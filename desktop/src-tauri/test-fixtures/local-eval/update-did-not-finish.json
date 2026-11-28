@@ -15,6 +15,7 @@
       "unfinishedUpdate": {
         "to": "0.16.0-rc.9",
         "prepared": true,
+        "state": "prepared",
         "stoppedDownloading": true,
         "failedStep": "image-download"
       },
@@ -77,6 +78,7 @@
       "unfinishedUpdate": {
         "to": "0.16.0-rc.9",
         "prepared": true,
+        "state": "prepared",
         "stoppedDownloading": true,
         "failedStep": "image-download"
       },
@@ -139,6 +141,7 @@
       "unfinishedUpdate": {
         "to": "0.16.0-rc.9",
         "prepared": true,
+        "state": "prepared",
         "stoppedDownloading": true,
         "failedStep": "image-download"
       },

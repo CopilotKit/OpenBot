@@ -20,6 +20,7 @@ import userEvent from "@testing-library/user-event";
 import { GoalPage } from "@/components/responsibilities/goal-page";
 import type { ResponsibilityRecord } from "@/lib/responsibilities";
 import { queryClient } from "@/query-client";
+import { GOALS_PATH } from "./schedules-api";
 
 let wasServer = true;
 beforeAll(() => {
@@ -50,7 +51,7 @@ beforeEach(() => {
         });
         return Response.json({});
       }
-      return Response.json({ triggers: [], runs: [] });
+      return Response.json({ triggers: [], runs: [], nextCursor: null });
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -62,8 +63,8 @@ afterEach(() => {
 
 const goal: ResponsibilityRecord = {
   id: "goal-1",
-  agentId: "bot-1",
-  channelId: "c1",
+  botId: "bot-1",
+  conversationId: "c1",
   threadId: "t1",
   title: "Watch the queue",
   instruction: "Tell me when the queue backs up.",
@@ -74,7 +75,9 @@ const goal: ResponsibilityRecord = {
   subscriptions: [],
   recurring: false,
   endsWhenMet: false,
+  createdAt: "2026-11-10T10:00:00Z",
   updatedAt: "2026-11-10T10:00:00Z",
+  completedAt: null,
 };
 
 const ENDS_WHEN_MET_ERROR =
@@ -120,7 +123,7 @@ test("a goal with no outcome can be saved after changing only its title", async 
   await waitFor(() => expect(sent.length).toBe(1));
   expect(sent[0]).toEqual({
     method: "PATCH",
-    url: "/api/responsibilities/goal-1",
+    url: `${GOALS_PATH}/goal-1`,
     body: {
       title: "Watch the support queue",
       instruction: "Tell me when the queue backs up.",
@@ -152,7 +155,7 @@ test("a goal that ends when met can't have its outcome cleared", async () => {
   await waitFor(() => expect(sent.length).toBe(1));
   expect(sent[0]).toEqual({
     method: "PATCH",
-    url: "/api/responsibilities/goal-1",
+    url: `${GOALS_PATH}/goal-1`,
     body: {
       title: "Watch the queue",
       instruction: "Tell me when the queue backs up.",

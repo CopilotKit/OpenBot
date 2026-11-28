@@ -1,5 +1,7 @@
 import {
+  DEFAULT_BOT_ENGINE,
   OPENBOT_HARNESS_NAME,
+  reachedThroughMastra,
   summaryFor,
   WEB_HARNESSES,
 } from "@openbot/shared/harnesses";
@@ -15,7 +17,7 @@ import {
   useQuery,
 } from "@tanstack/react-query";
 import { MotionConfig, motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { CustomAgentCta } from "@/components/agents/custom-agent-cta";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import AgentOrb from "@/components/agents/orb/agent-orb";
@@ -54,28 +56,31 @@ import {
 } from "@/lib/agents/form";
 import {
   ISOLATION_NOT_ALLOWED,
-  ISOLATION_UNAVAILABLE,
   isolatedExplained,
+  isolationUnavailable,
 } from "@/lib/agents/isolation";
 import { createAgentMutationOptions } from "@/lib/agents/mutations";
-import {
-  agentCapabilitiesQueryOptions,
-  testAgentConnection,
-} from "@/lib/agents/queries";
+import { publicVisibilityWords } from "@/lib/agents/public-words";
+import { testAgentConnection } from "@/lib/agents/queries";
+import { CreateBotRequestHarness } from "@/lib/api/generated/model";
 import { giveBotApp } from "@/lib/app-access/mutations";
 import {
   type GiveableApp,
   giveableAppsQueryOptions,
 } from "@/lib/app-access/queries";
+import { appsQueryOptions } from "@/lib/apps/queries";
 import { isComposing } from "@/lib/composing";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
 import {
-  type PluginsPage,
-  pluginKeys,
-  pluginsPageQueryOptions,
-} from "@/lib/plugins/queries";
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
+import { useOrganizationAudience } from "@/lib/organizations/queries";
+import { type PluginServer, pluginKeys } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -129,10 +134,27 @@ type Step = (typeof STEPS)[number];
 /**
  * Where the Bot runs: on this deployment, or behind a framework somebody hosts.
  *
- * The framework is kept for its connection instructions and default role description. Every framework is reached the same way and stored the same way — an AG-UI address —
- * so the server never hears which was picked.
+ * The framework is kept for its connection instructions and default role description, and sent with
+ * the create. Every framework but Mastra is reached the same way, at an AG-UI address. A Mastra
+ * server is reached through Mastra's own API, which the server picks from the framework sent.
  */
-type Runtime = { kind: "builtin" } | { kind: "managed"; harness: string };
+export type Runtime =
+  | { kind: "builtin" }
+  | { kind: "managed"; harness: string };
+
+/**
+ * The framework as the API names it, or undefined for "An agent you already run" (`byo-url`), which
+ * names none. The API lists the same ids as the harness catalogue, and api/openapi-harnesses.test.ts
+ * fails if the two drift apart.
+ */
+export function declaredFramework(
+  id: string,
+): CreateBotRequestHarness | undefined {
+  const known: readonly string[] = Object.values(CreateBotRequestHarness);
+  return id !== "" && known.includes(id)
+    ? (id as CreateBotRequestHarness)
+    : undefined;
+}
 
 /** Framework name used in default custom-agent instructions. */
 function frameworkName(runtime: Runtime): string {
@@ -182,22 +204,21 @@ function defaultInstructions(name: string, runtime: Runtime): string {
  * `min-h-0` and no overflow of its own shrinks and paints over the footer instead.
  */
 function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
-  const personal =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  const personal = capabilities?.edition === "personal";
   const createAgent = useMutation(createAgentMutationOptions(queryClient));
   /*
    * Assumed available while the answer loads, so the common deployment never sees the option flash
    * from disabled to enabled; the server refuses the create either way.
    */
-  const { data: capabilities } = useQuery(agentCapabilitiesQueryOptions());
-  const builtInAvailable = capabilities?.builtInAvailable ?? true;
+  const builtInAvailable = capabilities?.builtInBots ?? true;
   /*
    * A computer of its own: whether this deployment can make one, and whether an administrator lets
    * this person ask. Unavailable until the deployment says otherwise, since promising a computer
    * that cannot be made is the worse mistake; allowed unless the switch says no, since the server
    * refuses a create without it either way.
    */
-  const isolationAvailable = capabilities?.isolationAvailable ?? false;
+  const isolationAvailable = capabilities?.isolatedBots ?? false;
   const { data: mine } = useQuery(myCapabilitiesQueryOptions());
   const isolationAllowed = mine?.capabilities.isolatedComputers !== false;
   /** Shared with the person's own computer unless they tick it. */
@@ -218,8 +239,11 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   const [tried, setTried] = useState(false);
   /** Continue on the address is dialling it, before anything is created. */
   const [checking, setChecking] = useState(false);
-  /** Why the server could not reach the address on the last Continue, in its own words. */
-  const [unreachable, setUnreachable] = useState<string>();
+  /**
+   * Why the server could not reach the address on the last Continue, in its own words. The refusal
+   * itself, not its words: a hold is drawn calmly (lib/load-failure.tsx).
+   */
+  const [unreachable, setUnreachable] = useState<Failure>();
   /** The Bot just made, held for the moment the sheet spends saying so before it hands over. */
   const [createdId, setCreatedId] = useState<string>();
   /**
@@ -235,7 +259,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
    * list Connections shows as on, and not only the ones this person could give.
    */
   const turnedOn = useQuery({
-    ...pluginsPageQueryOptions(),
+    ...appsQueryOptions(),
     enabled: personal,
   });
   const [leftOut, setLeftOut] = useState<Set<string>>(() => new Set());
@@ -290,6 +314,13 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
   const create = async (chosen: Runtime) => {
     const managed = chosen.kind === "managed";
+    /*
+     * A Bot somebody runs names its framework; one that runs here names the engine new Bots run
+     * on (`DEFAULT_BOT_ENGINE`). The server decides each run's engine from there.
+     */
+    const framework = declaredFramework(
+      managed ? chosen.harness : DEFAULT_BOT_ENGINE,
+    );
     const agent = await createAgent.mutateAsync({
       ...agentInputFrom({
         name: name.trim(),
@@ -304,11 +335,10 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         isolated:
           !personal && isolated && isolationAvailable && isolationAllowed,
       }),
-      // The framework picked from the list, so the Bot is told what runs it. None for an agent
-      // somebody already runs, since nobody said what is behind its address.
-      ...(managed && chosen.harness !== "byo-url"
-        ? { harness: chosen.harness }
-        : {}),
+      // The framework picked from the list, so the Bot is told what runs it, or the engine a Bot
+      // that runs here is made on. None for an agent somebody already runs, since nobody said what
+      // is behind its address.
+      ...(framework ? { harness: framework } : {}),
     });
     /*
      * The ticked apps, given once the Bot exists. A refusal is not a failed create: the Bot is made,
@@ -359,6 +389,21 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       return;
     }
     setUnreachable(undefined);
+    /*
+     * A Mastra server has no AG-UI route, so the AG-UI test could only fail against it. The create
+     * names the framework and the server proves the address against Mastra's own API before it saves
+     * anything. What it refused with is shown under the address, as a failed test is.
+     */
+    if (runtime?.kind === "managed" && reachedThroughMastra(runtime.harness)) {
+      try {
+        await create(runtime);
+      } catch (error) {
+        createAgent.reset();
+        setUnreachable(failureOf(error, MASTRA_UNREACHABLE));
+        focusAddress();
+      }
+      return;
+    }
     setChecking(true);
     const verdict = await testAgentConnection(endpoint.trim(), key).finally(
       () => setChecking(false),
@@ -457,6 +502,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                     checked: isolated,
                     available: isolationAvailable,
                     allowed: isolationAllowed,
+                    cloud: capabilities?.hostedSignIn === true,
                     onChange: setIsolated,
                   }}
                   onInstructions={setInstructions}
@@ -484,7 +530,13 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
             ) : (
               <EndpointStep
                 endpoint={endpoint}
-                endpointError={tried ? endpointIssue : unreachable}
+                endpointError={
+                  tried
+                    ? endpointIssue === undefined
+                      ? undefined
+                      : { message: endpointIssue }
+                    : unreachable
+                }
                 harness={runtime?.kind === "managed" ? runtime.harness : null}
                 onEndpoint={(value) => {
                   setEndpoint(value);
@@ -509,7 +561,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
         {createAgent.error ? (
           <p className="mt-6 text-destructive text-sm" role="alert">
-            {createAgent.error.message}
+            {failureSaid(createAgent.error)}
           </p>
         ) : null}
       </div>
@@ -556,6 +608,10 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   );
 }
 
+/** Said when a Mastra create failed without a sentence of the server's own. */
+export const MASTRA_UNREACHABLE =
+  "Couldn't reach a Mastra server at that address.";
+
 /** How long the created view holds before handing over to the new Bot's page. */
 const CREATED_BEAT_MS = 1600;
 /** Shorter with reduced motion: nothing is moving, so the pause is only long enough to read. */
@@ -589,7 +645,7 @@ function CreatedView({ name }: { name: string }) {
         </motion.div>
         <motion.span
           animate={{ opacity: 1, scale: 1 }}
-          className="absolute -right-0.5 -bottom-0.5 flex size-7 items-center justify-center rounded-full bg-emerald-500 text-white ring-3 ring-popover"
+          className="absolute -right-0.5 -bottom-0.5 flex size-7 items-center justify-center rounded-full bg-success text-white ring-3 ring-popover"
           initial={{ opacity: 0, scale: 0 }}
           transition={{
             delay: 0.45,
@@ -621,7 +677,7 @@ type Visibility = AgentFormValues["visibility"];
 const VISIBILITY_OPTIONS: Array<{
   value: Visibility;
   title: string;
-  description: string;
+  description?: string;
   icon: typeof IconLock;
 }> = [
   {
@@ -633,7 +689,7 @@ const VISIBILITY_OPTIONS: Array<{
   {
     value: "public",
     title: "Public",
-    description: "Everyone in your company can find and use it.",
+    // No sentence of its own: said for the organization the person is in (`publicVisibilityWords`).
     icon: IconUsers,
   },
 ];
@@ -668,12 +724,14 @@ function AboutStep({
   onInstructions: (value: string) => void;
   onVisibility: (value: Visibility) => void;
   apps: GiveableApp[];
-  turnedOn: UseQueryResult<PluginsPage>;
+  turnedOn: UseQueryResult<PluginServer[]>;
   leftOut: Set<string>;
   onApp: (app: string, used: boolean) => void;
   isolation: IsolationChoice;
   personal: boolean;
 }) {
+  // Public is everyone in this organization, by name where the app knows it.
+  const everyone = publicVisibilityWords(useOrganizationAudience());
   return (
     <FieldGroup>
       <Field>
@@ -707,7 +765,7 @@ function AboutStep({
         <Textarea
           autoComplete="off"
           id="new-bot-instructions"
-          maxLength={1000}
+          maxLength={5000}
           onChange={(event) => onInstructions(event.target.value)}
           placeholder="Review receipts, categorize expenses, and prepare reimbursement reports."
           rows={5}
@@ -737,7 +795,7 @@ function AboutStep({
                         {option.title}
                       </span>
                       <span className="block text-pretty text-muted-foreground text-xs">
-                        {option.description}
+                        {option.description ?? everyone}
                       </span>
                     </span>
                   </button>
@@ -799,18 +857,22 @@ function AboutStep({
  * (`EVERY_BOT_REFUSAL` in server/src/plugins/personal-defaults.ts). A box to untick would promise a
  * choice the server doesn't offer.
  */
-function EveryAppList({ turnedOn }: { turnedOn: UseQueryResult<PluginsPage> }) {
+function EveryAppList({
+  turnedOn,
+}: {
+  turnedOn: UseQueryResult<PluginServer[]>;
+}) {
   if (turnedOn.isPending) return null;
-  const servers = turnedOn.data?.servers ?? [];
+  const servers = turnedOn.data ?? [];
   return (
     <FieldSet>
       <FieldLegend variant="label">Apps it can use</FieldLegend>
       <FieldDescription>
-        Every Bot can use every app you turn on in Connections.
+        Every Bot can use every app you connect in Connections.
       </FieldDescription>
       {turnedOn.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load your apps.
+          {loadFailure(turnedOn.error, "Couldn't load your apps.")}
         </p>
       ) : servers.length > 0 ? (
         <ul aria-label="Apps it can use" className="grid gap-2 sm:grid-cols-2">
@@ -842,6 +904,8 @@ type IsolationChoice = {
   available: boolean;
   /** Whether an administrator lets this person ask for one ("Isolated Bots"). */
   allowed: boolean;
+  /** Whether this is OpenBot Cloud (`hostedSignIn`), which gives each person one computer. */
+  cloud: boolean;
   onChange: (checked: boolean) => void;
 };
 
@@ -863,11 +927,12 @@ function IsolatedOption({
   checked,
   available,
   allowed,
+  cloud,
   isPublic,
   onChange,
 }: IsolationChoice & { isPublic: boolean }) {
   const reason = !available
-    ? ISOLATION_UNAVAILABLE
+    ? isolationUnavailable(cloud)
     : !allowed
       ? ISOLATION_NOT_ALLOWED
       : null;
@@ -919,6 +984,9 @@ function IsolatedOption({
           >
             {reason ?? "A computer of its own, instead of sharing yours."}
           </p>
+          {cloud && !available ? (
+            <BusinessComputerLink className="text-xs" />
+          ) : null}
         </div>
       </div>
     </FieldSet>
@@ -929,7 +997,7 @@ function IsolatedOption({
  * Filled rather than outlined, so the list reads as a set of things to pick and not as a stack of
  * cards. The border is there but transparent until chosen, so choosing one never shifts the rows.
  */
-const OPTION_CLASSES =
+export const OPTION_CLASSES =
   "flex w-full items-center gap-3 rounded-lg border border-transparent bg-muted/50 p-3 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
 /**
@@ -938,7 +1006,11 @@ const OPTION_CLASSES =
  * new question rather than the control on the previous screen. The sheet body scrolls;
  * an inner scroller would give this list a second scrollbar.
  */
-function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
+export function RuntimeStep({
+  onChoose,
+}: {
+  onChoose: (runtime: Runtime) => void;
+}) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
 
@@ -972,12 +1044,70 @@ function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
   );
 }
 
+/** Where docs/agent-frameworks.md is read, each framework's setup a section of it. */
+export const AGENT_FRAMEWORKS_DOCS =
+  "https://github.com/CopilotKit/OpenBot/blob/main/docs/agent-frameworks.md";
+
+/**
+ * The frameworks whose AG-UI receivers take the Bot's role and tool guidance at full strength only
+ * from a caller they trust, by harness id, with the docs section that sets each one up. LangChain is
+ * the Python LangGraph receiver, Mastra the Mastra one. "An agent you already run" may be either, so
+ * it links both. Every other framework passes the role through as it ships, and gets no hint.
+ *
+ * Nothing here says what an endpoint declared: the address step can't know that. It says what such a
+ * receiver needs, and where to read how to give it.
+ */
+const TRUSTED_GUIDANCE_SETUP: Record<
+  string,
+  readonly { name: string; href: string }[]
+> = {
+  langgraph: [
+    { name: "LangGraph", href: `${AGENT_FRAMEWORKS_DOCS}#langgraph` },
+  ],
+  mastra: [{ name: "Mastra", href: `${AGENT_FRAMEWORKS_DOCS}#mastra` }],
+  "byo-url": [
+    { name: "LangGraph", href: `${AGENT_FRAMEWORKS_DOCS}#langgraph` },
+    { name: "Mastra", href: `${AGENT_FRAMEWORKS_DOCS}#mastra` },
+  ],
+};
+
+/**
+ * What a framework's receiver needs to give the Bot its full role and tool guidance, under the
+ * address. Nothing for a framework that needs nothing.
+ *
+ * Kept below the address's own description and below a failed test, since it is about how the agent
+ * is set up and not about this address. The description above it is no longer the field's
+ * second-to-last line, so it keeps its own spacing instead of tucking up under the input.
+ */
+function TrustedGuidanceHint({ harness }: { harness: string | null }) {
+  const setup = TRUSTED_GUIDANCE_SETUP[harness ?? "byo-url"];
+  if (!setup) return null;
+  return (
+    <FieldDescription className="text-pretty">
+      For the Bot to get its full role and tool guidance, your agent has to
+      trust OpenBot. Add your agent's key below, or give the address of a
+      listener only OpenBot can reach, with trusted ingress turned on. Set it up
+      for{" "}
+      {setup.map((entry, index) => (
+        // A fragment, not a span: the description underlines only the links that are its children.
+        <Fragment key={entry.name}>
+          {index > 0 ? " or " : null}
+          <a href={entry.href} rel="noopener noreferrer" target="_blank">
+            {entry.name}
+          </a>
+        </Fragment>
+      ))}
+      .
+    </FieldDescription>
+  );
+}
+
 /**
  * The address of an agent somebody else runs, and the key it sits behind if it has one.
  *
  * The framework picked on the step before is named at the top so the person can see what they are
- * connecting, but nothing below differs by framework: every one of them is an AG-UI address and is
- * stored the same way.
+ * connecting. Nothing below differs by framework but Mastra's: every other one is an AG-UI address,
+ * and a Mastra one is the address of the Mastra server itself, so its example and its hint say so.
  *
  * The address takes focus on arrival rather than the heading, as the name does on the first step: it
  * is the one thing this step asks for, and its label says what it is.
@@ -987,7 +1117,7 @@ function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
  * from there, which is the one thing the browser cannot tell. Why it could not be reached arrives as
  * this field's error.
  */
-function EndpointStep({
+export function EndpointStep({
   harness,
   endpoint,
   secret,
@@ -998,11 +1128,12 @@ function EndpointStep({
   harness: string | null;
   endpoint: string;
   secret: string;
-  endpointError?: string;
+  endpointError?: Failure;
   onEndpoint: (value: string) => void;
   onKey: (value: string) => void;
 }) {
   const chosen = WEB_HARNESSES.find((entry) => entry.id === harness);
+  const mastra = reachedThroughMastra(harness);
 
   return (
     <div className="flex flex-col gap-6">
@@ -1028,20 +1159,29 @@ function EndpointStep({
             id="new-bot-endpoint"
             inputMode="url"
             onChange={(event) => onEndpoint(event.target.value)}
-            placeholder="https://your-agent.example.com/ag-ui"
+            placeholder={
+              mastra
+                ? "https://your-mastra-server.example.com"
+                : "https://your-agent.example.com/ag-ui"
+            }
             value={endpoint}
           />
           {endpointError ? (
-            <FieldError
-              className="text-pretty"
-              errors={[{ message: endpointError }]}
-            />
+            <FieldError className="text-pretty">
+              {failureSaid(endpointError)}
+            </FieldError>
+          ) : mastra ? (
+            <FieldDescription className="nth-last-2:mt-0">
+              Give the address of your Mastra server. It needs to run one agent,
+              and OpenBot's server has to be able to reach it.
+            </FieldDescription>
           ) : (
-            <FieldDescription>
+            <FieldDescription className="nth-last-2:mt-0">
               Any agent that speaks AG-UI works. OpenBot connects to it, so it
               has to be reachable from OpenBot's server.
             </FieldDescription>
           )}
+          <TrustedGuidanceHint harness={harness} />
         </Field>
         <Field>
           <FieldLabel htmlFor="new-bot-key">

@@ -7,10 +7,9 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  type BotBrowserApiState,
-  type BotBrowserState,
-  botBrowserApiPaths,
+import type {
+  BotBrowserApiState,
+  BotBrowserState,
 } from "@openbot/shared/bot-browser";
 import type { ComputerControlState } from "@openbot/shared/computer-control";
 import {
@@ -28,6 +27,12 @@ import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerView } from "@/components/computer/computer-view";
 import { Toaster, toast } from "@/components/ui/toast";
 import { queryClient } from "@/query-client";
+import {
+  ME_PATH,
+  meResponse,
+  PREFERENCES_PATH,
+  preferencesResponse,
+} from "./accounts-api";
 import { installChrome } from "./browser-narration.fixture";
 import { settleReactWork } from "./settle-react-work";
 
@@ -145,26 +150,64 @@ function endRecording() {
   };
 }
 
-const conflict = (error: string) => Response.json({ error }, { status: 409 });
-const invalid = () =>
-  Response.json({ error: "Invalid request" }, { status: 400 });
+/**
+ * A Bot's browser's addresses in the API, where the generated client sends every read and write. Only these are
+ * answered here, so a call that slipped back to `/api/computers/:botId/browser` reaches nothing and fails its case.
+ */
+const apiBrowser = (bot: string) =>
+  `/api/v2/organizations/default/computers/${encodeURIComponent(bot)}/browser`;
+const botBrowserApiPaths = {
+  state: apiBrowser,
+  tabs: (bot: string) => `${apiBrowser(bot)}/tabs`,
+  navigate: (bot: string) => `${apiBrowser(bot)}/navigate`,
+  recording: (bot: string) => `${apiBrowser(bot)}/recording`,
+  narration: (bot: string) => `${apiBrowser(bot)}/narration`,
+  clear: (bot: string) => `${apiBrowser(bot)}/clear`,
+};
+/** The person's own browser's address in the API, which nothing about a Bot's browser may call. */
+const OWN_BROWSER = "/api/v2/organizations/default/people/me/browser";
+
+/** A refusal as the API answers one: a problem (RFC 9457) whose `detail` is the sentence a person reads. */
+const problem = (status: number, detail: string) =>
+  new Response(
+    JSON.stringify({
+      type: "https://open.bot/errors/test",
+      title: detail,
+      status,
+      detail,
+      code: status === 409 ? "CONFLICT" : "VALIDATION_ERROR",
+      category: status === 409 ? "conflict" : "validation",
+      retryable: false,
+      requestId: "req_test",
+      traceId: "trace_test",
+    }),
+    { status, headers: { "content-type": "application/problem+json" } },
+  );
+/** What the API answers a write that came without the key every write carries. */
+const NO_KEY =
+  "Every write needs an Idempotency-Key header: a value you make once for this write and send again only to retry it.";
+const keyed = (init?: RequestInit) =>
+  Boolean(new Headers(init?.headers).get("idempotency-key"));
+const conflict = (detail: string) => problem(409, detail);
+const invalid = () => problem(400, "Invalid request");
 
 async function server(path: string, init?: RequestInit): Promise<Response> {
   const method = init?.method ?? "GET";
   const body = init?.body ? JSON.parse(String(init.body)) : undefined;
   requests.push({ path, method, body });
-  const computer = `/api/computers/${encodeURIComponent(botId)}`;
+  // The Bot's computer in the API: who is driving it, its screen and its state.
+  const computer = `/api/v2/organizations/default/computers/${encodeURIComponent(botId)}`;
   const mine = answer().mine;
 
-  if (path === "/api/me")
-    return Response.json({
+  if (path === ME_PATH)
+    return meResponse({
       user: { id: ME, email: "me@example.com", role: "user", onboarding: null },
     });
-  if (path === "/api/settings/preferences") {
+  if (path === PREFERENCES_PATH) {
     // As the server's own route takes it: one preference at a time, merged into the rest.
     if (method === "PATCH" && body && "narration" in body)
       narrationChoice = body.narration;
-    return Response.json({
+    return preferencesResponse({
       preferences: {
         messageListEmphasis: "thread",
         selfHostBannerDismissed: false,
@@ -212,11 +255,13 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
       capturedAt: SINCE,
       url: "https://expenses.example/report",
     });
-  if (path === `${computer}/status`)
-    return Response.json({ botId, state: "ready" });
+  if (path === computer) return Response.json({ botId, state: "ready" });
 
   if (path === botBrowserApiPaths.state(botId) && method === "GET")
     return Response.json(answer());
+  // Every write to the Bot's browser is made once per key, and refused without one.
+  if (path.startsWith(`${apiBrowser(botId)}/`) && !keyed(init))
+    return problem(400, NO_KEY);
   if (path === botBrowserApiPaths.tabs(botId)) {
     const asked = browserTabsRequestSchema.safeParse(body);
     if (!asked.success) return invalid();
@@ -437,8 +482,7 @@ const disabled = (element: HTMLElement) =>
   (element as HTMLButtonElement).disabled;
 const preferenceWrites = () =>
   requests.filter(
-    (sent) =>
-      sent.path === "/api/settings/preferences" && sent.method === "PATCH",
+    (sent) => sent.path === PREFERENCES_PATH && sent.method === "PATCH",
   );
 
 test("while the Bot holds the wheel the bar shows where the Bot is, read only, and Record asks for control", async () => {
@@ -648,9 +692,13 @@ test("narration goes to the Bot's browser, and Stop hands over the phrase being 
     { speaking: false },
   ]);
   // Nothing went to the person's own browser.
-  expect(requests.some((sent) => sent.path.startsWith("/api/browser"))).toBe(
-    false,
-  );
+  expect(
+    requests.some(
+      (sent) =>
+        sent.path.startsWith(OWN_BROWSER) ||
+        sent.path.startsWith("/api/browser"),
+    ),
+  ).toBe(false);
   expect(
     await dialog.findByText(
       "Saved to your Learning space: 7 actions and 1 narrated phrase.",
@@ -850,7 +898,7 @@ test("someone else taking the wheel does not open the Computer for this person o
   );
   await waitFor(() =>
     expect(
-      requests.some((sent) => sent.path === "/api/me") &&
+      requests.some((sent) => sent.path === ME_PATH) &&
         requests.some((sent) => sent.path.endsWith("/control")),
     ).toBe(true),
   );

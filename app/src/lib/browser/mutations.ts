@@ -1,15 +1,27 @@
-import {
-  type BrowserApiState,
-  type BrowserNarrationRequest,
-  type BrowserNavigateRequest,
-  type BrowserOpenResponse,
-  type BrowserTabsRequest,
-  browserApiPaths,
-  type RealBrowser,
-  type RealBrowserOpenResponse,
+import type {
+  BrowserApiState,
+  BrowserNarrationRequest,
+  BrowserNavigateRequest,
+  BrowserOpenResponse,
+  BrowserTabsRequest,
+  RealBrowser,
+  RealBrowserOpenResponse,
 } from "@openbot/shared/openbot-browser";
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client, tryClient } from "@/lib/client";
+import {
+  changePersonBrowserTabs,
+  clearPersonBrowser,
+  narrateInPersonBrowser,
+  navigatePersonBrowser,
+  openPersonBrowser,
+  recordInPersonBrowser,
+} from "@/lib/api/generated/browsers/browsers";
+import {
+  type ApiRequestOptions,
+  idempotencyKey,
+  organizationId,
+} from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 import { computerKeys } from "@/lib/computers/queries";
 import { browserKeys } from "./queries";
 
@@ -32,15 +44,13 @@ export function openBrowserMutationOptions(queryClient: QueryClient) {
   });
 }
 
-async function openBrowser(): Promise<
-  BrowserOpenResponse | RealBrowserOpenResponse
-> {
-  return (
-    await client(browserApiPaths.open, {
-      method: "POST",
-      fallback: "Couldn't open your browser. Try again.",
-    })
-  ).json();
+/** A key for this write alone, as every write to the person's browser carries. */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
+
+function openBrowser(): Promise<BrowserOpenResponse | RealBrowserOpenResponse> {
+  return openPersonBrowser(organizationId(), "me", once(), {
+    fallback: "Couldn't open your browser. Try again.",
+  });
 }
 
 export type BrowserRecordingStart = {
@@ -50,23 +60,23 @@ export type BrowserRecordingStart = {
   narrate?: boolean;
 };
 
-async function startBrowserRecording(
+function startBrowserRecording(
   variables: BrowserRecordingStart,
 ): Promise<BrowserApiState> {
-  return (
-    await client(browserApiPaths.recording, {
-      method: "POST",
-      body: {
-        action: "start",
-        title: variables.title,
-        ...(variables.language ? { language: variables.language } : {}),
-        ...(variables.narrate !== undefined
-          ? { narrate: variables.narrate }
-          : {}),
-      },
-      fallback: "Couldn't start recording. Try again.",
-    })
-  ).json();
+  return recordInPersonBrowser(
+    organizationId(),
+    "me",
+    {
+      action: "start",
+      title: variables.title,
+      ...(variables.language ? { language: variables.language } : {}),
+      ...(variables.narrate !== undefined
+        ? { narrate: variables.narrate }
+        : {}),
+    },
+    once(),
+    { fallback: "Couldn't start recording. Try again." },
+  );
 }
 
 /** Starts recording the tab the person is on, named for the task. `language` is the one narration is heard in. */
@@ -126,14 +136,16 @@ export function openAndStartBrowserRecordingMutationOptions(
 
 export function stopBrowserRecordingMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (): Promise<BrowserApiState> =>
-      (
-        await client(browserApiPaths.recording, {
-          method: "POST",
-          body: { action: "stop" },
+    mutationFn: (): Promise<BrowserApiState> =>
+      recordInPersonBrowser(
+        organizationId(),
+        "me",
+        { action: "stop" },
+        once(),
+        {
           fallback: "Couldn't stop recording. Try again.",
-        })
-      ).json(),
+        },
+      ),
     onSuccess: () => invalidateBrowser(queryClient),
   });
 }
@@ -141,14 +153,10 @@ export function stopBrowserRecordingMutationOptions(queryClient: QueryClient) {
 /** A new tab, or switching to or closing one, in the browser the page shows. */
 export function browserTabsMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (request: BrowserTabsRequest): Promise<BrowserApiState> =>
-      (
-        await client(browserApiPaths.tabs, {
-          method: "POST",
-          body: request,
-          fallback: "Couldn't change the tabs. Try again.",
-        })
-      ).json(),
+    mutationFn: (request: BrowserTabsRequest): Promise<BrowserApiState> =>
+      changePersonBrowserTabs(organizationId(), "me", request, once(), {
+        fallback: "Couldn't change the tabs. Try again.",
+      }),
     onSuccess: () => invalidateBrowser(queryClient),
   });
 }
@@ -156,16 +164,10 @@ export function browserTabsMutationOptions(queryClient: QueryClient) {
 /** An address typed into the address bar, or back, forward or reload, in the tab the person is on. */
 export function navigateBrowserMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (
-      request: BrowserNavigateRequest,
-    ): Promise<BrowserApiState> =>
-      (
-        await client(browserApiPaths.navigate, {
-          method: "POST",
-          body: request,
-          fallback: "Couldn't open that page. Try again.",
-        })
-      ).json(),
+    mutationFn: (request: BrowserNavigateRequest): Promise<BrowserApiState> =>
+      navigatePersonBrowser(organizationId(), "me", request, once(), {
+        fallback: "Couldn't open that page. Try again.",
+      }),
     onSuccess: () => invalidateBrowser(queryClient),
   });
 }
@@ -176,13 +178,10 @@ export function navigateBrowserMutationOptions(queryClient: QueryClient) {
  */
 export function clearBrowserMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (): Promise<BrowserApiState> =>
-      (
-        await client(browserApiPaths.clear, {
-          method: "POST",
-          fallback: "Couldn't clear your browser. Try again.",
-        })
-      ).json(),
+    mutationFn: (): Promise<BrowserApiState> =>
+      clearPersonBrowser(organizationId(), "me", once(), {
+        fallback: "Couldn't clear your browser. Try again.",
+      }),
     // Settings > Computer lists the browser too, with whether it runs.
     onSettled: () =>
       Promise.all([
@@ -210,7 +209,17 @@ export type NarrationPost = Unsent<BrowserNarrationRequest>;
  * recording carries on.
  */
 export function sendNarration(post: NarrationPost): Promise<NarrationAnswer> {
-  return sendNarrationTo(browserApiPaths.narration, post);
+  return sendNarrationWith(
+    (narration, options) =>
+      narrateInPersonBrowser(
+        organizationId(),
+        "me",
+        narration,
+        once(),
+        options,
+      ),
+    post,
+  );
 }
 
 /** Whether a narration post was taken, and when it was not, the server's own sentence for why if it said one. */
@@ -219,28 +228,26 @@ export type NarrationAnswer =
   | { ok: false; error: string | null };
 
 /**
- * `sendNarration` to the narration route at `path`: the person's own browser's, or a Bot's browser's
- * (`lib/bot-browser`), which takes the same body and answers the same way.
+ * `sendNarration` through `send`, the narration operation of the person's own browser or of a Bot's browser
+ * (`lib/bot-browser`), which take the same body and answer the same way.
+ *
+ * The fallback is empty on purpose: a refusal then carries the server's own sentence or nothing, and only the
+ * server's is told to the person.
  */
-export async function sendNarrationTo(
-  path: string,
+export async function sendNarrationWith(
+  send: (
+    narration: BrowserNarrationRequest,
+    options: ApiRequestOptions,
+  ) => Promise<unknown>,
   post: NarrationPost,
 ): Promise<NarrationAnswer> {
   try {
-    const response = await tryClient(path, {
-      method: "POST",
-      body: { ...post, sentAt: Date.now() },
+    await send({ ...post, sentAt: Date.now() } as BrowserNarrationRequest, {
+      fallback: "",
     });
-    if (response.ok) return { ok: true };
-    const said: unknown = await response
-      .json()
-      .then((body: { error?: unknown }) => body.error)
-      .catch(() => undefined);
-    return {
-      ok: false,
-      error: typeof said === "string" && said.trim() ? said.trim() : null,
-    };
-  } catch {
-    return { ok: false, error: null };
+    return { ok: true };
+  } catch (error) {
+    const said = error instanceof ClientError ? error.message.trim() : "";
+    return { ok: false, error: said || null };
   }
 }

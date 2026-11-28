@@ -123,6 +123,17 @@ export type ChromeFake = {
     }): void;
   };
   native: { reply: ((message: object) => object) | null; sent: object[] };
+  /**
+   * The extension's own updates, as chrome.runtime has them: `status` is what requestUpdateCheck answers (Chrome's
+   * RequestUpdateCheckStatus), `reloads` counts runtime.reload, and `ready` fires onUpdateAvailable, which Chrome does
+   * once an update it found is downloaded and waiting for the extension to restart.
+   */
+  update: {
+    status: "throttled" | "no_update" | "update_available";
+    version: string;
+    reloads: number;
+    ready(version: string): void;
+  };
   badge: { text: string; color: string };
   alarms: {
     created: Map<string, chrome.alarms.AlarmCreateInfo>;
@@ -153,7 +164,9 @@ export type ChromeFake = {
    */
   restartServiceWorker(): void;
   fireStartup(): void;
-  fireInstalled(reason: string): void;
+  /** Resolves once every onInstalled listener has finished, as their own promises say, so a test waits on the work
+   * itself rather than on a guess at how long it takes. Chrome itself waits on none of them. */
+  fireInstalled(reason: string): Promise<void>;
 };
 
 const DEFAULT_EXTENSION_ID = "abcdefghijklmnopabcdefghijklmnop";
@@ -350,6 +363,7 @@ export function installChromeFake(
     onConnect: event("runtime.onConnect"),
     onInstalled: event("runtime.onInstalled"),
     onStartup: event("runtime.onStartup"),
+    onUpdateAvailable: event("runtime.onUpdateAvailable"),
   };
   const serviceWorkerPorts: PortEnd[] = [];
   const notifyStorage: Partial<
@@ -484,6 +498,14 @@ export function installChromeFake(
         }),
     },
     native: { reply: null, sent: [] },
+    update: {
+      status: "no_update",
+      version: "",
+      reloads: 0,
+      ready(version) {
+        runtimeEvents.onUpdateAvailable.dispatch({ version });
+      },
+    },
     badge: { text: "", color: "" },
     alarms: {
       created: new Map(),
@@ -530,8 +552,8 @@ export function installChromeFake(
     fireStartup() {
       runtimeEvents.onStartup.dispatch();
     },
-    fireInstalled(reason) {
-      runtimeEvents.onInstalled.dispatch({ reason });
+    async fireInstalled(reason) {
+      await Promise.all(runtimeEvents.onInstalled.dispatch({ reason }));
     },
   };
 
@@ -730,6 +752,21 @@ export function installChromeFake(
             }
           },
         );
+      },
+      // Chrome 109+ answers with a promise: { status, version }, the version empty unless an update is available.
+      async requestUpdateCheck() {
+        calls.push("runtime.requestUpdateCheck");
+        return {
+          status: fake.update.status,
+          version:
+            fake.update.status === "update_available"
+              ? fake.update.version
+              : "",
+        };
+      },
+      reload() {
+        calls.push("runtime.reload");
+        fake.update.reloads += 1;
       },
       async sendNativeMessage(_host: string, message: object) {
         calls.push("runtime.sendNativeMessage");

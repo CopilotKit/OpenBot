@@ -1,7 +1,7 @@
 import { IconArrowLeft } from "@tabler/icons-react";
 import { Link, type LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
-import { ADMIN_SECTIONS } from "@/components/admin/admin-sections";
+import { useAdminSections } from "@/components/admin/admin-sections";
 import {
   Sidebar,
   SidebarContent,
@@ -19,12 +19,13 @@ const adminLinkOptions = { to: "/admin" } satisfies LinkOptions;
 
 /**
  * Admin's rail: Overview, then the same groups, in the same order, as the overview page. Both draw
- * `ADMIN_SECTIONS`, because the grouping is the only navigation help this screen offers, and two
+ * `useAdminSections()`, because the grouping is the only navigation help this screen offers, and two
  * orderings of the same links is worse than either one.
  */
 export function AdminSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
+  const sections = useAdminSections();
   return (
     <Sidebar variant="inset" {...props}>
       {/*
@@ -73,7 +74,7 @@ export function AdminSidebar({
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
-        {ADMIN_SECTIONS.map((group) => (
+        {sections.map((group) => (
           <SidebarGroup key={group.title}>
             <SidebarGroupLabel>{group.title}</SidebarGroupLabel>
             <SidebarMenu className="gap-px">
@@ -87,7 +88,8 @@ export function AdminSidebar({
                         {...props}
                       >
                         <item.icon className="mr-2 h-4 w-4" />
-                        {item.title}
+                        {/* Cut short on one line in a narrow sidebar, never wrapped out of the row. */}
+                        <span className="min-w-0 truncate">{item.title}</span>
                       </Link>
                     )}
                   />

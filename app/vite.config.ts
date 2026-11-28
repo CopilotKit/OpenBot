@@ -12,8 +12,11 @@ import { defineConfig, loadEnv, type Plugin } from "vite";
  * Announce the server's port to the two runtimes that serve the app through Vite, and to no other.
  *
  * The dev server and the desktop's `vite preview` serve the app on APP_PORT and proxy `/api` to the
- * server, but under bun that proxy cannot carry a WebSocket (oven-sh/bun#24127), so the app's
- * sockets address the server directly on this port. `socketUrl` reads it off `window`.
+ * server. Under the bun this was written on that proxy could not carry a WebSocket
+ * (oven-sh/bun#24127), so the app's own sockets address the server directly on this port, and
+ * still do. `socketUrl` reads it off `window`. The proxy does carry one on the bun this repository
+ * now pins, which the Intelligence gateway's socket relies on (`serving.proxy` below, and
+ * tests/dev-proxy-socket.test.ts).
  *
  * It is deliberately kept OUT of the built HTML. In production the server serves that same HTML on
  * its own origin and answers the upgrade there, so the socket is same-origin; a baked port would
@@ -128,6 +131,14 @@ const serving = {
   proxy: {
     "/api": {
       target: `http://localhost:${apiPort.port}`,
+      /*
+       * Sockets too. The server hands a client the CopilotKit Intelligence gateway's socket as a
+       * path on OpenBot's own address (`/api/intelligence/client`), and the page resolves a path
+       * against itself, which here is this dev server. Without the upgrade carried on, that socket
+       * is answered with the app's HTML and every conversation waits on it. The app's own sockets
+       * still name the server's port (`announceServerPort` above), so nothing else changes route.
+       */
+      ws: true,
     },
   },
 };
@@ -224,6 +235,16 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+  },
+  /*
+   * The release this build is made for, which an error report from the app carries
+   * (lib/error-reporting.tsx). An image built for a release sets OPENBOT_BUILD_VERSION; any other
+   * build leaves it empty, and the report then says no version.
+   */
+  define: {
+    __OPENBOT_APP_VERSION__: JSON.stringify(
+      process.env.OPENBOT_BUILD_VERSION ?? "",
+    ),
   },
   server: serving,
   preview: serving,

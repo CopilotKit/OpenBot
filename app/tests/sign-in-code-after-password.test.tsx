@@ -34,6 +34,10 @@ const PASSWORD = "correct-horse-battery-staple";
 const CODE = "731904";
 const ID = "request-mfa";
 
+/** Where the API answers a person's own sign-in requests. */
+const SIGN_IN_REQUESTS =
+  "/api/v2/organizations/default/people/me/sign-in-requests";
+
 function serving() {
   const state = {
     id: ID,
@@ -69,12 +73,29 @@ function serving() {
         } else if (path.endsWith("/code")) {
           state.outcome =
             "The site did not accept that code. Check it, or ask the site for a new one, and try again.";
-          return Response.json({ error: state.outcome }, { status: 409 });
+          return Response.json(
+            {
+              type: "https://open.bot/errors/conflict",
+              title: "The request conflicts with the current state.",
+              status: 409,
+              detail: state.outcome,
+              code: "CONFLICT",
+              category: "conflict",
+              retryable: false,
+              requestId: "req_test",
+              traceId: "trace_test",
+            },
+            {
+              status: 409,
+              headers: { "content-type": "application/problem+json" },
+            },
+          );
         }
-        return Response.json(state);
+        return Response.json({ signInRequest: state });
       }
-      if (path === `/api/sign-in-requests/${ID}`) return Response.json(state);
-      return Response.json({ error: "Not found" }, { status: 404 });
+      if (path === `${SIGN_IN_REQUESTS}/${ID}`)
+        return Response.json({ signInRequest: state });
+      return Response.json({ detail: "Not found" }, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -108,7 +129,7 @@ test("asks for the login first, and for the code only once the site has sent one
   // The login form is gone, and its password with it; one field is left: the code.
   expect(tree.queryByLabelText("Password")).toBeNull();
   const code = tree.getByLabelText("Verification code");
-  expect(server.posted[0]?.path).toBe(`/api/sign-in-requests/${ID}/submit`);
+  expect(server.posted[0]?.path).toBe(`${SIGN_IN_REQUESTS}/${ID}/submit`);
   expect(server.posted[0]?.body).not.toHaveProperty("code");
 
   // A wrong code says so and keeps asking.
@@ -122,8 +143,8 @@ test("asks for the login first, and for the code only once the site has sent one
   await tree.findByText("Signed in");
   await waitFor(() => expect(server.posted).toHaveLength(3));
   expect(server.posted.slice(1).map((post) => post.path)).toEqual([
-    `/api/sign-in-requests/${ID}/code`,
-    `/api/sign-in-requests/${ID}/code`,
+    `${SIGN_IN_REQUESTS}/${ID}/code`,
+    `${SIGN_IN_REQUESTS}/${ID}/code`,
   ]);
   // The code step carries the code and nothing else: no password is sent twice.
   expect(server.posted[2]?.body).toEqual({ code: CODE });

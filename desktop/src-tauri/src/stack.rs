@@ -1,9 +1,12 @@
 //! Raising the stack: the Compose services.
 //!
-//! Compose runs all of OpenBot: postgres, the supervisor, `agent-computer`, the Bots, a one-shot
-//! `migrate`, and the published image's `server` and `worker` under the `openbot` profile. Docker's
-//! restart policy keeps them up. Nothing runs on the host: the person's own browser is on the one
-//! computer, shown in the OpenBot window.
+//! Compose runs all of OpenBot: postgres, the supervisor, `agent-computer`, the Bots, and the
+//! published image's `server` under the `openbot` profile. The server applies its own migrations
+//! when it starts and does the scheduled work itself, which this release's Compose file says on
+//! one line (`SCHEDULED_WORK_MARKER`). An installation whose Compose file is an earlier release's
+//! has no such line, and its one-shot `migrate` and its `worker` are in use: it is run as that
+//! file requires (`selected_services`). Docker's restart policy keeps them up. Nothing runs on the
+//! host: the person's own browser is on the one computer, shown in the OpenBot window.
 //!
 //! [`HOST_PROCESSES`] still names what earlier versions ran on the host, the server, the app, the
 //! worker and a browser of the person's own on their desktop, so a Start or a Stop can find and end
@@ -19,32 +22,194 @@ use serde::{Deserialize, Serialize};
 use crate::engine::Address;
 use crate::problem::Problem;
 
-/// The services Compose owns. `migrate` is deliberately absent: it is run once, to completion,
-/// rather than raised, and treating it as a long-lived service makes it look like a crash loop.
+/// The services Compose owns in every installation this app runs.
 ///
-/// `server` and `worker` are OpenBot itself, from the published server image: the API, the app it
-/// serves, and the routines sweep. They used to be Bun processes this app started on the host after
-/// downloading Bun and running `bun install`, which on a fresh Windows machine took longer than
-/// everything else in the install put together. Now they are containers like the rest, and the
-/// restart policy that keeps them up is Docker's.
+/// `server` is OpenBot itself, from the published server image: the API, the app it serves, the
+/// database migrations, which it applies when it starts, and the scheduled work (firing routines,
+/// cleaning up unsent attachments, suspending idle computers). It used to be a Bun process this app
+/// started on the host after downloading Bun and running `bun install`, which on a fresh Windows
+/// machine took longer than everything else in the install put together. Now it is a container
+/// like the rest, and the restart policy that keeps it up is Docker's.
 ///
 /// No `supervisor`, and none of the bundled Bots. This app runs the personal edition (see
 /// `env::compose`): every Bot shares the one `agent-computer`, and its Personal Assistant runs inside
 /// the server. The supervisor is still stopped on Stop (`stop_computers`), for the
 /// computers an installation that predates this made for each Bot.
-const SERVICES: [&str; 4] = ["postgres", "agent-computer", "server", "worker"];
+const SERVICES: [&str; 3] = ["postgres", "agent-computer", "server"];
 
-/// The Compose profile `server` and `worker` sit behind, so `scripts/start.sh`, whose server is a
-/// host process, never starts a second one. Named on every command rather than only on `up`, so
-/// `down` stops them and `config` describes them.
+/// The routines sweep as a service of its own, which releases up to 1.0.3 run beside `server`.
+/// Raised, stopped and restarted with the server in an installation whose Compose file is one of
+/// theirs, and never named in any other (`installation_uses`).
+const WORKER: &str = "worker";
+
+/// The one-shot migration service the same releases run. Never raised by name: `server`
+/// depends on it there, so `up` runs it to completion first. Named only to list and pull its image.
+const MIGRATE: &str = "migrate";
+
+/// The Compose profile `server` sits behind (and `worker`, where a file defines it), so a plain
+/// `docker compose up` in a source checkout never starts a second one. Named on every command
+/// rather than only on `up`, so `down` stops them and `config` describes them.
 const OPENBOT_PROFILE: &str = "openbot";
 
-pub fn selected_services(harness: bool) -> Vec<&'static str> {
+/// The line a release's `docker-compose.yml` carries, at the top level, when its server applies
+/// its own migrations and does the scheduled work itself. Compose ignores a top-level `x-` field.
+///
+/// A positive statement by the file, read as text. This release's file still defines `worker` and
+/// `migrate`, so that an app from the release before reads it as current, and starts neither: what
+/// a file defines no longer says what it uses. A file from a release up to 1.0.3 cannot carry the
+/// line, and nothing else somebody edits in a file changes the answer.
+const SCHEDULED_WORK_MARKER: &str = "x-openbot-scheduled-work: server";
+
+/// Whether `text`, a Compose file, says its server does the scheduled work: the marker, on a line
+/// of its own at column 0, with nothing after it but a comment.
+fn server_does_the_scheduled_work(text: &str) -> bool {
+    text.lines()
+        .any(|line| line.split('#').next().unwrap_or(line).trim_end() == SCHEDULED_WORK_MARKER)
+}
+
+/// Whether the installation laid out in `folder` runs `service` (`worker` or `migrate`) as a
+/// service of its own: its Compose file defines it and does not say the server does that work.
+///
+/// The file on disk decides, not this app's release: an installation being updated still has the
+/// previous release's `docker-compose.yml` while this app backs its database up, and again after an
+/// update that rolled back. There the worker is raised with the server and `migrate` is what
+/// `server` waits on. A file with the marker is never asked for either, though it may define them.
+/// Compose refuses a command that names a service its file does not define. A file that cannot be
+/// read uses nothing.
+fn installation_uses(folder: &Path, service: &str) -> bool {
+    std::fs::read_to_string(folder.join("docker-compose.yml")).is_ok_and(|text| {
+        !server_does_the_scheduled_work(&text)
+            && compose_service_names(&text)
+                .iter()
+                .any(|name| name == service)
+    })
+}
+
+/// The services Start raises for the installation in `root`: [`SERVICES`], the `worker` its own
+/// Compose file uses, if it does (`installation_uses`), the Bot the person picked, and the engine of
+/// the plan the installation runs on, if it does (`plan_engine`).
+pub fn selected_services(root: &Path, harness: bool) -> Vec<&'static str> {
     let mut services = SERVICES.to_vec();
+    if installation_uses(root, WORKER) {
+        services.push(WORKER);
+    }
     if harness {
         services.push("agent-harness");
     }
+    if let Some(plan) = plan_engine(root) {
+        services.push(plan.service);
+    }
     services
+}
+
+/**
+The engine of the plan the installation in `root` runs on: the Claude plan's, or the ChatGPT plan's,
+which holds the plan's model transport for the Bot and the server's own Bots. None on any other
+connection, so every other installation runs one Bot image, not two.
+
+Read from the connection recorded beside the installation, which Start records before Compose runs
+and a change in the app records too (`saved_intent`), so every path that raises the stack (Start, a
+restart, an update's start) asks the same question and gets the same answer. Only where the
+installation's own Compose file defines the service: an update that rolled back may have a file
+that does not, and Compose refuses a name its file does not define.
+*/
+pub fn plan_engine(root: &Path) -> Option<Alone> {
+    let plan = crate::ai_connection::Plan::of(crate::saved_intent::SavedIntent::read(root).model?)?;
+    let alone = plan.alone();
+    std::fs::read_to_string(root.join("docker-compose.yml"))
+        .is_ok_and(|text| {
+            compose_service_names(&text)
+                .iter()
+                .any(|name| name == alone.service)
+        })
+        .then_some(alone)
+}
+
+/// [`selected_services`] and the one-shot `migrate`, where the file uses it: every service whose
+/// image the installation needs on the computer before Start.
+fn services_with_images(folder: &Path, harness: bool) -> Vec<&'static str> {
+    let mut services = selected_services(folder, harness);
+    if installation_uses(folder, MIGRATE) {
+        services.push(MIGRATE);
+    }
+    services
+}
+
+/**
+Remove this installation's containers for `migrate` and `worker` once its Compose file no longer
+uses them (`installation_uses`), and say which services had one.
+
+An update from a release that ran them leaves their containers behind when the stack was not taken
+down under the old file first. Nothing this app does under the new file touches them: it never
+names either service, and where the file does not define one, Compose calls its container an orphan
+and only warns. So the previous release's routines sweep would keep running beside a server that
+now does that work itself.
+
+Found by the labels Compose put on them: this installation's own project (`project`) and one of
+these two services, so no container of another project, and nothing the supervisor made, can match.
+`--remove-orphans` would also take every other container of the project this file does not name.
+Removed without `--volumes`: no volume is touched, and neither service ever had one. A service the
+file uses is never looked for, so a previous release's own worker and migrate containers are never
+removed while its file is the one installed. An installation with no Compose file is left alone.
+*/
+fn remove_retired_containers(engine: &Address, root: &Path) -> Result<Vec<&'static str>, String> {
+    if !root.join("docker-compose.yml").is_file() {
+        return Ok(Vec::new());
+    }
+    let retired: Vec<&'static str> = [MIGRATE, WORKER]
+        .into_iter()
+        .filter(|service| !installation_uses(root, service))
+        .collect();
+    if retired.is_empty() {
+        return Ok(retired);
+    }
+    let project = project(engine, root).map_err(|problem| problem.said)?;
+    let mut removed = Vec::new();
+    for service in retired {
+        let listed = engine
+            .command()
+            .current_dir(root)
+            .args(["ps", "--all", "--quiet"])
+            .arg("--filter")
+            .arg(format!("label=com.docker.compose.project={project}"))
+            .arg("--filter")
+            .arg(format!("label=com.docker.compose.service={service}"))
+            .output()
+            .map_err(|error| format!("could not list this installation's containers: {error}"))?;
+        if !listed.status.success() {
+            return Err(format!(
+                "could not list this installation's containers: {}",
+                command_said(&listed.stderr)
+            ));
+        }
+        let ids: Vec<String> = String::from_utf8_lossy(&listed.stdout)
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        if ids.is_empty() {
+            continue;
+        }
+        let output = engine
+            .command()
+            .current_dir(root)
+            .args(["rm", "--force"])
+            .args(&ids)
+            .output()
+            .map_err(|error| {
+                format!("could not remove the earlier {service} container: {error}")
+            })?;
+        if !output.status.success() {
+            return Err(format!(
+                "could not remove the earlier {service} container: {}",
+                command_said(&output.stderr)
+            ));
+        }
+        log::info!(
+            "[compose] removed the {service} container an earlier release left; this release's server does that work"
+        );
+        removed.push(service);
+    }
+    Ok(removed)
 }
 
 /// What earlier versions ran on the host rather than in a container, by the name each was recorded
@@ -97,11 +262,16 @@ pub fn compose_command_for(engine: &Address, root: &Path, secrets: &Secrets) -> 
 }
 
 fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command {
-    let project = project(engine, root).unwrap_or_else(|_| DESKTOP_PROJECT.to_owned());
+    let project = project(engine, root).unwrap_or_else(|_| desktop_project());
+    compose_command_as(engine, root, secrets, &project)
+}
+
+/// `compose_command` for `project`, already known.
+fn compose_command_as(engine: &Address, root: &Path, secrets: &Secrets, project: &str) -> Command {
     let mut command = engine.command();
     command.current_dir(root).args(["compose"]).envs(secrets);
-    command.env("COMPOSE_PROJECT_NAME", &project);
-    if let Some(namespace) = computer_namespace_for(&project) {
+    command.env("COMPOSE_PROJECT_NAME", project);
+    if let Some(namespace) = computer_namespace_for(project) {
         command.env("COMPUTER_NAMESPACE", namespace);
     }
     command
@@ -118,6 +288,47 @@ pub fn postgres_volume_exists(
     let configuration = postgres_configuration(engine, root, secrets)?;
     let volume = postgres_volume_name(&configuration)?;
     named_volume_exists(engine, root, &volume)
+}
+
+/**
+How much this installation's database takes on disk, for the room an update needs to back it up
+(`local_eval::update_needs`): `du` of its volume, read-only, in a container of the Postgres image the
+installation already has, with no network and nothing pulled. Zero when it has no database yet, and
+nothing when it cannot be measured. Never creates the volume: one that is not there is not mounted.
+*/
+pub fn database_bytes(engine: &Address, root: &Path, secrets: &Secrets) -> Option<u64> {
+    let configuration = postgres_configuration(engine, root, secrets).ok()?;
+    let volume = postgres_volume_name(&configuration).ok()?;
+    if !named_volume_exists(engine, root, &volume).ok()? {
+        return Some(0);
+    }
+    let config: serde_json::Value = serde_json::from_slice(&configuration).ok()?;
+    let image = config["services"]["postgres"]["image"].as_str()?.to_owned();
+    let mut command = engine.command();
+    command.current_dir(root).args([
+        "run",
+        "--rm",
+        "--pull=never",
+        "--network=none",
+        "--volume",
+        &format!("{volume}:/data:ro"),
+        "--entrypoint",
+        "/bin/sh",
+        &image,
+        "-c",
+        "du -sk /data",
+    ]);
+    let (succeeded, output) =
+        crate::local_images::run_within(command, std::time::Duration::from_secs(60), 64 * 1024)?;
+    if !succeeded {
+        return None;
+    }
+    let kib: u64 = String::from_utf8_lossy(&output)
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    Some(kib * 1024)
 }
 
 fn postgres_configuration(
@@ -922,11 +1133,11 @@ fn compose_start_command(
             }
         }
     }
+    let podman_ports = macos_podman
+        .then(|| macos_podman_ports(root, &files))
+        .flatten();
     for (file, contents) in [
-        (
-            MACOS_PODMAN_PORTS_FILE,
-            macos_podman.then_some(MACOS_PODMAN_PORTS),
-        ),
+        (MACOS_PODMAN_PORTS_FILE, podman_ports.as_deref()),
         (HARNESS_PORT_FILE, harness_ports.as_deref()),
     ] {
         if let Some(contents) = contents {
@@ -949,6 +1160,133 @@ fn compose_start_command(
         }
     }
     Ok(command)
+}
+
+/// The services a Compose file defines: the keys one level under its top-level `services:`.
+///
+/// Read as text, not parsed: the installation's files are the ones OpenBot ships, block-style with
+/// two-space indentation, and a file this cannot read simply contributes no names.
+fn compose_service_names(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut inside = false;
+    for line in text.lines() {
+        if line.trim().is_empty() || line.trim_start().starts_with('#') {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            inside = line.trim_end() == "services:";
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        let Some(rest) = line.strip_prefix("  ") else {
+            continue;
+        };
+        if rest.starts_with(' ') {
+            continue;
+        }
+        // The key alone, whether its value is the block under it or on its own line (`server: {}`).
+        let key = rest.split('#').next().unwrap_or(rest);
+        if let Some((name, _)) = key.split_once(':') {
+            names.push(name.trim().trim_matches(['"', '\'']).to_owned());
+        }
+    }
+    names
+}
+
+/// The Compose profile of the services `docker-compose.yml` keeps for one release and starts
+/// never: `agent-bot` and `agent-langgraph`, defined only so the app from the release before can
+/// merge its own port overlay onto the file. This app publishes no port for them.
+const OLDER_APPS_PROFILE: &str = "for-older-apps";
+
+/// The services a Compose file puts behind `profile`, read as text like [`compose_service_names`]:
+/// a `profiles:` line directly under the service, naming the profile.
+fn compose_services_behind(text: &str, profile: &str) -> Vec<String> {
+    let names = compose_service_names(text);
+    let mut behind = Vec::new();
+    let mut service: Option<&str> = None;
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix("  ") else {
+            if !line.trim().is_empty() {
+                service = None;
+            }
+            continue;
+        };
+        if !rest.starts_with(' ') {
+            let key = rest.split('#').next().unwrap_or(rest).trim_end();
+            service = key
+                .strip_suffix(':')
+                .map(|name| name.trim_matches(['"', '\'']))
+                .filter(|name| names.iter().any(|known| known == name));
+            continue;
+        }
+        let named = rest.strip_prefix("  profiles:").is_some_and(|value| {
+            value
+                .split(['[', ']', ',', '"', '\'', ' '])
+                .any(|p| p == profile)
+        });
+        if let (true, Some(name)) = (named, service) {
+            behind.push(name.to_owned());
+        }
+    }
+    behind
+}
+
+/// The Mac Podman port overlay for this installation: [`MACOS_PODMAN_PORTS`] with only the services
+/// its own Compose files define, or nothing when they define none of them.
+///
+/// The overlay names every service any release has published a port for. Compose refuses a project
+/// in which a file names a service that has no image ("has neither an image nor a build context
+/// specified"), and that refusal fails every command given the overlay. An installation being
+/// updated still has the previous release's `docker-compose.yml` while this app backs its database
+/// up, and again if the update is rolled back, so the overlay follows the file that is there.
+///
+/// A service the file keeps only for an older app ([`OLDER_APPS_PROFILE`]) gets no ports: it is
+/// never started, and the two names are real services in an earlier release's file.
+fn macos_podman_ports(root: &Path, files: &[String]) -> Option<String> {
+    let texts: Vec<String> = files
+        .iter()
+        .filter_map(|file| std::fs::read_to_string(root.join(file)).ok())
+        .collect();
+    let mut defined: std::collections::HashSet<String> = texts
+        .iter()
+        .flat_map(|text| compose_service_names(text))
+        .collect();
+    for text in &texts {
+        for kept in compose_services_behind(text, OLDER_APPS_PROFILE) {
+            defined.remove(&kept);
+        }
+    }
+    let (header, services) = MACOS_PODMAN_PORTS.split_once("services:\n")?;
+    // A block is a service's own line and what is indented under it; a comment line above a
+    // service belongs to the block it introduces.
+    let mut blocks: Vec<(&str, Vec<&str>)> = Vec::new();
+    let mut pending: Vec<&str> = Vec::new();
+    for line in services.lines() {
+        let service = line
+            .strip_prefix("  ")
+            .filter(|rest| !rest.starts_with(' ') && !rest.starts_with('#'))
+            .and_then(|rest| rest.trim_end().strip_suffix(':'));
+        if let Some(name) = service {
+            let mut lines = std::mem::take(&mut pending);
+            lines.push(line);
+            blocks.push((name, lines));
+        } else if line.starts_with("  #") {
+            pending.push(line);
+        } else if let Some((_, lines)) = blocks.last_mut() {
+            lines.push(line);
+        }
+    }
+    let kept: Vec<&str> = blocks
+        .iter()
+        .filter(|(name, _)| defined.contains(*name))
+        .flat_map(|(_, lines)| lines.iter().copied())
+        .collect();
+    if kept.is_empty() {
+        return None;
+    }
+    Some(format!("{header}services:\n{}\n", kept.join("\n")))
 }
 
 fn compose_files(root: &Path, environment: &str) -> Result<Vec<String>, Problem> {
@@ -1030,7 +1368,7 @@ pub fn installation_images_in(
 pub fn standalone_compose_command(compose: &Path, root: &Path, secrets: &Secrets) -> Command {
     let mut command = crate::quiet::command(compose);
     command.current_dir(root).envs(secrets);
-    command.env("COMPOSE_PROJECT_NAME", DESKTOP_PROJECT);
+    command.env("COMPOSE_PROJECT_NAME", desktop_project());
     command
 }
 
@@ -1041,8 +1379,8 @@ pub fn installation_images_by(
     release: &Path,
     harness: bool,
 ) -> Result<Vec<String>, Problem> {
-    let mut requested = selected_services(harness);
-    requested.push("migrate");
+    // The release's own file says which services it has: this one may not be the installed one.
+    let requested = services_with_images(release, harness);
     if release != root {
         // Compose reads the release's file from where it runs, and `.env` from there too, so the
         // installation's own settings are named explicitly.
@@ -1084,7 +1422,8 @@ pub fn installation_images_by(
     Ok(images.into_iter().collect())
 }
 
-/// Pull the selected stack before `up`, including the one-shot migration and service dependencies.
+/// Pull the selected stack before `up`, including service dependencies and, where the
+/// installation's Compose file uses one, the one-shot migration.
 /// Keep this separate from `up`: image transfer must not include container startup or migrations.
 /// Legacy batch helper for providers with a missing-only pull policy. The desktop installation
 /// step uses `pull_image` for explicit acquisition on every provider; `up` never pulls.
@@ -1098,8 +1437,7 @@ pub fn pull(
     let Some(json_progress) = crate::pull_metrics::compose_pull_progress(engine) else {
         return Ok(());
     };
-    let mut requested = selected_services(harness);
-    requested.push("migrate");
+    let requested = services_with_images(root, harness);
     let mut command = compose_command(engine, root, secrets);
     if json_progress {
         command.args(["--progress", "json"]);
@@ -1133,6 +1471,110 @@ pub fn up(
             &FOLDER_NOT_SHARED_YET_WAITS,
             std::env::consts::OS,
         )
+    })
+}
+
+/// A service behind a profile of its own, which OpenBot starts and stops alone: a plan's engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Alone {
+    pub profile: &'static str,
+    pub service: &'static str,
+}
+
+/**
+Start one service alone, and wait until it answers its health check, while everything else keeps
+running: the server, the database and every other Bot keep their containers. A service already
+running with the same settings is left as it is; one whose settings changed (a new plan token) is
+recreated. `--no-deps`, so nothing it might depend on is touched either.
+
+How a plan's engine starts the moment somebody signs in to the plan in the app.
+*/
+pub fn start_alone(
+    engine: &Address,
+    root: &Path,
+    alone: Alone,
+    secrets: &Secrets,
+) -> Result<(), Problem> {
+    crate::logging::timed("compose up one service", || {
+        let output = compose_command(engine, root, secrets)
+            .args(["--profile", alone.profile])
+            .args(["up", "-d", "--no-deps", "--no-build", "--pull", "never"])
+            .args(["--wait", "--wait-timeout", ALONE_PATIENCE])
+            .arg(alone.service)
+            .output()
+            .map_err(|error| {
+                Problem::with(
+                    "OpenBot couldn't start your plan. Try again.",
+                    format!("could not run {} compose: {error}", engine.engine.binary()),
+                )
+            })?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let raw = command_said(&output.stderr);
+        Err(Problem::with(crate::problem::said_about(&raw), raw))
+    })
+}
+
+/// How long [`start_alone`] and [`recreate_harness`] wait for the service's health check, in
+/// seconds. A plan's engine answers in seconds once its image is on the computer.
+const ALONE_PATIENCE: &str = "180";
+
+/**
+Recreate the picked harness alone, with the settings now in `.env`, and nothing else: a harness that
+fixes its provider when it starts has to start again to speak the new connection's wire. With the
+harness port overlay `up` uses, so it keeps its port.
+*/
+pub fn recreate_harness(engine: &Address, root: &Path, secrets: &Secrets) -> Result<(), Problem> {
+    crate::logging::timed("compose recreate the picked Bot", || {
+        let mut command = compose_start_command(engine, root, secrets, std::env::consts::OS)?;
+        let output = command
+            .args(["--profile", "harness"])
+            .args(["up", "-d", "--no-deps", "--no-build", "--pull", "never"])
+            .args([
+                "--force-recreate",
+                "--wait",
+                "--wait-timeout",
+                ALONE_PATIENCE,
+            ])
+            .arg("agent-harness")
+            .output()
+            .map_err(|error| {
+                Problem::with(
+                    "OpenBot couldn't restart your Bot. Try again.",
+                    format!("could not run {} compose: {error}", engine.engine.binary()),
+                )
+            })?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let raw = command_said(&output.stderr);
+        Err(Problem::with(crate::problem::said_about(&raw), raw))
+    })
+}
+
+/// Stop and remove one service alone, if it runs, and nothing else. One that is not running is
+/// already where this leaves it.
+pub fn remove_alone(engine: &Address, root: &Path, alone: Alone) -> Result<(), Problem> {
+    crate::logging::timed("compose remove one service", || {
+        let output = compose_command(engine, root, &Secrets::new())
+            .args(["--profile", alone.profile])
+            .args(["rm", "--stop", "--force", alone.service])
+            .output()
+            .map_err(|error| {
+                Problem::with(
+                    "OpenBot couldn't stop a plan it no longer uses.",
+                    format!("could not run {} compose: {error}", engine.engine.binary()),
+                )
+            })?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let raw = command_said(&output.stderr);
+        Err(Problem::with(
+            "OpenBot couldn't stop a plan it no longer uses.",
+            raw,
+        ))
     })
 }
 
@@ -1346,11 +1788,25 @@ fn up_now(
      * it: its image comes from `.env`, and with nothing picked it is a stand-in docker-compose.yml
      * names so older Compose will read the file at all. The flag comes before
      * `up`, because `--profile` is an option of `compose` itself and not of the subcommand.
+     *
+     * A plan's engine the same way, behind its own profile.
      */
-    let requested = selected_services(harness);
+    let requested = selected_services(root, harness);
+    let plan = plan_engine(root);
+    // Before anything is raised: a routines sweep an earlier release left must not run beside a
+    // server that does that work itself.
+    remove_retired_containers(engine, root).map_err(|detail| {
+        crate::problem::Problem::with(
+            "OpenBot couldn't clear what an earlier version left running. Try again.",
+            detail,
+        )
+    })?;
     let mut command = compose_start_command(engine, root, secrets, std::env::consts::OS)?;
     if harness {
         command.args(["--profile", "harness"]);
+    }
+    if let Some(plan) = plan {
+        command.args(["--profile", plan.profile]);
     }
     let output = command
         .args(["up", "-d", "--no-build", "--pull", "never"])
@@ -1430,15 +1886,14 @@ fn computer_namespace(engine: &Address, root: &Path) -> Result<Option<String>, S
 /// screen to stop it from. Stopped rather than removed, because the supervisor starts an existing
 /// owned container back up and the Bot keeps the profile and workspace volumes attached to it.
 /// Quiesce the supervisor before listing so in-flight creates and restarts are included.
-/// Returns false only when the selected root has no installed deployment to take down.
-pub fn stop_computers(engine: &Address, root: &Path) -> Result<bool, String> {
-    crate::logging::timed("stop Bots' computers", || stop_computers_now(engine, root))
+/// `namespace` is the one `computer_namespace` resolved for this deployment.
+fn stop_computers(engine: &Address, root: &Path, namespace: &str) -> Result<(), String> {
+    crate::logging::timed("stop Bots' computers", || {
+        stop_computers_now(engine, root, namespace)
+    })
 }
 
-fn stop_computers_now(engine: &Address, root: &Path) -> Result<bool, String> {
-    let Some(namespace) = computer_namespace(engine, root)? else {
-        return Ok(false);
-    };
+fn stop_computers_now(engine: &Address, root: &Path, namespace: &str) -> Result<(), String> {
     // Validate ownership before stopping anything, then wait for the creator to exit. A list taken
     // while the supervisor is active can miss a new computer or one it restarts after being stopped.
     let supervisor = compose_command(engine, root, &Secrets::new())
@@ -1475,7 +1930,7 @@ fn stop_computers_now(engine: &Address, root: &Path) -> Result<bool, String> {
         .map(str::to_string)
         .collect();
     if running.is_empty() {
-        return Ok(true);
+        return Ok(());
     }
 
     let stopped = engine
@@ -1485,17 +1940,66 @@ fn stop_computers_now(engine: &Address, root: &Path) -> Result<bool, String> {
         .output()
         .map_err(|error| format!("could not stop the Bots' computers: {error}"))?;
     if stopped.status.success() {
-        return Ok(true);
+        return Ok(());
     }
     Err(command_said(&stopped.stderr))
 }
 
+/// How long Compose gives the server to stop before it kills it, in seconds.
+///
+/// Asked to stop, the server finishes what it is doing: it waits for the requests in flight and the
+/// Bots' answers under way (six seconds at most, outside a cluster), stops an answer still going the
+/// way a person's Stop does (two and a half), and closes its sockets. Compose's own ten would kill a
+/// server still at that. Fifteen covers it, and a server with nothing to finish leaves at once.
+pub const SERVER_STOP_SECONDS: &str = "15";
+
+/// Stop the server on its own, before anything it is using.
+///
+/// FOUND ON DESKTOP. `compose down` stops every container at once, so a Bot's harness went away while
+/// the server was finishing the answer the Bot was giving, and the answer ended in "Couldn't reach"
+/// the Bot. The server finishes its answers when it is asked to stop, and it can only do that while
+/// the Bots, their computers and the database are still there. A failure here is logged and the rest
+/// is still stopped: `compose down` stops the server too.
+fn stop_server_first(engine: &Address, root: &Path) {
+    if !root.join("docker-compose.yml").is_file() {
+        return;
+    }
+    let stopped = crate::logging::timed("stop the server", || {
+        let output = compose_command(engine, root, &Secrets::new())
+            .args([
+                "-f",
+                "docker-compose.yml",
+                "--profile",
+                OPENBOT_PROFILE,
+                "stop",
+                "--timeout",
+                SERVER_STOP_SECONDS,
+                "server",
+            ])
+            .output()
+            .map_err(|error| error.to_string())?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(command_said(&output.stderr))
+        }
+    });
+    if let Err(error) = stopped {
+        log::warn!("[compose down] could not stop the server first: {error}");
+    }
+}
+
 pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
     crate::logging::timed("compose down", || {
-        // Stop the supervisor and its runtime-created computers before removing the Compose stack.
-        if !stop_computers(engine, root)? {
+        // Which computers are this deployment's is settled before anything is stopped: a namespace
+        // that can't be resolved stops nothing, and no installed deployment has nothing to take down.
+        let Some(namespace) = computer_namespace(engine, root)? else {
             return Ok(());
-        }
+        };
+        // The server first, so it can finish what it is doing with everything it uses still there.
+        stop_server_first(engine, root);
+        // Stop the supervisor and its runtime-created computers before removing the Compose stack.
+        stop_computers(engine, root, &namespace)?;
 
         /*
          * WITH THE PROFILE, OR THE PICKED BOT KEEPS RUNNING.
@@ -1508,9 +2012,18 @@ pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
          * Named unconditionally rather than only when a harness was picked: this has to stop what an
          * earlier run started, and whether that run picked one is not something a Stop can know.
          *
-         * `openbot` for the same reason: `server` and `worker` sit behind it, and a Stop that left them
-         * running would leave the app answering a window that says OpenBot is stopped.
+         * `openbot` for the same reason: `server` sits behind it, with `worker` where the file
+         * defines one, and a Stop that left them running would leave the app answering a window
+         * that says OpenBot is stopped.
+         *
+         * A `worker` or `migrate` container an earlier release left, under a file that no
+         * longer uses the service, is removed first: where the file does not define it, it is not
+         * Compose's to take down, and while one is attached the project's network stays. A
+         * failure there is logged and the rest is still stopped.
          */
+        if let Err(error) = remove_retired_containers(engine, root) {
+            log::warn!("[compose down] {error}");
+        }
         let output = compose_command(engine, root, &Secrets::new())
             .args([
                 "-f",
@@ -3078,6 +3591,393 @@ pub fn service_log(engine: &Address, root: &Path, service: &str, lines: u16) -> 
         .unwrap_or_default()
 }
 
+/**
+`service_log`, stopped at `deadline`: None when Compose was still running then. For troubleshooting
+logs, which are asked for when the engine may be stalled: `compose logs` then waits on it for
+minutes, or until it is restarted.
+
+As the project the installation recorded, or `desktop_project` when it recorded none. Never decided
+here (`project`): deciding asks the engine, with no time limit, and records the answer.
+*/
+pub fn service_log_by(
+    engine: &Address,
+    root: &Path,
+    service: &str,
+    lines: u16,
+    deadline: std::time::Instant,
+) -> Option<String> {
+    let project = saved_project(root).unwrap_or_else(desktop_project);
+    let mut command = compose_command_as(engine, root, &Secrets::new(), &project);
+    command.args(["logs", "--tail", &lines.to_string(), service]);
+    let left = deadline.saturating_duration_since(std::time::Instant::now());
+    match crate::quiet::output_within(&mut command, left) {
+        Ok(out) => {
+            let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+            text.push_str(&String::from_utf8_lossy(&out.stderr));
+            Some(text.trim().to_string())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::TimedOut => None,
+        Err(_) => Some(String::new()),
+    }
+}
+
+/// The exit code the OpenBot server uses for every refusal to start: 78, `EX_CONFIG` from
+/// sysexits.h, "configuration error".
+///
+/// The server refuses when it has no licence or an invalid one, when a single-user server runs in a
+/// container without `OPENBOT_INSTALL_TOKEN`, when it can't use its object store, when it rejects a
+/// setting, or when it must not migrate the database. Each time it prints one sentence to stderr and
+/// exits 78. It won't start until somebody changes its configuration, so waiting longer can't help.
+/// Docker still restarts it under `unless-stopped`, but Desktop stops waiting for `/health` as soon
+/// as the server's last exit was this code, and shows that sentence as the reason (`server_refusal`).
+/// Any other non-zero exit is a crash: Docker restarts it and Desktop keeps waiting.
+pub const SERVER_REFUSED_TO_START: i64 = 78;
+
+/// The file a refusing server writes its sentence to, in the sign-in folder Compose bind-mounts into
+/// it: `.openbot/refusal` here, `/openbot/refusal` in the container (`OPENBOT_REFUSAL_FILE` in
+/// docker-compose.yml).
+pub const REFUSAL_FILE: &str = "refusal";
+
+/// Take away the sentence an earlier start's server wrote, before Compose starts this one, so only a
+/// refusal from this start is read (`server_refusal`).
+///
+/// FIRST, THE SERVER THAT WROTE IT. The engine keeps restarting a refusing server until Compose
+/// replaces it, and each restart refuses again and writes the old sentence again. Under Podman that
+/// is every second or so, so a Retry after the setting was put right read the old server's sentence,
+/// written after the file was taken away and before `up` replaced the container, although the new
+/// server was healthy. So a server that refused is stopped and removed first, and nothing is left
+/// that could write the file: it serves nothing, and `up` makes it again from the settings as they
+/// are now.
+///
+/// Removed rather than told apart by when the file was written or by whom: the file's time comes
+/// from the host and the container's start time from the engine's own machine, which under Podman
+/// on Windows or macOS is a virtual machine with a clock of its own, and naming the container in the
+/// file would need every server image to write it.
+pub fn forget_refusal(engine: &Address, root: &Path) {
+    let file = root.join(".openbot").join(REFUSAL_FILE);
+    // The file there at all is a server that refused, even caught half written: a server empties
+    // it before it writes its sentence, every time the engine restarts it.
+    if file.exists() || engine_reports_refusal(engine, root) {
+        let removed = compose_command(engine, root, &Secrets::new())
+            .args(["rm", "--stop", "--force", "server"])
+            .output();
+        match removed {
+            Ok(out) if out.status.success() => {
+                log::info!("[start] removed the server that refused to start")
+            }
+            Ok(out) => log::warn!(
+                "[start] could not remove the server that refused to start: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+            Err(error) => {
+                log::warn!("[start] could not remove the server that refused to start: {error}")
+            }
+        }
+    }
+    if let Err(error) = std::fs::remove_file(&file) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            log::warn!("[start] could not remove {}: {error}", file.display());
+        }
+    }
+}
+
+/// The sentence the server wrote to [`REFUSAL_FILE`] when it refused to start, if it did.
+fn refusal_written(root: &Path) -> Option<String> {
+    let said = std::fs::read_to_string(root.join(".openbot").join(REFUSAL_FILE)).ok()?;
+    let said = said.trim();
+    (!said.is_empty()).then(|| said.to_owned())
+}
+
+/// Why the server refused to start, or `None` while it has not.
+///
+/// FIRST, THE FILE. A refusing server writes its sentence to [`REFUSAL_FILE`] as it exits 78, and the
+/// file stays there however the engine restarts it. The engine's own view of the container does
+/// not: Podman starts a refusing server again at once, so `compose ps` reports it `running`, exit
+/// 0, "Up 1 second" nearly all the time, and `exited` with 78 only for a moment. Sampled every 0.3 s
+/// for 60 s against Podman on Windows it said `running` 132 times and `exited` (78) 13, and asked
+/// every few seconds, as this is, it missed the refusal for the whole three-minute wait. The file
+/// does not depend on when it is asked, on either engine.
+///
+/// Then the container's state, for a server that could not write the file: Docker restarts a
+/// refusing server with a growing delay and reports it `restarting` with "(78)" between tries.
+///
+/// Asked between health checks. `None` too when the engine can't be asked: the wait carries on as
+/// it did before, and its own timeout still ends it.
+pub fn server_refusal(engine: &Address, root: &Path) -> Option<String> {
+    if let Some(said) = refusal_written(root) {
+        return Some(said);
+    }
+    let container = refused_server(engine, root)?;
+    // The container's own log, not Compose's: Compose merges stdout and stderr into one stream, and
+    // a server restarted under `unless-stopped` has already written the next attempt's stdout
+    // after the sentence. The engine keeps the two apart.
+    let log = engine
+        .command()
+        .current_dir(root)
+        .args(["logs", "--tail", "40", &container])
+        .output()
+        .ok();
+    let stderr = log
+        .as_ref()
+        .map(|out| String::from_utf8_lossy(&out.stderr).into_owned())
+        .unwrap_or_default();
+    let compose_log = if stderr.trim().is_empty() {
+        service_log(engine, root, "server", 40)
+    } else {
+        String::new()
+    };
+    Some(refusal_sentence_in(&stderr, &compose_log))
+}
+
+/// The id of the `server` container whose last exit was [`SERVER_REFUSED_TO_START`], as the engine
+/// reports it now. `None` too when the engine can't be asked.
+fn refused_server(engine: &Address, root: &Path) -> Option<String> {
+    let listing = compose_command(engine, root, &Secrets::new())
+        .args(["ps", "-a", "--format", "json", "server"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())?;
+    refused_server_in(&String::from_utf8_lossy(&listing.stdout))
+}
+
+/// Whether the engine itself says the server refused, for a server that could not write the file.
+fn engine_reports_refusal(engine: &Address, root: &Path) -> bool {
+    refused_server(engine, root).is_some()
+}
+
+/// The id of the `server` container whose last exit was [`SERVER_REFUSED_TO_START`], from
+/// `compose ps -a --format json server`: one object a line, or one array from an older Compose.
+///
+/// MEASURED: while Docker restarts a container, Compose reports its `ExitCode` as 0 and the real
+/// code only in `Status` ("Restarting (78) 1 second ago"). An exited container has both.
+fn refused_server_in(listing: &str) -> Option<String> {
+    let rows: Vec<serde_json::Value> = if listing.trim_start().starts_with('[') {
+        serde_json::from_str(listing).ok()?
+    } else {
+        listing
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    };
+    rows.into_iter().find_map(|row| {
+        if row["Service"].as_str() != Some("server") {
+            return None;
+        }
+        let state = row["State"].as_str()?.to_ascii_lowercase();
+        if state != "restarting" && state != "exited" {
+            return None;
+        }
+        let reported = row["ExitCode"].as_i64().filter(|code| *code != 0);
+        let in_status = row["Status"]
+            .as_str()
+            .and_then(|status| status.split_once('('))
+            .and_then(|(_, rest)| rest.split_once(')'))
+            .and_then(|(code, _)| code.trim().parse::<i64>().ok());
+        (reported.or(in_status) == Some(SERVER_REFUSED_TO_START))
+            .then(|| row["ID"].as_str().map(str::to_owned))
+            .flatten()
+    })
+}
+
+/// The sentence a refusing server printed: the last line of its stderr, or, from an engine that
+/// gave no stderr apart, the last line of Compose's log with its `server-1  | ` prefix taken off.
+fn refusal_sentence_in(stderr: &str, compose_log: &str) -> String {
+    let last = |text: &str| {
+        text.lines()
+            .rfind(|line| !line.trim().is_empty())
+            .map(|line| line.trim().to_owned())
+    };
+    last(stderr)
+        .or_else(|| {
+            last(compose_log).map(|line| match line.split_once(" | ") {
+                Some((prefix, said)) if !prefix.trim().contains(char::is_whitespace) => {
+                    said.trim().to_owned()
+                }
+                _ => line,
+            })
+        })
+        .unwrap_or_else(|| {
+            "OpenBot can't start until its settings are changed. The details below say why."
+                .to_owned()
+        })
+}
+
+/// What the engine says of the installation's `server` container, asked when OpenBot stops
+/// answering under an open window (`server_container`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerContainer {
+    /// Up, whether or not it answers: a server that is busy, or an engine that is slow to pass its
+    /// answers on. Docker keeps it; nothing should start it again.
+    Running,
+    /// Exited, and Docker is starting it again by its restart policy.
+    Restarting,
+    /// Stopped and staying stopped, with the code it exited with and whether the engine killed it
+    /// for memory.
+    Exited {
+        code: Option<i64>,
+        out_of_memory: bool,
+    },
+    /// There is no `server` container.
+    Missing,
+}
+
+/// Why the engine gave no word on the `server` container.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerContainerUnknown {
+    /// The engine did not answer within the limit. It is there, and slow.
+    Slow,
+    /// The engine could not be asked, or refused: stopped, or not there at all.
+    Unreachable(String),
+}
+
+/**
+The engine's word on `root`'s `server` container, within `limit`.
+
+MEASURED in a dogfooding report (Desktop 1.1.2, macOS): the container engine stalled for minutes,
+`local status` took 115 seconds to list services where it takes a tenth of one, and every request to
+the server ran out of time. The server's container was up the whole while (its ports still took
+connections; a stopped container's refuse them at once). Its not answering is no reason to start it
+again, which recreates it and ends every Bot's turn that was running.
+*/
+pub fn server_container(
+    engine: &Address,
+    root: &Path,
+    limit: std::time::Duration,
+) -> Result<ServerContainer, ServerContainerUnknown> {
+    let operation = format!(
+        "{} compose ps -a --format json server",
+        engine.engine.binary()
+    );
+    // As the project the installation recorded, never decided here: deciding asks the engine with
+    // no time limit (`service_log_by` gives the same reason).
+    let project = saved_project(root).unwrap_or_else(desktop_project);
+    let mut listing = compose_command_as(engine, root, &Secrets::new(), &project);
+    listing.args(["ps", "-a", "--format", "json", "server"]);
+    let output = match crate::quiet::output_within(&mut listing, limit) {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
+            return Err(ServerContainerUnknown::Slow)
+        }
+        Err(error) => {
+            return Err(ServerContainerUnknown::Unreachable(format!(
+                "could not run {operation}: {error}"
+            )))
+        }
+    };
+    if !output.status.success() {
+        let said = format!(
+            "{operation} exited with status {}: {}",
+            output.status,
+            command_said(&output.stderr)
+        );
+        // MEASURED on a Mac under Podman: with the engine's machine stalled (its VM process
+        // stopped), `compose ps` gives up after about 14 seconds with "ssh: handshake failed:
+        // connection reset by peer" rather than running out of time. Asked then, the machine
+        // says it is running, or takes too long to say anything, as `machine inspect` asks the
+        // stalled VM process too. A stopped machine says so at once. So that is a slow engine,
+        // not a gone one.
+        if machine_running_or_slow(engine, limit) {
+            return Err(ServerContainerUnknown::Slow);
+        }
+        return Err(ServerContainerUnknown::Unreachable(said));
+    }
+    let Some((state, id)) = server_container_in(&String::from_utf8_lossy(&output.stdout)) else {
+        return Ok(ServerContainer::Missing);
+    };
+    let ServerContainer::Exited { code, .. } = state else {
+        return Ok(state);
+    };
+    // Whether the engine killed it for memory, which only `inspect` says. Not knowing is not
+    // knowing: the exit code still says how it ended.
+    let mut inspect = engine.command();
+    inspect.args(["inspect", "--format", "{{.State.OOMKilled}}", &id]);
+    let out_of_memory = crate::quiet::output_within(&mut inspect, limit)
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| String::from_utf8_lossy(&output.stdout).trim() == "true");
+    Ok(ServerContainer::Exited {
+        code,
+        out_of_memory,
+    })
+}
+
+/// Whether the Podman machine behind `engine` says it is running, or does not say within `limit`.
+/// False when it says anything else, or cannot be asked; for Docker; and for a Podman with no
+/// machine (Linux).
+///
+/// MEASURED on a Mac: with the machine's VM process stopped, `podman machine inspect` waits on it
+/// too and does not return. On Windows it went on not returning after the machine came back. So
+/// it is asked within a limit, as every engine call the watcher makes is, and running out of time
+/// is the slow machine it looks like.
+fn machine_running_or_slow(engine: &Address, limit: std::time::Duration) -> bool {
+    let (crate::engine::Engine::Podman, Some(connection)) =
+        (&engine.engine, engine.connection.as_deref())
+    else {
+        return false;
+    };
+    let machine = crate::acquire::machine_of(connection);
+    let mut inspect = crate::engine::podman_command(&["machine", "inspect", machine]);
+    match crate::quiet::output_within(&mut inspect, limit) {
+        Err(error) if error.kind() == std::io::ErrorKind::TimedOut => true,
+        Err(_) => false,
+        Ok(output) => {
+            output.status.success()
+                && crate::acquire::machine_state(&String::from_utf8_lossy(&output.stdout), machine)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|state| state == "running")
+        }
+    }
+}
+
+/// The `server` container's state and id, from `compose ps -a --format json server`: one object a
+/// line, or one array from an older Compose. `None` when there is no `server` container.
+///
+/// MEASURED: while Docker restarts a container, Compose reports its `ExitCode` as 0 and the real
+/// code only in `Status` ("Restarting (78) 1 second ago"). An exited container has both.
+fn server_container_in(listing: &str) -> Option<(ServerContainer, String)> {
+    let rows: Vec<serde_json::Value> = if listing.trim_start().starts_with('[') {
+        serde_json::from_str(listing).ok()?
+    } else {
+        listing
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    };
+    let row = rows
+        .into_iter()
+        .find(|row| row["Service"].as_str() == Some("server"))?;
+    let id = row["ID"].as_str().unwrap_or_default().to_owned();
+    let state = row["State"]
+        .as_str()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let code = row["ExitCode"]
+        .as_i64()
+        .filter(|code| *code != 0)
+        .or_else(|| {
+            row["Status"]
+                .as_str()
+                .and_then(|status| status.split_once('('))
+                .and_then(|(_, rest)| rest.split_once(')'))
+                .and_then(|(code, _)| code.trim().parse::<i64>().ok())
+        })
+        .or_else(|| row["ExitCode"].as_i64());
+    let container = match state.as_str() {
+        // Paused is still there, holding everything it had: not stopped, and not ours to restart.
+        "running" | "paused" => ServerContainer::Running,
+        "restarting" => ServerContainer::Restarting,
+        // exited, dead, created (never started), removing.
+        _ => ServerContainer::Exited {
+            code,
+            out_of_memory: false,
+        },
+    };
+    Some((container, id))
+}
+
 /// Which Compose services are not running, and the last thing each said.
 ///
 /// `compose up` succeeds once it has asked for everything; a service that then exits is not its
@@ -3209,16 +4109,28 @@ Every service rather than `server` alone, read row by row: naming a service on `
 resolve it, and `server` sits behind a profile this command would otherwise have to repeat.
 */
 pub fn server_publishes(engine: &Address, root: &Path, ports: &[u16]) -> Result<bool, Problem> {
+    server_publishes_within(engine, root, ports, SERVER_PUBLISHES_WITHIN)
+}
+
+/// [`server_publishes`], waiting `limit` for the engine.
+pub fn server_publishes_within(
+    engine: &Address,
+    root: &Path,
+    ports: &[u16],
+    limit: std::time::Duration,
+) -> Result<bool, Problem> {
     let operation = format!("{} compose ps", engine.engine.binary());
-    let output = compose_command(engine, root, &Secrets::new())
-        .args(["ps", "--format", "{{.Service}}\t{{.Ports}}"])
-        .output()
-        .map_err(|error| {
-            Problem::with(
-                "OpenBot couldn't check on its own services. Try again.",
-                format!("could not run {operation}: {error}"),
-            )
-        })?;
+    let mut listing = compose_command(engine, root, &Secrets::new());
+    listing.args(["ps", "--format", "{{.Service}}\t{{.Ports}}"]);
+    // MEASURED on Windows under Podman: after the engine's machine had been stalled, this call
+    // never returned, and the connection watcher that made it stopped for good. An engine that
+    // does not say within the limit is not taken to publish anything.
+    let output = crate::quiet::output_within(&mut listing, limit).map_err(|error| {
+        Problem::with(
+            "OpenBot couldn't check on its own services. Try again.",
+            format!("could not run {operation}: {error}"),
+        )
+    })?;
     if !output.status.success() {
         return Err(Problem::with(
             "OpenBot couldn't check on its own services. Try again.",
@@ -3230,6 +4142,9 @@ pub fn server_publishes(engine: &Address, root: &Path, ports: &[u16]) -> Result<
         ports,
     ))
 }
+
+/// How long `server_publishes` waits for the engine's listing.
+pub const SERVER_PUBLISHES_WITHIN: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// `server_publishes` over a `{{.Service}}\t{{.Ports}}` listing. Pure, for the reason
 /// `published_in` is.
@@ -3255,6 +4170,15 @@ never logged.
 Every service's row rather than `server` named, for the reason `server_publishes` gives.
 */
 pub fn server_host_token(engine: &Address, root: &Path) -> Result<Option<String>, String> {
+    match server_environment(engine, root)? {
+        Some(environment) => host_token_in(&environment),
+        None => Ok(None),
+    }
+}
+
+/// The `{{json .Config.Env}}` of the installation's running `server` container, if one is running.
+/// Only reads; what it holds is never logged.
+fn server_environment(engine: &Address, root: &Path) -> Result<Option<Vec<u8>>, String> {
     let listed = compose_command(engine, root, &Secrets::new())
         .args(["ps", "--format", "{{.Service}}\t{{.ID}}"])
         .output()
@@ -3286,35 +4210,87 @@ pub fn server_host_token(engine: &Address, root: &Path) -> Result<Option<String>
     if !inspected.status.success() {
         return Err(command_said(&inspected.stderr));
     }
-    host_token_in(&inspected.stdout)
+    Ok(Some(inspected.stdout))
+}
+
+/// The install's token the installation's running `server` container was given, if it has one
+/// (`install_token`). Read back from there, as `server_host_token` reads its own, by a session that
+/// shows a deployment an earlier one raised and by the Recorder's native host, a process of its own:
+/// it is exactly the token the server checks. A server from a release before the token was given
+/// none, and asks for none. Never logged.
+pub fn server_install_token(engine: &Address, root: &Path) -> Result<Option<String>, String> {
+    match server_environment(engine, root)? {
+        Some(environment) => install_token_in(&environment),
+        None => Ok(None),
+    }
+}
+
+/// `server_install_token` over a container's `{{json .Config.Env}}`.
+pub fn install_token_in(environment: &[u8]) -> Result<Option<String>, String> {
+    setting_in(environment, crate::install_token::NAME)
 }
 
 /// `server_host_token` over a container's `{{json .Config.Env}}`. Pure, for the reason
 /// `published_in` is. An empty value is no token, as the server reads it.
 pub fn host_token_in(environment: &[u8]) -> Result<Option<String>, String> {
+    setting_in(environment, "OPENBOT_DESKTOP_HOST_TOKEN")
+}
+
+/// The value of `name` in a container's `{{json .Config.Env}}`, None when it is absent or empty.
+fn setting_in(environment: &[u8], name: &str) -> Result<Option<String>, String> {
     let environment: Vec<String> = serde_json::from_slice(environment)
         .map_err(|_| "the server container's settings could not be read".to_string())?;
     Ok(environment
         .iter()
-        .find_map(|entry| entry.strip_prefix("OPENBOT_DESKTOP_HOST_TOKEN="))
+        .find_map(|entry| {
+            entry
+                .strip_prefix(name)
+                .and_then(|rest| rest.strip_prefix('='))
+        })
         .filter(|token| !token.trim().is_empty())
         .map(str::to_owned))
 }
 
 /**
-Restart OpenBot itself, the server and the worker, and leave everything else running.
+Restart OpenBot itself and leave everything else running: the server, and the worker where the
+installation's Compose file uses one, made again from `.env` and `secrets`, the environment Start
+hands Compose (`compose_environment` in main.rs), so a setting changed in `.env` since Start
+reaches the server.
 
-What the Status window's Restart did to the host processes, now done by the engine that runs them:
-the database and the Bots stay up, so nothing is lost and it takes seconds. The profile is named
-because both services sit behind it, and Compose refuses to restart a service it cannot see.
+Not Compose's `restart`, which this used to be: it keeps each container exactly as it was made, and
+Compose documents that a restart applies no change to the configuration or environment. A container
+gets `.env` when it is created, so this one is created again, with `up --force-recreate`, which is
+how `up` applies a change and also restarts a server whose settings did not change. `--no-deps`
+leaves the database, the computer and the Bots running, so nothing is lost and it takes seconds.
+Built as Start builds its `up` (`compose_start_command`), with the same overlays, and never pulls or
+builds.
+
+Never the `worker` of a file that says its server does the scheduled work: nothing in that release
+starts it, so there is none to restart.
 */
-pub fn restart_openbot(engine: &Address, root: &Path) -> Result<(), String> {
-    crate::logging::timed("compose restart", || restart_openbot_now(engine, root))
+pub fn recreate_openbot(engine: &Address, root: &Path, secrets: &Secrets) -> Result<(), String> {
+    crate::logging::timed("compose recreate", || {
+        recreate_openbot_now(engine, root, secrets)
+    })
 }
 
-fn restart_openbot_now(engine: &Address, root: &Path) -> Result<(), String> {
-    let output = compose_command(engine, root, &Secrets::new())
-        .args(["--profile", OPENBOT_PROFILE, "restart", "server", "worker"])
+fn recreate_openbot_now(engine: &Address, root: &Path, secrets: &Secrets) -> Result<(), String> {
+    let output = compose_start_command(engine, root, secrets, std::env::consts::OS)
+        .map_err(|problem| match problem.detail {
+            Some(detail) => format!("{} {detail}", problem.said),
+            None => problem.said,
+        })?
+        .args([
+            "up",
+            "-d",
+            "--no-deps",
+            "--force-recreate",
+            "--no-build",
+            "--pull",
+            "never",
+            "server",
+        ])
+        .args(installation_uses(root, WORKER).then_some(WORKER))
         .output()
         .map_err(|error| format!("could not restart OpenBot: {error}"))?;
     if output.status.success() {
@@ -3358,6 +4334,67 @@ pub const PROJECT_FILE: &str = ".openbot-project.json";
 /// tell which containers are the app's.
 pub const DESKTOP_PROJECT: &str = "openbot-desktop";
 
+/**
+Names another Compose project for a new installation in place of `DESKTOP_PROJECT`.
+
+For a second OpenBot Desktop run on one computer beside an installed one, such as a build being
+tested: with its own `HOME` it has its own folder, but on the same engine `DESKTOP_PROJECT` is the
+installed OpenBot's project, so the second one would take the installed one's containers, ports,
+database and Bots' computers as its own. Unset, empty, or not a name Compose accepts, it is ignored.
+An installation that already recorded its project keeps it (see `project`).
+
+Naming a project other than `DESKTOP_PROJECT` also gives the app an identifier of its own
+(`identifier_for`), so the second app has its own single-instance lock and its own folders for
+everything it keeps (which installation it last opened among them), and never opens, starts or
+stops the installed one's.
+*/
+pub const PROJECT_VARIABLE: &str = "OPENBOT_DESKTOP_PROJECT";
+
+/// The project `PROJECT_VARIABLE` names, when it names one other than `DESKTOP_PROJECT`: this app is
+/// then a second OpenBot beside an installed one.
+pub fn side_by_side_project() -> Option<String> {
+    side_by_side_named(std::env::var(PROJECT_VARIABLE).ok().as_deref())
+}
+
+fn side_by_side_named(named: Option<&str>) -> Option<String> {
+    let project = desktop_project_named(named);
+    (project != DESKTOP_PROJECT).then_some(project)
+}
+
+/**
+The identifier this run of the app goes by: `built`, the one in `tauri.conf.json`, or, beside an
+installed OpenBot (`side_by_side_project`), `built` followed by the project.
+
+Everything the app keeps per installation hangs off its identifier: the single-instance lock, which
+otherwise hands a second app's launch to the first and exits, and the folders Tauri gives the app
+(Application Support and Logs on a Mac, `%APPDATA%` and `%LOCALAPPDATA%` on Windows), which hold the
+record of the installation it last opened. With the built identifier, a second app opened the
+first one's folder and its Quit stopped the first one's back end.
+*/
+pub fn identifier_for(built: &str) -> String {
+    identifier_named(built, side_by_side_project().as_deref())
+}
+
+fn identifier_named(built: &str, project: Option<&str>) -> String {
+    match project {
+        Some(project) => format!("{built}.{project}"),
+        None => built.to_owned(),
+    }
+}
+
+/// The project a new installation runs as: `DESKTOP_PROJECT`, or the one `PROJECT_VARIABLE` names.
+pub fn desktop_project() -> String {
+    desktop_project_named(std::env::var(PROJECT_VARIABLE).ok().as_deref())
+}
+
+fn desktop_project_named(named: Option<&str>) -> String {
+    named
+        .map(str::trim)
+        .filter(|name| compose_project_name(name))
+        .unwrap_or(DESKTOP_PROJECT)
+        .to_owned()
+}
+
 #[derive(Serialize, Deserialize)]
 struct SavedProject {
     project: String,
@@ -3388,7 +4425,7 @@ Every Compose command for the installation is given it (see `compose_command`), 
 Stop, the cleanup at Quit, status and Start fresh all name the same project, and none of them can
 name one that is not the installation's own.
 
-A new installation runs as `DESKTOP_PROJECT`. One made by an earlier app ran as its folder's name
+A new installation runs as `DESKTOP_PROJECT`, or as the project `PROJECT_VARIABLE` names. One made by an earlier app ran as its folder's name
 (`project_name`), and keeps it ONLY when the engine holds containers of that project that Compose
 ran from this very folder: Compose labels each container with the folder it ran from, which is
 the one thing a folder-named project cannot fake. Any other answer is `DESKTOP_PROJECT`. A tester's
@@ -3416,11 +4453,12 @@ pub fn project_choosing(engine: &Address, root: &Path, legacy: &str) -> Result<S
     if let Some(saved) = saved_project(root) {
         return Ok(saved);
     }
+    let new = desktop_project();
     // No folder, no installation: nothing to decide for, and nowhere to record it.
     if !root.is_dir() {
-        return Ok(DESKTOP_PROJECT.to_owned());
+        return Ok(new);
     }
-    let chosen = if legacy != DESKTOP_PROJECT && compose_project_name(legacy) {
+    let chosen = if legacy != DESKTOP_PROJECT && legacy != new && compose_project_name(legacy) {
         let running = legacy_containers(engine, root, legacy)?;
         if running.here {
             legacy.to_owned()
@@ -3432,10 +4470,10 @@ pub fn project_choosing(engine: &Address, root: &Path, legacy: &str) -> Result<S
             }
             legacy.to_owned()
         } else {
-            DESKTOP_PROJECT.to_owned()
+            new
         }
     } else {
-        DESKTOP_PROJECT.to_owned()
+        new
     };
     crate::preparation::write_checkpoint(
         root,
@@ -3588,10 +4626,12 @@ fn canonical(folder: &Path) -> PathBuf {
 /// installation has to say: `None` leaves it what earlier apps always ran with.
 ///
 /// `DESKTOP_PROJECT`'s own, so a new installation's `<namespace>-computer-…`, `-profile-…` and
-/// `-workspace-…` cannot be a source checkout's either. A legacy installation keeps the default its
-/// Bots' computers and volumes were made under, or it would lose them.
+/// `-workspace-…` cannot be a source checkout's either, and the project `PROJECT_VARIABLE` names
+/// its own, so a second OpenBot beside an installed one never stops or reuses the installed one's.
+/// A legacy installation keeps the default its Bots' computers and volumes were made under, or it
+/// would lose them.
 pub fn computer_namespace_for(project: &str) -> Option<&str> {
-    (project == DESKTOP_PROJECT).then_some(DESKTOP_PROJECT)
+    (project == DESKTOP_PROJECT || project == desktop_project()).then_some(project)
 }
 
 /**
@@ -3762,6 +4802,7 @@ pub fn answering_at(port: u16, path: &str) -> Option<String> {
 pub fn answering_within(port: u16, path: &str, patience: std::time::Duration) -> Option<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(patience)
+        .default_headers(crate::client_version::headers())
         .build()
         .ok()?;
     LOOPBACKS.iter().find_map(|host| {
@@ -3790,14 +4831,35 @@ pub fn app_url(port: u16) -> Option<String> {
 /// `keep_going` is asked between polls, so a Stop pressed during the wait ends it there rather than
 /// after the full patience. What a stopped wait returns does not matter: the caller asks its own
 /// ticket first, and the cancellation is what it reports.
+///
+/// `refused` is asked whenever the API is not answering (`server_refusal`). A server that refused
+/// to start won't answer however long this waits, so its sentence ends the wait at once.
 pub fn wait_until_healthy(
     ready: &Ready,
     patience: std::time::Duration,
     keep_going: impl Fn() -> bool,
-) -> Result<(), String> {
-    wait_until_healthy_saying(ready, patience, keep_going, &mut |line| {
+    mut refused: impl FnMut() -> Option<String>,
+) -> Result<(), NotReady> {
+    wait_until_healthy_saying(ready, patience, keep_going, &mut refused, &mut |line| {
         log::info!("{line}")
     })
+}
+
+/// Why the server is not ready.
+#[derive(Debug, PartialEq, Eq)]
+pub enum NotReady {
+    /// It refused to start (`SERVER_REFUSED_TO_START`), and this is the sentence it said.
+    Refused(String),
+    /// It did not answer before the wait ended: which port was not answering.
+    NotAnswering(String),
+}
+
+impl std::fmt::Display for NotReady {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NotReady::Refused(said) | NotReady::NotAnswering(said) => f.write_str(said),
+        }
+    }
 }
 
 /// [`wait_until_healthy`], with what it waited on and why it stopped said to `say`: each poll's
@@ -3807,8 +4869,9 @@ pub fn wait_until_healthy_saying(
     ready: &Ready,
     patience: std::time::Duration,
     keep_going: impl Fn() -> bool,
+    refused: &mut dyn FnMut() -> Option<String>,
     say: &mut dyn FnMut(String),
-) -> Result<(), String> {
+) -> Result<(), NotReady> {
     let started = std::time::Instant::now();
     let deadline = started + patience;
     let mut waited = crate::logging::WaitLog::new(
@@ -3820,8 +4883,11 @@ pub fn wait_until_healthy_saying(
     );
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
+        .default_headers(crate::client_version::headers())
         .build()
-        .map_err(|error| format!("could not ask OpenBot's services: {error}"))?;
+        .map_err(|error| {
+            NotReady::NotAnswering(format!("could not ask OpenBot's services: {error}"))
+        })?;
     let mut api_up = false;
 
     while std::time::Instant::now() < deadline && keep_going() {
@@ -3842,6 +4908,17 @@ pub fn wait_until_healthy_saying(
             say(waited.ended(std::time::Instant::now(), "both answered"));
             return Ok(());
         }
+        if !api_up {
+            if let Some(said) = refused() {
+                say(waited.ended(
+                    std::time::Instant::now(),
+                    &format!(
+                        "the server refused to start (exit {SERVER_REFUSED_TO_START}): {said}"
+                    ),
+                ));
+                return Err(NotReady::Refused(said));
+            }
+        }
 
         std::thread::sleep(std::time::Duration::from_millis(750));
     }
@@ -3860,7 +4937,7 @@ pub fn wait_until_healthy_saying(
         "stopped by Stop or Quit".to_string()
     };
     say(waited.ended(std::time::Instant::now(), &why));
-    Err(failed)
+    Err(NotReady::NotAnswering(failed))
 }
 
 /// What `port` answered at `path` on either loopback: the address that answered, or what each
@@ -3909,6 +4986,26 @@ pub fn startup_problem(problem: Problem, secrets: &Secrets) -> Problem {
         detail.push('\n');
         detail.push_str(&cleanup);
     }
+    let mut problem = Problem::with(
+        "OpenBot could not finish starting. Try Start again, or share the details below for help.",
+        without_credentials(detail, secrets),
+    );
+    problem.database_reset = database_reset;
+    problem
+}
+
+/// A server that refused to start (`SERVER_REFUSED_TO_START`): its own sentence is the headline,
+/// because it already says why OpenBot can't start and what to change. Start again won't help
+/// until that changes. The log stays in the details, with credentials removed.
+pub fn startup_refusal(said: String, detail: String, secrets: &Secrets) -> Problem {
+    Problem::with(
+        without_credentials(said, secrets),
+        without_credentials(detail, secrets),
+    )
+}
+
+/// `text` with every credential this run handed out replaced by its name.
+fn without_credentials(mut text: String, secrets: &Secrets) -> String {
     let mut credentials: Vec<_> = secrets
         .iter()
         .filter(|(key, value)| {
@@ -3918,14 +5015,9 @@ pub fn startup_problem(problem: Problem, secrets: &Secrets) -> Problem {
         .collect();
     credentials.sort_by_key(|(_, value)| std::cmp::Reverse(value.len()));
     for (key, value) in credentials {
-        detail = detail.replace(value, &format!("<{key}>"));
+        text = text.replace(value, &format!("<{key}>"));
     }
-    let mut problem = Problem::with(
-        "OpenBot could not finish starting. Try Start again, or share the details below for help.",
-        detail,
-    );
-    problem.database_reset = database_reset;
-    problem
+    text
 }
 
 /// What a directory has to contain before it can be raised.
@@ -3954,7 +5046,12 @@ pub fn deployment_problem(root: &Path) -> Option<String> {
 
 /// Where the shell keeps the deployment it manages.
 pub fn default_root() -> PathBuf {
-    dirs_home().join("OpenBot")
+    default_root_in(&dirs_home())
+}
+
+/// `default_root` in the home folder `home`.
+pub fn default_root_in(home: &Path) -> PathBuf {
+    home.join("OpenBot")
 }
 
 /// The deployment directory somebody typed, as a path.
@@ -4465,6 +5562,30 @@ mod tests {
     use super::*;
 
     use crate::test_support::temp_root;
+
+    /// A release whose server and computer are one image: its image list names the same reference
+    /// for both, and Compose answers `config --images` with a line for every service, so that
+    /// reference comes back once for each service on it. Install is handed it once, which is what
+    /// it then sizes, pulls and looks for on the computer.
+    #[cfg(unix)]
+    #[test]
+    fn an_image_two_services_run_is_one_image_to_install() {
+        let root = temp_root("stack-one-image-two-services");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "x-openbot-scheduled-work: server\nservices:\n  postgres: {}\n  agent-computer: {}\n  server: {}\n",
+        )
+        .unwrap();
+        let one = "ghcr.io/copilotkit/openbot@sha256:1111111111111111111111111111111111111111111111111111111111111111";
+        // Compose, as far as this asks of it: the lines it prints for these three services.
+        let script = format!("printf '%s\\n' pgvector/pgvector:pg17 {one} {one}");
+        let mut compose = Command::new("sh");
+        compose.args(["-c", script.as_str(), "compose"]);
+        let images = installation_images_by(compose, &root, &root, false).unwrap();
+        assert_eq!(images, [one, "pgvector/pgvector:pg17"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn startup_problem_keeps_build_and_cleanup_details_but_removes_credentials() {
@@ -5371,6 +6492,22 @@ fn main() {
         }
     }
 
+    /// Whether this fixture's own leaf still listens: the leaf alive, as itself, and its port on
+    /// 127.0.0.1, where it bound, answering. A port given back can be taken by any listener on the
+    /// computer at once, so something answering there afterwards says nothing about the leaf; a
+    /// leaf that is gone listens on nothing.
+    #[cfg(unix)]
+    fn leaf_listening(fixture: &UnixDescendantFixture) -> bool {
+        unix_process(fixture.leaf.pid)
+            .unwrap()
+            .is_some_and(|now| now.start == fixture.leaf.start)
+            && std::net::TcpStream::connect_timeout(
+                &std::net::SocketAddr::from(([127, 0, 0, 1], fixture.port)),
+                std::time::Duration::from_millis(300),
+            )
+            .is_ok()
+    }
+
     #[cfg(unix)]
     impl Drop for UnixDescendantFixture {
         fn drop(&mut self) {
@@ -5386,13 +6523,10 @@ fn main() {
             let _ = self.parent.kill();
             let _ = self.parent.wait();
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-            while something_answers(self.port) && std::time::Instant::now() < deadline {
+            while leaf_listening(self) && std::time::Instant::now() < deadline {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
-            assert!(
-                !something_answers(self.port),
-                "fixture listener was not cleaned"
-            );
+            assert!(!leaf_listening(self), "fixture listener was not cleaned");
             assert!(unix_process(self.parent.id()).unwrap().is_none());
             assert!(unix_process(self.leaf.pid).unwrap().is_none());
             std::fs::remove_dir_all(&self.root).unwrap();
@@ -5407,7 +6541,7 @@ fn main() {
             let result = stop_processes_under(&fixture.root);
             let parent = fixture.parent.try_wait().unwrap();
             let leaf = unix_process(fixture.leaf.pid).unwrap();
-            let listening = something_answers(fixture.port);
+            let listening = leaf_listening(&fixture);
             let retry = stop_processes_under(&fixture.root);
             eprintln!(
                 "{}",
@@ -5467,7 +6601,7 @@ fn main() {
         );
         // Retrying the durable record also handles ancestors left stopped by the failed attempt.
         assert!(stop_processes_under(&fixture.root).is_ok());
-        assert!(!something_answers(fixture.port));
+        assert!(!leaf_listening(&fixture));
         assert!(unix_process(fixture.leaf.pid).unwrap().is_none());
         assert_eq!(stop_processes_under(&fixture.root).unwrap(), 0);
         // Drop independently checks the retained instances and port before removing the fixture.
@@ -6292,20 +7426,51 @@ fn main() {
         }
     }
 
+    /**
+    A listener on `[::1]` alone, on a port the system never hands out by itself.
+
+    The tests that use it let go of it and then expect its port to read free. A port from the
+    system's own range (`[::1]:0`) could not be expected to: while `[::1]` holds a port, Linux hands
+    the same number to another test's `127.0.0.1:0` listener (5 of 5 tries, measured on a CI-sized
+    box), and that listener answers on the port once this one is gone. Below 32768 is outside every
+    system's default range (Linux 32768-60999, macOS and Windows 49152-65535), so only a port taken
+    by number can be there, and one that answers already is passed over.
+    */
     fn ipv6_loopback_listener() -> Option<std::net::TcpListener> {
-        match std::net::TcpListener::bind("[::1]:0") {
-            Ok(listener) => Some(listener),
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported
-                ) =>
-            {
-                eprintln!("IPv6 loopback unavailable; skipping IPv6 socket regression: {error}");
-                None
+        const FIRST: u16 = 20_000;
+        const COUNT: u16 = 12_000;
+        let start = (std::process::id() % u32::from(COUNT)) as u16;
+        for step in 0..COUNT {
+            let port = FIRST + (start + step) % COUNT;
+            if something_answers(port) {
+                continue;
             }
-            Err(error) => panic!("could not bind the IPv6 regression listener: {error}"),
+            match std::net::TcpListener::bind(("::1", port)) {
+                Ok(listener) => return Some(listener),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported
+                    ) =>
+                {
+                    eprintln!(
+                        "IPv6 loopback unavailable; skipping IPv6 socket regression: {error}"
+                    );
+                    return None;
+                }
+                // Taken by number, or reserved by the system (Windows keeps ranges for Hyper-V).
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied
+                    ) => {}
+                Err(error) => panic!("could not bind the IPv6 regression listener: {error}"),
+            }
         }
+        panic!(
+            "no port from {FIRST} to {} was free on [::1]",
+            FIRST + COUNT - 1
+        );
     }
 
     fn host_command_line(name: &str) -> &'static str {
@@ -6466,6 +7631,241 @@ fn main() {
         writeln!(file, "{}\t{}", cwd.display(), joined).unwrap();
     }
     let scenario = std::env::var("OPENBOT_FAKE_ENGINE_SCENARIO").unwrap();
+    // A `server` the engine keeps restarting. `compose ps` answers each ask with the next row of
+    // `.fixture-server-rows` (the last again once they run out), as an engine sampled at that moment
+    // would, and `logs` writes `.fixture-server-stderr` to stderr.
+    if scenario == "server-refusal" {
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        if actual.first().map(String::as_str) == Some("compose") && actual.iter().any(|arg| arg == "ps") {
+            let rows = std::fs::read_to_string(".fixture-server-rows").unwrap_or_default();
+            let rows: Vec<&str> = rows.lines().filter(|row| !row.is_empty()).collect();
+            let asked: usize = std::fs::read_to_string(".fixture-server-asked").ok().and_then(|n| n.trim().parse().ok()).unwrap_or(0);
+            std::fs::write(".fixture-server-asked", (asked + 1).to_string()).unwrap();
+            if let Some(row) = rows.get(asked).or(rows.last()) { println!("{row}"); }
+        } else if actual.first().map(String::as_str) == Some("logs") {
+            eprint!("{}", std::fs::read_to_string(".fixture-server-stderr").unwrap_or_default());
+        } else if actual.first().map(String::as_str) == Some("compose") && actual.iter().any(|arg| arg == "rm") {
+            // `rm --stop` returns once the container is gone: the old server is told to stop, and
+            // the engine waits for it as an engine does, however long it takes. Past two minutes
+            // something is wrong: it says so, fails, and leaves `.fixture-rm-gave-up` for the test.
+            std::fs::write(".fixture-stop-server", "").unwrap();
+            let patience = std::time::Instant::now() + std::time::Duration::from_secs(120);
+            while std::path::Path::new(".fixture-old-server-alive").exists() {
+                if std::time::Instant::now() >= patience {
+                    std::fs::write(".fixture-rm-gave-up", "").unwrap();
+                    eprintln!("the old server was still running two minutes after it was told to stop");
+                    std::process::exit(1);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+        return;
+    }
+    // An engine with the containers `.fixture-containers` lists, one `id<TAB>project<TAB>service`
+    // a line. `ps` filters by label as an engine does, `rm` removes, and Compose answers whatever
+    // it is asked. Every command is in the record above.
+    if scenario == "installed-services" {
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        // Podman is addressed by a connection; Docker here is not.
+        let podman = args.first().map(String::as_str) == Some("--connection");
+        // An engine's images are the same wherever a command about them runs from: they are kept
+        // beside the installation the record is named after.
+        if matches!(actual.first().map(String::as_str), Some("image") | Some("version")) {
+            if let Ok(record) = std::env::var("OPENBOT_TEST_ENGINE_RECORD") {
+                std::env::set_current_dir(std::path::PathBuf::from(record).with_extension("")).unwrap();
+            }
+        }
+        let listed = || -> Vec<(String, String, String)> {
+            std::fs::read_to_string(".fixture-containers").unwrap_or_default().lines().map(|line| {
+                let mut fields = line.split('\t').map(str::to_string);
+                (fields.next().unwrap(), fields.next().unwrap(), fields.next().unwrap())
+            }).collect()
+        };
+        match actual.first().map(String::as_str) {
+            Some("ps") => {
+                let wanted: Vec<&str> = actual.windows(2)
+                    .filter(|pair| pair[0] == "--filter")
+                    .map(|pair| pair[1].as_str())
+                    .collect();
+                for (id, project, service) in listed() {
+                    let labels = [
+                        format!("label=com.docker.compose.project={project}"),
+                        format!("label=com.docker.compose.service={service}"),
+                    ];
+                    if wanted.iter().all(|filter| labels.iter().any(|label| label == filter)) {
+                        println!("{id}");
+                    }
+                }
+            }
+            Some("rm") => {
+                assert_eq!(actual[1], "--force", "{actual:?}");
+                let remaining: String = listed().into_iter()
+                    .filter(|(id, _, _)| !actual[2..].contains(id))
+                    .map(|(id, project, service)| format!("{id}\t{project}\t{service}\n"))
+                    .collect();
+                std::fs::write(".fixture-containers", remaining).unwrap();
+            }
+            Some("compose") if actual == ["compose", "pull", "--help"] => {
+                println!("      --policy string   Apply pull policy (\"missing\"|\"always\")");
+            }
+            // An engine that is not answering, where `.fixture-engine-not-answering` says so, in
+            // each engine's own words and with its own exit code.
+            Some("image") | Some("version") if std::path::Path::new(".fixture-engine-not-answering").exists() => {
+                if podman {
+                    eprintln!("Cannot connect to Podman. Please verify your connection to the Linux system using `podman system connection list`, or try `podman machine init` and `podman machine start` to manage a new Linux VM");
+                    std::process::exit(125);
+                }
+                eprintln!("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?");
+                std::process::exit(1);
+            }
+            Some("version") => println!("1.51"),
+            // The engine's images: `.fixture-images` lists them, one `reference<TAB>id,id` a line,
+            // the ids being the containers made from it. `image inspect` finds one or does not.
+            // `image rm` removes one as Docker 29 and Podman 6 do without `--force`: an image a
+            // container that still exists was made from is refused, running or stopped (Docker
+            // exits 1, Podman 2), and one the engine does not have is an error (both exit 1). It
+            // is never asked to force, and never to prune.
+            Some("image") => {
+                assert!(
+                    actual.len() == 3 && !actual.iter().any(|arg| arg == "--force" || arg == "-f" || arg == "prune"),
+                    "{actual:?}"
+                );
+                let reference = actual[2].as_str();
+                let images: Vec<(String, Vec<String>)> = std::fs::read_to_string(".fixture-images").unwrap_or_default().lines().map(|line| {
+                    let (name, made) = line.split_once('\t').unwrap_or((line, ""));
+                    (name.to_string(), made.split(',').filter(|id| !id.is_empty()).map(str::to_string).collect())
+                }).collect();
+                let found = images.iter().find(|(name, _)| name == reference);
+                let unknown = || {
+                    if podman { eprintln!("Error: {reference}: image not known"); }
+                    else { eprintln!("Error response from daemon: No such image: {reference}"); }
+                };
+                match (actual[1].as_str(), found) {
+                    ("inspect", Some(_)) => println!("[{{\"RepoDigests\":[\"{reference}\"]}}]"),
+                    ("inspect", None) => {
+                        println!("[]");
+                        unknown();
+                        std::process::exit(if podman { 125 } else { 1 });
+                    }
+                    ("rm", None) => {
+                        unknown();
+                        std::process::exit(1);
+                    }
+                    ("rm", Some((_, made))) => {
+                        let existing: Vec<String> = listed().into_iter().map(|(id, _, _)| id).collect();
+                        if let Some(user) = made.iter().find(|id| existing.contains(id)) {
+                            if podman {
+                                eprintln!("Error: image used by {user}: image is in use by a container: consider listing external containers and force-removing image");
+                                std::process::exit(2);
+                            }
+                            eprintln!("Error response from daemon: conflict: unable to delete {reference} (must be forced) - container {user} is using its referenced image {reference}");
+                            std::process::exit(1);
+                        }
+                        let remaining: String = images.iter()
+                            .filter(|(name, _)| name != reference)
+                            .map(|(name, made)| format!("{name}\t{}\n", made.join(",")))
+                            .collect();
+                        std::fs::write(".fixture-images", remaining).unwrap();
+                        println!("Untagged: {reference}");
+                    }
+                    _ => panic!("unexpected command: {actual:?}"),
+                }
+            }
+            // What Compose answers for the files OpenBot publishes, where the engine has images to
+            // list: the database image the file names, and the server's and the computer's from
+            // the variables Desktop hands it (`deployment::IMAGE_VARIABLES`), each once.
+            Some("compose")
+                if std::path::Path::new(".fixture-images").exists()
+                    && actual.iter().any(|arg| arg == "--images") =>
+            {
+                let file = std::fs::read_to_string("docker-compose.yml").unwrap();
+                let database = file.lines()
+                    .skip_while(|line| line.trim_end() != "  postgres:")
+                    .find_map(|line| line.strip_prefix("    image: "))
+                    .unwrap()
+                    .to_string();
+                let mut images = vec![database];
+                for variable in ["SERVER_IMAGE", "COMPUTER_IMAGE"] {
+                    let image = std::env::var(variable).unwrap();
+                    if !images.contains(&image) { images.push(image); }
+                }
+                for image in images { println!("{image}"); }
+            }
+            // Compose's own container bookkeeping, where `.fixture-compose-containers` asks for it.
+            // `up` makes a container for each service it is given, and for `migrate` when the
+            // file's `server` waits on one. `down` takes the containers of the services the file
+            // defines and leaves any other: that is what an orphan is. With
+            // `.fixture-this-release-does-not-start`, a file whose `server` waits on no `migrate`
+            // fails its `up`.
+            Some("compose")
+                if std::path::Path::new(".fixture-compose-containers").exists()
+                    && actual.iter().any(|arg| arg == "up" || arg == "down") =>
+            {
+                let file = std::fs::read_to_string("docker-compose.yml").unwrap();
+                let mut inside = false;
+                let mut defined: Vec<String> = Vec::new();
+                for line in file.lines() {
+                    if !line.starts_with(' ') && !line.trim().is_empty() && !line.starts_with('#') {
+                        inside = line.trim_end() == "services:";
+                    } else if inside && line.starts_with("  ") && !line.starts_with("   ") && !line.starts_with("  #") {
+                        if let Some((name, _)) = line.trim().split_once(':') { defined.push(name.to_string()); }
+                    }
+                }
+                let mut containers = listed();
+                if actual.iter().any(|arg| arg == "down") {
+                    containers.retain(|(_, project, service)| project != "openbot-desktop" || !defined.contains(service));
+                } else {
+                    let at = actual.iter().position(|arg| arg == "up").unwrap();
+                    let mut raised: Vec<String> = actual[at + 1..].iter()
+                        .filter(|arg| !arg.starts_with('-') && *arg != "never")
+                        .cloned()
+                        .collect();
+                    for service in &raised {
+                        if !defined.contains(service) {
+                            eprintln!("no such service: {service}");
+                            std::process::exit(1);
+                        }
+                    }
+                    let waits_on_migrate = file.contains("      migrate:\n        condition: service_completed_successfully");
+                    if !waits_on_migrate
+                        && std::path::Path::new(".fixture-this-release-does-not-start").exists()
+                    {
+                        eprintln!("Container openbot-desktop-server-1 Error dependency failed to start");
+                        std::process::exit(1);
+                    }
+                    if waits_on_migrate && raised.iter().any(|name| name == "server") {
+                        raised.push("migrate".to_string());
+                    }
+                    for service in raised {
+                        if !containers.iter().any(|(_, project, made)| project == "openbot-desktop" && *made == service) {
+                            containers.push((format!("{service}-1"), "openbot-desktop".to_string(), service));
+                        }
+                    }
+                }
+                let kept: String = containers.into_iter()
+                    .map(|(id, project, service)| format!("{id}\t{project}\t{service}\n"))
+                    .collect();
+                std::fs::write(".fixture-containers", kept).unwrap();
+            }
+            Some("compose") if actual.iter().any(|arg| arg == "--images") => println!("fixture/image:1"),
+            Some("compose") if actual.iter().any(|arg| arg == "config") => {
+                println!("{{\"services\":{{\"supervisor\":{{\"environment\":{{\"COMPUTER_NAMESPACE\":\"fixture\"}}}}}}}}");
+            }
+            Some("compose") => {}
+            _ => panic!("unexpected command: {actual:?}"),
+        }
+        return;
+    }
+    // No other scenario's engine holds a `migrate` or `worker` container for Start to remove.
+    {
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        if actual.len() == 7
+            && actual[..3] == ["ps", "--all", "--quiet"]
+            && actual[6].starts_with("label=com.docker.compose.service=")
+        {
+            return;
+        }
+    }
     if scenario == "postgres-volume" {
         let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
         let (file, failure) = if actual == ["compose", "config", "--format", "json"] {
@@ -6633,6 +8033,13 @@ fn main() {
             Some("compose") if actual.get(1).map(String::as_str) == Some("config") => {
                 if std::path::Path::new(".fixture-config-failure").exists() { std::process::exit(17); }
                 print!("{}", std::fs::read_to_string(".fixture-config").unwrap());
+            }
+            Some("compose")
+                if actual == ["compose", "--profile", "openbot", "stop", "--timeout", "15", "server"] => {
+                if root.join(".fixture-server-stop-failure").exists() {
+                    eprintln!("fixture server stop refused");
+                    std::process::exit(17);
+                }
             }
             Some("compose") if actual == ["compose", "stop", "supervisor"] => {
                 if root.join(".fixture-supervisor-stop-failure").exists() {
@@ -8466,16 +9873,74 @@ fn main() {
     /// The personal edition: one computer, no supervisor, and no bundled Bot, whatever the model.
     #[test]
     fn the_personal_edition_raises_one_computer_and_no_bundled_bot() {
-        for service in ["supervisor", "agent-bot", "agent-langgraph"] {
-            assert!(!SERVICES.contains(&service), "{service} is started");
-            assert!(
-                !selected_services(true).contains(&service),
-                "{service} is started"
-            );
+        let root = temp_root("personal-edition-services");
+        std::fs::create_dir_all(&root).unwrap();
+        for compose in [
+            THIS_RELEASES_COMPOSE,
+            RELEASED_COMPOSE_1_0_2,
+            RELEASED_COMPOSE_1_0_3,
+        ] {
+            std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
+            for service in ["supervisor", "agent-bot", "agent-langgraph"] {
+                assert!(!SERVICES.contains(&service), "{service} is started");
+                assert!(
+                    !selected_services(&root, true).contains(&service),
+                    "{service} is started"
+                );
+            }
+            assert!(SERVICES.contains(&"agent-computer"));
+            assert!(!selected_services(&root, false).contains(&"agent-harness"));
+            assert!(selected_services(&root, true).contains(&"agent-harness"));
         }
-        assert!(SERVICES.contains(&"agent-computer"));
-        assert!(!selected_services(false).contains(&"agent-harness"));
-        assert!(selected_services(true).contains(&"agent-harness"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /**
+    Each plan raises its own engine with the stack, and nothing else does.
+
+    A ChatGPT plan's Bot is the TypeScript engine, which sends the plan's model calls to the ChatGPT
+    plan's engine (`crate::plan::CHATGPT_PLAN_SERVICE`); a Claude plan's Bot is the Claude plan's
+    engine. Read from the connection recorded beside the installation, so a key raises one Bot
+    image and not two, and a change made in the app is what the next start raises.
+    */
+    #[test]
+    fn each_plan_raises_its_own_engine_and_nothing_else_does() {
+        use crate::saved_intent::ModelIntent;
+        let root = temp_root("plan-engine-services");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
+        let claude = "agent-claude-plan";
+        let chatgpt = crate::plan::CHATGPT_PLAN_SERVICE;
+        for (intent, raised) in [
+            (ModelIntent::ChatGptPlan, Some(chatgpt)),
+            (ModelIntent::ClaudePlan, Some(claude)),
+            (ModelIntent::OpenAiApiKey, None),
+            (ModelIntent::AnthropicApiKey, None),
+            (ModelIntent::CompatibleEndpoint, None),
+            (ModelIntent::GoogleOauth, None),
+        ] {
+            crate::saved_intent::record_settled(&root, intent).unwrap();
+            for harness in [true, false] {
+                let services = selected_services(&root, harness);
+                assert_eq!(
+                    services.contains(&chatgpt),
+                    raised == Some(chatgpt),
+                    "{intent:?} {services:?}"
+                );
+                assert_eq!(
+                    services.contains(&claude),
+                    raised == Some(claude),
+                    "{intent:?} {services:?}"
+                );
+            }
+            assert_eq!(plan_engine(&root).map(|alone| alone.service), raised);
+        }
+        // An installation whose Compose file has no such service is never asked to raise it.
+        std::fs::write(root.join("docker-compose.yml"), RELEASED_COMPOSE_1_0_2).unwrap();
+        crate::saved_intent::record_settled(&root, ModelIntent::ChatGptPlan).unwrap();
+        assert!(!selected_services(&root, true).contains(&chatgpt));
+        assert_eq!(plan_engine(&root), None);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// Stop has to name both profiles, or what sits behind them keeps running: the one Bot the
@@ -8601,6 +10066,14 @@ fn main() {
 
     #[test]
     fn an_ipv6_only_port_is_named_unless_this_deployment_already_publishes_it() {
+        // It needs its port free again once it lets go: a process another test starts would hold
+        // a copy of the listener until it execs, which waits on the system's check of a new
+        // program for seconds on a busy Mac.
+        if crate::test_support::isolated_process(
+            "stack::tests::an_ipv6_only_port_is_named_unless_this_deployment_already_publishes_it",
+        ) {
+            return;
+        }
         let _ports = crate::test_support::hold_ports();
         let Some(listener) = ipv6_loopback_listener() else {
             return;
@@ -8621,8 +10094,35 @@ fn main() {
         assert_eq!(port_already_taken(&ports), None);
     }
 
+    /// FOUND IN CI: the test above read its port still taken after letting it go, by a listener
+    /// another test had been handed the same number for on `127.0.0.1`. The port the IPv6 tests
+    /// hold is one the system never hands out, so no other test's listener can land on it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_ipv6_port_tests_hold_a_port_the_system_never_hands_out() {
+        let Some(listener) = ipv6_loopback_listener() else {
+            return;
+        };
+        let port = listener.local_addr().unwrap().port();
+        let range = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range").unwrap();
+        let mut bounds = range
+            .split_whitespace()
+            .map(|bound| bound.parse::<u16>().unwrap());
+        let (first, last) = (bounds.next().unwrap(), bounds.next().unwrap());
+        assert!(
+            !(first..=last).contains(&port),
+            "port {port} is in the range {first}-{last} the system hands to listeners on port 0"
+        );
+    }
+
     #[test]
     fn an_ipv6_only_port_is_not_clear_while_its_listener_is_held() {
+        // It needs its port free again once it lets go, as the test above does.
+        if crate::test_support::isolated_process(
+            "stack::tests::an_ipv6_only_port_is_not_clear_while_its_listener_is_held",
+        ) {
+            return;
+        }
         let _ports = crate::test_support::hold_ports();
         let Some(listener) = ipv6_loopback_listener() else {
             return;
@@ -8945,6 +10445,195 @@ fn main() {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// The Compose file release 1.0.2 installed, which an installation still has while a newer app
+    /// updates it and after an update that rolled back.
+    const RELEASED_COMPOSE_1_0_2: &str =
+        include_str!("../test-fixtures/compose/docker-compose-v1.0.2.yml");
+
+    /// And the one 1.0.3 installed, the latest release that runs `worker` and `migrate`. The two
+    /// files are the same today; each is the release's own, so the tests below hold for both.
+    const RELEASED_COMPOSE_1_0_3: &str =
+        include_str!("../test-fixtures/compose/docker-compose-v1.0.3.yml");
+
+    /// Every release an installation may be on when this app updates it or puts it back, by name.
+    const RELEASED_COMPOSES: [(&str, &str); 2] = [
+        ("1.0.2", RELEASED_COMPOSE_1_0_2),
+        ("1.0.3", RELEASED_COMPOSE_1_0_3),
+    ];
+
+    fn overlay_services(overlay: &str) -> Vec<String> {
+        compose_service_names(overlay)
+    }
+
+    /// Updating 1.0.2 on a Mac with Podman failed, and the fall-back start failed too (1.0.3's file
+    /// is read the same way): the overlay
+    /// named a service the installed Compose file did not define, and Compose refused every command
+    /// with "service ... has neither an image nor a build context specified". The overlay names
+    /// only what the installation's own file defines, whichever release wrote that file.
+    #[test]
+    fn the_mac_podman_overlay_names_only_services_the_installation_uses() {
+        for (release, compose) in RELEASED_COMPOSES {
+            let root = temp_root("compose-ports-installed");
+            std::fs::create_dir_all(&root).unwrap();
+            let files = ["docker-compose.yml".to_owned()];
+
+            std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
+            let released = macos_podman_ports(&root, &files).unwrap();
+            let defined = compose_service_names(compose);
+            for service in overlay_services(&released) {
+                assert!(defined.contains(&service), "{service} is not in {release}");
+            }
+            assert_eq!(
+                overlay_services(&released),
+                [
+                    "postgres",
+                    "supervisor",
+                    "agent-computer",
+                    "agent-bot",
+                    "agent-langgraph",
+                    "agent-harness",
+                    "server"
+                ]
+            );
+            assert!(released.contains("${BOT_PORT:-4200}:4200"), "{released}");
+
+            // And this release's own file, once the update has put it in place.
+            let current = include_str!("../../../docker-compose.yml");
+            std::fs::write(root.join("docker-compose.yml"), current).unwrap();
+            let updated = macos_podman_ports(&root, &files).unwrap();
+            assert_eq!(
+                overlay_services(&updated),
+                [
+                    "postgres",
+                    "supervisor",
+                    "agent-computer",
+                    "agent-langgraph-agui",
+                    "agent-harness",
+                    "server"
+                ]
+            );
+
+            // A service a person's own override file defines counts as defined.
+            std::fs::write(
+                root.join("docker-compose.yml"),
+                "services:\n  postgres:\n    image: x\n",
+            )
+            .unwrap();
+            std::fs::write(
+                root.join("docker-compose.override.yml"),
+                "services:\n  server: # theirs\n    image: y\n",
+            )
+            .unwrap();
+            let both = [
+                "docker-compose.yml".to_owned(),
+                "docker-compose.override.yml".to_owned(),
+            ];
+            assert_eq!(
+                overlay_services(&macos_podman_ports(&root, &both).unwrap()),
+                ["postgres", "server"]
+            );
+
+            // Nothing to override is no overlay at all, not an empty `services:`.
+            std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
+            assert_eq!(macos_podman_ports(&root, &files), None);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    /// This release's Compose file defines `agent-bot` and `agent-langgraph` for one release, so
+    /// the 1.0.2 and 1.0.3 apps can merge their own port overlay onto it (each names both; the
+    /// fixtures are `macos-podman-ports.yml` at those tags). This app starts neither and publishes
+    /// no port for either: not in the services it brings up, nor in either overlay it writes.
+    #[test]
+    fn this_app_names_neither_service_kept_for_an_older_app() {
+        let kept = ["agent-bot", "agent-langgraph"];
+        for older in [
+            include_str!("../test-fixtures/older-apps/macos-podman-ports-v1.0.2.yml"),
+            include_str!("../test-fixtures/older-apps/macos-podman-ports-v1.0.3.yml"),
+        ] {
+            for service in kept {
+                assert!(overlay_services(older).contains(&service.to_owned()));
+            }
+        }
+        let current = include_str!("../../../docker-compose.yml");
+        assert_eq!(compose_services_behind(current, OLDER_APPS_PROFILE), kept);
+        // In 1.0.2's file and 1.0.3's both are services it runs, and they keep their ports there.
+        for (release, compose) in RELEASED_COMPOSES {
+            assert!(
+                compose_services_behind(compose, OLDER_APPS_PROFILE).is_empty(),
+                "{release}"
+            );
+        }
+        assert!(compose_services_behind(current, "openbot").contains(&"server".to_owned()));
+
+        let root = temp_root("compose-kept-for-older-apps");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), current).unwrap();
+        std::fs::write(root.join(".env"), "PICKED_HARNESS_HOST_PORT=4302\n").unwrap();
+        let ports = macos_podman_ports(&root, &["docker-compose.yml".to_owned()]).unwrap();
+        let harness = harness_port_overlay(&root, true).unwrap().unwrap();
+        for service in kept {
+            assert!(!SERVICES.contains(&service), "{service} is started");
+            assert!(
+                !selected_services(&root, true).contains(&service),
+                "{service} is started"
+            );
+            for overlay in [&ports, &harness] {
+                assert!(
+                    !overlay_services(overlay).contains(&service.to_owned()),
+                    "{service} is given ports: {overlay}"
+                );
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The same, read by real Compose: with the overlay this app writes, 1.0.2's file is a valid
+    /// project, and with every service named it is the refusal the update met.
+    #[test]
+    #[ignore = "requires Docker Compose; only reads configuration, no running engine needed"]
+    fn compose_accepts_the_mac_podman_overlay_over_the_1_0_2_compose_file() {
+        let root = temp_root("compose-ports-1-0-2");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), RELEASED_COMPOSE_1_0_2).unwrap();
+        std::fs::write(root.join(".env"), "BOT_PORT=4200\n").unwrap();
+        let docker =
+            std::env::var_os("OPENBOT_TEST_COMPOSE_DOCKER").unwrap_or_else(|| "docker".into());
+        let config = |overlay: &str| {
+            std::fs::write(root.join(MACOS_PODMAN_PORTS_FILE), overlay).unwrap();
+            Command::new(&docker)
+                .current_dir(&root)
+                .env_clear()
+                .env("PATH", env!("OPENBOT_TEST_TOOL_PATH"))
+                .args([
+                    "compose",
+                    "-f",
+                    "docker-compose.yml",
+                    "-f",
+                    MACOS_PODMAN_PORTS_FILE,
+                ])
+                .args(["config", "--quiet"])
+                .output()
+                .unwrap()
+        };
+        let every_service = config(MACOS_PODMAN_PORTS);
+        assert!(!every_service.status.success());
+        assert!(
+            String::from_utf8_lossy(&every_service.stderr)
+                .contains("has neither an image nor a build context specified"),
+            "{}",
+            String::from_utf8_lossy(&every_service.stderr)
+        );
+        let installed =
+            config(&macos_podman_ports(&root, &["docker-compose.yml".to_owned()]).unwrap());
+        assert!(
+            installed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&installed.stderr)
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// Real Compose merging is the important assertion: without !override, IPv6 ports survive.
     /// This only reads configuration; it never contacts a container engine or registry.
     #[test]
@@ -8954,7 +10643,11 @@ fn main() {
         std::fs::create_dir_all(&root).unwrap();
         let source = include_str!("../../../docker-compose.yml");
         std::fs::write(root.join("docker-compose.yml"), source).unwrap();
-        std::fs::write(root.join(MACOS_PODMAN_PORTS_FILE), MACOS_PODMAN_PORTS).unwrap();
+        std::fs::write(
+            root.join(MACOS_PODMAN_PORTS_FILE),
+            macos_podman_ports(&root, &["docker-compose.yml".to_owned()]).unwrap(),
+        )
+        .unwrap();
         std::fs::write(root.join("docker-compose.override.yml"), "services:\n  supervisor:\n    environment:\n      COMPUTER_NAMESPACE: regression-kept\n    labels:\n      regression: kept\n").unwrap();
         let docker =
             std::env::var_os("OPENBOT_TEST_COMPOSE_DOCKER").unwrap_or_else(|| "docker".into());
@@ -8996,9 +10689,11 @@ fn main() {
             let mut published = 0;
             for (_, service) in before["services"].as_object_mut().unwrap() {
                 if let Some(ports) = service.get_mut("ports").and_then(serde_json::Value::as_array_mut) {
-                    assert_eq!(ports.len(), 2, "the released port pattern must exercise dual loopback");
+                    // Each published port is on both loopbacks; the server publishes two.
+                    let both = ports.len();
+                    assert_eq!(both % 2, 0, "the released port pattern must exercise dual loopback");
                     ports.retain(|port| port["host_ip"] == "127.0.0.1");
-                    assert_eq!(ports.len(), 1);
+                    assert_eq!(ports.len(), both / 2);
                     published += 1;
                 }
             }
@@ -9021,7 +10716,8 @@ fn main() {
         let path = PathFixture::with_fake_engine("macos-podman-start");
         let [_, podman] = computer_stop_addresses(&path);
         let (root, record) = computer_stop_root(&path, "podman-start", "{}");
-        let original = "services: {}\n";
+        let original = RELEASED_COMPOSE_1_0_2;
+        std::fs::write(root.join("docker-compose.yml"), original).unwrap();
         let settings = "POSTGRES_PORT=5544\nPICKED_HARNESS_PORT=4206\n";
         std::fs::write(root.join(".env"), settings).unwrap();
         std::fs::write(root.join("docker-compose.override.yml"), "services: {}\n").unwrap();
@@ -9106,7 +10802,7 @@ fn main() {
         std::fs::write(root.join(".fixture-refusals"), "2").unwrap();
         let began = std::time::Instant::now();
         let services = up(&docker, &root, false, &Secrets::new()).unwrap();
-        assert_eq!(services, selected_services(false));
+        assert_eq!(services, selected_services(&root, false));
         assert_eq!(tries(), 3);
         assert!(began.elapsed() >= std::time::Duration::from_secs(3));
 
@@ -9219,7 +10915,7 @@ fn main() {
         // Refused, refreshed once with the database image and never a pull, then mounted at once.
         reset();
         let services = up_retrying(&docker, &root, false, &Secrets::new(), &zero, "macos").unwrap();
-        assert_eq!(services, selected_services(false));
+        assert_eq!(services, selected_services(&root, false));
         assert_eq!(read(".fixture-up-tries").len(), 2);
         let refresh = read(".fixture-refresh");
         assert_eq!(refresh.lines().count(), 1, "{refresh}");
@@ -9266,8 +10962,1201 @@ fn main() {
     #[test]
     fn migrate_is_not_raised_as_a_service() {
         // Raised alongside the others it exits immediately, and Compose reports a service that will
-        // not stay up. It is run to completion instead, by `migrate`.
-        assert!(!SERVICES.contains(&"migrate"));
+        // not stay up. Where a release's file defines it, `server` depends on it, so `up` runs it
+        // to completion first.
+        assert!(!SERVICES.contains(&MIGRATE));
+        for (release, compose) in RELEASED_COMPOSES {
+            let root = temp_root("migrate-not-raised");
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
+            assert!(
+                !selected_services(&root, true).contains(&MIGRATE),
+                "{release}"
+            );
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    /// This release's own Compose file, which an installation has once it is on this release.
+    const THIS_RELEASES_COMPOSE: &str = include_str!("../../../docker-compose.yml");
+
+    /// What tells this release's file from an earlier one's is one line the file itself carries,
+    /// at the top level, once. It is read as text, so no Compose has to resolve the file first, and
+    /// it is not what the file defines: this release's file defines `worker` and `migrate` too.
+    #[test]
+    fn this_releases_compose_file_says_once_that_its_server_does_the_scheduled_work() {
+        let marked: Vec<&str> = THIS_RELEASES_COMPOSE
+            .lines()
+            .filter(|line| line.contains("x-openbot-scheduled-work"))
+            .collect();
+        assert_eq!(marked, [SCHEDULED_WORK_MARKER]);
+        assert_eq!(SCHEDULED_WORK_MARKER, "x-openbot-scheduled-work: server");
+        assert!(server_does_the_scheduled_work(THIS_RELEASES_COMPOSE));
+        let defined = compose_service_names(THIS_RELEASES_COMPOSE);
+        for service in [WORKER, MIGRATE] {
+            assert!(defined.iter().any(|name| name == service), "{service}");
+        }
+
+        // 1.0.2's file and 1.0.3's have no such line, and are read as using both.
+        for (release, compose) in RELEASED_COMPOSES {
+            assert!(!server_does_the_scheduled_work(compose), "{release}");
+        }
+        // Only the line itself counts: not a comment about it, a nested key, or another value.
+        for other in [
+            "# x-openbot-scheduled-work: server\nservices: {}\n",
+            "services:\n  x-openbot-scheduled-work: server\n",
+            "x-openbot-scheduled-work: worker\nservices: {}\n",
+        ] {
+            assert!(!server_does_the_scheduled_work(other), "{other}");
+        }
+        assert!(server_does_the_scheduled_work(
+            "x-openbot-scheduled-work: server # the server sweeps\nservices: {}\n"
+        ));
+
+        let root = temp_root("scheduled-work-marker");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
+        assert!(!installation_uses(&root, WORKER) && !installation_uses(&root, MIGRATE));
+        for (release, compose) in RELEASED_COMPOSES {
+            std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
+            assert!(
+                installation_uses(&root, WORKER) && installation_uses(&root, MIGRATE),
+                "{release}"
+            );
+        }
+        // A later release's file, with neither service and no line, uses neither.
+        std::fs::write(root.join("docker-compose.yml"), "services:\n  server: {}\n").unwrap();
+        assert!(!installation_uses(&root, WORKER) && !installation_uses(&root, MIGRATE));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An installation in the fake engine's folder with `compose` as its Compose file and
+    /// `containers` on its engine (`id<TAB>project<TAB>service` a line), and where the engine
+    /// records what it is asked.
+    fn installed_services_root(
+        path: &PathFixture,
+        label: &str,
+        compose: &str,
+        containers: &str,
+    ) -> (PathBuf, PathBuf) {
+        let (root, record) = computer_stop_root(path, label, "{}");
+        std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
+        std::fs::write(root.join(".fixture-containers"), containers).unwrap();
+        (root, record)
+    }
+
+    /// Every engine command Desktop builds for an installation: its image list, its pull, Start,
+    /// Restart and Stop. Returned as the engine recorded them, one a line.
+    fn every_command_for(engine: &Address, root: &Path, record: &Path) -> String {
+        let secrets = Secrets::new();
+        installation_images(engine, root, true, &secrets).unwrap();
+        pull(engine, root, true, &secrets, |_| {}).unwrap();
+        up(engine, root, true, &secrets).unwrap();
+        recreate_openbot(engine, root, &secrets).unwrap();
+        down(engine, root).unwrap();
+        std::fs::read_to_string(record).unwrap()
+    }
+
+    /// The commands in `log` that end with `suffix`, without the folder each ran in.
+    fn commands_ending(log: &str, suffix: &str) -> Vec<String> {
+        log.lines()
+            .filter_map(|line| line.split_once('\t'))
+            .map(|(_, command)| command.to_string())
+            .filter(|command| command.ends_with(suffix))
+            .collect()
+    }
+
+    /// This release's server applies its own migrations and does the scheduled work itself, and
+    /// its Compose file says so on one line. It still defines `migrate` and `worker`, for an app
+    /// from the release before to read, and nothing in this release starts them: Desktop names
+    /// neither anywhere, not to list images, pull, start, restart or stop.
+    #[test]
+    fn this_releases_compose_file_is_never_asked_for_migrate_or_worker() {
+        if crate::test_support::isolated_process(
+            "stack::tests::this_releases_compose_file_is_never_asked_for_migrate_or_worker",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        let (root, record) =
+            installed_services_root(&path, "this-release", THIS_RELEASES_COMPOSE, "");
+        assert_eq!(
+            selected_services(&root, false),
+            ["postgres", "agent-computer", "server"]
+        );
+
+        let log = every_command_for(&docker, &root, &record);
+        let compose: Vec<&str> = log
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .map(|(_, command)| command)
+            .filter(|command| command.starts_with("compose "))
+            .collect();
+        assert!(compose.len() >= 5, "{log}");
+        for command in &compose {
+            // Nor either service kept behind the profile for older apps.
+            for word in command.split(' ') {
+                assert!(
+                    !["migrate", "worker", "agent-bot", "agent-langgraph"].contains(&word),
+                    "{command}"
+                );
+            }
+        }
+        assert_eq!(
+            commands_ending(&log, "postgres agent-computer server agent-harness"),
+            [
+                "compose --profile harness config --images postgres agent-computer server agent-harness",
+                "compose --profile harness pull --policy missing --include-deps postgres agent-computer server agent-harness",
+                "compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness",
+            ],
+            "{log}"
+        );
+        assert_eq!(
+            commands_ending(&log, "--pull never server"),
+            ["compose up -d --no-deps --force-recreate --no-build --pull never server"],
+            "{log}"
+        );
+        // Nothing of an earlier release's is on the engine, so nothing is removed.
+        assert!(!log.contains("\trm "), "{log}");
+    }
+
+    /// An installation still has release 1.0.2's or 1.0.3's Compose file while a newer app updates it, and
+    /// again after an update that rolled back. That file defines `migrate` and `worker`, and the
+    /// installation is run as it requires: the worker is raised, restarted and stopped with the
+    /// server, `migrate` runs as the dependency `up` completes before `server`, both images are
+    /// listed and pulled, and neither container is removed.
+    #[test]
+    fn the_previous_releases_compose_file_still_runs_its_migrate_and_worker() {
+        if crate::test_support::isolated_process(
+            "stack::tests::the_previous_releases_compose_file_still_runs_its_migrate_and_worker",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        for (release, compose) in RELEASED_COMPOSES {
+            let containers =
+                "migrate-1\topenbot-desktop\tmigrate\nworker-1\topenbot-desktop\tworker\n";
+            let (root, record) = installed_services_root(
+                &path,
+                &format!("previous-release-{release}"),
+                compose,
+                containers,
+            );
+            // `server` waits on `migrate` in that file, which is how `up` runs it.
+            assert!(compose.contains(
+            "    depends_on:\n      migrate:\n        condition: service_completed_successfully"
+        ));
+            assert_eq!(
+                selected_services(&root, false),
+                ["postgres", "agent-computer", "server", "worker"]
+            );
+
+            let log = every_command_for(&docker, &root, &record);
+            assert_eq!(
+            commands_ending(&log, "postgres agent-computer server worker agent-harness migrate"),
+            [
+                "compose --profile harness config --images postgres agent-computer server worker agent-harness migrate",
+                "compose --profile harness pull --policy missing --include-deps postgres agent-computer server worker agent-harness migrate",
+            ],
+            "{log}"
+        );
+            assert_eq!(
+            commands_ending(&log, "postgres agent-computer server worker agent-harness"),
+            ["compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness"],
+            "{log}"
+        );
+            assert_eq!(
+                commands_ending(&log, "--pull never server worker"),
+                ["compose up -d --no-deps --force-recreate --no-build --pull never server worker"],
+                "{log}"
+            );
+            assert!(
+                log.contains(
+                    "\tcompose -f docker-compose.yml --profile harness --profile openbot down\n"
+                ),
+                "{log}"
+            );
+            // Its `migrate` and `worker` containers are Compose's own under this file: never looked
+            // for, never removed.
+            assert!(!log.contains("\tps --all --quiet "), "{log}");
+            assert!(!log.contains("\trm "), "{log}");
+            assert_eq!(
+                std::fs::read_to_string(root.join(".fixture-containers")).unwrap(),
+                containers
+            );
+        }
+    }
+
+    /// The update's own steps (`upgrade::Steps`) through the functions Start and Stop use, on the
+    /// fake engine: Stop is `down`, the new release is this release's Compose file, installing asks
+    /// for its image list, and Start is `up`. With `dies_starting`, the app stops the moment the new
+    /// release has started, as a crash or a forced quit would. There is no database to dump here.
+    struct UpdateTo<'a> {
+        engine: &'a Address,
+        root: &'a Path,
+        dies_starting: bool,
+    }
+
+    impl crate::upgrade::Steps for UpdateTo<'_> {
+        fn stop(&mut self) -> Result<(), Problem> {
+            down(self.engine, self.root).map_err(Problem::from)
+        }
+        fn has_database(&mut self) -> Result<bool, Problem> {
+            Ok(false)
+        }
+        fn back_up(&mut self, _to: &Path) -> Result<(), Problem> {
+            unreachable!("there is no database to back up")
+        }
+        fn lay_out(&mut self) -> Result<(), Problem> {
+            std::fs::write(self.root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
+            Ok(())
+        }
+        fn install(&mut self) -> Result<(), Problem> {
+            installation_images(self.engine, self.root, false, &Secrets::new()).map(|_| ())
+        }
+        fn start(&mut self) -> Result<(), Problem> {
+            up(self.engine, self.root, false, &Secrets::new())?;
+            if self.dies_starting && !installation_uses(self.root, WORKER) {
+                panic!("the app stopped while the update was starting");
+            }
+            Ok(())
+        }
+        fn restore(&mut self, _from: &Path) -> Result<(), Problem> {
+            unreachable!("there is no dump to restore")
+        }
+    }
+
+    /// An installation laid out as an earlier release (`compose`, 1.0.2's file or 1.0.3's) and
+    /// running, on an engine that keeps containers the way Compose does: `up` under that file has
+    /// made its `migrate` and `worker` beside the rest.
+    fn running_earlier_release(
+        path: &PathFixture,
+        docker: &Address,
+        label: &str,
+        compose: &str,
+    ) -> (PathBuf, PathBuf) {
+        let (root, record) = installed_services_root(path, label, compose, "");
+        std::fs::write(root.join(".fixture-compose-containers"), "").unwrap();
+        up(docker, &root, false, &Secrets::new()).unwrap();
+        assert_eq!(
+            fixture_services(&root),
+            ["postgres", "agent-computer", "server", "worker", "migrate"]
+        );
+        std::fs::remove_file(&record).unwrap();
+        (root, record)
+    }
+
+    /// The services this installation has a container for on the fake engine.
+    fn fixture_services(root: &Path) -> Vec<String> {
+        std::fs::read_to_string(root.join(".fixture-containers"))
+            .unwrap()
+            .lines()
+            .map(|line| line.rsplit('\t').next().unwrap().to_string())
+            .collect()
+    }
+
+    /// What the engine was asked, without the folder each command ran in.
+    fn engine_commands(record: &Path) -> Vec<String> {
+        std::fs::read_to_string(record)
+            .unwrap()
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .map(|(_, command)| command.to_string())
+            .collect()
+    }
+
+    /// What must hold once an update from an earlier release (`compose`, 1.0.2's file or 1.0.3's)
+    /// has been undone: the installed Compose file is that release's again, byte for byte; the previous version was started as that file requires, with
+    /// its `worker` named and its `migrate` raised by that `up`; its image list still asks for
+    /// both; and nothing looked for, or removed, a `worker` or `migrate` container once that file
+    /// was back, or at any point removed one.
+    fn assert_back_on_earlier_release(docker: &Address, root: &Path, record: &Path, compose: &str) {
+        assert_eq!(
+            std::fs::read(root.join("docker-compose.yml")).unwrap(),
+            compose.as_bytes()
+        );
+        assert!(!crate::upgrade::interrupted(root));
+        let commands = engine_commands(record);
+        let listing = format!("{commands:#?}");
+        let previous_start =
+            "compose up -d --no-build --pull never postgres agent-computer server worker";
+        assert_eq!(
+            commands.last().map(String::as_str),
+            Some(previous_start),
+            "{listing}"
+        );
+        // The update's own Stop, under this release's file, is the last to look for left-overs;
+        // the previous version's Start, under its own file, does not.
+        let last_down = commands
+            .iter()
+            .rposition(|command| command.ends_with(" down"))
+            .unwrap();
+        assert!(
+            !commands[last_down..]
+                .iter()
+                .any(|command| command.starts_with("ps --all --quiet")),
+            "{listing}"
+        );
+        assert!(
+            !commands.iter().any(|command| command.starts_with("rm ")),
+            "{listing}"
+        );
+        // Its `migrate` ran as the dependency that `up` completes, and its `worker` is running.
+        assert_eq!(
+            fixture_services(root),
+            ["postgres", "agent-computer", "server", "worker", "migrate"]
+        );
+        // And what Install would ask for now is that release's list, `migrate` and `worker` included.
+        std::fs::remove_file(record).unwrap();
+        installation_images(docker, root, false, &Secrets::new()).unwrap();
+        assert_eq!(
+            engine_commands(record),
+            ["compose config --images postgres agent-computer server worker migrate"]
+        );
+    }
+
+    /// An update from 1.0.2 or 1.0.3 whose new version does not start is undone: that release's
+    /// Compose file goes back and it is started again. The failure comes after this release's file, which uses
+    /// neither `migrate` nor `worker`, is in place.
+    #[test]
+    fn an_update_from_an_earlier_release_that_does_not_start_goes_back_to_its_migrate_and_worker() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_update_from_an_earlier_release_that_does_not_start_goes_back_to_its_migrate_and_worker",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        for (release, compose) in RELEASED_COMPOSES {
+            let (root, record) = running_earlier_release(
+                &path,
+                &docker,
+                &format!("update-fails-{release}"),
+                compose,
+            );
+            std::fs::write(root.join(".fixture-this-release-does-not-start"), "").unwrap();
+
+            let mut steps = UpdateTo {
+                engine: &docker,
+                root: &root,
+                dies_starting: false,
+            };
+            let ran = crate::upgrade::run(&root, &mut steps);
+            assert!(matches!(ran, crate::upgrade::Ran::Kept(_)), "{ran:?}");
+
+            // The new version was tried under its own file: asked for no `migrate` or `worker`.
+            let commands = engine_commands(&record);
+            assert!(
+                commands.contains(
+                    &"compose config --images postgres agent-computer server".to_string()
+                ) && commands.contains(
+                    &"compose up -d --no-build --pull never postgres agent-computer server"
+                        .to_string()
+                ),
+                "{commands:#?}"
+            );
+            assert_back_on_earlier_release(&docker, &root, &record, compose);
+        }
+    }
+
+    /// The same, for an update the app stopped part way: the new version had started when the app
+    /// died, and the next Start puts the earlier release back first (`upgrade::recover`) and
+    /// starts it.
+    #[test]
+    fn an_update_from_an_earlier_release_the_app_stopped_part_way_goes_back_to_its_migrate_and_worker(
+    ) {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_update_from_an_earlier_release_the_app_stopped_part_way_goes_back_to_its_migrate_and_worker",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        for (release, compose) in RELEASED_COMPOSES {
+            let (root, record) = running_earlier_release(
+                &path,
+                &docker,
+                &format!("update-interrupted-{release}"),
+                compose,
+            );
+
+            let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut steps = UpdateTo {
+                    engine: &docker,
+                    root: &root,
+                    dies_starting: true,
+                };
+                crate::upgrade::run(&root, &mut steps)
+            }));
+            assert!(died.is_err(), "the app was to stop part way");
+            // Left as the app left it: this release's file in place and running, the earlier one's
+            // set aside.
+            assert!(crate::upgrade::interrupted(&root));
+            assert_eq!(
+                std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
+                THIS_RELEASES_COMPOSE
+            );
+            assert_eq!(
+                fixture_services(&root),
+                ["postgres", "agent-computer", "server"]
+            );
+
+            // The next Start.
+            let mut steps = UpdateTo {
+                engine: &docker,
+                root: &root,
+                dies_starting: false,
+            };
+            assert!(crate::upgrade::recover(&root, &mut steps).unwrap());
+            crate::upgrade::Steps::start(&mut steps).unwrap();
+            assert_back_on_earlier_release(&docker, &root, &record, compose);
+        }
+    }
+
+    /// The update from 1.0.2 or 1.0.3: once this release's Compose file is in place, the `worker`
+    /// and `migrate` containers that release made belong to no service, and Compose leaves such a container
+    /// running. Start removes them before it raises anything, and only them: found by this
+    /// installation's project and those two services, removed without touching a volume. A
+    /// `worker` of another Compose project and this installation's other containers stay.
+    #[test]
+    fn the_update_removes_the_worker_and_migrate_containers_the_previous_release_left() {
+        if crate::test_support::isolated_process(
+            "stack::tests::the_update_removes_the_worker_and_migrate_containers_the_previous_release_left",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        for (release, compose) in RELEASED_COMPOSES {
+            let containers = "migrate-1\topenbot-desktop\tmigrate\n\
+                          worker-1\topenbot-desktop\tworker\n\
+                          server-1\topenbot-desktop\tserver\n\
+                          postgres-1\topenbot-desktop\tpostgres\n\
+                          elsewhere-worker-1\tanother-project\tworker\n";
+            // The earlier release is installed and running, and the update lays this release's file
+            // over it.
+            let (root, record) =
+                installed_services_root(&path, &format!("updated-{release}"), compose, containers);
+            std::fs::write(root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
+
+            let services = up(&docker, &root, false, &Secrets::new()).unwrap();
+            assert_eq!(services, ["postgres", "agent-computer", "server"]);
+            assert_eq!(
+                std::fs::read_to_string(root.join(".fixture-containers")).unwrap(),
+                "server-1\topenbot-desktop\tserver\n\
+             postgres-1\topenbot-desktop\tpostgres\n\
+             elsewhere-worker-1\tanother-project\tworker\n"
+            );
+            let log = std::fs::read_to_string(&record).unwrap();
+            let commands: Vec<&str> = log
+                .lines()
+                .filter_map(|line| line.split_once('\t'))
+                .map(|(_, command)| command)
+                .collect();
+            assert_eq!(
+            commands,
+            [
+                "ps --all --quiet --filter label=com.docker.compose.project=openbot-desktop --filter label=com.docker.compose.service=migrate",
+                "rm --force migrate-1",
+                "ps --all --quiet --filter label=com.docker.compose.project=openbot-desktop --filter label=com.docker.compose.service=worker",
+                "rm --force worker-1",
+                "compose up -d --no-build --pull never postgres agent-computer server",
+            ],
+            "{log}"
+        );
+            assert!(
+                !log.contains("--volumes") && !log.contains("--remove-orphans"),
+                "{log}"
+            );
+
+            // Stop finds none left, and the next Start removes nothing.
+            std::fs::remove_file(&record).unwrap();
+            down(&docker, &root).unwrap();
+            up(&docker, &root, false, &Secrets::new()).unwrap();
+            assert!(!std::fs::read_to_string(&record).unwrap().contains("\trm "));
+        }
+    }
+
+    /// A release as an update lays it out: its Compose file and the image list it publishes.
+    struct Release {
+        version: &'static str,
+        compose: String,
+        images: String,
+    }
+
+    /// One of OpenBot's published images, pinned by digest as a release's image list names it.
+    fn published(name: &str, digest: char) -> String {
+        format!(
+            "ghcr.io/copilotkit/{name}@sha256:{}",
+            digest.to_string().repeat(64)
+        )
+    }
+
+    fn image_list(version: &str, images: &[(&str, String)]) -> String {
+        let images: serde_json::Map<String, serde_json::Value> = images
+            .iter()
+            .map(|(name, reference)| {
+                (
+                    (*name).to_string(),
+                    serde_json::json!({ "reference": reference }),
+                )
+            })
+            .collect();
+        serde_json::json!({ "version": version, "images": images }).to_string()
+    }
+
+    /// The database image an earlier release's Compose file named, which this release's does not.
+    const EARLIER_DATABASE: &str = "pgvector/pgvector:pg16";
+    const THIS_DATABASE: &str = "pgvector/pgvector:pg17";
+
+    /// 1.0.3 as it was published: a server image and a computer image of their own. Its database
+    /// is named here by a tag this release's file has moved on from, so an image an earlier
+    /// release pulled that is not OpenBot's own is on the engine too.
+    fn earlier_release() -> Release {
+        Release {
+            version: "v1.0.3",
+            compose: RELEASED_COMPOSE_1_0_3.replace(THIS_DATABASE, EARLIER_DATABASE),
+            images: image_list(
+                "v1.0.3",
+                &[
+                    ("server", published("openbot-server", 'a')),
+                    ("supervisor", published("openbot-supervisor", 'a')),
+                    ("agent-computer", published("openbot-agent-computer", 'a')),
+                    (
+                        "agent-claude-sdk",
+                        published("openbot-agent-claude-sdk", 'c'),
+                    ),
+                    (
+                        "agent-openai-agents",
+                        published("openbot-agent-openai-agents", 'a'),
+                    ),
+                ],
+            ),
+        }
+    }
+
+    /// A release with this tree's Compose file: the server and the computer run from the one
+    /// OpenBot image, at `digest`. Its first sign-in image is the one 1.0.3 published, unchanged.
+    fn release_with_this_file(version: &'static str, digest: char) -> Release {
+        Release {
+            version,
+            compose: THIS_RELEASES_COMPOSE.to_string(),
+            images: image_list(
+                version,
+                &[
+                    ("server", published("openbot", digest)),
+                    ("supervisor", published("openbot-supervisor", digest)),
+                    ("agent-computer", published("openbot", digest)),
+                    (
+                        "agent-claude-sdk",
+                        published("openbot-agent-claude-sdk", 'c'),
+                    ),
+                    (
+                        "agent-openai-agents",
+                        published("openbot-agent-openai-agents", digest),
+                    ),
+                ],
+            ),
+        }
+    }
+
+    /// Images on the engine that are nobody's to remove but their owner's: somebody else's, and
+    /// the ones the backend's own tool pulled for a backend it runs on this computer.
+    const NOT_OPENBOTS: [&str; 3] = [
+        "redis:7-alpine",
+        "ghcr.io/copilotkit/intelligence/app-api:0.16.0-rc.9",
+        "docker.io/rancher/k3s@sha256:53cf744fe2fabf140cee240d2db70d13a4f2d98f1a13c98f58f457f423096917",
+    ];
+
+    fn lay_out_release(root: &Path, release: &Release) {
+        std::fs::write(root.join("docker-compose.yml"), &release.compose).unwrap();
+        std::fs::write(crate::deployment::images_path(root), &release.images).unwrap();
+        crate::deployment::record(root, release.version, false).unwrap();
+    }
+
+    /// The images on the fake engine, by reference.
+    fn engine_images(root: &Path) -> Vec<String> {
+        std::fs::read_to_string(root.join(".fixture-images"))
+            .unwrap()
+            .lines()
+            .map(|line| line.split('\t').next().unwrap().to_string())
+            .collect()
+    }
+
+    /// Install what is laid out, as the window's Install does: ask which images the installation
+    /// runs (`preparation::installation_pull_set`), pull the ones the engine does not have, and
+    /// record the finished install with the engine checked for each (`preparation::complete`).
+    fn install_release(engine: &Address, root: &Path) -> Result<(), Problem> {
+        let images = crate::preparation::installation_pull_set(engine, root, root, None)?;
+        let mut store = std::fs::read_to_string(root.join(".fixture-images")).unwrap();
+        for image in &images {
+            if !engine_images(root).contains(image) {
+                store.push_str(&format!("{image}\t\n"));
+            }
+        }
+        std::fs::write(root.join(".fixture-images"), store).unwrap();
+        crate::preparation::complete(root, None, images, engine)
+    }
+
+    /// Say that `container` was made from `image`, as the engine knows it.
+    fn made_from(root: &Path, image: &str, container: &str) {
+        let store: String = std::fs::read_to_string(root.join(".fixture-images"))
+            .unwrap()
+            .lines()
+            .map(|line| {
+                if line.split('\t').next() == Some(image) {
+                    format!("{image}\t{container}\n")
+                } else {
+                    format!("{line}\n")
+                }
+            })
+            .collect();
+        std::fs::write(root.join(".fixture-images"), store).unwrap();
+    }
+
+    /// The update's steps (`upgrade::Steps`) with each release's own images, through the
+    /// functions Install, Start and Stop use, on the fake engine. There is no database to dump.
+    struct UpdateToRelease<'a> {
+        engine: &'a Address,
+        root: &'a Path,
+        to: &'a Release,
+    }
+
+    impl crate::upgrade::Steps for UpdateToRelease<'_> {
+        fn stop(&mut self) -> Result<(), Problem> {
+            down(self.engine, self.root).map_err(Problem::from)
+        }
+        fn has_database(&mut self) -> Result<bool, Problem> {
+            Ok(false)
+        }
+        fn back_up(&mut self, _to: &Path) -> Result<(), Problem> {
+            unreachable!("there is no database to back up")
+        }
+        fn lay_out(&mut self) -> Result<(), Problem> {
+            lay_out_release(self.root, self.to);
+            Ok(())
+        }
+        fn install(&mut self) -> Result<(), Problem> {
+            install_release(self.engine, self.root)
+        }
+        fn start(&mut self) -> Result<(), Problem> {
+            up(self.engine, self.root, false, &Secrets::new()).map(|_| ())
+        }
+        fn restore(&mut self, _from: &Path) -> Result<(), Problem> {
+            unreachable!("there is no dump to restore")
+        }
+    }
+
+    /// 1.0.3 installed and running on an engine that also holds images that are not OpenBot's.
+    fn running_earlier_release_with_images(
+        path: &PathFixture,
+        engine: &Address,
+        label: &str,
+    ) -> (PathBuf, PathBuf) {
+        let earlier = earlier_release();
+        let (root, record) = installed_services_root(path, label, &earlier.compose, "");
+        std::fs::write(root.join(".fixture-compose-containers"), "").unwrap();
+        let others: String = NOT_OPENBOTS
+            .iter()
+            .map(|image| format!("{image}\t\n"))
+            .collect();
+        std::fs::write(root.join(".fixture-images"), others).unwrap();
+        // A `.env` that names both plans' images (`preparation::plan_images`), so each release's
+        // install pulls both, as every install did before: one a later release replaces under the
+        // same name, and one both releases share.
+        std::fs::write(
+            root.join(".env"),
+            format!(
+                "PICKED_HARNESS_IMAGE={}\nCHATGPT_AUTH_FILE=/root/.langchain/chatgpt-auth.json\n",
+                published("openbot-agent-claude-sdk", 'c')
+            ),
+        )
+        .unwrap();
+        lay_out_release(&root, &earlier);
+        install_release(engine, &root).unwrap();
+        up(engine, &root, false, &Secrets::new()).unwrap();
+        std::fs::remove_file(&record).unwrap();
+        (root, record)
+    }
+
+    /// The images still to be removed, as the installation's list holds them.
+    fn listed_for_removal(root: &Path) -> Vec<String> {
+        let Ok(bytes) = std::fs::read(root.join(crate::superseded_images::FILE)) else {
+            return Vec::new();
+        };
+        let list: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        list["images"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|image| image.as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// What the engine was asked about its images, without the connection Podman is named by.
+    fn image_commands(record: &Path) -> Vec<String> {
+        engine_commands(record)
+            .into_iter()
+            .map(|command| {
+                command
+                    .strip_prefix("--connection fixture-machine ")
+                    .unwrap_or(&command)
+                    .to_string()
+            })
+            .filter(|command| command.starts_with("image "))
+            .collect()
+    }
+
+    /// The images the engine was asked to remove, in the order it was asked.
+    fn asked_to_remove(record: &Path) -> Vec<String> {
+        image_commands(record)
+            .into_iter()
+            .filter_map(|command| command.strip_prefix("image rm ").map(str::to_string))
+            .collect()
+    }
+
+    /// Every entry logged in this process. Only a test that runs alone in its process
+    /// (`isolated_process`) installs it.
+    static UPDATE_LOGGED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+    struct KeepUpdateLog;
+
+    impl log::Log for KeepUpdateLog {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record) {
+            UPDATE_LOGGED
+                .lock()
+                .unwrap()
+                .push(format!("{} {}", record.level(), record.args()));
+        }
+        fn flush(&self) {}
+    }
+
+    /// The update from 1.0.3 left its server and computer images on the engine beside the new
+    /// release's (1.62 GB and 1.45 GB on a Mac under Podman and on Windows). Once the new release
+    /// has started, the images only the earlier release ran are removed, one `image rm` each and
+    /// none forced: its server, its computer and the sign-in image this release replaced. What
+    /// this release runs stays, the sign-in image both releases share included. So does every
+    /// image that is not OpenBot's own: the database image the earlier file named by a tag,
+    /// somebody else's image, and the ones the backend's own tool pulled. On Docker and on Podman.
+    #[test]
+    fn an_update_removes_the_previous_releases_images_once_the_new_release_has_started() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_update_removes_the_previous_releases_images_once_the_new_release_has_started",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        for (name, engine) in ["docker", "podman"]
+            .into_iter()
+            .zip(computer_stop_addresses(&path))
+        {
+            let (root, record) =
+                running_earlier_release_with_images(&path, &engine, &format!("images-{name}"));
+            let earlier = [
+                published("openbot-agent-computer", 'a'),
+                published("openbot-agent-openai-agents", 'a'),
+                published("openbot-server", 'a'),
+            ];
+            let shared = published("openbot-agent-claude-sdk", 'c');
+            for image in earlier.iter().chain([&shared]) {
+                assert!(engine_images(&root).contains(image), "{name}: {image}");
+            }
+
+            let this = release_with_this_file("v1.0.4", 'b');
+            let mut steps = UpdateToRelease {
+                engine: &engine,
+                root: &root,
+                to: &this,
+            };
+            let ran = crate::upgrade::run(&root, &mut steps);
+            assert!(matches!(ran, crate::upgrade::Ran::Moved), "{name}: {ran:?}");
+            // The update itself removed no image: everything it could go back to was there
+            // until the new release had started.
+            assert_eq!(asked_to_remove(&record), [""; 0], "{name}");
+
+            let removed = crate::superseded_images::remove(&engine, &root);
+            assert_eq!(removed, earlier, "{name}");
+            assert_eq!(asked_to_remove(&record), earlier, "{name}");
+            let mut left = engine_images(&root);
+            left.sort();
+            let mut expected: Vec<String> =
+                NOT_OPENBOTS.iter().map(|image| image.to_string()).collect();
+            expected.extend([
+                EARLIER_DATABASE.to_string(),
+                THIS_DATABASE.to_string(),
+                published("openbot", 'b'),
+                published("openbot-agent-openai-agents", 'b'),
+                shared,
+            ]);
+            expected.sort();
+            assert_eq!(left, expected, "{name}");
+            // Nothing is left to try again, and the next Start asks for nothing.
+            assert!(
+                !root.join(crate::superseded_images::FILE).exists(),
+                "{name}"
+            );
+            std::fs::remove_file(&record).unwrap();
+            up(&engine, &root, false, &Secrets::new()).unwrap();
+            assert_eq!(crate::superseded_images::remove(&engine, &root), [""; 0]);
+            assert_eq!(image_commands(&record), [""; 0], "{name}");
+        }
+    }
+
+    /// An update whose new release does not start goes back to the earlier one, which needs
+    /// every image it had. None is listed for removal and the engine is asked to remove none,
+    /// then or after the earlier release has started again.
+    #[test]
+    fn an_update_that_did_not_start_removes_no_image() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_update_that_did_not_start_removes_no_image",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        let (root, record) = running_earlier_release_with_images(&path, &docker, "images-kept");
+        let before = engine_images(&root);
+        std::fs::write(root.join(".fixture-this-release-does-not-start"), "").unwrap();
+
+        let this = release_with_this_file("v1.0.4", 'b');
+        let mut steps = UpdateToRelease {
+            engine: &docker,
+            root: &root,
+            to: &this,
+        };
+        let ran = crate::upgrade::run(&root, &mut steps);
+        assert!(matches!(ran, crate::upgrade::Ran::Kept(_)), "{ran:?}");
+        assert_eq!(
+            crate::deployment::installed(&root).unwrap().version,
+            "v1.0.3"
+        );
+
+        assert!(!root.join(crate::superseded_images::FILE).exists());
+        assert_eq!(crate::superseded_images::remove(&docker, &root), [""; 0]);
+        assert_eq!(asked_to_remove(&record), [""; 0]);
+        // Everything the earlier release runs is still there, beside what the update pulled.
+        let after = engine_images(&root);
+        for image in &before {
+            assert!(after.contains(image), "{image} is gone");
+        }
+    }
+
+    /// The first Start straight after Install, while the engine is not answering for a moment (a
+    /// Podman machine busy as the back end's cluster comes up in it, or just restarted under it),
+    /// waits for the engine and goes on: the images Install pulled are there. An engine that did not
+    /// answer `image inspect` was read as one without the images, and Start refused with "Finish
+    /// installing OpenBot's local software" until the person went round Install again. An engine
+    /// that answers and does not have an image still sends Start back to Install, without a wait.
+    #[test]
+    fn start_straight_after_install_waits_for_an_engine_that_is_not_answering_yet() {
+        if crate::test_support::isolated_process(
+            "stack::tests::start_straight_after_install_waits_for_an_engine_that_is_not_answering_yet",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        for (name, engine) in ["docker", "podman"]
+            .into_iter()
+            .zip(computer_stop_addresses(&path))
+        {
+            let release = release_with_this_file("v1.0.4", 'b');
+            let (root, _record) = installed_services_root(
+                &path,
+                &format!("first-start-{name}"),
+                &release.compose,
+                "",
+            );
+            std::fs::write(root.join(".fixture-images"), "").unwrap();
+            lay_out_release(&root, &release);
+            install_release(&engine, &root).unwrap();
+
+            // Not answering when Start asks, and answering again a moment later.
+            let not_answering = root.join(".fixture-engine-not-answering");
+            std::fs::write(&not_answering, "").unwrap();
+            let back = {
+                let not_answering = not_answering.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    std::fs::remove_file(not_answering).unwrap();
+                })
+            };
+            let started = crate::preparation::require(&root, Some(&None), &engine);
+            back.join().unwrap();
+            if let Err(problem) = started {
+                panic!("{name}: Start refused an installation that had just finished: {problem:?}");
+            }
+
+            // One image gone from an engine that answers: Install again, at once.
+            let store = std::fs::read_to_string(root.join(".fixture-images")).unwrap();
+            let gone = store.lines().next().unwrap().split('\t').next().unwrap();
+            let kept: String = store
+                .lines()
+                .skip(1)
+                .map(|line| format!("{line}\n"))
+                .collect();
+            std::fs::write(root.join(".fixture-images"), kept).unwrap();
+            let asked = std::time::Instant::now();
+            let refused = crate::preparation::require(&root, Some(&None), &engine).unwrap_err();
+            assert!(
+                asked.elapsed() < std::time::Duration::from_secs(1),
+                "{name}: waited"
+            );
+            assert_eq!(refused.said, crate::preparation::REQUIRED, "{name}");
+            assert_eq!(
+                refused.connection,
+                Some(crate::problem::Connection::Installation),
+                "{name}"
+            );
+            assert!(
+                refused
+                    .detail
+                    .as_deref()
+                    .is_some_and(|said| said.contains(gone)),
+                "{name}: {refused:?}"
+            );
+        }
+    }
+
+    /// An engine that does not answer for the whole wait is said as that, not as an installation
+    /// to finish: installing again would not reach it either.
+    #[test]
+    fn an_engine_that_never_answers_is_not_an_installation_to_finish() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_engine_that_never_answers_is_not_an_installation_to_finish",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        for (name, engine) in ["docker", "podman"]
+            .into_iter()
+            .zip(computer_stop_addresses(&path))
+        {
+            let release = release_with_this_file("v1.0.4", 'b');
+            let (root, _record) = installed_services_root(
+                &path,
+                &format!("never-answers-{name}"),
+                &release.compose,
+                "",
+            );
+            std::fs::write(root.join(".fixture-images"), "").unwrap();
+            lay_out_release(&root, &release);
+            install_release(&engine, &root).unwrap();
+            let images = crate::preparation::installed_images(&root).unwrap();
+            std::fs::write(root.join(".fixture-engine-not-answering"), "").unwrap();
+            let problem = crate::preparation::require_images_within(
+                &engine,
+                &images,
+                std::time::Duration::from_millis(300),
+                std::time::Duration::from_millis(50),
+            )
+            .unwrap_err();
+            assert_ne!(problem.said, crate::preparation::REQUIRED, "{name}");
+            assert_eq!(problem.connection, None, "{name}");
+            assert!(
+                problem.said.contains("not answering"),
+                "{name}: {problem:?}"
+            );
+            assert!(
+                problem
+                    .detail
+                    .as_deref()
+                    .is_some_and(|said| said.contains("Cannot connect")),
+                "{name}: {problem:?}"
+            );
+        }
+    }
+
+    /// An image a container was made from cannot go yet: the earlier computer image, which a
+    /// stopped Bot computer of this installation still uses, and the earlier server image, which
+    /// a container of another Compose project uses. The engine refuses each, in its own words and
+    /// with its own exit code, and that is not a failure of anything: it is logged, the image
+    /// stays on the list beside the installation, and it is tried again after the next start. An
+    /// engine that is not answering removes nothing and forgets nothing. An image that is gone by
+    /// the time it is tried comes off the list.
+    #[test]
+    fn an_image_a_container_still_uses_stays_and_is_removed_after_a_later_start() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_image_a_container_still_uses_stays_and_is_removed_after_a_later_start",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let _ = log::set_boxed_logger(Box::new(KeepUpdateLog));
+        log::set_max_level(log::LevelFilter::Info);
+        for (name, engine) in ["docker", "podman"]
+            .into_iter()
+            .zip(computer_stop_addresses(&path))
+        {
+            let (root, record) =
+                running_earlier_release_with_images(&path, &engine, &format!("images-used-{name}"));
+            let computer = published("openbot-agent-computer", 'a');
+            let server = published("openbot-server", 'a');
+            let sign_in = published("openbot-agent-openai-agents", 'a');
+            let mut containers = std::fs::read_to_string(root.join(".fixture-containers")).unwrap();
+            containers.push_str("computer-ada-1\topenbot-desktop-computers\tcomputer\n");
+            containers.push_str("elsewhere-1\tanother-project\tserver\n");
+            std::fs::write(root.join(".fixture-containers"), containers).unwrap();
+            made_from(&root, &computer, "computer-ada-1");
+            made_from(&root, &server, "elsewhere-1");
+
+            let this = release_with_this_file("v1.0.4", 'b');
+            let mut steps = UpdateToRelease {
+                engine: &engine,
+                root: &root,
+                to: &this,
+            };
+            let ran = crate::upgrade::run(&root, &mut steps);
+            assert!(matches!(ran, crate::upgrade::Ran::Moved), "{name}: {ran:?}");
+
+            UPDATE_LOGGED.lock().unwrap().clear();
+            assert_eq!(
+                crate::superseded_images::remove(&engine, &root),
+                [sign_in.as_str()],
+                "{name}"
+            );
+            assert_eq!(
+                listed_for_removal(&root),
+                [computer.clone(), server.clone()],
+                "{name}"
+            );
+            for image in [&computer, &server] {
+                assert!(engine_images(&root).contains(image), "{name}: {image}");
+            }
+            // Each refusal is in the log with what the engine said, and nowhere else.
+            let logged = UPDATE_LOGGED.lock().unwrap().join("\n");
+            let refusal = if name == "podman" {
+                "image is in use by a container"
+            } else {
+                "is using its referenced image"
+            };
+            for image in [&computer, &server] {
+                assert!(
+                    logged.lines().any(|line| line.starts_with("INFO ")
+                        && line.contains(&format!("left {image}"))
+                        && line.contains(refusal)),
+                    "{name}: {logged}"
+                );
+            }
+
+            // An engine that is not answering: nothing removed, nothing forgotten.
+            std::fs::write(root.join(".fixture-engine-not-answering"), "").unwrap();
+            assert_eq!(crate::superseded_images::remove(&engine, &root), [""; 0]);
+            assert_eq!(
+                listed_for_removal(&root),
+                [computer.clone(), server.clone()],
+                "{name}"
+            );
+            std::fs::remove_file(root.join(".fixture-engine-not-answering")).unwrap();
+
+            // The Bot computer is gone by the next Start, and its image goes after it. The other
+            // project still has its container, and its image stays.
+            let containers: String = std::fs::read_to_string(root.join(".fixture-containers"))
+                .unwrap()
+                .lines()
+                .filter(|line| !line.starts_with("computer-ada-1\t"))
+                .map(|line| format!("{line}\n"))
+                .collect();
+            std::fs::write(root.join(".fixture-containers"), containers).unwrap();
+            std::fs::remove_file(&record).unwrap();
+            up(&engine, &root, false, &Secrets::new()).unwrap();
+            assert_eq!(
+                crate::superseded_images::remove(&engine, &root),
+                [computer.as_str()],
+                "{name}"
+            );
+            assert_eq!(
+                asked_to_remove(&record),
+                [computer.clone(), server.clone()],
+                "{name}"
+            );
+            assert_eq!(listed_for_removal(&root), [server.as_str()], "{name}");
+            assert!(engine_images(&root).contains(&server), "{name}");
+
+            // Somebody removes that container and the image themselves: nothing is left to do.
+            let store: String = std::fs::read_to_string(root.join(".fixture-images"))
+                .unwrap()
+                .lines()
+                .filter(|line| !line.starts_with(&format!("{server}\t")))
+                .map(|line| format!("{line}\n"))
+                .collect();
+            std::fs::write(root.join(".fixture-images"), store).unwrap();
+            assert_eq!(crate::superseded_images::remove(&engine, &root), [""; 0]);
+            assert!(
+                !root.join(crate::superseded_images::FILE).exists(),
+                "{name}"
+            );
+        }
+    }
+
+    /// An installation updated twice while an image of the first release could not go: the list
+    /// holds what both updates left, the second update's images are removed after it starts, and
+    /// the image still in use is still waiting. Nothing the installed release runs is on it.
+    #[test]
+    fn an_installation_updated_again_still_removes_what_every_earlier_release_left() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_installation_updated_again_still_removes_what_every_earlier_release_left",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        let (root, _record) = running_earlier_release_with_images(&path, &docker, "images-twice");
+        let server = published("openbot-server", 'a');
+        let mut containers = std::fs::read_to_string(root.join(".fixture-containers")).unwrap();
+        containers.push_str("elsewhere-1\tanother-project\tserver\n");
+        std::fs::write(root.join(".fixture-containers"), containers).unwrap();
+        made_from(&root, &server, "elsewhere-1");
+
+        for (version, digest) in [("v1.0.4", 'b'), ("v1.0.5", 'd')] {
+            let next = release_with_this_file(version, digest);
+            let mut steps = UpdateToRelease {
+                engine: &docker,
+                root: &root,
+                to: &next,
+            };
+            let ran = crate::upgrade::run(&root, &mut steps);
+            assert!(matches!(ran, crate::upgrade::Ran::Moved), "{ran:?}");
+            if version == "v1.0.4" {
+                // The app closes before anything is removed; the list is beside the installation.
+                assert_eq!(listed_for_removal(&root).len(), 4);
+            }
+        }
+        // What 1.0.3 and 1.0.4 pulled, without what 1.0.5 runs.
+        assert_eq!(
+            listed_for_removal(&root),
+            [
+                published("openbot-agent-claude-sdk", 'c'),
+                published("openbot-agent-computer", 'a'),
+                published("openbot-agent-openai-agents", 'a'),
+                published("openbot-agent-openai-agents", 'b'),
+                published("openbot-server", 'a'),
+                published("openbot", 'b'),
+            ]
+        );
+        assert_eq!(
+            crate::superseded_images::remove(&docker, &root),
+            [
+                published("openbot-agent-computer", 'a'),
+                published("openbot-agent-openai-agents", 'a'),
+                published("openbot-agent-openai-agents", 'b'),
+                published("openbot", 'b'),
+            ]
+        );
+        assert_eq!(listed_for_removal(&root), [server.as_str()]);
+        let left = engine_images(&root);
+        for image in [
+            server,
+            published("openbot", 'd'),
+            published("openbot-agent-openai-agents", 'd'),
+            published("openbot-agent-claude-sdk", 'c'),
+        ] {
+            assert!(left.contains(&image), "{image} is gone");
+        }
     }
 
     #[test]
@@ -9375,6 +12264,9 @@ fn main() {
             let log = std::fs::read_to_string(record).unwrap();
             println!("{} shutdown trace:\n{log}", address.engine.binary());
             assert_computer_shutdown_preserves_foreign_and_volumes(&root);
+            let server = log
+                .find("compose -f docker-compose.yml --profile openbot stop --timeout 15 server")
+                .unwrap();
             let config = log.find("config --format json").unwrap();
             let supervisor = log
                 .find("compose -f docker-compose.yml stop supervisor")
@@ -9385,12 +12277,42 @@ fn main() {
                 .find("--profile harness --profile openbot down")
                 .unwrap();
             assert!(
-                config < supervisor
+                config < server
+                    && server < supervisor
                     && supervisor < snapshot
                     && snapshot < computers
                     && computers < teardown,
                 "{log}"
             );
+        }
+    }
+
+    /// A server that can't be stopped on its own first still leaves the rest to stop: `compose down`
+    /// stops it with everything else, as it did before the server was stopped first.
+    #[test]
+    fn stop_with_a_server_that_wont_stop_first_still_stops_everything() {
+        if crate::test_support::isolated_process(
+            "stack::tests::stop_with_a_server_that_wont_stop_first_still_stops_everything",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("computer-stop");
+        for address in computer_stop_addresses(&path) {
+            let (root, record) =
+                computer_shutdown_race_root(&path, &format!("root-{}", address.engine.binary()));
+            std::fs::write(root.join(".fixture-server-stop-failure"), "").unwrap();
+            down(&address, &root).unwrap();
+            let log = std::fs::read_to_string(record).unwrap();
+            assert!(
+                log.contains("--profile openbot stop --timeout 15 server"),
+                "{log}"
+            );
+            assert!(
+                log.contains("--profile harness --profile openbot down"),
+                "{log}"
+            );
+            assert_computer_shutdown_preserves_foreign_and_volumes(&root);
+            assert!(root.join("stack.down").exists());
         }
     }
 
@@ -9413,7 +12335,8 @@ fn main() {
                 "{error}"
             );
             let log = std::fs::read_to_string(&record).unwrap();
-            assert_eq!(log.lines().count(), 2, "{log}");
+            // Its namespace, the server's own stop, then the supervisor's stop that failed.
+            assert_eq!(log.lines().count(), 3, "{log}");
             assert!(
                 !log.contains("ps --quiet") && !log.contains("harness down"),
                 "{log}"
@@ -9598,7 +12521,8 @@ fn main() {
     }
     for listener in &listeners { listener.set_nonblocking(true).unwrap(); }
     let mut requests = std::fs::File::create(format!("{name}.requests")).unwrap();
-    std::fs::write(format!("{name}.port"), port.to_string()).unwrap();
+    println!("{port}");
+    std::io::stdout().flush().unwrap();
     let mut ipv4_requests = 0_usize;
     loop {
         for listener in &listeners {
@@ -9643,33 +12567,29 @@ fn main() {
                     format!("synthetic {name} diagnostic"),
                 )
                 .unwrap();
-                fixture.children.push((
-                    name,
-                    Command::new(&binary)
-                        .args([name, mode])
-                        .current_dir(&fixture.root)
-                        .spawn()
-                        .unwrap(),
-                ));
-                let port_file = fixture.root.join(format!("{name}.port"));
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-                let port = loop {
-                    if let Ok(port) = std::fs::read_to_string(&port_file) {
-                        if let Ok(port) = port.parse() {
-                            break port;
-                        }
-                    }
-                    assert!(fixture
-                        .children
-                        .last_mut()
-                        .unwrap()
-                        .1
-                        .try_wait()
-                        .unwrap()
-                        .is_none());
-                    assert!(std::time::Instant::now() < deadline, "fixture did not bind");
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                };
+                let mut child = Command::new(&binary)
+                    .args([name, mode])
+                    .current_dir(&fixture.root)
+                    .stdout(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                // The fixture says its port once both loopbacks are bound. Waiting for that line, not
+                // for a deadline, holds however slowly a loaded computer starts it; a fixture that
+                // dies first closes its output and is reported as it is.
+                let mut said = String::new();
+                std::io::BufRead::read_line(
+                    &mut std::io::BufReader::new(child.stdout.take().unwrap()),
+                    &mut said,
+                )
+                .unwrap();
+                fixture.children.push((name, child));
+                let port = said.trim().parse().unwrap_or_else(|_| {
+                    let child = &mut fixture.children.last_mut().unwrap().1;
+                    panic!(
+                        "the {name} fixture stopped before it bound: {:?}",
+                        child.wait()
+                    )
+                });
                 if name == "server" {
                     fixture.ready.api = port;
                 } else {
@@ -9680,7 +12600,8 @@ fn main() {
         }
 
         fn wait(&mut self, patience: std::time::Duration) -> Result<(), String> {
-            wait_until_healthy(&self.ready, patience, || true)
+            wait_until_healthy(&self.ready, patience, || true, || None)
+                .map_err(|not_ready| not_ready.to_string())
         }
 
         fn requests(&self, name: &str) -> String {
@@ -9786,11 +12707,12 @@ fn main() {
             &ready,
             std::time::Duration::from_secs(2),
             || true,
+            &mut || None,
             &mut |line| lines.push(line),
         );
         assert_eq!(
             result.unwrap_err(),
-            format!("the API is not answering on port {port}.")
+            NotReady::NotAnswering(format!("the API is not answering on port {port}."))
         );
         let what = format!("[wait] OpenBot's services, GET /health on port {port} (API)");
         let first = &lines[0];
@@ -9825,6 +12747,7 @@ fn main() {
             &ready,
             std::time::Duration::from_secs(30),
             || false,
+            &mut || None,
             &mut |line| lines.push(line),
         );
         assert!(result.is_err());
@@ -9839,6 +12762,372 @@ fn main() {
             started.elapsed() < std::time::Duration::from_secs(5),
             "a stopped Start sat out the readiness wait"
         );
+    }
+
+    /// `compose ps -a --format json server` from Docker Compose 5.1.4, captured from a busybox
+    /// `server` that prints a refusal to stderr and exits 78 under `restart: unless-stopped`. Only
+    /// the project's name and folder are changed. Note `"ExitCode":0` beside
+    /// `"Status":"Restarting (78) 1 second ago"`: Compose reports the code only in `Status` while
+    /// Docker restarts the container.
+    const SERVER_RESTARTING_78: &str = r#"{"Command":"\"sh -c 'echo 'Listen…\"","CreatedAt":"2026-11-17 17:25:48 -0800 PST","ExitCode":0,"Health":"","ID":"44290d7f2426","Image":"busybox:1.37","Labels":"com.docker.compose.config-hash=c5d01b65d579431b261b014ba30e985f0166b2261c560d3312537e754d51b10e,com.docker.compose.oneoff=False,com.docker.compose.project.config_files=/Users/someone/OpenBot/docker-compose.yml,com.docker.compose.project.working_dir=/Users/someone/OpenBot,com.docker.compose.version=5.1.4,desktop.docker.io/ports.scheme=v2,com.docker.compose.container-number=1,com.docker.compose.depends_on=,com.docker.compose.image=sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec,com.docker.compose.project=openbot-desktop,com.docker.compose.service=server","LocalVolumes":"0","Mounts":"","Name":"openbot-desktop-server-1","Names":"openbot-desktop-server-1","Networks":"openbot-desktop_default","Ports":"","Project":"openbot-desktop","Publishers":[],"RunningFor":"3 seconds ago","Service":"server","Size":"0B","State":"restarting","Status":"Restarting (78) 1 second ago"}
+"#;
+
+    /// The same server under `restart: "no"`, captured the same way: exited, with the code in both.
+    const SERVER_EXITED_78: &str = r#"{"Command":"\"sh -c 'echo \\\"OpenBo…\"","CreatedAt":"2026-11-17 17:25:48 -0800 PST","ExitCode":78,"Health":"","ID":"25e12f3681a6","Image":"busybox:1.37","Labels":"com.docker.compose.project=openbot-desktop,com.docker.compose.project.config_files=/Users/someone/OpenBot/docker-compose.yml,com.docker.compose.project.working_dir=/Users/someone/OpenBot,com.docker.compose.container-number=1,com.docker.compose.depends_on=,com.docker.compose.image=sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec,com.docker.compose.oneoff=False,com.docker.compose.service=server,com.docker.compose.version=5.1.4,desktop.docker.io/ports.scheme=v2,com.docker.compose.config-hash=57b53b5d6e3830623627023b2104496ce3a597f9875f882936ebecf8476a7570","LocalVolumes":"0","Mounts":"","Name":"openbot-desktop-server-1","Names":"openbot-desktop-server-1","Networks":"openbot-desktop_default","Ports":"","Project":"openbot-desktop","Publishers":[],"RunningFor":"3 seconds ago","Service":"server","Size":"0B","State":"exited","Status":"Exited (78) 3 seconds ago"}
+"#;
+
+    /// A server that crashes, exit 1, under `restart: unless-stopped`, captured the same way.
+    const SERVER_RESTARTING_1: &str = r#"{"Command":"\"sh -c 'echo 'someth…\"","CreatedAt":"2026-11-17 17:25:48 -0800 PST","ExitCode":0,"Health":"","ID":"1cb05c9d99ab","Image":"busybox:1.37","Labels":"desktop.docker.io/ports.scheme=v2,com.docker.compose.container-number=1,com.docker.compose.image=sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec,com.docker.compose.project.config_files=/Users/someone/OpenBot/docker-compose.yml,com.docker.compose.project.working_dir=/Users/someone/OpenBot,com.docker.compose.service=server,com.docker.compose.config-hash=1ae19c6d833db14ce3249c6af143773e31a5e7f8f6b73debbbba18b003075802,com.docker.compose.depends_on=,com.docker.compose.oneoff=False,com.docker.compose.project=openbot-desktop,com.docker.compose.version=5.1.4","LocalVolumes":"0","Mounts":"","Name":"openbot-desktop-server-1","Names":"openbot-desktop-server-1","Networks":"openbot-desktop_default","Ports":"","Project":"openbot-desktop","Publishers":[],"RunningFor":"3 seconds ago","Service":"server","Size":"0B","State":"restarting","Status":"Restarting (1) 1 second ago"}
+"#;
+
+    /// The refusing server's own log, as the engine gives it: `docker logs --tail 40`'s stderr.
+    const REFUSAL_STDERR: &str = "OpenBot can't start without a licence. Set OPENBOT_LICENSE and start it again.\nOpenBot can't start without a licence. Set OPENBOT_LICENSE and start it again.\nOpenBot can't start without a licence. Set OPENBOT_LICENSE and start it again.\n";
+
+    /// `compose logs --tail 40 server` for the same server. Compose merges both streams, so the
+    /// next attempt's stdout already follows the sentence.
+    const REFUSAL_COMPOSE_LOG: &str = "server-1  | Listening soon.\nserver-1  | OpenBot can't start without a licence. Set OPENBOT_LICENSE and start it again.\nserver-1  | Listening soon.\nserver-1  | OpenBot can't start without a licence. Set OPENBOT_LICENSE and start it again.\nserver-1  | Listening soon.";
+
+    const REFUSAL: &str =
+        "OpenBot can't start without a licence. Set OPENBOT_LICENSE and start it again.";
+
+    /// A server that exits 78 is recognised as refusing to start, whether Docker is restarting it
+    /// or it has stopped, from the rows Compose really prints. A crash (exit 1) is not.
+    #[test]
+    fn a_server_that_exits_78_is_a_refusal_and_exit_1_is_not() {
+        assert_eq!(
+            refused_server_in(SERVER_RESTARTING_78).as_deref(),
+            Some("44290d7f2426")
+        );
+        assert_eq!(
+            refused_server_in(SERVER_EXITED_78).as_deref(),
+            Some("25e12f3681a6")
+        );
+        // An older Compose prints one JSON array.
+        assert_eq!(
+            refused_server_in(&format!("[{}]", SERVER_RESTARTING_78.trim())).as_deref(),
+            Some("44290d7f2426")
+        );
+        assert_eq!(refused_server_in(SERVER_RESTARTING_1), None);
+        assert_eq!(refused_server_in(""), None);
+
+        // The sentence is the last line the server wrote to stderr, not the stdout after it.
+        assert_eq!(
+            refusal_sentence_in(REFUSAL_STDERR, REFUSAL_COMPOSE_LOG),
+            REFUSAL
+        );
+        // From an engine that keeps no stderr apart: Compose's last line, without its prefix.
+        let ending_in_the_sentence = REFUSAL_COMPOSE_LOG
+            .rsplit_once('\n')
+            .map(|(before, _)| before)
+            .unwrap();
+        assert_eq!(refusal_sentence_in("", ending_in_the_sentence), REFUSAL);
+    }
+
+    /// The wait ends at once with the server's own sentence when the server refused to start, and
+    /// sits out its patience as before when the server crashed. Nothing answers port 1, so only the
+    /// refusal can end the first wait early.
+    #[test]
+    fn readiness_ends_at_once_with_the_sentence_when_the_server_refuses() {
+        let ready = Ready { api: 1, app: 1 };
+        let refusal = |listing: &'static str| {
+            move || {
+                refused_server_in(listing)
+                    .map(|_| refusal_sentence_in(REFUSAL_STDERR, REFUSAL_COMPOSE_LOG))
+            }
+        };
+
+        let started = std::time::Instant::now();
+        let mut lines = Vec::new();
+        let result = wait_until_healthy_saying(
+            &ready,
+            std::time::Duration::from_secs(180),
+            || true,
+            &mut refusal(SERVER_RESTARTING_78),
+            &mut |line| lines.push(line),
+        );
+        assert_eq!(result, Err(NotReady::Refused(REFUSAL.to_owned())));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "a refusing server sat out the readiness wait"
+        );
+        assert!(
+            lines
+                .last()
+                .unwrap()
+                .contains(&format!("the server refused to start (exit 78): {REFUSAL}")),
+            "{lines:#?}"
+        );
+
+        let started = std::time::Instant::now();
+        let result = wait_until_healthy_saying(
+            &ready,
+            std::time::Duration::from_secs(2),
+            || true,
+            &mut refusal(SERVER_RESTARTING_1),
+            &mut |_| {},
+        );
+        assert_eq!(
+            result,
+            Err(NotReady::NotAnswering(
+                "the API is not answering on port 1.".to_owned()
+            ))
+        );
+        assert!(started.elapsed() >= std::time::Duration::from_secs(2));
+
+        // The person reads the sentence itself, with the log kept behind it.
+        let problem = startup_refusal(
+            REFUSAL.to_owned(),
+            format!("Last from the server container (up to 40 lines):\n{REFUSAL_COMPOSE_LOG}"),
+            &Secrets::new(),
+        );
+        assert_eq!(problem.said, REFUSAL);
+        assert!(problem
+            .detail
+            .unwrap()
+            .contains("server-1  | Listening soon."));
+    }
+
+    /// The watcher's question when OpenBot stops answering: is the `server` container up, being
+    /// restarted by Docker, or stopped? From the rows Compose really prints, Docker's and Podman's.
+    #[test]
+    fn the_server_container_reads_as_up_restarting_or_stopped_from_real_compose_rows() {
+        assert_eq!(
+            server_container_in(PODMAN_RUNNING),
+            Some((ServerContainer::Running, "6c1f0e2a9b3d".into()))
+        );
+        assert_eq!(
+            server_container_in(SERVER_RESTARTING_78).map(|(state, _)| state),
+            Some(ServerContainer::Restarting)
+        );
+        assert_eq!(
+            server_container_in(SERVER_EXITED_78),
+            Some((
+                ServerContainer::Exited {
+                    code: Some(78),
+                    out_of_memory: false
+                },
+                "25e12f3681a6".into()
+            ))
+        );
+        // Exit 0 in `ExitCode`, the real code only in `Status`.
+        assert_eq!(
+            server_container_in(PODMAN_EXITED_0_STATUS_78).map(|(state, _)| state),
+            Some(ServerContainer::Exited {
+                code: Some(78),
+                out_of_memory: false
+            })
+        );
+        // An older Compose prints one JSON array.
+        assert_eq!(
+            server_container_in(&format!("[{}]", PODMAN_RUNNING.trim())).map(|(state, _)| state),
+            Some(ServerContainer::Running)
+        );
+        // No `server` container at all.
+        assert_eq!(server_container_in(""), None);
+    }
+
+    /// What `compose ps -a --format json server` reports for a refusing server under Podman, which
+    /// starts it again at once. Built from Desktop's own docker-compose.exe sampled against the
+    /// Podman pipe every 0.3 s for 60 s on Windows: 132 rows `running` with exit 0 and "Up 1 second",
+    /// 12 `exited` with 78, and one `exited` with exit 0 and "Exited (78)" in its status.
+    const PODMAN_RUNNING: &str = r#"{"Command":"/app/bin/openbot server","CreatedAt":"2026-11-18 03:02:11 +0000 UTC","ExitCode":0,"Health":"starting","ID":"6c1f0e2a9b3d","Image":"ghcr.io/copilotkit/openbot:test","Labels":"com.docker.compose.project=openbot-desktop,com.docker.compose.service=server","LocalVolumes":"0","Mounts":"","Name":"openbot-desktop-server-1","Names":"openbot-desktop-server-1","Networks":"openbot-desktop_default","Ports":"127.0.0.1:3001->3001/tcp","Project":"openbot-desktop","Publishers":[],"RunningFor":"2 minutes ago","Service":"server","Size":"0B","State":"running","Status":"Up 1 second"}"#;
+    const PODMAN_EXITED_78: &str = r#"{"Command":"/app/bin/openbot server","CreatedAt":"2026-11-18 03:02:11 +0000 UTC","ExitCode":78,"Health":"","ID":"6c1f0e2a9b3d","Image":"ghcr.io/copilotkit/openbot:test","Labels":"com.docker.compose.project=openbot-desktop,com.docker.compose.service=server","LocalVolumes":"0","Mounts":"","Name":"openbot-desktop-server-1","Names":"openbot-desktop-server-1","Networks":"openbot-desktop_default","Ports":"","Project":"openbot-desktop","Publishers":[],"RunningFor":"2 minutes ago","Service":"server","Size":"0B","State":"exited","Status":"Exited (78) Less than a second ago"}"#;
+    const PODMAN_EXITED_0_STATUS_78: &str = r#"{"Command":"/app/bin/openbot server","CreatedAt":"2026-11-18 03:02:11 +0000 UTC","ExitCode":0,"Health":"","ID":"6c1f0e2a9b3d","Image":"ghcr.io/copilotkit/openbot:test","Labels":"com.docker.compose.project=openbot-desktop,com.docker.compose.service=server","LocalVolumes":"0","Mounts":"","Name":"openbot-desktop-server-1","Names":"openbot-desktop-server-1","Networks":"openbot-desktop_default","Ports":"","Project":"openbot-desktop","Publishers":[],"RunningFor":"2 minutes ago","Service":"server","Size":"0B","State":"exited","Status":"Exited (78) Less than a second ago"}"#;
+
+    /// Under Podman, a refusing server is caught on Desktop's first look, through the real
+    /// `server_refusal` and the engine command it runs. Podman restarts it so fast that `compose
+    /// ps` says `running`, exit 0, at nearly every ask, so the rows here are the ones Desktop's
+    /// own asks landed on in a three-minute wait on Windows, a `running` row each time, with the
+    /// sampled `exited` rows after them. The server wrote its sentence as it exited
+    /// (`OPENBOT_REFUSAL_FILE`). A server that crashed wrote none, and the wait runs out as before.
+    #[test]
+    fn a_refusal_under_podman_is_caught_at_once_though_the_engine_says_running() {
+        if crate::test_support::isolated_process(
+            "stack::tests::a_refusal_under_podman_is_caught_at_once_though_the_engine_says_running",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("server-refusal");
+        let ready = Ready { api: 1, app: 1 };
+        // Desktop asked about 60 times in its wait and never landed on an exited row.
+        let mut rows = vec![PODMAN_RUNNING; 60];
+        rows.extend([
+            PODMAN_EXITED_78,
+            PODMAN_RUNNING,
+            PODMAN_EXITED_0_STATUS_78,
+            PODMAN_RUNNING,
+        ]);
+        for address in computer_stop_addresses(&path) {
+            let (root, _) =
+                computer_stop_root(&path, &format!("refusal-{}", address.engine.binary()), "{}");
+            std::fs::write(root.join(".fixture-server-rows"), rows.join("\n")).unwrap();
+            std::fs::write(root.join(".fixture-server-stderr"), REFUSAL_STDERR).unwrap();
+            std::fs::create_dir_all(root.join(".openbot")).unwrap();
+            std::fs::write(
+                root.join(".openbot").join(REFUSAL_FILE),
+                format!("{REFUSAL}\n"),
+            )
+            .unwrap();
+
+            let started = std::time::Instant::now();
+            let result = wait_until_healthy_saying(
+                &ready,
+                std::time::Duration::from_secs(20),
+                || true,
+                &mut || server_refusal(&address, &root),
+                &mut |_| {},
+            );
+            assert_eq!(
+                result,
+                Err(NotReady::Refused(REFUSAL.to_owned())),
+                "{address:?}"
+            );
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(5),
+                "{address:?}: the refusal took {:?}",
+                started.elapsed()
+            );
+
+            // The next Start takes the old sentence away before the server runs again. One that
+            // crashes instead writes none: the same `running` rows are not a refusal, and the wait
+            // runs out as it always did.
+            forget_refusal(&address, &root);
+            assert!(!root.join(".openbot").join(REFUSAL_FILE).exists());
+            std::fs::write(root.join(".fixture-server-rows"), PODMAN_RUNNING).unwrap();
+            std::fs::write(root.join(".fixture-server-asked"), "0").unwrap();
+            let result = wait_until_healthy_saying(
+                &ready,
+                std::time::Duration::from_secs(2),
+                || true,
+                &mut || server_refusal(&address, &root),
+                &mut |_| {},
+            );
+            assert_eq!(
+                result,
+                Err(NotReady::NotAnswering(
+                    "the API is not answering on port 1.".to_owned()
+                )),
+                "{address:?}"
+            );
+        }
+        // The rows that do carry 78 are each a refusal by themselves, and `running` is not.
+        assert_eq!(
+            refused_server_in(PODMAN_EXITED_78).as_deref(),
+            Some("6c1f0e2a9b3d")
+        );
+        assert_eq!(
+            refused_server_in(PODMAN_EXITED_0_STATUS_78).as_deref(),
+            Some("6c1f0e2a9b3d")
+        );
+        assert_eq!(refused_server_in(PODMAN_RUNNING), None);
+    }
+
+    /// A Retry after the setting was put right reads no refusal from the server it replaces.
+    ///
+    /// Found on Windows under Podman: SMTP_HOST without MAIL_FROM, Start, the refusal shown; the
+    /// setting taken out, Retry, and the same sentence again although the new server answered
+    /// `/health`. The old server, which the engine kept restarting with the old settings, refused
+    /// again and wrote its sentence after Start took the file away and before Compose replaced it.
+    /// Here that server writes its sentence every 10 ms until the engine stops it.
+    #[test]
+    fn a_retry_reads_no_refusal_from_the_server_it_replaces() {
+        if crate::test_support::isolated_process(
+            "stack::tests::a_retry_reads_no_refusal_from_the_server_it_replaces",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("server-refusal");
+        for address in computer_stop_addresses(&path) {
+            let (root, _) =
+                computer_stop_root(&path, &format!("retry-{}", address.engine.binary()), "{}");
+            // The new server is up: the engine reports no refusal of its own.
+            std::fs::write(root.join(".fixture-server-rows"), PODMAN_RUNNING).unwrap();
+            std::fs::create_dir_all(root.join(".openbot")).unwrap();
+            let file = root.join(".openbot").join(REFUSAL_FILE);
+            std::fs::write(&file, format!("{REFUSAL}\n")).unwrap();
+            std::fs::write(root.join(".fixture-old-server-alive"), "").unwrap();
+            let old_server = {
+                let (root, file) = (root.clone(), file.clone());
+                std::thread::spawn(move || {
+                    while !root.join(".fixture-stop-server").exists() {
+                        std::fs::write(&file, format!("{REFUSAL}\n")).ok();
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    // Told to stop, it takes a moment to go, and refuses again meanwhile: only
+                    // waiting for it to be gone, as `rm --stop` does, leaves nothing to read.
+                    let stopping = std::time::Instant::now();
+                    while stopping.elapsed() < std::time::Duration::from_secs(1) {
+                        std::fs::write(&file, format!("{REFUSAL}\n")).ok();
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    std::fs::remove_file(root.join(".fixture-old-server-alive")).unwrap();
+                })
+            };
+
+            forget_refusal(&address, &root);
+            // Many times over the time the old server takes to come round again.
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            let read = server_refusal(&address, &root);
+
+            std::fs::write(root.join(".fixture-stop-server"), "").unwrap();
+            old_server.join().unwrap();
+            assert!(
+                !root.join(".fixture-rm-gave-up").exists(),
+                "{address:?}: the engine gave up waiting for the old server to stop"
+            );
+            assert_eq!(read, None, "{address:?}: the old server's refusal was read");
+        }
+    }
+
+    /// A Retry that catches the old server's sentence half written still removes that server.
+    ///
+    /// A server writes the file by emptying it and then writing its sentence, every time the
+    /// engine restarts it. Caught between the two, the file was there but empty, read as no
+    /// refusal; Podman reports the server `running` nearly all the time, so the old server was
+    /// left in place and wrote its sentence again before Compose replaced it. Here the old
+    /// server is held between the two until the engine stops it, or until the Retry is over.
+    #[test]
+    fn a_retry_that_catches_a_refusal_half_written_still_removes_its_server() {
+        if crate::test_support::isolated_process(
+            "stack::tests::a_retry_that_catches_a_refusal_half_written_still_removes_its_server",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("server-refusal");
+        for address in computer_stop_addresses(&path) {
+            let (root, _) =
+                computer_stop_root(&path, &format!("half-{}", address.engine.binary()), "{}");
+            std::fs::write(root.join(".fixture-server-rows"), PODMAN_RUNNING).unwrap();
+            std::fs::create_dir_all(root.join(".openbot")).unwrap();
+            let file = root.join(".openbot").join(REFUSAL_FILE);
+            // Emptied, its sentence not yet written.
+            std::fs::write(&file, "").unwrap();
+            std::fs::write(root.join(".fixture-old-server-alive"), "").unwrap();
+            let old_server = {
+                let (root, file) = (root.clone(), file.clone());
+                std::thread::spawn(move || {
+                    let (stop, finish) = (
+                        root.join(".fixture-stop-server"),
+                        root.join(".fixture-finish-writing"),
+                    );
+                    while !stop.exists() && !finish.exists() {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    if !stop.exists() {
+                        std::fs::write(&file, format!("{REFUSAL}\n")).unwrap();
+                    }
+                    std::fs::remove_file(root.join(".fixture-old-server-alive")).unwrap();
+                })
+            };
+
+            forget_refusal(&address, &root);
+            // A server still there finishes its sentence now.
+            std::fs::write(root.join(".fixture-finish-writing"), "").unwrap();
+            old_server.join().unwrap();
+            let read = server_refusal(&address, &root);
+
+            assert_eq!(read, None, "{address:?}: the old server's refusal was read");
+        }
     }
 
     /// The folder-derived name is now only the name an earlier app's installation ran as, which
@@ -9913,6 +13202,77 @@ fn main() {
                 Some(DESKTOP_PROJECT.to_owned())
             )
         );
+    }
+
+    #[test]
+    fn a_new_folder_runs_as_the_project_the_variable_names_beside_an_installed_openbot() {
+        const TEST: &str = "stack::tests::a_new_folder_runs_as_the_project_the_variable_names_beside_an_installed_openbot";
+        if crate::test_support::isolated_process(TEST) {
+            return;
+        }
+        let side = "openbot-side-by-side";
+        std::env::set_var(PROJECT_VARIABLE, side);
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let docker = Address::new(crate::engine::Engine::Docker, None);
+        let (installed, _) = project_choice_root(&path, "installed");
+        let (root, _) = project_choice_root(&path, "side");
+        // The installed OpenBot is running, as `DESKTOP_PROJECT`, from its own folder.
+        std::fs::write(
+            root.join(".fixture-containers"),
+            compose_container_row("c-installed", "server", DESKTOP_PROJECT, &installed),
+        )
+        .unwrap();
+        assert_eq!(project(&docker, &root).unwrap(), side);
+        assert_eq!(saved_project(&root).as_deref(), Some(side));
+        // Its Bots' computers are its own too: Quit stops these, and only these.
+        assert_eq!(
+            compose_names(&docker, &root),
+            (Some(side.to_owned()), Some(side.to_owned()))
+        );
+    }
+
+    #[test]
+    fn only_another_project_gives_the_app_an_identifier_of_its_own() {
+        const BUILT: &str = "ai.copilotkit.openbot.desktop";
+        for unchanged in [None, Some(""), Some("Not A Name"), Some(DESKTOP_PROJECT)] {
+            assert_eq!(side_by_side_named(unchanged), None, "{unchanged:?}");
+            assert_eq!(
+                identifier_named(BUILT, side_by_side_named(unchanged).as_deref()),
+                BUILT
+            );
+        }
+        let side = side_by_side_named(Some("openbot-test2"));
+        assert_eq!(side.as_deref(), Some("openbot-test2"));
+        assert_eq!(
+            identifier_named(BUILT, side.as_deref()),
+            "ai.copilotkit.openbot.desktop.openbot-test2"
+        );
+    }
+
+    #[test]
+    fn the_project_variable_is_ignored_unless_compose_accepts_the_name() {
+        assert_eq!(desktop_project_named(None), DESKTOP_PROJECT);
+        for ignored in [
+            "",
+            "  ",
+            "Upper",
+            "-leading",
+            "_leading",
+            "two words",
+            "a/b",
+            "dot.ted",
+        ] {
+            assert_eq!(
+                desktop_project_named(Some(ignored)),
+                DESKTOP_PROJECT,
+                "{ignored:?}"
+            );
+        }
+        assert_eq!(
+            desktop_project_named(Some(" openbot-dev \n")),
+            "openbot-dev"
+        );
+        assert_eq!(desktop_project_named(Some("openbot_2")), "openbot_2");
     }
 
     #[test]
@@ -10220,6 +13580,87 @@ fn main() {
         let other = br#"["NOT_OPENBOT_DESKTOP_HOST_TOKEN=x"]"#;
         assert_eq!(host_token_in(other), Ok(None));
         assert!(host_token_in(b"no such container").is_err());
+    }
+
+    /// The same for the install's token, which an earlier session's deployment and the Recorder's
+    /// native host read back. A server from a release before it was given none.
+    #[test]
+    fn the_install_token_is_read_from_the_server_containers_environment() {
+        let given = br#"["OPENBOT_DESKTOP_HOST_TOKEN=host-abc","OPENBOT_INSTALL_TOKEN=install-xyz_-","PATH=/usr/bin"]"#;
+        assert_eq!(install_token_in(given), Ok(Some("install-xyz_-".into())));
+        assert_eq!(host_token_in(given), Ok(Some("host-abc".into())));
+        let empty = br#"["OPENBOT_INSTALL_TOKEN=","PATH=/usr/bin"]"#;
+        assert_eq!(install_token_in(empty), Ok(None));
+        let older = br#"["OPENBOT_DESKTOP_HOST_TOKEN=host-abc","PATH=/usr/bin"]"#;
+        assert_eq!(install_token_in(older), Ok(None));
+        assert_eq!(
+            install_token_in(br#"["XOPENBOT_INSTALL_TOKEN=x"]"#),
+            Ok(None)
+        );
+        assert!(install_token_in(b"no such container").is_err());
+    }
+
+    /// The services of a Compose file whose own block names `setting` in its environment, with the
+    /// value each gives it. Read as text, as `compose_service_names` reads the file.
+    fn services_given(compose: &str, setting: &str) -> Vec<(String, String)> {
+        let mut given = Vec::new();
+        let mut service = None;
+        let mut inside = false;
+        for line in compose.lines() {
+            if line.trim().is_empty() || line.trim_start().starts_with('#') {
+                continue;
+            }
+            if !line.starts_with(' ') {
+                inside = line.trim_end() == "services:";
+                service = None;
+                continue;
+            }
+            if !inside {
+                continue;
+            }
+            if let Some(rest) = line
+                .strip_prefix("  ")
+                .filter(|rest| !rest.starts_with(' '))
+            {
+                service = rest.split_once(':').map(|(name, _)| name.trim().to_owned());
+                continue;
+            }
+            if let (Some(service), Some((key, value))) = (&service, line.trim().split_once(": ")) {
+                if key == setting {
+                    given.push((service.clone(), value.trim().to_owned()));
+                }
+            }
+        }
+        given
+    }
+
+    /// The install's token reaches the server, from the environment Desktop runs Compose in and
+    /// otherwise from `.env` (scripts/start.sh), and no other service. The releases an install may be
+    /// put back to name it nowhere: their server asks for none.
+    #[test]
+    fn the_install_token_is_given_to_the_server_alone() {
+        assert_eq!(
+            services_given(THIS_RELEASES_COMPOSE, crate::install_token::NAME),
+            [(
+                "server".to_string(),
+                "${OPENBOT_INSTALL_TOKEN:-}".to_string()
+            )]
+        );
+        // Beside the host token, which reaches it the same way.
+        assert_eq!(
+            services_given(THIS_RELEASES_COMPOSE, "OPENBOT_DESKTOP_HOST_TOKEN"),
+            [(
+                "server".to_string(),
+                "${OPENBOT_DESKTOP_HOST_TOKEN:-}".to_string()
+            )]
+        );
+        for (release, compose) in RELEASED_COMPOSES {
+            assert_eq!(
+                services_given(compose, crate::install_token::NAME),
+                [],
+                "{release}"
+            );
+        }
     }
 
     #[test]

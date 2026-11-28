@@ -151,15 +151,17 @@ CHOICES = {
         },
         ("openai", "local-model"),
     ),
+    # A model OpenAI serves on Chat Completions with any effort; which API each model takes is
+    # tests/test_responses_api.py's question.
     "an OpenAI key": (
         lambda base: {
             "BOT_PROVIDER": "",
-            "BOT_MODEL": "gpt-5.5",
+            "BOT_MODEL": "gpt-5.2",
             "OPENAI_API_KEY": "test-key",
             "OPENAI_BASE_URL": f"{base}/v1",
             "ANTHROPIC_API_KEY": "",
         },
-        ("openai", "gpt-5.5"),
+        ("openai", "gpt-5.2"),
     ),
 }
 
@@ -222,7 +224,7 @@ def test_an_openai_key_uses_the_official_endpoint_when_compose_sets_a_blank_url(
     monkeypatch.delenv("OPENAI_API_BASE", raising=False)
     monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
     monkeypatch.setenv("BOT_PROVIDER", "")
-    monkeypatch.setenv("BOT_MODEL", "gpt-5.5")
+    monkeypatch.setenv("BOT_MODEL", "gpt-5.2")
     # A key no other test uses: Langroid caches the OpenAI client it builds by API key, so with the
     # "test-key" above this test would be handed that test's client, already pointed at the fake.
     monkeypatch.setenv("OPENAI_API_KEY", "blank-url-test-key")
@@ -238,7 +240,7 @@ def test_an_openai_key_uses_the_official_endpoint_when_compose_sets_a_blank_url(
     )
 
     assert destinations == [("https", "api.openai.com", "/v1/chat/completions")]
-    assert provider_seen == [("openai", "gpt-5.5")]
+    assert provider_seen == [("openai", "gpt-5.2")]
     assert response.status_code == 200
     assert '"RUN_FINISHED"' in response.text
     assert '"RUN_ERROR"' not in response.text

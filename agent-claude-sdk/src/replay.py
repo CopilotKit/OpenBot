@@ -6,7 +6,7 @@ thread, so a restart, or the 30-minute idle eviction, leaves the Bot answering t
 alone. The worker also builds its options once, so context and grants changed after the first run
 never reached it. Here each query gets a fresh worker, built from this run's input, and the
 conversation as its prompt: all of it, or as much as fits `REPLAY_BUDGET_TOKENS`, always with the
-person's first message (see `conversation_content`).
+person's first and latest messages (see `conversation_content`).
 
 Client-tool continuations do not take this path: the adapter resolves their PostToolUse hook in the
 same SDK query that emitted the tool use. The exceptions are answered by a fresh query from here: a
@@ -16,14 +16,25 @@ running (it outlived the query's bound, or the process restarted); see `OpenBotC
 
 import asyncio
 import json
+import logging
 import math
 import os
+import signal
+import subprocess
 import tempfile
 from contextlib import suppress
 from datetime import datetime
 
-from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, StateSnapshotEvent
+from ag_ui.core import (
+    EventType,
+    RunErrorEvent,
+    RunFinishedEvent,
+    StateSnapshotEvent,
+    SystemMessage,
+)
 from ag_ui_claude_sdk.session import SessionWorker
+
+logger = logging.getLogger(__name__)
 
 # How long a query may go without an event: the model endpoint's own, and the full harness's through
 # upstream's `query_timeout_seconds`, which defaults to 300 seconds. A client tool or the person can
@@ -37,6 +48,15 @@ MODEL_QUERY_TIMEOUT_SECONDS = 300
 # The browser inserts system rows too (a skill's instructions arrive that way), and those are part
 # of the conversation, not the Bot's instructions.
 SERVER_INSTRUCTION_ID_PREFIXES = ("standing-role:", "granted-tools:")
+# And the Bot's learned Skills catalog (`RemoteLearnedSkillsMiddleware` in
+# server/src/learning/remote.ts), which the server also drops from a request and writes itself.
+SERVER_INSTRUCTION_IDS = frozenset({"openbot:learned-skills"})
+
+# Context entries that carry data and never instructions: the person's memory, its records quoted
+# as untrusted data by the server (`PersonalMemoryMiddleware` in server/src/memory/tools.ts).
+DATA_CONTEXT = frozenset({"OpenBot personal memory"})
+# The row a data entry is replayed as, among the conversation, never in the system prompt.
+DATA_ROW_ID = "openbot:personal-memory"
 
 # How much of the thread one query replays, in estimated tokens.
 #
@@ -61,9 +81,16 @@ CHARS_PER_TOKEN = 1.5
 # The most visual tokens one image costs on any current model: a 2,576 px long edge on Claude 4.7
 # and later (https://platform.claude.com/docs/en/build-with-claude/vision).
 IMAGE_TOKENS = 4_784
-# What is kept of an earlier turn's tool result when the thread is over the budget; see
-# `fit_to_budget`. Enough for the head of a listing or a document and the ids in it.
+# What is kept of an older tool result when the thread is over the budget; see `fit_to_budget`.
+# Enough for the head of a listing or a document and the ids in it.
 OLD_RESULT_CHARS = 4_000
+# The newest tool results, which a replay over the budget keeps whole and never leaves out: a Bot
+# is told to batch about five reads at once, and a step must see the whole of its latest batch.
+# The same number OpenBot's other engines keep (`KEEP_RESULTS` in agent-langgraph-ts).
+KEEP_WHOLE_RESULTS = 10
+# The tool OpenBot offers for reading a cleared result back, answered from the whole conversation
+# it stores (shared/recall-earlier-results.ts). A replay names it only when the run offers it.
+RECALL = "recall_earlier_results"
 # The most of one tool result a model is shown, in characters: what Claude Code keeps inline for one
 # of OpenBot's tools (`INLINE_RESULT_CHARS` in the adapter). In a running query Claude Code saves a
 # larger result to a file and shows a preview; a replay is one prompt, and a result in it was sent
@@ -80,6 +107,19 @@ def cut_note(cut):
     )
 
 
+def cleared_note(call_id, recall):
+    """What a tool result cleared from a replay says in its place, naming the call it answered."""
+    if recall:
+        return (
+            "[This result was cleared to make room in the conversation. Call "
+            f'{RECALL} with call_id "{call_id}" to read it again.]'
+        )
+    return (
+        f'[This result (call_id "{call_id}") was cleared to make room in the conversation. If '
+        "you need it again, call the tool again.]"
+    )
+
+
 def _cut_result(message, keep):
     """A tool message with its result cut to its first `keep` characters, saying so."""
     content = message.content
@@ -92,11 +132,63 @@ def is_server_instruction(message):
     return (
         message.role == "system"
         and isinstance(message.id, str)
-        and message.id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+        and (
+            message.id.startswith(SERVER_INSTRUCTION_ID_PREFIXES)
+            or message.id in SERVER_INSTRUCTION_IDS
+        )
     )
 
 
-def conversation_content(messages, model_only=True, fit_results=False):
+def as_sent_to_model(input_data):
+    """The run with its context sorted into instructions and data, before anything reads it.
+
+    Upstream appends every AG-UI context entry to the system prompt
+    (`build_state_context_addendum`), which gives each the authority of the Bot's own role.
+    - A context entry that repeats one of the server's instruction rows goes: the row is already
+      in the system prompt (`system_instructions`), so it is said once.
+    - The person's memory ("OpenBot personal memory") is data, never an instruction. It leaves the
+      context and is replayed among the conversation as a labelled system row, quoted like any
+      other row that is not the server's own, unless the thread already carries it.
+    Every other context entry is left for upstream, as before.
+    """
+    messages = list(input_data.messages or [])
+    instructions = {
+        message.content.strip()
+        for message in messages
+        if is_server_instruction(message) and isinstance(message.content, str)
+    }
+    carried = {
+        message.content.strip()
+        for message in messages
+        if message.role == "system" and isinstance(message.content, str)
+    }
+    context = []
+    data = []
+    for entry in input_data.context or []:
+        value = str(entry.value)
+        if value.strip() in instructions:
+            continue
+        if entry.description in DATA_CONTEXT:
+            if value.strip() not in carried:
+                data.append(SystemMessage(id=DATA_ROW_ID, role="system", content=value))
+            continue
+        context.append(entry)
+    if len(context) == len(input_data.context or []) and not data:
+        return input_data
+    # After the server's instruction rows, ahead of the conversation they describe.
+    first_turn = next(
+        (index for index, message in enumerate(messages) if not is_server_instruction(message)),
+        len(messages),
+    )
+    return input_data.model_copy(
+        update={
+            "context": context,
+            "messages": [*messages[:first_turn], *data, *messages[first_turn:]],
+        }
+    )
+
+
+def conversation_content(messages, model_only=True, fit_results=False, recall=False):
     """Replay completed history as labelled data; keep attached images as images.
 
     ClaudeSDKClient.query accepts user input, not an arbitrary assistant history.
@@ -108,28 +200,32 @@ def conversation_content(messages, model_only=True, fit_results=False):
     `model_only` also refuses a part the model cannot be shown. The full harness names such a
     file in the history instead of failing the whole run.
 
-    A thread over `REPLAY_BUDGET_TOKENS` is fitted to it: earlier turns' tool results are cut
-    first (`fit_to_budget`), then the oldest messages are left out (`replay_start`), and the replay
-    says so where they were. The person's first message is always kept: it is the request a long
-    task is being carried out under, and a few short replies later ("skip that one, go on") are
-    meaningless without it.
+    A thread over `REPLAY_BUDGET_TOKENS` is fitted to it: older tool results are cut, then
+    cleared, keeping the newest `KEEP_WHOLE_RESULTS` whole (`fit_to_budget`), then the oldest
+    messages are left out (`replay_start`), and the replay says so where they were. The person's
+    first message is always kept: it is the request a long task is being carried out under, and a
+    few short replies later ("skip that one, go on") are meaningless without it. So is their
+    latest: a turn hundreds of steps long leaves out its own oldest steps, never what it answers.
 
     No tool result is replayed longer than `RESULT_CHARS`. `fit_results` is the retry after the
     model refused the turn as too long (see `OpenBotClaudeAgentAdapter._pump`): every tool result
     is cut to its first `OLD_RESULT_CHARS`, this turn's included, because the window that refused
     it was smaller than the budget assumes.
+
+    `recall` says the run offers `recall_earlier_results`, which a cleared result then names.
     """
     kept = [
         message
         for message in messages
         if message.role != "system"
+        or message.id == DATA_ROW_ID
         or not (model_only or is_server_instruction(message))
     ]
     entries = fit_to_budget(
         kept,
         [_entry_blocks(_cut_result(message, RESULT_CHARS), strict=model_only) for message in kept],
-        budget=0 if fit_results else None,
-        current_turn=fit_results,
+        cut_all=fit_results,
+        recall=recall,
     )
     content = [
         {
@@ -138,7 +234,7 @@ def conversation_content(messages, model_only=True, fit_results=False):
         }
     ]
     first = _first_request(kept)
-    start = replay_start(
+    start, skipped = replay_plan(
         kept,
         [estimated_tokens(blocks) for blocks in entries],
         pinned=first,
@@ -162,8 +258,22 @@ def conversation_content(messages, model_only=True, fit_results=False):
                 ),
             }
         )
-    for blocks in entries[start:]:
-        content.extend(blocks)
+    for index in range(start, len(entries)):
+        if skipped and index == skipped.start:
+            content.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"The person's latest message is above. The {len(skipped)} oldest "
+                        "messages of this turn since then, earlier tool calls and their results, "
+                        "are not shown: they were left out to fit the context window. The newest "
+                        "steps of this turn follow."
+                    ),
+                }
+            )
+        if index in skipped:
+            continue
+        content.extend(entries[index])
     if _read_as_a_command(content[-1]):
         content.append({"type": "text", "text": HISTORY_ENDS})
     return content
@@ -231,53 +341,93 @@ def _latest_request(messages):
     return users[-1] if users else len(messages)
 
 
-def fit_to_budget(messages, entries, budget=None, current_turn=False):
-    """The replay's entries, with the results of earlier turns' tool calls cut to fit `budget`.
+def _is_result(message):
+    return message.role == "tool" and isinstance(message.content, str)
+
+
+def fit_to_budget(messages, entries, budget=None, cut_all=False, recall=False):
+    """The replay's entries, with older tool results cut, then cleared, to fit `budget`.
 
     A tool result is the largest thing in a thread by far: a page of email, an app's tool list, a
     report. A few of them put a thread over the budget, and leaving out its oldest messages
     (`replay_start`) left out the person's own request: the Bot said it could no longer see the
-    task it was half-way through. So the results of earlier turns are cut first, oldest first
-    and only as far as the budget needs, each to its first `OLD_RESULT_CHARS` characters and a
-    line saying how much was left out. The current turn's results (from the latest user message
-    on) are cut only with `current_turn`, after every earlier one: they are what the Bot is working
-    from now, and are cut only when the model refused the turn as too long without it.
+    task it was half-way through. So results go first, oldest first and only as far as the budget
+    needs, in three passes:
+
+    1. Earlier turns' results, each cut to its first `OLD_RESULT_CHARS` characters and a line
+       saying how much was left out.
+    2. The current turn's results (from the latest user message on), the same way. A long task is
+       one turn of hundreds of steps, which the server carries on call by call, and replayed whole
+       it was refused as too long.
+    3. Any result, cleared to a note naming its call (`cleared_note`).
+
+    The newest `KEEP_WHOLE_RESULTS` results are never cut or cleared here: they are what the Bot
+    is working from now. `cut_all` is the retry after the model refused the turn as too long:
+    every result is cut to `OLD_RESULT_CHARS` first, these included.
     """
     budget = REPLAY_BUDGET_TOKENS if budget is None else budget
     entries = list(entries)
     costs = [estimated_tokens(blocks) for blocks in entries]
     total = sum(costs)
-    for index in range(len(messages) if current_turn else _latest_request(messages)):
-        if total <= budget:
-            break
-        message = messages[index]
-        if message.role != "tool" or not isinstance(message.content, str):
-            continue
-        if len(message.content) <= OLD_RESULT_CHARS:
-            continue
-        entries[index] = _entry_blocks(_cut_result(message, OLD_RESULT_CHARS), strict=False)
+    results = [index for index, message in enumerate(messages) if _is_result(message)]
+    newest = set(results[-KEEP_WHOLE_RESULTS:])
+    latest = _latest_request(messages)
+
+    def replace(index, message):
+        nonlocal total
+        entries[index] = _entry_blocks(message, strict=False)
         cost = estimated_tokens(entries[index])
         total += cost - costs[index]
         costs[index] = cost
+
+    if cut_all:
+        for index in results:
+            replace(index, _cut_result(messages[index], OLD_RESULT_CHARS))
+    passes = [
+        ([index for index in results if index < latest], "cut"),
+        ([index for index in results if index > latest and index not in newest], "cut"),
+        ([index for index in results if index not in newest], "clear"),
+    ]
+    for indices, how in passes:
+        for index in indices:
+            if total <= budget:
+                return entries
+            message = messages[index]
+            if how == "cut":
+                if len(message.content) > OLD_RESULT_CHARS:
+                    replace(index, _cut_result(message, OLD_RESULT_CHARS))
+                continue
+            note = cleared_note(message.tool_call_id, recall)
+            if len(message.content) > len(note):
+                replace(index, message.model_copy(update={"content": note}))
     return entries
 
 
 def replay_start(messages, costs, budget=None, pinned=None):
-    """Where the replay starts: the oldest message the newest messages that fit `budget` reach.
+    """Where the replay starts, for a thread whose current turn is replayed whole; see `replay_plan`."""
+    return replay_plan(messages, costs, budget, pinned)[0]
 
-    Everything from the latest user message on is always kept, whatever it costs: it is what this
-    run answers, and any tool calls and results this turn has made since are part of it. The start
-    never falls between a tool call and its result, or on a result, so no call is replayed without
-    its answer and no answer without its call.
+
+def replay_plan(messages, costs, budget=None, pinned=None):
+    """Which messages the replay leaves out to fit `budget`: `(start, skipped)`.
+
+    The replay is the messages from `start` on, less the range `skipped`, after the person's
+    `pinned` first message. It keeps the newest messages that fit, newest first, and always:
+    - the person's latest message: it is what this run answers;
+    - everything from the call of the newest `KEEP_WHOLE_RESULTS` results on, whatever it costs:
+      the steps the Bot is working from now. A turn with fewer results is kept whole.
+    A turn too long to fit leaves out its own oldest steps, between the person's latest message and
+    its newest steps (`skipped`). Nothing earlier is replayed then.
+
+    Neither `start` nor the end of `skipped` falls between a tool call and its result, or on a
+    result, so no call is replayed without its answer and no answer without its call.
 
     `pinned` is the index of a message replayed whatever the start is, the person's first one
-    (see `conversation_content`), so its cost comes out of the budget first.
+    (see `conversation_content`), so its cost comes out of the budget first, with the latest's.
     """
     budget = REPLAY_BUDGET_TOKENS if budget is None else budget
     if sum(costs) <= budget:
-        return 0
-    if pinned is not None:
-        budget -= costs[pinned]
+        return 0, range(0)
     called_at = {}
     for index, message in enumerate(messages):
         for call in getattr(message, "tool_calls", None) or []:
@@ -289,17 +439,28 @@ def replay_start(messages, costs, budget=None, pinned=None):
             if message.tool_call_id in called_at:
                 inside.update(range(called_at[message.tool_call_id] + 1, index + 1))
     users = [index for index, message in enumerate(messages) if message.role == "user"]
-    start = users[-1] if users else len(messages) - 1
-    while start > 0 and start in inside:
-        start -= 1
-    total = sum(cost for index, cost in enumerate(costs[start:], start) if index != pinned)
+    latest = users[-1] if users else len(messages) - 1
+    kept = {index for index in (pinned, latest if users else None) if index is not None}
+    budget -= sum(costs[index] for index in kept)
+    # The newest steps of the turn: from the call of its oldest result still kept whole.
+    tail = latest
+    results = [index for index in range(latest + 1, len(messages)) if messages[index].role == "tool"]
+    if len(results) > KEEP_WHOLE_RESULTS:
+        oldest = results[-KEEP_WHOLE_RESULTS]
+        tail = max(latest, called_at.get(messages[oldest].tool_call_id, oldest))
+    while tail > 0 and tail in inside:
+        tail -= 1
+    start = tail
+    total = sum(cost for index, cost in enumerate(costs[start:], start) if index not in kept)
     for index in range(start - 1, -1, -1):
-        total += 0 if index == pinned else costs[index]
+        total += 0 if index in kept else costs[index]
         if total > budget:
             break
         if index not in inside:
             start = index
-    return start
+    if users and start > latest:
+        return latest, range(latest + 1, start)
+    return start, range(0)
 
 
 def _content_block(part):
@@ -357,6 +518,149 @@ def system_prompt_in_file(options):
     return path
 
 
+# How long ending a query waits for Claude Code to take the interrupt. The SDK itself waits 60
+# seconds for the answer, and a Claude Code blocked on a tool call may never give one.
+INTERRUPT_SECONDS = 10
+# How long `SessionWorker.stop` may take to close the query the SDK's way: stop its in-process MCP
+# servers (5 seconds for a stuck tool), close Claude Code's stdin and give it 5 seconds to exit,
+# then terminate it.
+STOP_SECONDS = 20
+# How long Claude Code is given to exit after SIGTERM before it is sent SIGKILL.
+TERMINATE_SECONDS = 5
+
+# The ends of queries still under way, held so none is collected before it finishes.
+_ENDING = set()
+
+
+def finish_regardless(coroutine):
+    """Run `coroutine` to its end even if whoever awaits it is cancelled.
+
+    Ending a query is a run of awaits (interrupt Claude Code, close the SDK client, wait for the
+    process), and a cancellation that reaches any of them leaves Claude Code running. The SDK's
+    own close says so: an asyncio cancellation that arrives while it closes skips its terminate and
+    kill. The cancellations come from the run itself: a second stop, the person's next message, a
+    request that closed (whose cleanup Starlette cancels again at every await). Awaited through
+    this, the caller can still be cancelled; the work it started finishes anyway.
+    """
+    task = asyncio.ensure_future(coroutine)
+    _ENDING.add(task)
+    task.add_done_callback(_ended)
+    return asyncio.shield(task)
+
+
+def _ended(task):
+    _ENDING.discard(task)
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("Ending a Claude query failed", exc_info=task.exception())
+
+
+def _cli_transport(worker):
+    """The SDK transport that started this worker's Claude Code, while the worker holds it."""
+    return getattr(getattr(worker, "_client", None), "_transport", None)
+
+
+def _descendants(pid):
+    """The process ids under `pid`: whatever Claude Code itself started."""
+    children = {}
+    try:
+        if os.path.isdir("/proc"):
+            for entry in os.listdir("/proc"):
+                if not entry.isdigit():
+                    continue
+                with suppress(OSError, IndexError, ValueError):
+                    with open(f"/proc/{entry}/stat", encoding="utf-8") as stat:
+                        # The command name is in parentheses and may hold spaces; the parent follows it.
+                        ppid = int(stat.read().rsplit(")", 1)[1].split()[1])
+                    children.setdefault(ppid, []).append(int(entry))
+        else:
+            listing = subprocess.run(
+                ["ps", "-A", "-o", "pid=", "-o", "ppid="],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True,
+            ).stdout
+            for line in listing.splitlines():
+                child, parent = (int(field) for field in line.split())
+                children.setdefault(parent, []).append(child)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+    found, pending = [], [pid]
+    while pending:
+        for child in children.get(pending.pop(), []):
+            found.append(child)
+            pending.append(child)
+    return found
+
+
+async def end_cli_process(process):
+    """Make sure a query's Claude Code, and anything it started, is no longer running.
+
+    The SDK's close does this itself when it is allowed to finish, and then leaves nothing here to
+    do. When it was cut short, Claude Code is still running with its stdin open, waiting on a tool
+    call or for its next message, and nothing else will ever end it.
+    """
+    if process is None or process.returncode is not None:
+        return
+    logger.warning("Claude Code outlived its query's close; ending it (pid %s)", process.pid)
+    descendants = await asyncio.to_thread(_descendants, process.pid)
+    with suppress(ProcessLookupError):
+        process.terminate()
+    try:
+        async with asyncio.timeout(TERMINATE_SECONDS):
+            await process.wait()
+    except TimeoutError:
+        with suppress(ProcessLookupError):
+            process.kill()
+        with suppress(TimeoutError):
+            async with asyncio.timeout(TERMINATE_SECONDS):
+                await process.wait()
+    for pid in descendants:
+        with suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, signal.SIGKILL)
+    # Its pipes, which the SDK keeps open for as long as it keeps the process.
+    with suppress(Exception):
+        async with asyncio.timeout(TERMINATE_SECONDS):
+            await process.aclose()
+
+
+async def end_query(adapter, worker, thread, run, turn, transport, prompt_file):
+    """End one query: interrupt Claude Code, close its SDK client, and make sure it has exited.
+
+    Runs through `finish_regardless`, so a cancellation of the run that started it cannot cut it
+    short. Each SDK step is bounded, and whatever they leave running is ended here.
+    """
+    transport = _cli_transport(worker) or transport
+    try:
+        # Stop the CLI before cancelling any unresolved PostToolUse hooks; no placeholder result
+        # may reach Claude.
+        with suppress(TimeoutError):
+            async with asyncio.timeout(INTERRUPT_SECONDS):
+                await worker.interrupt()
+        if turn:
+            for result in turn.results.values():
+                if not result.done():
+                    result.cancel()
+        # Only this query's own entries: a newer query on the thread may already be running.
+        if (adapter._workers.get(thread) or {}).get("worker") is worker:
+            adapter._workers.pop(thread, None)
+            adapter._per_thread_state.pop(thread, None)
+        adapter._per_run_result.pop((thread, run), None)
+        transport = _cli_transport(worker) or transport
+        try:
+            async with asyncio.timeout(STOP_SECONDS):
+                await worker.stop()
+        except TimeoutError:
+            logger.warning("Claude Code's SDK client did not close within %ss", STOP_SECONDS)
+    finally:
+        try:
+            await end_cli_process(getattr(transport, "_process", None))
+        finally:
+            if prompt_file:
+                with suppress(FileNotFoundError):
+                    os.unlink(prompt_file)
+
+
 async def run_replayed_query(adapter, input_data, fit_results=False):
     thread, run = input_data.thread_id, input_data.run_id
     model_only = adapter._model_only
@@ -388,11 +692,17 @@ async def run_replayed_query(adapter, input_data, fit_results=False):
             "message": {
                 "role": "user",
                 "content": conversation_content(
-                    input_data.messages, model_only=model_only, fit_results=fit_results
+                    input_data.messages,
+                    model_only=model_only,
+                    fit_results=fit_results,
+                    recall=any(tool.name == RECALL for tool in input_data.tools or []),
                 ),
             },
             "parent_tool_use_id": None,
         }
+
+    # Read again as the query ends; kept from its first message in case the worker has let go.
+    transport = None
 
     try:
         await worker.start()
@@ -406,7 +716,9 @@ async def run_replayed_query(adapter, input_data, fit_results=False):
         async with asyncio.timeout(timeout) as deadline:
 
             async def moving(messages):
+                nonlocal transport
                 async for message in messages:
+                    transport = transport or _cli_transport(worker)
                     if timeout is not None:
                         deadline.reschedule(asyncio.get_running_loop().time() + timeout)
                     yield message
@@ -431,20 +743,16 @@ async def run_replayed_query(adapter, input_data, fit_results=False):
             else f"The Claude query timed out after {timeout}s."
         )
     finally:
-        # Also runs on HTTP cancellation. Stop the CLI before cancelling any
-        # unresolved PostToolUse hooks; no placeholder result may reach Claude.
-        await worker.interrupt()
-        turn = adapter._turns.get(thread)
-        if turn:
-            for result in turn.results.values():
-                if not result.done():
-                    result.cancel()
-        adapter._workers.pop(thread, None)
-        adapter._per_thread_state.pop(thread, None)
-        adapter._per_run_result.pop((thread, run), None)
-        try:
-            await worker.stop()
-        finally:
-            if prompt_file:
-                with suppress(FileNotFoundError):
-                    os.unlink(prompt_file)
+        # Also runs on HTTP cancellation, and may itself be cancelled again: the query is ended in a
+        # task of its own, which finishes whatever happens to this one (see `finish_regardless`).
+        await finish_regardless(
+            end_query(
+                adapter,
+                worker,
+                thread,
+                run,
+                adapter._turns.get(thread),
+                transport or _cli_transport(worker),
+                prompt_file,
+            )
+        )

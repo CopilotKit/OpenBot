@@ -1,5 +1,22 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import {
+  type InfiniteData,
+  infiniteQueryOptions,
+  type QueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
+import { everyPage } from "@/lib/api/every-page";
+import {
+  getConversation,
+  listConversations,
+  listRefusedTurns,
+} from "@/lib/api/generated/conversations/conversations";
+import type {
+  RefusedTurn as ApiRefusedTurn,
+  Conversation,
+  ConversationSummary,
+} from "@/lib/api/generated/model";
+import { organizationId } from "@/lib/api/request";
+import { keepHeldBusy } from "./held-busy";
 
 /**
  * A channel as the browser sees it.
@@ -92,10 +109,12 @@ export type ChannelSummary = AgentChannel & {
   /**
    * Whether a turn is running in this channel right now.
    *
-   * Mostly socket-only and transient: a person's own run is announced and never stored, so a
-   * refetch drops it. The roster returns it true for a channel with `work`, which is stored, so a
-   * conversation a Bot is still answering in stays lit across a reload. A headless turn — a handoff
-   * hop, a relay — sets it, which is how the roster shows work the browser never streamed.
+   * Mostly socket-only and transient: a person's own run is announced and never stored, so the
+   * server's read never says it. A read keeps what the socket said instead (`held-busy.ts`), so a
+   * roster read again mid-turn does not put the row out. The roster returns it true for a channel
+   * with `work`, which is stored, so a conversation a Bot is still answering in stays lit across a
+   * reload. A headless turn — a handoff hop, a relay — sets it, which is how the roster shows work
+   * the browser never streamed.
    */
   busy?: boolean;
   /**
@@ -119,7 +138,41 @@ export const channelKeys = {
   /** Every channel read by id, to refetch them together. */
   details: () => ["channels", "detail"] as const,
   detail: (channelId: string) => ["channels", "detail", channelId] as const,
+  /** Every Bot's list of its conversations (the Bots panel), to patch or refetch them together. */
+  byBots: () => ["channels", "bot"] as const,
+  /** One Bot's conversations, as the Bots panel lists them under it. */
+  byBot: (botId: string) => ["channels", "bot", botId] as const,
+  /** The caller's turns in one conversation that were refused before they ran. */
+  refusedTurns: (channelId: string) =>
+    ["channels", "refused-turns", channelId] as const,
 };
+
+/**
+ * One of the caller's turns in a conversation that was refused before it ran: the API's
+ * `RefusedTurn`. Nothing of it reaches the conversation's thread, so the transcript draws it from
+ * here: the message it was for, after `afterMessageId`, and the refusal under it.
+ */
+export type RefusedTurn = ApiRefusedTurn;
+
+/** Every refused turn of the caller's in a conversation, newest first, page by page to the end. */
+export function refusedTurnsQueryOptions(channelId: string) {
+  return queryOptions({
+    queryKey: channelKeys.refusedTurns(channelId),
+    queryFn: ({ signal }): Promise<RefusedTurn[]> =>
+      everyPage(async (cursor) => {
+        const page = await listRefusedTurns(
+          organizationId(),
+          channelId,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          {
+            signal,
+            fallback: "Couldn't load this conversation's refused turns.",
+          },
+        );
+        return { items: page.refusedTurns, nextCursor: page.nextCursor };
+      }),
+  });
+}
 
 /** One page of channels, and where the next one starts. */
 export type ChannelPage = {
@@ -141,15 +194,44 @@ export function channelListQueryOptions() {
   return infiniteQueryOptions({
     queryKey: channelKeys.list(),
     initialPageParam: "",
-    queryFn: async ({ pageParam }): Promise<ChannelPage> => {
-      const suffix = pageParam
-        ? `?cursor=${encodeURIComponent(pageParam as string)}`
-        : "";
-      const response = await client(`/api/channels${suffix}`, {
-        fallback: "Couldn't load your conversations.",
-      });
-      return (await response.json()) as ChannelPage;
-    },
+    queryFn: async ({ pageParam }): Promise<ChannelPage> =>
+      channelPageOf(
+        await listConversations(
+          organizationId(),
+          pageParam ? { cursor: pageParam as string } : undefined,
+          { fallback: "Couldn't load your conversations." },
+        ),
+      ),
+    getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,
+    select: (data): ChannelSummary[] =>
+      data.pages.flatMap((page) => page.channels),
+  });
+}
+
+/**
+ * One Bot's conversations, newest first, `limit` at a time: the Bots panel's list under a Bot, read
+ * from the server (`botId` on listConversations) so a Bot's older conversations are there too, not
+ * only the ones the roster happens to have loaded. Group conversations are listed under each Bot.
+ */
+export function botConversationsInfiniteQueryOptions(
+  botId: string,
+  limit: number,
+) {
+  return infiniteQueryOptions({
+    queryKey: channelKeys.byBot(botId),
+    initialPageParam: "",
+    queryFn: async ({ pageParam }): Promise<ChannelPage> =>
+      channelPageOf(
+        await listConversations(
+          organizationId(),
+          {
+            botId,
+            limit,
+            ...(pageParam ? { cursor: pageParam as string } : {}),
+          },
+          { fallback: "Couldn't load this Bot's conversations." },
+        ),
+      ),
     getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,
     select: (data): ChannelSummary[] =>
       data.pages.flatMap((page) => page.channels),
@@ -202,18 +284,18 @@ export function channelSearchInfiniteQueryOptions(
     queryKey: channelKeys.search(normalized, limit),
     enabled: isChannelSearchable(normalized),
     initialPageParam: "",
-    queryFn: async ({ pageParam, signal }): Promise<ChannelPage> => {
-      const params = new URLSearchParams({
-        q: normalized,
-        limit: String(limit),
-      });
-      if (pageParam) params.set("cursor", pageParam as string);
-      const response = await client(`/api/channels/search?${params}`, {
-        fallback: "Couldn't search your conversations.",
-        signal,
-      });
-      return (await response.json()) as ChannelPage;
-    },
+    queryFn: async ({ pageParam, signal }): Promise<ChannelPage> =>
+      channelPageOf(
+        await listConversations(
+          organizationId(),
+          {
+            q: normalized,
+            limit,
+            ...(pageParam ? { cursor: pageParam as string } : {}),
+          },
+          { fallback: "Couldn't search your conversations.", signal },
+        ),
+      ),
     getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,
     select: (data): ChannelSummary[] =>
       data.pages.flatMap((page) => page.channels),
@@ -223,10 +305,63 @@ export function channelSearchInfiniteQueryOptions(
 export function channelQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: channelKeys.detail(channelId),
-    queryFn: async (): Promise<AgentChannel> => {
-      return client(`/api/channels/${channelId}`, "channel", {
-        fallback: "Couldn't load this conversation.",
-      });
-    },
+    queryFn: async (): Promise<AgentChannel> =>
+      channelOf(
+        (
+          await getConversation(organizationId(), channelId, {
+            fallback: "Couldn't load this conversation.",
+          })
+        ).conversation,
+      ),
+  });
+}
+
+/**
+ * A conversation as the sidebar's list already holds it, or undefined when the list has not read it.
+ * Nothing is asked: for a screen to name a conversation while its own read is still on its way, as
+ * it is for as long as OpenBot Desktop can't reach the OpenBot it is connected to.
+ */
+export function listedChannel(
+  queryClient: QueryClient,
+  channelId: string,
+): ChannelSummary | undefined {
+  return queryClient
+    .getQueryData<InfiniteData<ChannelPage>>(channelKeys.list())
+    ?.pages.flatMap((page) => page.channels)
+    .find((one) => one.id === channelId);
+}
+
+/**
+ * A conversation as the API answers it, in the names the app's screens and its socket events use:
+ * the API calls a conversation's Bots `botIds`.
+ */
+export function channelOf({ botIds, ...rest }: Conversation): AgentChannel {
+  return { ...rest, agentIds: botIds, work: rest.work as ChannelWork[] };
+}
+
+function channelSummaryOf({
+  botIds,
+  lastMessageBotId,
+  ...rest
+}: ConversationSummary): ChannelSummary {
+  return {
+    ...rest,
+    agentIds: botIds,
+    lastMessageAgentId: lastMessageBotId,
+    work: rest.work as ChannelWork[],
+  };
+}
+
+/**
+ * A page of the roster as the server answered it, with the turns the server can't see kept: a row it
+ * says nothing of busy in stays busy while a turn is known to be running there (`held-busy.ts`).
+ */
+function channelPageOf(page: {
+  conversations: ConversationSummary[];
+  nextCursor: string | null;
+}): ChannelPage {
+  return keepHeldBusy({
+    channels: page.conversations.map(channelSummaryOf),
+    nextCursor: page.nextCursor,
   });
 }

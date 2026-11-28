@@ -8,7 +8,7 @@ import { useEffect } from "react";
 export const OPEN_REQUEST = "openbot:open";
 
 /** A page path of this OpenBot: `/channel/c-1`, never another site or a protocol-relative link. */
-function isOwnPath(path: unknown): path is string {
+export function isOwnPath(path: unknown): path is string {
   return (
     typeof path === "string" && path.startsWith("/") && !path.startsWith("//")
   );

@@ -16,8 +16,9 @@ and installs it when the person says (`SUAutomaticallyUpdate`), and Tauri's upda
 
 WHICH IMAGES. Each release publishes every image the app may pull for it as `desktop-images.json`
 (`release_images`), with the back end release its CLI installs. Of those, only the ones this
-installation runs: for each image its last install pulled (`preparation::installed_images`), the
-release's image of the same repository; and, when the back end's release changes, for each
+installation runs: for each image its last install pulled that it still runs
+(`preparation::images_it_runs`, which leaves out the ChatGPT plan's image unless it is on that
+plan), the release's image of the same repository; and, when the back end's release changes, for each
 repository the bundled CLI pulls into the node (`local_eval::bundled_cli_images`), the release's.
 An image the release adds under a new repository is left to the update, as before.
 
@@ -272,13 +273,7 @@ pub fn computer_free(address: &Address) -> Option<u64> {
     #[cfg(target_os = "macos")]
     {
         let _ = address;
-        let home = std::env::var_os("HOME")?;
-        let path = std::ffi::CString::new(std::os::unix::ffi::OsStrExt::as_bytes(home.as_os_str()))
-            .ok()?;
-        // SAFETY: `path` is a valid C string, and `statvfs` only writes the struct it is given.
-        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
-        let read = unsafe { libc::statvfs(path.as_ptr(), &mut stat) };
-        (read == 0).then(|| u64::from(stat.f_bavail) * stat.f_frsize)
+        crate::windows::mac_drive().map(|drive| drive.free)
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
@@ -635,11 +630,7 @@ mod tests {
     fn laid_out(label: &str, version: &str) -> std::path::PathBuf {
         let root = crate::test_support::temp_root(label);
         std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(
-            root.join("docker-compose.yml"),
-            "services:\n  server: {}\n  worker: {}\n",
-        )
-        .unwrap();
+        std::fs::write(root.join("docker-compose.yml"), "services:\n  server: {}\n").unwrap();
         std::fs::write(crate::deployment::images_path(&root), "{}").unwrap();
         crate::deployment::record(&root, version, false).unwrap();
         root

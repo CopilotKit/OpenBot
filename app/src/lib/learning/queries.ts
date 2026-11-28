@@ -1,31 +1,85 @@
-import type {
-  LearnedSkillDetail,
-  LearningAutoAssignState,
-  LearningDeliveryStatus,
-  LearningOverview,
-  LearningProposal,
-  LearningProposalDetail,
-  LearningRunSummary,
-  LearningSettings,
-  PeopleProposals,
-  PersonalLearningSharing,
-  PersonalReview,
-  RecordingSkills,
-  SharingRequest,
+import {
+  AUTOMATIC_LEARNING_CONTAINER_ID,
+  type LearnedSkillDetail,
+  type LearningAutoAssignState,
+  type LearningProposalDetail,
 } from "@openbot/shared/learning";
-import { queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { queryOptions, replaceEqualDeep } from "@tanstack/react-query";
+import {
+  getBotLearningStatus,
+  getLearnedSkill,
+  getLearningEvidence,
+  getLearningOverview,
+  getLearningProposal,
+  getLearningSettings,
+  getPersonLearningEvidence,
+  getPersonLearningProposal,
+  getPersonLearningReview,
+  getPersonLearningSettings,
+  getPublishedSkill,
+  getRecordingTitles,
+  listLearningProposals,
+  listOrganizationLearningRuns,
+  listPersonalLearningProposals,
+  listPersonLearningProposals,
+  listPublishedSkills,
+  listSkillSharingRequests,
+} from "@/lib/api/generated/learning/learning";
+import type {
+  LearningOverview as ApiLearningOverview,
+  LearningProposal as ApiLearningProposal,
+  LearningSettings as ApiLearningSettings,
+  LearningAutomatic,
+  LearningConfiguration,
+  LearningPerson,
+  LearningRun,
+  PersonLearning,
+  PersonLearningReview,
+  PublishedSkillSummary,
+  SkillDelivery,
+  SkillSharingRequest,
+} from "@/lib/api/generated/model";
+import { organizationId } from "@/lib/api/request";
+import { everyPage } from "@/lib/routines/queries";
+import { assembleProposal } from "./proposal-detail";
+
+/** The person signed in, as the API addresses them. */
+const ME = "me";
+
+/** A skill change Learning proposed in a space, waiting for review or reviewed. */
+export type LearningProposal = ApiLearningProposal;
+/** Which space every Bot learns into, which space each Bot has, and who reviews what people's recordings propose. */
+export type LearningSettings = ApiLearningSettings;
+/** How Learning stands for a space: what waits, what is published, and whether a run is going. */
+export type LearningOverview = ApiLearningOverview;
+/** How a Bot's learned skills reach it. */
+export type LearningDeliveryStatus = SkillDelivery;
+/** One run of Learning over a space, with OpenBot's sentence for why it stopped when it failed. */
+export type LearningRunSummary = LearningRun;
+/** Settings, Learning: the person's sharing choice and the skills in their own space. */
+export type PersonalLearningSharing = PersonLearning;
+/** The person's own review of what each of their spaces proposed, with each space's latest run. */
+export type PersonalReview = PersonLearningReview;
+/** A person whose recordings proposed skills, with their space and what waits in it. */
+export type PeopleProposalsPerson = LearningPerson;
+/** A person's request to open a learned skill to every Bot, by the id an admin decides it with. */
+export type SharingRequest = SkillSharingRequest;
 
 export const learningKeys = {
   all: ["learning"] as const,
   settings: ["learning", "settings"] as const,
   automatic: ["learning", "automatic"] as const,
+  organizationSpace: ["learning", "organization-space"] as const,
   personal: ["learning", "personal"] as const,
   review: ["learning", "review"] as const,
   peopleProposals: ["learning", "people-proposals"] as const,
   sharingRequests: ["learning", "sharing-requests"] as const,
-  personProposal: (userId: string, proposalId: string) =>
-    ["learning", "person-proposal", { userId, proposalId }] as const,
+  personProposal: (userId: string, containerId: string, proposalId: string) =>
+    [
+      "learning",
+      "person-proposal",
+      { userId, containerId, proposalId },
+    ] as const,
   recordingSkills: (title: string, since: number, revision: string) =>
     ["learning", "recording-skills", { title, since, revision }] as const,
   personalProposal: (container: string, proposalId: string) =>
@@ -42,9 +96,9 @@ export const learningKeys = {
     ["learning", "skill", { source, name }] as const,
 };
 
-/** `?agentId=…` for a Bot's own container, nothing for the deployment default. */
-const forBot = (agentId?: string) =>
-  agentId ? `?agentId=${encodeURIComponent(agentId)}` : "";
+/** `{ botId }` for a Bot's own space, nothing for the space every Bot learns into. */
+const forBot = (agentId?: string) => (agentId ? { botId: agentId } : {});
+
 /**
  * Settings, Learning: who else's Bots use the Skills learned from your own recordings, and the Skills in your own
  * Learning space (null when Intelligence did not deliver them).
@@ -53,77 +107,121 @@ export function personalLearningQueryOptions() {
   return queryOptions({
     queryKey: learningKeys.personal,
     retry: false,
-    queryFn: async (): Promise<PersonalLearningSharing> =>
-      (
-        await client("/api/settings/learning", {
-          fallback: "Couldn't load your Learning settings. Reload the page.",
-        })
-      ).json(),
-  });
-}
-export function learningSettingsQueryOptions() {
-  return queryOptions({
-    queryKey: learningKeys.settings,
-    queryFn: (): Promise<LearningSettings> =>
-      client("/api/admin/learning/settings", "settings", {
-        fallback: "Learning settings could not be loaded.",
+    queryFn: ({ signal }): Promise<PersonalLearningSharing> =>
+      getPersonLearningSettings(organizationId(), ME, {
+        signal,
+        fallback:
+          "Couldn't load your Learning settings. Try again in a moment.",
       }),
   });
 }
+
+function readLearningConfiguration(
+  signal?: AbortSignal,
+): Promise<LearningConfiguration> {
+  return getLearningSettings(organizationId(), {
+    signal,
+    fallback: "Learning settings could not be loaded.",
+  });
+}
+
+export function learningSettingsQueryOptions() {
+  return queryOptions({
+    queryKey: learningKeys.settings,
+    queryFn: async ({ signal }): Promise<LearningSettings> =>
+      (await readLearningConfiguration(signal)).settings,
+  });
+}
+
+/**
+ * What OpenBot last found looking for the space it assigns by itself, as the Admin page words it. The space it assigns
+ * is always the same one, so an answer that leaves out which is about that one.
+ */
+export function autoAssignState(
+  automatic: LearningAutomatic | null,
+): LearningAutoAssignState | null {
+  if (!automatic) return null;
+  const containerId = automatic.containerId ?? AUTOMATIC_LEARNING_CONTAINER_ID;
+  if (automatic.state === "assigned") return { state: "assigned", containerId };
+  if (automatic.state === "absent")
+    return {
+      state: "absent",
+      containerId,
+      ...(automatic.instructions !== undefined
+        ? { instructions: automatic.instructions }
+        : {}),
+      ...(automatic.canCreate !== undefined
+        ? { canCreate: automatic.canCreate }
+        : {}),
+      ...(automatic.createError !== undefined
+        ? { createError: automatic.createError }
+        : {}),
+    };
+  return { state: automatic.state };
+}
+
+/**
+ * The id of the container OpenBot keeps for this organization alone, or null where it keeps none and the default is
+ * whichever container is assigned or chosen. Never drawn: lib/learning/display.ts names a container from it.
+ */
+export function learningOrganizationSpaceQueryOptions() {
+  return queryOptions({
+    queryKey: learningKeys.organizationSpace,
+    retry: false,
+    queryFn: async ({ signal }): Promise<string | null> =>
+      (await readLearningConfiguration(signal)).organizationSpaceId ?? null,
+  });
+}
+
 /** Why no container was assigned automatically, or `null` when the server has nothing to say. */
 export function learningAutomaticQueryOptions() {
   return queryOptions({
     queryKey: learningKeys.automatic,
     retry: false,
-    queryFn: async (): Promise<LearningAutoAssignState | null> =>
-      (await client<LearningAutoAssignState | undefined>(
-        "/api/admin/learning/settings",
-        "automatic",
-        { fallback: "Learning settings could not be loaded." },
-      )) ?? null,
+    queryFn: async ({ signal }): Promise<LearningAutoAssignState | null> =>
+      autoAssignState((await readLearningConfiguration(signal)).automatic),
   });
 }
+
 export function learningOverviewQueryOptions(agentId?: string) {
   return queryOptions({
     queryKey: ["learning", "overview", agentId],
     retry: false,
-    queryFn: (): Promise<LearningOverview> =>
-      client(
-        `/api/admin/learning/overview${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ""}`,
-        "overview",
-        { fallback: "Learning status could not be loaded." },
-      ),
+    queryFn: ({ signal }): Promise<LearningOverview> =>
+      getLearningOverview(organizationId(), forBot(agentId), {
+        signal,
+        fallback: "Learning status could not be loaded.",
+      }),
   });
 }
+
 export function learningDeliveryQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: ["learning", "delivery", agentId],
     enabled: Boolean(agentId),
     retry: false,
-    queryFn: (): Promise<LearningDeliveryStatus> =>
-      client(
-        `/api/admin/learning/status/${encodeURIComponent(agentId)}`,
-        "status",
-        { fallback: "Skill delivery status could not be loaded." },
-      ),
+    queryFn: ({ signal }): Promise<LearningDeliveryStatus> =>
+      getBotLearningStatus(organizationId(), agentId, {
+        signal,
+        fallback: "Skill delivery status could not be loaded.",
+      }),
   });
 }
-/** Create the project's container with the deployment's credential, then report what assignment found. */
-export function createLearningContainer(): Promise<LearningAutoAssignState> {
-  return client("/api/admin/learning/container", "automatic", {
-    method: "POST",
-    body: {},
-    fallback: "The Learning container could not be created.",
-  });
-}
-export function saveLearningSettings(
-  settings: LearningSettings,
-): Promise<LearningSettings> {
-  return client("/api/admin/learning/settings", "settings", {
-    method: "PUT",
-    body: settings,
-    fallback: "Learning settings could not be saved.",
-  });
+
+/**
+ * The space a Bot learns into, or the one every Bot does, by the saved settings: a Bot named there has its own (null
+ * leaves it out of Learning), any other uses the default. Null where none is assigned.
+ */
+async function spaceFor(
+  agentId: string | undefined,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const { settings } = await readLearningConfiguration(signal);
+  const target =
+    agentId && Object.hasOwn(settings.bots, agentId)
+      ? (settings.bots[agentId] ?? null)
+      : settings.defaultTarget;
+  return target?.containerId ?? null;
 }
 
 /** The container a proposal list is for, and its proposed skills, newest first, reviewed ones included. */
@@ -132,21 +230,31 @@ export type LearningProposals = {
   proposals: LearningProposal[];
 };
 
-/** Admin → Automatic learning: the skills Intelligence proposed for a Bot's container, or the default. */
+/** Admin → Automatic learning: the skills Learning proposed for a Bot's space, or the default. */
 export function learningProposalsQueryOptions(agentId?: string) {
   return queryOptions({
     queryKey: learningKeys.proposals(agentId),
     retry: false,
-    queryFn: async (): Promise<LearningProposals> =>
-      (
-        await client(`/api/admin/learning/proposals${forBot(agentId)}`, {
-          fallback: "Couldn't load proposed skills. Try again.",
-        })
-      ).json(),
+    queryFn: async ({ signal }): Promise<LearningProposals> => {
+      const [containerId, proposals] = await Promise.all([
+        spaceFor(agentId, signal),
+        everyPage(async (params) => {
+          const page = await listLearningProposals(
+            organizationId(),
+            { ...forBot(agentId), ...params },
+            { signal, fallback: "Couldn't load proposed skills. Try again." },
+          );
+          return { items: page.proposals, nextCursor: page.nextCursor };
+        }),
+      ]);
+      return { containerId, proposals };
+    },
   });
 }
 
-/** One proposed skill with every file it publishes and the evidence behind it. */
+const PROPOSAL_FALLBACK = "Couldn't load this skill. Try again.";
+
+/** One proposed skill in a Bot's space, or the default, with every file it publishes and the evidence behind it. */
 export function learningProposalQueryOptions(
   proposalId: string,
   agentId?: string,
@@ -154,46 +262,72 @@ export function learningProposalQueryOptions(
   return queryOptions({
     queryKey: learningKeys.proposal(proposalId, agentId),
     retry: false,
-    queryFn: (): Promise<LearningProposalDetail> =>
-      client(
-        `/api/admin/learning/proposals/${encodeURIComponent(proposalId)}${forBot(agentId)}`,
-        "proposal",
-        { fallback: "Couldn't load this skill. Try again." },
+    queryFn: async ({ signal }): Promise<LearningProposalDetail> =>
+      assembleProposal(
+        await getLearningProposal(
+          organizationId(),
+          proposalId,
+          forBot(agentId),
+          { signal, fallback: PROPOSAL_FALLBACK },
+        ),
+        {
+          evidence: (insightId) =>
+            getLearningEvidence(organizationId(), insightId, forBot(agentId), {
+              signal,
+            }),
+        },
       ),
   });
 }
 
-/** The analysis runs of a Bot's container, or the default, newest first. */
+/** The analysis runs of a Bot's space, or the default, newest first. */
 export function learningRunsQueryOptions(agentId?: string) {
   return queryOptions({
     queryKey: learningKeys.runs(agentId),
     retry: false,
-    queryFn: async (): Promise<{
-      containerId: string | null;
-      runs: LearningRunSummary[];
-    }> =>
-      (
-        await client(`/api/admin/learning/runs${forBot(agentId)}`, {
-          fallback: "Couldn't load analysis runs. Try again.",
-        })
-      ).json(),
+    queryFn: async ({
+      signal,
+    }): Promise<{ containerId: string | null; runs: LearningRunSummary[] }> => {
+      const [containerId, runs] = await Promise.all([
+        spaceFor(agentId, signal),
+        everyPage(async (params) => {
+          const page = await listOrganizationLearningRuns(
+            organizationId(),
+            { ...forBot(agentId), ...params },
+            { signal, fallback: "Couldn't load analysis runs. Try again." },
+          );
+          return { items: page.runs, nextCursor: page.nextCursor };
+        }),
+      ]);
+      return { containerId, runs };
+    },
   });
 }
 
-/** The skills published in a Bot's container, or the default. */
+/** The skills published in a Bot's space, or the default, read to the end of the list. */
 export function learnedSkillsQueryOptions(agentId?: string) {
   return queryOptions({
     queryKey: learningKeys.skills(agentId),
     retry: false,
-    queryFn: async (): Promise<{
+    queryFn: async ({
+      signal,
+    }): Promise<{
       containerId: string | null;
-      skills: { name: string; description: string }[];
-    }> =>
-      (
-        await client(`/api/admin/learning/skills${forBot(agentId)}`, {
-          fallback: "Couldn't load published skills. Try again.",
-        })
-      ).json(),
+      skills: PublishedSkillSummary[];
+    }> => {
+      // Every page names the same space; the first one says which.
+      let containerId: string | null | undefined;
+      const skills = await everyPage(async (params) => {
+        const page = await listPublishedSkills(
+          organizationId(),
+          { ...forBot(agentId), ...params },
+          { signal, fallback: "Couldn't load published skills. Try again." },
+        );
+        containerId ??= page.containerId;
+        return { items: page.skills, nextCursor: page.nextCursor };
+      });
+      return { containerId: containerId ?? null, skills };
+    },
   });
 }
 
@@ -203,18 +337,6 @@ export type LearnedSkillSource =
   | { kind: "personal" }
   | { kind: "person"; userId: string };
 
-function learnedSkillPath(source: LearnedSkillSource, name: string) {
-  const skill = encodeURIComponent(name);
-  switch (source.kind) {
-    case "admin":
-      return `/api/admin/learning/skills/${skill}${forBot(source.agentId)}`;
-    case "personal":
-      return `/api/settings/learning/skills/${skill}`;
-    case "person":
-      return `/api/admin/learning/people/${encodeURIComponent(source.userId)}/skills/${skill}`;
-  }
-}
-
 /** One published skill with every file it contains and, from your own space, the recordings it was learned from. */
 export function learnedSkillQueryOptions(
   source: LearnedSkillSource,
@@ -223,10 +345,30 @@ export function learnedSkillQueryOptions(
   return queryOptions({
     queryKey: learningKeys.skill(source, name),
     retry: false,
-    queryFn: (): Promise<LearnedSkillDetail> =>
-      client(learnedSkillPath(source, name), "skill", {
+    queryFn: ({ signal }): Promise<LearnedSkillDetail> => {
+      const options = {
+        signal,
         fallback: "Couldn't load this skill. Try again.",
-      }),
+      };
+      switch (source.kind) {
+        case "admin":
+          return getPublishedSkill(
+            organizationId(),
+            name,
+            forBot(source.agentId),
+            options,
+          );
+        case "personal":
+          return getLearnedSkill(organizationId(), ME, name, options);
+        case "person":
+          return getLearnedSkill(
+            organizationId(),
+            source.userId,
+            name,
+            options,
+          );
+      }
+    },
   });
 }
 
@@ -235,22 +377,90 @@ export function personalReviewQueryOptions() {
   return queryOptions({
     queryKey: learningKeys.review,
     retry: false,
-    // While a run is going the review is read again, so what it proposes (or approves) shows up without a reload.
+    queryFn: ({ signal }): Promise<PersonalReview> =>
+      getPersonLearningReview(organizationId(), ME, {
+        signal,
+        fallback: "Couldn't load your skills to review. Try again in a moment.",
+      }),
+    // While a run is going the review is read again, so what it proposes (or approves) shows up without a reload, and
+    // after a read that failed it is read again until one answers. Every person's reads go through the one project key,
+    // which the backend limits: so every thirty seconds while a run goes, and once a minute after a failed read.
     refetchInterval: (query) =>
-      query.state.data?.sources.some(
-        (source) =>
-          source.latestRun &&
-          !["succeeded", "failed"].includes(source.latestRun.status),
-      )
-        ? 10_000
-        : false,
-    queryFn: async (): Promise<PersonalReview> =>
-      (
-        await client("/api/settings/learning/review", {
-          fallback: "Couldn't load your skills to review. Reload the page.",
-        })
-      ).json(),
+      query.state.error
+        ? 60_000
+        : query.state.data?.spaces.some(
+              (space) =>
+                space.latestRun &&
+                !["succeeded", "failed"].includes(space.latestRun.status),
+            )
+          ? 30_000
+          : false,
+    structuralSharing: (previous, next) =>
+      replaceEqualDeep(
+        previous,
+        keepSeenRuns(
+          previous as PersonalReview | undefined,
+          next as PersonalReview,
+        ),
+      ),
   });
+}
+
+/**
+ * The review read again, with each space's latest run kept where the new answer has none but the last one did. A
+ * space's runs are never taken away, so an answer without one for a space that had one is a read that came back
+ * short, and saying "No run yet" over a run that finished would be wrong.
+ */
+export function keepSeenRuns(
+  previous: PersonalReview | undefined,
+  next: PersonalReview,
+): PersonalReview {
+  if (!previous) return next;
+  return {
+    ...next,
+    spaces: next.spaces.map((space) => {
+      if (space.latestRun) return space;
+      const seen = previous.spaces.find(
+        (before) => before.containerId === space.containerId,
+      )?.latestRun;
+      return seen ? { ...space, latestRun: seen } : space;
+    }),
+  };
+}
+
+/**
+ * One proposal in a person's own space, assembled for the dialog, with the recordings its evidence cites named as that
+ * person's. `personId` is `me` for your own.
+ */
+function personProposal(
+  personId: string,
+  containerId: string,
+  proposalId: string,
+  signal: AbortSignal,
+): Promise<LearningProposalDetail> {
+  const space = { containerId };
+  return getPersonLearningProposal(
+    organizationId(),
+    personId,
+    proposalId,
+    space,
+    { signal, fallback: PROPOSAL_FALLBACK },
+  ).then((proposal) =>
+    assembleProposal(proposal, {
+      evidence: (insightId) =>
+        getPersonLearningEvidence(
+          organizationId(),
+          personId,
+          insightId,
+          space,
+          {
+            signal,
+          },
+        ),
+      titles: (ids) =>
+        getRecordingTitles(organizationId(), personId, { ids }, { signal }),
+    }),
+  );
 }
 
 /** One skill proposed from your own recordings, with every file it publishes. */
@@ -261,12 +471,8 @@ export function personalProposalQueryOptions(
   return queryOptions({
     queryKey: learningKeys.personalProposal(container, proposalId),
     retry: false,
-    queryFn: (): Promise<LearningProposalDetail> =>
-      client(
-        `/api/settings/learning/proposals/${encodeURIComponent(proposalId)}?container=${encodeURIComponent(container)}`,
-        "proposal",
-        { fallback: "Couldn't load this skill. Try again." },
-      ),
+    queryFn: ({ signal }): Promise<LearningProposalDetail> =>
+      personProposal(ME, container, proposalId, signal),
   });
 }
 
@@ -275,26 +481,35 @@ export function peopleProposalsQueryOptions() {
   return queryOptions({
     queryKey: learningKeys.peopleProposals,
     retry: false,
-    queryFn: async (): Promise<PeopleProposals> =>
-      (
-        await client("/api/admin/learning/people/proposals", {
-          fallback: "Couldn't load people's skills to review. Try again.",
-        })
-      ).json(),
+    queryFn: async ({
+      signal,
+    }): Promise<{ people: PeopleProposalsPerson[] }> => ({
+      people: await everyPage(async (params) => {
+        const page = await listPersonalLearningProposals(
+          organizationId(),
+          params,
+          {
+            signal,
+            fallback: "Couldn't load people's skills to review. Try again.",
+          },
+        );
+        return { items: page.people, nextCursor: page.nextCursor };
+      }),
+    }),
   });
 }
 
 /** One skill proposed from a person's own recordings, with every file it publishes. */
-export function personProposalQueryOptions(userId: string, proposalId: string) {
+export function personProposalQueryOptions(
+  userId: string,
+  containerId: string,
+  proposalId: string,
+) {
   return queryOptions({
-    queryKey: learningKeys.personProposal(userId, proposalId),
+    queryKey: learningKeys.personProposal(userId, containerId, proposalId),
     retry: false,
-    queryFn: (): Promise<LearningProposalDetail> =>
-      client(
-        `/api/admin/learning/people/${encodeURIComponent(userId)}/proposals/${encodeURIComponent(proposalId)}`,
-        "proposal",
-        { fallback: "Couldn't load this skill. Try again." },
-      ),
+    queryFn: ({ signal }): Promise<LearningProposalDetail> =>
+      personProposal(userId, containerId, proposalId, signal),
   });
 }
 
@@ -303,12 +518,19 @@ export function sharingRequestsQueryOptions() {
   return queryOptions({
     queryKey: learningKeys.sharingRequests,
     retry: false,
-    queryFn: (): Promise<SharingRequest[]> =>
-      client("/api/admin/learning/sharing-requests", "requests", {
-        fallback: "Couldn't load sharing requests. Try again.",
+    queryFn: ({ signal }): Promise<SharingRequest[]> =>
+      everyPage(async (params) => {
+        const page = await listSkillSharingRequests(organizationId(), params, {
+          signal,
+          fallback: "Couldn't load sharing requests. Try again.",
+        });
+        return { items: page.requests, nextCursor: page.nextCursor };
       }),
   });
 }
+
+/** A skill proposed from one of the person's recordings, with the space it is in, for opening or reviewing it. */
+export type RecordingSkill = LearningProposal & { container: string };
 
 /**
  * Teach a Bot, after a recording saves: the skills Learning proposed from it, named `title` and stopped at `since`
@@ -323,12 +545,25 @@ export function recordingSkillsQueryOptions(
   return queryOptions({
     queryKey: learningKeys.recordingSkills(title, since, revision),
     retry: false,
-    queryFn: async (): Promise<RecordingSkills> =>
-      (
-        await client(
-          `/api/settings/learning/recording-skills?title=${encodeURIComponent(title)}&since=${since}`,
-          { fallback: "Couldn't read your skills just now. Try again." },
-        )
-      ).json(),
+    queryFn: async ({ signal }): Promise<{ skills: RecordingSkill[] }> => ({
+      skills: await everyPage(async (params) => {
+        const page = await listPersonLearningProposals(
+          organizationId(),
+          ME,
+          { recordingTitle: title, since, ...params },
+          {
+            signal,
+            fallback: "Couldn't read your skills just now. Try again.",
+          },
+        );
+        return {
+          items: page.skills.map((skill) => ({
+            ...skill.proposal,
+            container: skill.containerId,
+          })),
+          nextCursor: page.nextCursor,
+        };
+      }),
+    }),
   });
 }

@@ -3,115 +3,159 @@ import {
   type QueryClient,
   queryOptions,
 } from "@tanstack/react-query";
-import { client } from "@/lib/client";
-export type MemoryRecord = {
-  id: string;
-  content: string;
-  provenance: string;
-  sourceId: string | null;
-  enabled: boolean;
-  reviewState: "unreviewed" | "confirmed" | "edited";
-  /** `intelligence`: held by CopilotKit Intelligence for this person, formed outside OpenBot. */
-  formedBy: "person" | "import" | "bot" | "intelligence";
-  formedByAgentId: string | null;
-  sourceApp: string | null;
-  sourceLink: string | null;
-  observedAt: string | null;
-  updatedAt: string;
-};
-export type MemorySource = {
-  id: string;
-  title: string;
-  agentId: string;
-  toolRef: string;
-  enabled: boolean;
-  syncStatus: "idle" | "running" | "succeeded" | "error";
-  syncError: string | null;
-  lastSyncAt: string | null;
-};
-export type MemorySourceTool = {
-  ref: string;
-  title: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-};
+import {
+  createMemory as createMemoryOperation,
+  createMemorySource,
+  deleteMemory as deleteMemoryOperation,
+  deleteMemorySource,
+  listMemories,
+  listMemorySources,
+  listMemorySourceTools,
+  syncMemorySource,
+  updateMemory as updateMemoryOperation,
+  updateMemorySource,
+} from "@/lib/api/generated/memory/memory";
+import type {
+  MemorySource as ApiMemorySource,
+  MemorySourceTool as ApiMemorySourceTool,
+  CreateMemorySourceRequest,
+  Memory,
+  UpdateMemoryRequest,
+} from "@/lib/api/generated/model";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { everyPage } from "@/lib/routines/queries";
+
+/** Memory is always the signed-in person's own: the API addresses them as `me`. */
+const ME = "me";
+
+/**
+ * One fact the person's Bots remember about them, as the API answers it. `formedBy` says who formed
+ * it; `intelligence` is one held by CopilotKit Intelligence for this person, formed outside OpenBot.
+ */
+export type MemoryRecord = Memory;
+/** One app action a Bot reads facts in from: the API's `MemorySource`, with the Bot as `botId`. */
+export type MemorySource = ApiMemorySource;
+/** One of a Bot's read actions it could read facts in from. */
+export type MemorySourceTool = ApiMemorySourceTool;
+
 export const memoryKeys = {
   all: ["memory"] as const,
   sources: ["memory", "sources"] as const,
   available: (id: string) => ["memory", "available", id] as const,
 };
+
+/** Every memory the person's Bots hold about them, read to the end of the list. */
 export const memoriesQueryOptions = () =>
   queryOptions({
     queryKey: memoryKeys.all,
-    queryFn: (): Promise<MemoryRecord[]> =>
-      client("/api/memory", "memories", { fallback: "Could not load memory" }),
+    queryFn: ({ signal }): Promise<MemoryRecord[]> =>
+      everyPage(async (params) => {
+        const page = await listMemories(organizationId(), ME, params, {
+          signal,
+          fallback: "Could not load memory",
+        });
+        return { items: page.memories, nextCursor: page.nextCursor };
+      }),
   });
+
+/** Every source the person's Bots read facts in from. */
 export const memorySourcesQueryOptions = () =>
   queryOptions({
     queryKey: memoryKeys.sources,
-    queryFn: (): Promise<MemorySource[]> =>
-      client("/api/memory/sources", "sources", {
-        fallback: "Could not load memory sources",
+    queryFn: ({ signal }): Promise<MemorySource[]> =>
+      everyPage(async (params) => {
+        const page = await listMemorySources(organizationId(), ME, params, {
+          signal,
+          fallback: "Could not load memory sources",
+        });
+        return { items: page.sources, nextCursor: page.nextCursor };
       }),
     refetchInterval: 15_000,
   });
-export const availableMemorySourcesQueryOptions = (id: string) =>
+
+/** The read actions one Bot could read facts in from. */
+export const availableMemorySourcesQueryOptions = (botId: string) =>
   queryOptions({
-    queryKey: memoryKeys.available(id),
-    enabled: !!id,
-    queryFn: (): Promise<MemorySourceTool[]> =>
-      client(
-        `/api/memory/sources/available/${encodeURIComponent(id)}`,
-        "tools",
-        { fallback: "Could not load connected app actions" },
-      ),
+    queryKey: memoryKeys.available(botId),
+    enabled: !!botId,
+    queryFn: ({ signal }): Promise<MemorySourceTool[]> =>
+      everyPage(async (params) => {
+        const page = await listMemorySourceTools(
+          organizationId(),
+          botId,
+          params,
+          { signal, fallback: "Could not load connected app actions" },
+        );
+        return { items: page.tools, nextCursor: page.nextCursor };
+      }),
   });
+
 export const createMemory = (content: string) =>
-  client("/api/memory", {
-    method: "POST",
-    body: { content },
-    fallback: "Could not remember this fact",
-  });
-export const updateMemory = (
-  id: string,
-  input: { content?: string; enabled?: boolean; reviewState?: "confirmed" },
-) =>
-  client(`/api/memory/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: input,
-    fallback: "Could not update memory",
-  });
+  createMemoryOperation(
+    organizationId(),
+    ME,
+    { content },
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback: "Could not remember this fact" },
+  );
+
+export type MemoryChange = Pick<
+  UpdateMemoryRequest,
+  "content" | "enabled" | "reviewState"
+>;
+
+export const updateMemory = (id: string, input: MemoryChange) =>
+  updateMemoryOperation(
+    organizationId(),
+    ME,
+    id,
+    input,
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback: "Could not update memory" },
+  );
+
 export const deleteMemory = (id: string) =>
-  client(`/api/memory/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    fallback: "Could not forget this memory",
-  });
-export const addMemorySource = (input: {
-  agentId: string;
-  toolRef: string;
-  title: string;
-  args: Record<string, unknown>;
-}) =>
-  client("/api/memory/sources", {
-    method: "POST",
-    body: input,
-    fallback: "Could not add this source",
-  });
-export const memorySourceAction = (
+  deleteMemoryOperation(
+    organizationId(),
+    ME,
+    id,
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback: "Could not forget this memory" },
+  );
+
+/** Start reading one of a Bot's connected apps' actions as a memory source, and read it once now. */
+export const addMemorySource = (input: CreateMemorySourceRequest) =>
+  createMemorySource(
+    organizationId(),
+    ME,
+    input,
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback: "Could not add this source" },
+  );
+
+const SOURCE_FALLBACK = "Could not change this source";
+
+/** Sync, remove, turn on or turn off one memory source. */
+export async function memorySourceAction(
   id: string,
   action: "sync" | "remove" | "enable" | "disable",
-) =>
-  client(
-    `/api/memory/sources/${encodeURIComponent(id)}${action === "sync" ? "/sync" : ""}`,
-    {
-      method:
-        action === "sync" ? "POST" : action === "remove" ? "DELETE" : "PATCH",
-      ...(action === "enable" || action === "disable"
-        ? { body: { enabled: action === "enable" } }
-        : {}),
-      fallback: "Could not change this source",
-    },
-  );
+): Promise<void> {
+  const headers = { "Idempotency-Key": idempotencyKey() };
+  const options = { fallback: SOURCE_FALLBACK };
+  if (action === "sync")
+    await syncMemorySource(organizationId(), ME, id, headers, options);
+  else if (action === "remove")
+    await deleteMemorySource(organizationId(), ME, id, headers, options);
+  else
+    await updateMemorySource(
+      organizationId(),
+      ME,
+      id,
+      { enabled: action === "enable" },
+      headers,
+      options,
+    );
+}
 
 const settleMemory = (queryClient: QueryClient) => () =>
   queryClient.invalidateQueries({ queryKey: memoryKeys.all });
@@ -123,13 +167,8 @@ export const createMemoryMutationOptions = (queryClient: QueryClient) =>
   });
 export const updateMemoryMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
-    mutationFn: ({
-      id,
-      input,
-    }: {
-      id: string;
-      input: { content?: string; enabled?: boolean; reviewState?: "confirmed" };
-    }) => updateMemory(id, input),
+    mutationFn: ({ id, input }: { id: string; input: MemoryChange }) =>
+      updateMemory(id, input),
     onSettled: settleMemory(queryClient),
   });
 export const deleteMemoryMutationOptions = (queryClient: QueryClient) =>

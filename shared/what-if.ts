@@ -56,14 +56,16 @@ export const WHAT_IF_INTENT_WORDS: Record<WhatIfIntent, string> = {
 /**
  * One action a Bot might take, as the deciders are asked about it.
  *
- * Who: a Bot, and either a person whose accounts and authority the run uses, or a group, for "any
- * member of it". What started the run. Then either an app's tool, or something on the Bot's computer
- * with the page it is on. `effect` is never chosen: it is the app's own classification of the tool,
- * the one a real call is judged by, and the server fills it in.
+ * Who: a Bot, and either a person whose accounts and authority the run uses, or one of the
+ * organization's teams or a directory group, for "any member of it". What started the run. Then
+ * either an app's tool, or something on the Bot's computer with the page it is on. `effect` is never
+ * chosen: it is the app's own classification of the tool, the one a real call is judged by, and the
+ * server fills it in.
  */
 export type WhatIfAction = {
   bot: string;
   person: string;
+  /** `team:<id>` for one of the organization's teams, or a directory group's own name. */
   group: string;
   initiator: WhatIfInitiator;
   surface: "app" | "computer";
@@ -180,7 +182,10 @@ export type WhatIfLabels = {
 export type WhatIfVocabulary = {
   bots: { id: string; name: string; owner: string | null }[];
   people: { id: string; name: string | null; email: string }[];
+  /** The directory groups, by name. */
   groups: string[];
+  /** The organization's teams. An action names one in `group`, as `team:<id>`. */
+  teams?: { id: string; name: string }[];
   apps: {
     id: string;
     name: string;
@@ -262,6 +267,48 @@ export function hostIn(value: string): string | null {
     : null;
 }
 
+/** How an action's `group` names one of the organization's teams: `team:<id>`. */
+const WHAT_IF_TEAM = "team:";
+
+/** What an action's `group` holds for a team. */
+export function whatIfTeamGroup(teamId: string): string {
+  return `${WHAT_IF_TEAM}${teamId}`;
+}
+
+/** The team an action's `group` names, or null when it names a directory group or nothing. */
+export function whatIfTeamOf(group: string): string | null {
+  return group.startsWith(WHAT_IF_TEAM)
+    ? group.slice(WHAT_IF_TEAM.length)
+    : null;
+}
+
+/** What a team is called once it is no longer one of the organization's, after "Anyone in". */
+export const WHAT_IF_MISSING_TEAM = "a team that no longer exists";
+
+/**
+ * What an action's `group` is called after "Anyone in": a team by its name, never its id, and a
+ * directory group by its own name. A team the vocabulary doesn't list has been deleted since.
+ */
+export function whatIfGroupName(
+  group: string,
+  vocabulary: Pick<WhatIfVocabulary, "teams">,
+): string {
+  const teamId = whatIfTeamOf(group);
+  if (teamId === null) return group;
+  return (
+    vocabulary.teams?.find((team) => team.id === teamId)?.name ??
+    WHAT_IF_MISSING_TEAM
+  );
+}
+
+/** Whether an action's `group` is a team or a directory group this OpenBot has. */
+function groupIsKnown(group: string, vocabulary: WhatIfVocabulary): boolean {
+  const teamId = whatIfTeamOf(group);
+  return teamId === null
+    ? vocabulary.groups.includes(group)
+    : (vocabulary.teams ?? []).some((team) => team.id === teamId);
+}
+
 /** The names a chip shows for the values in an action. */
 export function labelsFor(
   action: WhatIfAction,
@@ -272,7 +319,7 @@ export function labelsFor(
   if (bot) labels.bot = bot.name;
   const person = vocabulary.people.find((entry) => entry.id === action.person);
   if (person) labels.person = person.name ?? person.email;
-  if (action.group) labels.group = action.group;
+  if (action.group) labels.group = whatIfGroupName(action.group, vocabulary);
   const app = vocabulary.apps.find((entry) => entry.id === action.app);
   if (app) labels.app = app.name;
   return labels;
@@ -286,12 +333,12 @@ export function missingFrom(
   if (!vocabulary.bots.some((bot) => bot.id === action.bot))
     return "Choose a Bot.";
   if (action.person && action.group)
-    return "Choose a person or a group, not both.";
+    return "Choose a person or a team, not both.";
   if (
     !(
       (action.person &&
         vocabulary.people.some((person) => person.id === action.person)) ||
-      (action.group && vocabulary.groups.includes(action.group))
+      (action.group && groupIsKnown(action.group, vocabulary))
     )
   )
     return "Choose whose account it runs on.";

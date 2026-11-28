@@ -1,4 +1,5 @@
 import { IconFingerprint, IconShieldLock } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import { PageRows } from "@/components/layout/page-shell";
 import {
   Item,
@@ -10,15 +11,38 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { identityProviderWords } from "@/lib/identity-providers/words";
+import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { ControlsSection } from "./controls-section";
 
-/** Admin, Identity providers: whether SSO is the only way in, and directory provisioning. */
-export function SignInSection() {
+/**
+ * What the directory deactivating somebody does. Where people may create organizations
+ * (`canCreate`, the server's verdict), it ends their membership of this organization alone; where
+ * OpenBot keeps one, it ends their access to OpenBot.
+ */
+function deprovisioning(severalOrganizations: boolean): string {
+  return severalOrganizations
+    ? "Deprovisioning removes the person from this organization, retires the connector credentials they granted here and stops their computers. They keep any other organization they're in."
+    : "Deprovisioning ends sessions, blocks the address, retires connector credentials and stops their computers.";
+}
+
+/**
+ * Admin, Identity providers: whether SSO is the only way in, and directory provisioning. `organizationOnly` outside
+ * `default`, where requiring SSO is this organization's rule about its members.
+ */
+export function SignInSection({
+  organizationOnly = false,
+}: {
+  organizationOnly?: boolean;
+}) {
+  const severalOrganizations = useOrganizationChoices()?.canCreate === true;
+  // A hosted OpenBot: no social sign-in, and nothing here is set in an environment its admin holds.
+  const hosted =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
+  const words = identityProviderWords(organizationOnly, hosted);
   return (
-    <ControlsSection
-      description="Addresses in INITIAL_ADMIN_EMAILS can always use social sign-in as an emergency way in. Each of those sign-ins shows in Activity."
-      title="Sign-in"
-    >
+    <ControlsSection description={words.signInDescription} title="Sign-in">
       {({ data, setSetting, saving }) => (
         <PageRows>
           <Item size="sm">
@@ -28,9 +52,7 @@ export function SignInSection() {
             <ItemContent>
               <ItemTitle>Require SSO</ItemTitle>
               <ItemDescription>
-                {data.settings.ssoRequired
-                  ? "People can only sign in through a registered SAML or OpenID Connect provider."
-                  : "People can also sign in with Google, Microsoft or Okta."}
+                {data.settings.ssoRequired ? words.ssoOn : words.ssoOff}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -53,8 +75,8 @@ export function SignInSection() {
               <ItemTitle>SCIM provisioning</ItemTitle>
               <ItemDescription className="line-clamp-none">
                 {data.scim.configured
-                  ? `Directory base URL ${data.scim.baseUrl ?? "(set BETTER_AUTH_URL)"} with the SCIM_BEARER_TOKEN bearer token. Deprovisioning ends sessions, blocks the address, retires connector credentials and stops their computers.`
-                  : "Off. Set SCIM_BEARER_TOKEN to accept provisioning from Okta, Entra or another directory."}
+                  ? `Directory base URL ${data.scim.baseUrl ?? "(set BETTER_AUTH_URL)"} with the SCIM_BEARER_TOKEN bearer token. ${deprovisioning(severalOrganizations)}`
+                  : words.scimOff}
               </ItemDescription>
             </ItemContent>
             <ItemActions>

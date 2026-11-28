@@ -24,6 +24,12 @@ import { ActionChips } from "@/components/what-if/action-chips";
 import { WhatIfResultView } from "@/components/what-if/what-if-result";
 import { isComposing } from "@/lib/composing";
 import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
+import {
   askWhatIf,
   checkWhatIf,
   type WhatIfChecked,
@@ -69,7 +75,7 @@ function WhatIfPage() {
   const vocabulary = useQuery(whatIfVocabularyQueryOptions());
   const [text, setText] = useState("");
   const [asking, setAsking] = useState(false);
-  const [askProblem, setAskProblem] = useState<string | null>(null);
+  const [askProblem, setAskProblem] = useState<Failure | null>(null);
   const [unclear, setUnclear] = useState<string | null>(null);
   /** The question the chips were read from, until the admin starts over. */
   const [asked, setAsked] = useState<string | null>(null);
@@ -78,7 +84,7 @@ function WhatIfPage() {
   );
   const [checked, setChecked] = useState<WhatIfChecked | null>(null);
   const [checking, setChecking] = useState(false);
-  const [checkProblem, setCheckProblem] = useState<string | null>(null);
+  const [checkProblem, setCheckProblem] = useState<Failure | null>(null);
   const question = text.trim();
 
   const setAction = (next: WhatIfAction) => {
@@ -101,7 +107,7 @@ function WhatIfPage() {
         setAction(reading.action);
       }
     } catch (thrown) {
-      setAskProblem((thrown as Error).message);
+      setAskProblem(failureOf(thrown, String(thrown)));
     } finally {
       setAsking(false);
     }
@@ -118,7 +124,7 @@ function WhatIfPage() {
     try {
       setChecked(await checkWhatIf(action, asked ?? undefined));
     } catch (thrown) {
-      setCheckProblem((thrown as Error).message);
+      setCheckProblem(failureOf(thrown, String(thrown)));
     } finally {
       setChecking(false);
     }
@@ -170,13 +176,10 @@ function WhatIfPage() {
             data-what-if-problem
             role="alert"
           >
-            {askProblem}
+            {failureSaid(askProblem)}
           </p>
         ) : unclear ? (
-          <p
-            className="text-amber-700 text-sm dark:text-amber-500"
-            data-what-if-unclear
-          >
+          <p className="text-warning text-sm" data-what-if-unclear>
             {unclear}
           </p>
         ) : null}
@@ -204,7 +207,10 @@ function WhatIfPage() {
         >
           {vocabulary.isError ? (
             <p className="text-destructive text-sm" role="alert">
-              Couldn't load this OpenBot's Bots and apps. Reload the page.
+              {loadFailure(
+                vocabulary.error,
+                "Couldn't load this OpenBot's Bots and apps. Try again in a moment.",
+              )}
             </p>
           ) : (
             <ActionChips
@@ -223,7 +229,7 @@ function WhatIfPage() {
           ) : null}
           {checkProblem ? (
             <p className="mt-3 text-destructive text-sm" role="alert">
-              {checkProblem}
+              {failureSaid(checkProblem)}
             </p>
           ) : null}
         </PageCard>

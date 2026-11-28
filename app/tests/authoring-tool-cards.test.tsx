@@ -9,10 +9,14 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { ActiveBotProvider, useActiveBot } from "@/lib/copilot/active-bot";
 import { BotTools } from "@/lib/copilot/bot-tools";
 import { SkillTools } from "@/lib/copilot/skill-tools";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 import { SKILL_CREATOR_SLUG } from "@/lib/skills/proposal";
 import { queryClient } from "@/query-client";
+import { ME_PATH, meResponse } from "./accounts-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import { SKILLS_PATH, skillsResponse, type TodaySkill } from "./skills-api";
 
 /**
  * The cards and answers of the two authoring tools, drawn by what the SDK actually keeps.
@@ -61,15 +65,12 @@ const existingBot = {
   mine: true,
 };
 
-const existingSkill = {
-  id: "skill-1",
+const existingSkill: TodaySkill = {
   slug: "weekly-summary",
   ownerUserId: ME,
   title: "Weekly summary",
   summary: "Say what moved this week.",
   instructions: "List what moved this week.",
-  origin: "user",
-  installedBy: ME,
   grantedTo: [],
   tools: [],
 };
@@ -84,29 +85,34 @@ function serving(grant: string) {
     release = resolve;
   });
   global.fetch = Object.assign(
-    async (input: RequestInfo | URL) => {
+    async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), "http://127.0.0.1").pathname;
-      if (path === `/api/plugins/for/${BOT}`)
-        return Response.json({
+      if (path === botGrantsPath(BOT))
+        return botGrantsResponse({
           tools: [],
           skills: [
             { slug: grant, title: grant, summary: "", instructions: "" },
           ],
         });
-      if (path === "/api/me")
-        return Response.json({
+      if (path === ME_PATH)
+        return meResponse({
           user: { id: ME, email: "me@example.com", role: "user" },
         });
-      if (path === "/api/agents") {
+      const bots = answerBotsList(input, init, { visible: [existingBot] });
+      if (bots) {
         await released;
-        return Response.json({ agents: [existingBot] });
+        return bots;
+      }
+      if (path === SKILLS_PATH) {
+        await released;
+        return skillsResponse([existingSkill]);
       }
       if (path === "/api/plugins") {
         await released;
         return Response.json({
           catalogue: [],
           servers: [],
-          skills: [existingSkill],
+          skills: [],
           botsMayCallBack: false,
         });
       }
@@ -236,7 +242,7 @@ test("a proposed skill that would overwrite an existing one says so", async () =
   // Whoever asks for them, the skills have loaded by now.
   await waitFor(() =>
     expect(
-      queryClient.getQueryData(pluginsPageQueryOptions().queryKey)?.skills,
+      queryClient.getQueryData(skillListQueryOptions().queryKey),
     ).toHaveLength(1),
   );
   await tree.findByText("Replace /weekly-summary");

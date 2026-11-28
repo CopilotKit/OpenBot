@@ -21,6 +21,7 @@ import {
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * A Bot offering to keep an eye on one thing for the person: the card `offer_check_in` draws.
@@ -111,7 +112,7 @@ export function CheckInOfferCard({
   if (allowed !== true || !agentId || !settings.data) return null;
   const watching = settings.data.find(
     (setting) =>
-      setting.agentId === agentId &&
+      setting.botId === agentId &&
       setting.enabled &&
       (link
         ? setting.sourceLink === link
@@ -157,7 +158,7 @@ export function CheckInOfferCard({
       </div>
       {create.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {create.error.message}
+          {failureSaid(create.error)}
         </p>
       ) : null}
       {channelId ? null : (
@@ -201,8 +202,8 @@ export function CheckInOfferCard({
           onClick={() =>
             channelId &&
             create.mutate({
-              agentId,
-              channelId,
+              botId: agentId,
+              conversationId: channelId,
               subject,
               focus: focus ?? "",
               ...(link && /^https?:\/\//.test(link)

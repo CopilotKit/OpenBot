@@ -8,61 +8,26 @@ import ts from "typescript";
  * OpenBot they mean is the backend (see .claude/skills/openbot-copy), one word.
  *
  * Read are the string literals, template text and JSX text of the desktop window, the app, the
- * server, the Recorder extension and the shared Recorder disclosure, and the string literals of the
- * desktop's native side, whose problems, notices, progress lines and menu items reach the window and
- * the tray.
+ * Recorder extension and the shared Recorder disclosure, and the string literals of the desktop's
+ * native side, whose problems, notices, progress lines and menu items reach the window and the tray.
  * Not read: code identifiers and env names (`intelligenceStack`, `INTELLIGENCE_API_URL`; the check
- * is for the capitalised word), comments, tests, log calls, and docs/ and charts/, which operators
- * read to configure Intelligence by name.
+ * is for the capitalised word), comments, tests, log calls, and docs/, which operators read to
+ * configure Intelligence by name. The server's text comes with the published OpenBot images, not
+ * from this tree.
  */
 const REPO = join(import.meta.dir, "..");
 const WORD = /\bIntelligence\b/;
 
 /**
- * Text that names Intelligence and never reaches a person: written only to the server's log, or
- * refused before the server serves anything. Each entry must still match, so one that goes stale
- * is removed rather than kept as a hole.
+ * Text that names Intelligence and never reaches a person: written only to a log, refused before
+ * anything is served, or only compared with an answer. Each entry must still match, so one that
+ * goes stale is removed rather than kept as a hole.
  */
 const NOT_SHOWN: { file: string; text: string; why: string }[] = [
   {
-    file: "server/src/config.ts",
-    text: "CopilotKit Intelligence is required and is not configured",
-    why: "a boot refusal, printed to the operator's terminal before the server listens",
-  },
-  {
-    file: "server/src/config.ts",
-    text: "both say where the browser reaches the Intelligence gateway",
-    why: "a boot refusal, printed before the server listens",
-  },
-  {
-    file: "server/src/config.ts",
-    text: "must be the Intelligence project's numeric ID",
-    why: "a boot refusal, printed before the server listens",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Intelligence has no valid licence. Give Intelligence's own deployment",
-    why: "the boot log's advice, which names the Helm keys an operator sets",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Intelligence's licence has expired. Renew it and replace COPILOTKIT_LICENSE_TOKEN",
-    why: "the boot log's advice",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Managed Intelligence could not resolve this project's entitlement",
-    why: "the boot log's advice",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Intelligence answers that this deployment's entitlement is not active",
-    why: "the boot log's advice",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Intelligence did not confirm this deployment's entitlement",
-    why: "the boot log's advice",
+    file: "extension/src/offscreen/grant.ts",
+    text: "Could not connect to Intelligence",
+    why: "the CopilotKit runtime's own sentence, which the Recorder looks for in an answer and never shows; reworded, it matches nothing",
   },
 ];
 
@@ -169,9 +134,9 @@ function nativeText(path: string, word = WORD): string[] {
 
 function shown(word = WORD): string[] {
   const found = [
-    ...["desktop/src", "app/src", "server/src", "extension/src"].flatMap(
-      (root) => [...files(join(REPO, root), /\.tsx?$/)],
-    ),
+    ...["desktop/src", "app/src", "extension/src"].flatMap((root) => [
+      ...files(join(REPO, root), /\.tsx?$/),
+    ]),
     join(REPO, "shared/recorder-disclosure.ts"),
   ].flatMap((path) => scriptText(path, word));
   found.push(
@@ -187,24 +152,18 @@ const isNotShown = (hit: string) =>
     (entry) => hit.startsWith(`${entry.file}:`) && hit.includes(entry.text),
   );
 
-test("no text a person reads in the desktop app, the app, the server or the Recorder says Intelligence", () => {
+test("no text a person reads in the desktop app, the app or the Recorder says Intelligence", () => {
   expect(shown().filter((hit) => !isNotShown(hit))).toEqual([]);
 });
 
 /**
- * "Backend" is one word in what a person reads, never "back end" or "Back-end". The one two-word
- * "back end" left is the Recorder matching a message OpenBot does not write. The bare "back-end" is
- * the id of a group of containers (partNames.ts), never shown.
+ * "Backend" is one word in what a person reads, never "back end" or "Back-end". The bare "back-end"
+ * is the id of a group of containers (partNames.ts), never shown.
  */
 test("no text a person reads says back end in two words", () => {
   expect(
     shown(/\b[Bb]ack(?:[\s-]|\\\n)+ends?\b/).filter(
-      (hit) =>
-        !/\s{2}back-end$/.test(hit) &&
-        !(
-          hit.startsWith("extension/src/offscreen/grant.ts:") &&
-          hit.includes("Could not connect to OpenBot's back end")
-        ),
+      (hit) => !/\s{2}back-end$/.test(hit),
     ),
   ).toEqual([]);
 });
@@ -224,24 +183,34 @@ const COPILOTKIT = /(?<!OpenBot\s+by\s+)(?<![\w/.-])CopilotKit(?![\w/-])/;
  */
 const COPILOTKIT_ALLOWED: { file: string; text: string; why: string }[] = [
   {
+    file: "app/src/routes/_authed/admin/management.tsx",
+    text: "CopilotKit sees this install's version and health",
+    why: "managed updates: the company that receives the install's version and health and upgrades it, said before Connect in the same words as the approval page (the glossary's named exception)",
+  },
+  {
+    file: "app/src/routes/_authed/admin/management.tsx",
+    text: "The window is agreed with CopilotKit",
+    why: "managed updates: who the maintenance window is agreed with, the same words as the approval page",
+  },
+  {
+    file: "app/src/routes/_authed/admin/management.tsx",
+    text: "sign in to CopilotKit as an admin",
+    why: "managed updates: the approval page signs in to CopilotKit's own account, under the name its sign-in card shows",
+  },
+  {
+    file: "app/src/routes/_authed/admin/management.tsx",
+    text: "CopilotKit account your licence is under",
+    why: "managed updates: the account's own name, the glossary's named exception like GitHub's and Slack's own words",
+  },
+  {
+    file: "app/src/lib/plan/words.ts",
+    text: "Free because you're a CopilotKit employee",
+    why: "OpenBot Cloud's thank-you to the company's own staff, whose runs are free: the employer is named, in the words it was asked for",
+  },
+  {
     file: "desktop/src/Sections.tsx",
     text: "by CopilotKit",
     why: "the Account step's header, beside OpenBot's name: it reads OpenBot by CopilotKit",
-  },
-  {
-    file: "server/src/config.ts",
-    text: "CopilotKit Intelligence is required and is not configured",
-    why: "a boot refusal, printed to the operator's terminal before the server listens",
-  },
-  {
-    file: "server/src/request-actor.ts",
-    text: "A CopilotKit run requires",
-    why: "a refusal of a run with no signed-in user, which the signed-in app never makes",
-  },
-  {
-    file: "server/src/learning/ensure-container.ts",
-    text: "CopilotKit",
-    why: "the operator's Learning setup, which names the CopilotKit CLI the operator runs",
   },
 ];
 

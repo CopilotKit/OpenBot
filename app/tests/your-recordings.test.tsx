@@ -60,7 +60,14 @@ beforeEach(() => {
     async (path: Parameters<typeof fetch>[0]) => {
       const url = String(path);
       asked.push(url);
-      const cursor = new URL(url, "http://x").searchParams.get("cursor") ?? "";
+      const address = new URL(url, "http://x");
+      // Only the API's address answers, so a request anywhere else fails the test it is in.
+      if (
+        address.pathname !==
+        "/api/v2/organizations/default/people/me/recordings"
+      )
+        return Response.json({ detail: "Not found" }, { status: 404 });
+      const cursor = address.searchParams.get("cursor") ?? "";
       if (failing.has(cursor))
         return Response.json({ error: "Server trouble" }, { status: 500 });
       return Response.json(
@@ -169,7 +176,9 @@ test("Show more loads the next page", async () => {
   await view.findByText("Close a ticket");
   expect(view.getByText("Refund an order")).toBeTruthy();
   await waitFor(() => expect(view.queryByText("Show more")).toBeNull());
-  expect(asked).toContain("/api/recorder/recordings?cursor=c2");
+  expect(asked).toContain(
+    "/api/v2/organizations/default/people/me/recordings?cursor=c2",
+  );
 });
 
 test("a later page that cannot be reached says so below the rows, and Show more retries it", async () => {

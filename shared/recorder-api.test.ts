@@ -49,26 +49,18 @@ describe("recorder constants and paths", () => {
     );
   });
 
-  test("only the capture pass leaves /api/recorder: OpenBot serves the Recorder nothing else", () => {
-    const samples: Record<string, string> = {
+  test("outside the API the Recorder keeps only the released Desktop shells' connect code and the capture pass", () => {
+    expect({
       connectCodes: recorderPaths.connectCodes,
-      connections: recorderPaths.connections,
-      connection: recorderPaths.connection("c"),
-      currentConnection: recorderPaths.currentConnection,
-      me: recorderPaths.me,
-      recordings: recorderPaths.recordings,
-      learning: recorderPaths.learning,
-      activity: recorderPaths.activity,
       trajectoryConnect: recorderPaths.trajectoryConnect("t"),
-    };
-    expect(Object.keys(samples).sort()).toEqual(
-      Object.keys(recorderPaths).sort(),
-    );
-    for (const [name, path] of Object.entries(samples)) {
-      expect(path.startsWith("/api/recorder/")).toBe(
-        name !== "trajectoryConnect",
-      );
-    }
+    }).toEqual({
+      connectCodes: "/api/recorder/connect-codes",
+      trajectoryConnect: "/api/copilotkit/trajectory/t/connect",
+    });
+    expect(Object.keys(recorderPaths).sort()).toEqual([
+      "connectCodes",
+      "trajectoryConnect",
+    ]);
   });
 
   test("the gate refusals carry the documented statuses", () => {

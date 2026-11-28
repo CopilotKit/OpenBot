@@ -35,7 +35,7 @@ export const FREE_RELEASE_FILES = ["CHANGELOG.md", "release-policy.json"];
 /** What a release PR may change only by its version. */
 export const VERSION_ONLY_RELEASE_FILES = [
   "package.json",
-  "charts/openbot/Chart.yaml",
+  "backend-images.env",
   "desktop/src-tauri/Cargo.toml",
   "desktop/src-tauri/Cargo.lock",
 ];

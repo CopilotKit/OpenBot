@@ -19,6 +19,8 @@ import {
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route as ComposioRoute } from "@/routes/_authed/admin/plugins/composio";
+import { APPS_PATH, answerAppsApi, appBody } from "./apps-api";
+import { connectionsCall, startResponse } from "./connections-api";
 
 /**
  * WHAT A FAILED ADD SAYS WHEN A SECOND ADD IS PRESSED BEFORE THE FIRST ONE ANSWERS.
@@ -70,53 +72,83 @@ beforeEach(() => {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const requested = typeof input === "string" ? input : String(input);
     const path = requested.split("?")[0] ?? requested;
-    const json = (body: unknown, status = 200) =>
+    const json = (body: unknown, status = 200, type = "application/json") =>
       new Response(JSON.stringify(body), {
         status,
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": type },
       });
 
-    if (path === "/api/plugins/composio/apps" && init?.method === "POST") {
-      const slug = (JSON.parse(String(init.body)) as { slug: string }).slug;
+    if (path === APPS_PATH && init?.method === "POST") {
+      const { directoryEntryId } = JSON.parse(String(init.body)) as {
+        directoryEntryId: string;
+      };
+      const slug = directoryEntryId.replace(/^directory:/, "");
       if (slug === "slack") {
         // HELD, so the second press genuinely overtakes the first rather than following it. This is
         // the window the defect lives in and the only way a test can stand inside it.
         await slackWaits;
-        return json({ error: SLACK_REFUSAL }, 409);
+        return json(
+          {
+            type: "https://open.bot/errors/app-service-failed",
+            title: "The service behind this app didn't answer.",
+            status: 502,
+            detail: SLACK_REFUSAL,
+            code: "APP_SERVICE_FAILED",
+            category: "dependency",
+            retryable: true,
+            requestId: "req_test",
+            traceId: "trace_test",
+          },
+          502,
+          "application/problem+json",
+        );
       }
-      // The route's own answer: the row it made.
-      return json({ server: { id: `composio-${slug}` } }, 201);
+      // The API's own answer: the app it added.
+      return json(
+        appBody({
+          id: `composio-${slug}`,
+          title: slug,
+          url: `composio://${slug}`,
+          provenance: "composio",
+          authScheme: "OAUTH2",
+        }),
+        201,
+      );
     }
-    if (path === "/api/plugins/composio/apps") {
-      return json({
-        apps: [
-          {
-            slug: "slack",
-            name: "Slack",
-            description: "Messages, channels and files.",
-            logo: null,
-            categories: [],
-            actionCount: 167,
-            // What the server sends on every row; Slack and Gmail are both sign-in apps.
-            connection: { kind: "consent" },
-            enabled: false,
-          },
-          {
-            slug: "gmail",
-            name: "Gmail",
-            description: "Mail, threads and labels.",
-            logo: null,
-            categories: [],
-            actionCount: 42,
-            // What the server sends on every row; Slack and Gmail are both sign-in apps.
-            connection: { kind: "consent" },
-            enabled: false,
-          },
-        ],
+    // The sign-in Connect goes on to once an app is added.
+    if (connectionsCall(path, init)?.operation === "connect")
+      return startResponse({
+        authorizationUrl: `https://sign-in.example/${path}`,
       });
-    }
-    // Everything else this screen's invalidation touches.
-    return json({ servers: [], catalogue: [], composioConfigured: true });
+    // Every read this screen and its invalidation make.
+    const apps = answerAppsApi(input, init, {
+      composioConfigured: true,
+      directory: [
+        {
+          slug: "slack",
+          name: "Slack",
+          description: "Messages, channels and files.",
+          logo: null,
+          categories: [],
+          actionCount: 167,
+          // Slack and Gmail are both sign-in apps.
+          connection: { kind: "consent" },
+          enabled: false,
+        },
+        {
+          slug: "gmail",
+          name: "Gmail",
+          description: "Mail, threads and labels.",
+          logo: null,
+          categories: [],
+          actionCount: 42,
+          connection: { kind: "consent" },
+          enabled: false,
+        },
+      ],
+    });
+    if (apps) return apps;
+    return json({ connections: [] });
   }) as unknown as typeof fetch;
 });
 
@@ -129,6 +161,31 @@ beforeEach(() => {
 const originalOptions = { ...ComposioRoute.options };
 afterEach(() => {
   Object.assign(ComposioRoute.options, originalOptions);
+});
+
+/*
+ * Each press is Connect, which claims a tab for the sign-in on the click: a tab that records nothing
+ * and is closed when the add is refused.
+ */
+let originalOpen: typeof window.open;
+beforeEach(() => {
+  originalOpen = window.open;
+  window.open = (() => {
+    let closed = false;
+    return {
+      get closed() {
+        return closed;
+      },
+      opener: null,
+      close: () => {
+        closed = true;
+      },
+      location: { replace: () => {} },
+    } as unknown as Window;
+  }) as typeof window.open;
+});
+afterEach(() => {
+  window.open = originalOpen;
 });
 
 function renderPicker() {
@@ -187,11 +244,11 @@ test("an add that fails while a second one is pressed still says what went wrong
 
   // The press that will fail, held open by the stub.
   await userEvent.click(
-    await within(slackRow).findByRole("button", { name: "Add" }),
+    await within(slackRow).findByRole("button", { name: "Connect Slack" }),
   );
   // And the press that overtakes it, which rebuilds the shared observer under the first one.
   await userEvent.click(
-    await within(gmailRow).findByRole("button", { name: "Add" }),
+    await within(gmailRow).findByRole("button", { name: "Connect Gmail" }),
   );
 
   /*
@@ -202,7 +259,7 @@ test("an add that fails while a second one is pressed still says what went wrong
    */
   expect(
     within(slackRow)
-      .getByRole("button", { name: "Adding…" })
+      .getByRole("button", { name: "Connecting…" })
       .hasAttribute("disabled"),
   ).toBe(true);
 
@@ -215,6 +272,8 @@ test("an add that fails while a second one is pressed still says what went wrong
 
   // And the row drains on the refusal exactly as it would on a success, so a retry is possible.
   await waitFor(() => {
-    expect(within(slackRow).getByRole("button", { name: "Add" })).toBeTruthy();
+    expect(
+      within(slackRow).getByRole("button", { name: "Connect Slack" }),
+    ).toBeTruthy();
   });
 });

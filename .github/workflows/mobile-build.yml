@@ -1,0 +1,73 @@
+name: OpenBot Mobile build
+
+# Starts a build of OpenBot Mobile (mobile/) on Expo's build service, EAS Build, in the Expo project
+# mobile/app.config.ts names. The build itself runs on Expo's machines and is listed on expo.dev
+# with its install link: this job only starts it and prints that link. mobile/README.md says what
+# each profile is for.
+#
+# Run by hand, from main or from a branch of this repository. The production profile is not offered
+# here: a build for the stores comes from a release workflow of its own, behind a reviewer.
+#
+# EXPO_TOKEN is the token of a robot user of the Expo organization. It is kept in the
+# `mobile-preview` environment and nowhere else. The signing certificates and the Android keystore
+# stay on Expo's side, so this repository holds none of them.
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: The build profile in mobile/eas.json.
+        type: choice
+        options:
+          - preview
+          - development
+          - development-simulator
+        default: preview
+      platform:
+        description: The phones to build for.
+        type: choice
+        options:
+          - all
+          - ios
+          - android
+        default: all
+
+permissions: {}
+
+# A second start of the same build from the same branch waits for the first: each one is a build
+# Expo charges for.
+concurrency:
+  group: mobile-build-${{ github.ref }}-${{ inputs.profile }}-${{ inputs.platform }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Start the build on Expo
+    if: github.repository == 'CopilotKit/OpenBot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: mobile-preview
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No cache, here or for the EAS CLI below: this job starts a build people install, so it
+      # reads nothing another run could have written.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      # The EAS CLI reads mobile/app.config.ts, which needs the app's own packages.
+      - run: npm ci --prefix mobile --ignore-scripts
+      - uses: expo/expo-github-action@5273c2136bd09c2a341fe3340d3e767ce5a13015 # 9.0.2
+        with:
+          eas-version: 27.11.0
+          eas-cache: false
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Start the build
+        working-directory: mobile
+        env:
+          PROFILE: ${{ inputs.profile }}
+          PLATFORM: ${{ inputs.platform }}
+        run: eas build --profile "$PROFILE" --platform "$PLATFORM" --non-interactive --no-wait

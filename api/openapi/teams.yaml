@@ -1,0 +1,1204 @@
+# Teams: the named groups of people inside one organization, and each team's members.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+paths:
+  /api/v2/organizations/{organizationId}/teams:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Teams]
+      operationId: listTeams
+      summary: List an organization's teams
+      description: >-
+        Return one page of the organization's teams, in the order they were
+        created. Any member of the organization can read it. Each team says
+        the caller's own role in it and whether the caller may manage it.
+        search narrows the list to the teams whose name holds it, ignoring
+        case; it finds only this organization's teams. A missing cursor starts
+        at the first page and nextCursor null ends the list. A cursor belongs
+        to the search that made it, so changing the search starts again
+        without one.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:read]
+        - apiKey: []
+      parameters:
+        - name: search
+          in: query
+          description: >-
+            Part of a team's name, matched without regard to case. Leading and
+            trailing spaces are ignored; empty lists every team.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of teams.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/TeamPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [Teams]
+      operationId: createTeam
+      summary: Create a team
+      description: >-
+        Create a team in the organization. Only an owner or an admin of the
+        organization can. A team's name is unique in its organization,
+        whatever its case. A team may sit under a parent team, and then its
+        members can use everything granted to the parent as well. A repeated
+        request with the same Idempotency-Key and body returns the first
+        result.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTeamRequest'
+            examples:
+              named:
+                value:
+                  name: Sales
+                  description: Everybody who sells.
+      responses:
+        '201':
+          description: The team was created.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            Location:
+              description: The new team.
+              schema:
+                type: string
+              example: /api/v2/organizations/default/teams/Tm4Qx8LpV2nWc7RbY1sKd0Ze
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamResponse'
+              examples:
+                created:
+                  $ref: '#/components/examples/CreatedTeam'
+        '400':
+          $ref: '#/components/responses/InvalidTeam'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/TeamConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/teams/{teamId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TeamId'
+    get:
+      tags: [Teams]
+      operationId: getTeam
+      summary: Read one team
+      description: >-
+        Return one of the organization's teams. Any member of the
+        organization can read it. A team of another organization is not
+        found.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The team.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamResponse'
+              examples:
+                team:
+                  $ref: '#/components/examples/CreatedTeam'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    patch:
+      tags: [Teams]
+      operationId: updateTeam
+      summary: Change a team
+      description: >-
+        Change a team's name, its description or its parent team; a field
+        that is absent stays as it is, and a null parent takes the team out
+        from under its parent. An owner or an admin of the organization can,
+        and so can one of the team's maintainers, except that only an owner
+        or an admin changes its parent. A team that comes from the company's
+        directory keeps the directory's name. A team can't be put under
+        itself or under a team beneath it.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTeamRequest'
+            examples:
+              renamed:
+                value:
+                  name: Sales EMEA
+      responses:
+        '200':
+          description: The team as it now is.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamResponse'
+              examples:
+                changed:
+                  $ref: '#/components/examples/CreatedTeam'
+        '400':
+          $ref: '#/components/responses/InvalidTeam'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/TeamForbidden'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '409':
+          $ref: '#/components/responses/TeamConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Teams]
+      operationId: deleteTeam
+      summary: Delete a team
+      description: >-
+        Delete a team. Its members stay in the organization and lose what
+        was granted to the team, at once. Teams under it move up to its own
+        parent. Only an owner or an admin of the organization can. A team
+        that comes from the company's directory is removed there, not here.
+        Deleting a team that is not there changes nothing.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The team is gone.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/TeamForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/teams/{teamId}/members:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TeamId'
+    get:
+      tags: [Teams]
+      operationId: listTeamMembers
+      summary: List a team's members
+      description: >-
+        Return one page of the people in a team, in the order they joined
+        it. Any member of the organization can read it. People who are only
+        in a team beneath this one are not listed, and nor is anybody who is
+        not a member of the organization now: somebody removed from it is
+        listed again once they are restored. search narrows the list to the
+        people whose address or name holds it, ignoring case. A missing cursor
+        starts at the first page and nextCursor null ends the list. A cursor
+        belongs to the search that made it, so changing the search starts
+        again without one.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:read]
+        - apiKey: []
+      parameters:
+        - name: search
+          in: query
+          description: >-
+            Part of an address or a name, matched without regard to case.
+            Leading and trailing spaces are ignored; empty lists everybody.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of the team's members.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamMemberPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/TeamMemberPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/teams/{teamId}/members/{memberId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TeamId'
+      - $ref: '#/components/parameters/TeamMemberId'
+    put:
+      tags: [Teams]
+      operationId: putTeamMember
+      summary: Add a person to a team, or change their role in it
+      description: >-
+        Put a member of the organization in the team with a role, or change
+        the role of somebody already in it. What is granted to the team is
+        theirs from their next request. An owner or an admin of the
+        organization can, and so can one of the team's maintainers. A team
+        that comes from the company's directory takes its people from the
+        directory, so nobody is added to it here.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutTeamMemberRequest'
+            examples:
+              member:
+                value:
+                  role: member
+      responses:
+        '200':
+          description: The person as a member of the team.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamMemberResponse'
+              examples:
+                added:
+                  $ref: '#/components/examples/AddedTeamMember'
+        '400':
+          $ref: '#/components/responses/InvalidTeamMember'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/TeamForbidden'
+        '404':
+          $ref: '#/components/responses/TeamOrPersonNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Teams]
+      operationId: removeTeamMember
+      summary: Take a person out of a team
+      description: >-
+        Take a person out of the team. They stay in the organization and
+        lose what was granted to the team from their next request. An owner
+        or an admin of the organization can, so can one of the team's
+        maintainers, and anybody can take themselves out. A team that comes
+        from the company's directory takes its people from the directory, so
+        nobody is removed from it here. Removing somebody who is not in the
+        team changes nothing.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: They are not in the team.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/TeamForbidden'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/teams/{teamId}/models:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TeamId'
+    get:
+      tags: [Teams]
+      operationId: getTeamModels
+      summary: Read which models a team's people may run
+      description: >-
+        Return the models a team allows its people to run, or null when the
+        team sets none. A person in teams with lists may run any model one
+        of those lists names (their teams' parents' lists included), within
+        what the organization allows: its model allowlist when that narrows
+        anything, otherwise every model. A team with no list sets nothing,
+        and a person in no team with a list runs what the organization
+        allows. Admins and owners are held to it like anyone else. Any
+        member of the organization can read it. A team of another
+        organization is not found.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [organizations:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The team's models, or that it sets none.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamModels'
+              examples:
+                limited:
+                  $ref: '#/components/examples/LimitedTeamModels'
+                none:
+                  $ref: '#/components/examples/NoTeamModels'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    put:
+      tags: [Teams]
+      operationId: replaceTeamModels
+      summary: Set which models a team's people may run
+      description: >-
+        Replace the models a team allows its people to run. At least one,
+        each one the organization's model catalogue offers
+        (getModelCatalogue with view=all), named as the organization's model
+        allowlist names models: provider/model. A model the organization's
+        allowlist leaves out may be listed, and runs only once the
+        organization allows it too. From the next request, the team's
+        people (and the people of the teams beneath it) run only models one
+        of their teams allows. Only an owner or an admin of the
+        organization can, for a team made here or one from the company's
+        directory alike. A repeated request with the same Idempotency-Key
+        and body returns the first result.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamModelsInput'
+            examples:
+              two:
+                value:
+                  models: [openai/gpt-5.6-terra, anthropic/claude-sonnet-5]
+      responses:
+        '200':
+          description: The team's models, as saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamModels'
+              examples:
+                limited:
+                  $ref: '#/components/examples/LimitedTeamModels'
+        '400':
+          $ref: '#/components/responses/InvalidTeamModels'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/TeamModelsAdminOnly'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Teams]
+      operationId: deleteTeamModels
+      summary: Stop limiting a team's models
+      description: >-
+        Clear a team's models, so the team sets none again and its people
+        run what their other teams and the organization allow. Only an owner
+        or an admin of the organization can. Clearing a team that sets none
+        changes nothing.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The team sets no models.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/TeamModelsAdminOnly'
+        '404':
+          $ref: '#/components/responses/TeamNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  parameters:
+    TeamId:
+      name: teamId
+      in: path
+      required: true
+      description: The team's id. Opaque.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: ^[A-Za-z0-9_-]+$
+      example: Tm4Qx8LpV2nWc7RbY1sKd0Ze
+    TeamMemberId:
+      name: memberId
+      in: path
+      required: true
+      description: The person's id, or me for the caller.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: ^[A-Za-z0-9_-]+$
+      example: 2fn8w1c6y4tq7h0mbe3s
+  schemas:
+    TeamRole:
+      type: string
+      description: >-
+        A person's role in a team. A maintainer can rename the team and add
+        and remove its people; a member cannot.
+      enum: [maintainer, member]
+    TeamSource:
+      type: string
+      description: >-
+        Where a team comes from. openbot is a team made here. directory is a
+        group of the company's directory, kept in step with it: its name and
+        its people are the directory's and can't be changed here.
+      enum: [openbot, directory]
+    Team:
+      type: object
+      description: >-
+        One team of an organization, as one of the organization's members
+        sees it. role and canManage are the server's verdicts about the
+        caller.
+      required:
+        - id
+        - name
+        - description
+        - parentTeamId
+        - source
+        - memberCount
+        - role
+        - canManage
+        - canMove
+        - canDelete
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The team's id. Opaque.
+        name:
+          type: string
+          description: What people call it. Unique in its organization.
+        description:
+          type: [string, 'null']
+          description: What the team is for, when somebody has said.
+        parentTeamId:
+          type: [string, 'null']
+          description: >-
+            The team this one sits under, whose grants its members also have.
+            Null for a team under none.
+        source:
+          $ref: '#/components/schemas/TeamSource'
+        memberCount:
+          type: integer
+          minimum: 0
+          description: >-
+            How many people are in the team itself: the people its members
+            list shows.
+        role:
+          oneOf:
+            - $ref: '#/components/schemas/TeamRole'
+            - type: 'null'
+          description: The caller's role in the team. Null when they are not in it.
+        canManage:
+          type: boolean
+          description: >-
+            Whether the caller may rename the team and add and remove its
+            people: the server's verdict.
+        canMove:
+          type: boolean
+          description: >-
+            Whether the caller may put the team under another team or take
+            it out from under one: the server's verdict, true for an owner
+            or an admin of the organization.
+        canDelete:
+          type: boolean
+          description: >-
+            Whether the caller may delete the team: the server's verdict,
+            true for an owner or an admin of the organization, and never for
+            a team that comes from the company's directory.
+        createdAt:
+          type: string
+          format: date-time
+          description: When the team was created.
+    TeamPage:
+      type: object
+      required: [teams, canCreate, nextCursor]
+      properties:
+        teams:
+          type: array
+          description: In the order they were created.
+          items:
+            $ref: '#/components/schemas/Team'
+        canCreate:
+          type: boolean
+          description: >-
+            Whether the caller may create a team here: the server's verdict.
+            The same on every page.
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    TeamResponse:
+      type: object
+      required: [team]
+      properties:
+        team:
+          $ref: '#/components/schemas/Team'
+    CreateTeamRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
+          description: What people call it.
+        description:
+          type: string
+          maxLength: 500
+          pattern: ^[^\x00]*$
+          description: What the team is for.
+        parentTeamId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: ^[A-Za-z0-9_-]+$
+          description: A team of the same organization to put this one under.
+    UpdateTeamRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
+          description: What people call it.
+        description:
+          type: [string, 'null']
+          maxLength: 500
+          pattern: ^[^\x00]*$
+          description: What the team is for. Null clears it.
+        parentTeamId:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 200
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            A team of the same organization to put this one under. Null takes
+            it out from under its parent.
+    TeamMember:
+      type: object
+      description: One person in a team.
+      required: [id, email, name, image, role, isCaller, joinedAt]
+      properties:
+        id:
+          type: string
+          description: The person's id.
+        email:
+          type: string
+          description: Their address.
+        name:
+          type: [string, 'null']
+          description: What OpenBot calls them. Null until they choose.
+        image:
+          type: [string, 'null']
+          description: Their picture's address, when they have one.
+        role:
+          $ref: '#/components/schemas/TeamRole'
+        isCaller:
+          type: boolean
+          description: Whether this person is the caller.
+        joinedAt:
+          type: string
+          format: date-time
+          description: When they joined the team.
+    TeamMemberPage:
+      type: object
+      required: [members, nextCursor]
+      properties:
+        members:
+          type: array
+          description: In the order they joined the team.
+          items:
+            $ref: '#/components/schemas/TeamMember'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    TeamMemberResponse:
+      type: object
+      required: [member]
+      properties:
+        member:
+          $ref: '#/components/schemas/TeamMember'
+    PutTeamMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role:
+          $ref: '#/components/schemas/TeamRole'
+    TeamModelId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
+      description: >-
+        A model, as provider/model: the organization's model allowlist names
+        models this way, from the catalogue's provider and a model's id
+        (getModelCatalogue).
+      example: openai/gpt-5.6-terra
+    TeamModels:
+      type: object
+      description: >-
+        The models a team allows its people to run. models null: the team
+        sets none, and its people run what their other teams and the
+        organization allow.
+      required: [models, updatedBy, updatedAt]
+      properties:
+        models:
+          type: [array, 'null']
+          description: >-
+            The models, as provider/model, in the order they were saved. Null
+            when the team sets none.
+          items:
+            $ref: '#/components/schemas/TeamModelId'
+        updatedBy:
+          type: [string, 'null']
+          description: >-
+            The id of the person who last set them. Null when the team sets
+            none, or that person's account is gone.
+        updatedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When they were last set. Null when the team sets none.
+    TeamModelsInput:
+      type: object
+      additionalProperties: false
+      required: [models]
+      properties:
+        models:
+          type: array
+          minItems: 1
+          maxItems: 200
+          uniqueItems: true
+          description: >-
+            The models the team's people may run, as provider/model. Each one
+            the organization's model catalogue offers.
+          items:
+            $ref: '#/components/schemas/TeamModelId'
+  responses:
+    InvalidTeam:
+      description: >-
+        The name, the description or the parent is missing or malformed, the
+        parent is not a team that can hold this one, or the Idempotency-Key
+        is malformed.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            name:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A name of 1 to 100 characters is required.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            parent:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A team can't sit under itself or under a team beneath it.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidTeamMember:
+      description: The role is missing or malformed, or the Idempotency-Key is.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            role:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A role of maintainer or member is required.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TeamForbidden:
+      description: >-
+        The caller may not change this team: they are neither an owner or an
+        admin of the organization nor one of the team's maintainers. Or the
+        team comes from the company's directory, which is where it is
+        changed.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notAllowed:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin of this organization or a maintainer of this team can change it.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            directory:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: This team comes from your company's directory. Change its people there.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TeamNotFound:
+      description: >-
+        The organization or the team does not exist or is not visible to the
+        caller.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            organization:
+              value:
+                type: https://open.bot/errors/organization-not-found
+                title: Organization not found.
+                status: 404
+                detail: Couldn't find that organization.
+                code: ORGANIZATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            team:
+              value:
+                type: https://open.bot/errors/team-not-found
+                title: Team not found.
+                status: 404
+                detail: Couldn't find that team.
+                code: TEAM_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TeamOrPersonNotFound:
+      description: >-
+        The organization or the team does not exist or is not visible to the
+        caller, or the person is not a member of the organization.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            team:
+              value:
+                type: https://open.bot/errors/team-not-found
+                title: Team not found.
+                status: 404
+                detail: Couldn't find that team.
+                code: TEAM_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            person:
+              value:
+                type: https://open.bot/errors/person-not-found
+                title: Person not found.
+                status: 404
+                detail: They aren't a member of this organization. Add them to the organization first.
+                code: PERSON_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidTeamModels:
+      description: >-
+        The models are missing, empty, repeated or malformed, one is not a
+        model the organization's catalogue offers, or the Idempotency-Key is
+        malformed.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unknown:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: openai/claude-x isn't a model this organization offers.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            empty:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Choose at least one model.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TeamModelsAdminOnly:
+      description: >-
+        The caller is not an owner or an admin of the organization: a team's
+        maintainers don't change its models. Or the organization requires
+        signing in through the company's identity provider and the caller
+        hasn't (SSO_REQUIRED).
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin of this organization can change a team's models.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            ssoRequired:
+              value:
+                type: https://open.bot/errors/sso-required
+                title: Sign in through your company's identity provider.
+                status: 403
+                detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
+                code: SSO_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TeamConflict:
+      description: >-
+        Another team of the organization has that name. Or the
+        Idempotency-Key was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            nameTaken:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Another team here already has that name. Choose another.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    TeamPageLast:
+      summary: An organization's teams, on one page.
+      value:
+        teams:
+          - id: Tm4Qx8LpV2nWc7RbY1sKd0Ze
+            name: Sales
+            description: Everybody who sells.
+            parentTeamId: null
+            source: openbot
+            memberCount: 2
+            role: maintainer
+            canManage: true
+            canMove: true
+            canDelete: true
+            createdAt: '2026-11-15T09:12:40.000Z'
+          - id: Fn2Wc6Yt4Qh7M0be3sKq8xLp
+            name: Finance
+            description: null
+            parentTeamId: null
+            source: directory
+            memberCount: 1
+            role: null
+            canManage: false
+            canMove: true
+            canDelete: false
+            createdAt: '2026-11-15T09:20:05.000Z'
+        canCreate: true
+        nextCursor: null
+    CreatedTeam:
+      summary: A team made in OpenBot.
+      value:
+        team:
+          id: Tm4Qx8LpV2nWc7RbY1sKd0Ze
+          name: Sales
+          description: Everybody who sells.
+          parentTeamId: null
+          source: openbot
+          memberCount: 0
+          role: null
+          canManage: true
+          canMove: true
+          canDelete: true
+          createdAt: '2026-11-15T09:12:40.000Z'
+    TeamMemberPageLast:
+      summary: A team's people, on one page.
+      value:
+        members:
+          - id: 8kq2m4x7p1rvz3a9c5d0
+            email: dana.whitfield@acme.com
+            name: Dana Whitfield
+            image: null
+            role: maintainer
+            isCaller: true
+            joinedAt: '2026-11-15T09:13:02.000Z'
+          - id: 2fn8w1c6y4tq7h0mbe3s
+            email: sam.ortiz@acme.com
+            name: Sam Ortiz
+            image: null
+            role: member
+            isCaller: false
+            joinedAt: '2026-11-15T09:20:05.000Z'
+        nextCursor: null
+    LimitedTeamModels:
+      summary: A team whose people run two models.
+      value:
+        models: [openai/gpt-5.6-terra, anthropic/claude-sonnet-5]
+        updatedBy: 8kq2m4x7p1rvz3a9c5d0
+        updatedAt: '2026-11-23T10:04:12.000Z'
+    NoTeamModels:
+      summary: A team that sets no models.
+      value:
+        models: null
+        updatedBy: null
+        updatedAt: null
+    AddedTeamMember:
+      summary: Somebody put in a team.
+      value:
+        member:
+          id: 2fn8w1c6y4tq7h0mbe3s
+          email: sam.ortiz@acme.com
+          name: Sam Ortiz
+          image: null
+          role: member
+          isCaller: false
+          joinedAt: '2026-11-15T09:20:05.000Z'

@@ -11,7 +11,18 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { AppsSections, SkillsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type { AppAccess } from "@/lib/app-access/queries";
+import { meResponse } from "./accounts-api";
 import { appAccess } from "./app-access-fixture";
+import {
+  botAppPath,
+  botAppsPath,
+  botAppsResponse,
+  botGrantsPath,
+  botGrantsResponse,
+  GIVEABLE_APPS_PATH,
+  giveableAppsResponse,
+} from "./bot-grants-api";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -60,13 +71,13 @@ const GMAIL = {
   key: "composio-gmail",
   displayName: "Gmail",
   logo: null,
-  account: "personal",
+  account: "personal" as const,
 };
 const NOTION = {
   key: "notion",
   displayName: "Notion",
   logo: null,
-  account: "personal",
+  account: "personal" as const,
 };
 
 function serving(held: AppAccess[]) {
@@ -76,14 +87,16 @@ function serving(held: AppAccess[]) {
     const method = init?.method ?? "GET";
     if (url.endsWith("/give")) {
       writes.push(`${method} ${url}`);
-      return Response.json({ granted: [], revoked: [] });
+      return Response.json({ given: [] });
     }
-    if (url === "/api/plugins/giveable")
-      return Response.json({ apps: [GMAIL, NOTION] });
-    if (url.includes("/api/plugins/for/") && url.endsWith("/apps"))
-      return Response.json({ apps: held });
-    if (url.includes("/api/plugins/for/"))
-      return Response.json({ tools: [], skills: [] });
+    if (url.endsWith("/take-back")) {
+      writes.push(`${method} ${url}`);
+      return Response.json({ takenBack: [] });
+    }
+    if (url.startsWith(GIVEABLE_APPS_PATH))
+      return giveableAppsResponse([GMAIL, NOTION]);
+    if (url.startsWith(botAppsPath(BOT.id))) return botAppsResponse(held);
+    if (url.startsWith(botGrantsPath(BOT.id))) return botGrantsResponse();
     if (url.endsWith("/api/plugins"))
       return Response.json({
         catalogue: [],
@@ -101,8 +114,9 @@ function serving(held: AppAccess[]) {
           grantable: true,
         },
       });
-    if (url.includes("/api/agents")) return Response.json({ agents: [] });
-    return Response.json({
+    const bots = answerBotsList(url, init, { visible: [] });
+    if (bots) return bots;
+    return meResponse({
       user: { id: "me", role: "user", email: "me@example.test", name: "Me" },
     });
   }) as unknown as typeof fetch;
@@ -147,13 +161,13 @@ test("each app you could give has a switch, on where you gave it, and pressing i
   fireEvent.click(gmail);
   await waitFor(() =>
     expect(writes).toContain(
-      "POST /api/plugins/for/expenses/apps/composio-gmail/give",
+      `POST ${botAppPath("expenses", "composio-gmail")}/give`,
     ),
   );
   fireEvent.click(notion);
   await waitFor(() =>
     expect(writes).toContain(
-      "DELETE /api/plugins/for/expenses/apps/notion/give",
+      `POST ${botAppPath("expenses", "notion")}/take-back`,
     ),
   );
 });

@@ -8,6 +8,7 @@ import type {
   PageStateResponse,
   PageToBackground,
 } from "../../protocol/messages";
+import { COMPANY_SIGN_IN_REQUIRED } from "../../shared/openbot-client";
 import { narrationLanguage } from "../../shared/speech-language";
 import { Page } from "../ui/page";
 import { ask as askBackground } from "../ui/runtime";
@@ -154,6 +155,13 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     }
   };
   const discardKept = () => act({ type: "page.kept.discard" });
+  /** A page of an OpenBot, opened by the service worker: OpenBot Desktop's own through the entry address its native host
+   * answers, since the personal edition only admits requests carrying its install's token, and any other as it is. */
+  const openOpenBot = async (url: string) => {
+    setError(null);
+    const answer = await ask({ type: "page.openbot.open", url });
+    if (!answer.ok) setError(answer.error);
+  };
 
   if (!view) {
     return (
@@ -188,7 +196,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
               size="lg"
               onClick={() => {
                 const origin = new URL(openAddress);
-                openTab(`${origin.origin}/settings/browsers`);
+                void openOpenBot(`${origin.origin}/settings/browsers`);
               }}
             >
               Open {new URL(openAddress).host}
@@ -263,7 +271,11 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   return (
     <Page
       title={connection.user.name}
-      description={new URL(connection.openbotUrl).host}
+      description={
+        connection.organizationName
+          ? `Records into ${connection.organizationName} on ${new URL(connection.openbotUrl).host}`
+          : new URL(connection.openbotUrl).host
+      }
       width="popup"
     >
       <Notices notice={view.notice} kept={state.kept} onDismiss={dismiss} />
@@ -272,6 +284,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
           state={state}
           connected
           openbotUrl={connection.openbotUrl}
+          onOpenOpenBot={openOpenBot}
           onDiscard={discardKept}
         />
       ) : (
@@ -307,6 +320,19 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
         />
       ) : null}
       {shownError ? <ErrorLine message={shownError} /> : null}
+      {/* Held out until they sign in through their company: the way in is in OpenBot, which shows it on any page. */}
+      {shownError === COMPANY_SIGN_IN_REQUIRED ? (
+        <div className="mt-3">
+          <Button
+            onClick={() =>
+              void openOpenBot(`${new URL(connection.openbotUrl).origin}/`)
+            }
+            size="lg"
+          >
+            Sign in with your company
+          </Button>
+        </div>
+      ) : null}
     </Page>
   );
 }

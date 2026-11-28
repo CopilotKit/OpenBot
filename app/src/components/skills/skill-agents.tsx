@@ -2,12 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * Which of your Agents carry this skill.
  *
  * WITHOUT THIS THE SKILL DOES NOTHING. A skill reaches a Bot's `/` menu only through a grant: the
- * menu is fed by `GET /api/plugins/for/:agentId`, which returns what that Bot HOLDS, and a row in
+ * menu is fed by the Bot's grants (listBotGrants), which return what that Bot HOLDS, and a row in
  * `plugin_grants` IS the grant — absence is the refusal. A skill nobody granted is written, listed,
  * and invisible everywhere it would actually be used.
  *
@@ -73,7 +74,7 @@ export function SkillAgents({
       )}
       {grant.error ? (
         <p className="text-destructive text-xs" role="alert">
-          {grant.error.message}
+          {failureSaid(grant.error)}
         </p>
       ) : null}
     </div>

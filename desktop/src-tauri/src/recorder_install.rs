@@ -1192,6 +1192,53 @@ mod tests {
         assert!(stop.contains("Stop-Process -Force"));
     }
 
+    /// On a fresh Windows box the Installing page sat still on "Output folder" for about two
+    /// minutes: the stop started PowerShell and WMI to look for processes under a cli-bundle
+    /// folder that wasn't there yet. The stop runs only when this installation has that folder,
+    /// which it does on an update or a reinstall over a bundled CLI, and a running node.exe keeps.
+    #[test]
+    fn the_bundled_cli_stop_runs_only_when_there_is_a_cli_bundle_to_stop() {
+        let stop = nsis_macro("OPENBOT_STOP_BUNDLED_CLI");
+        let lines: Vec<&str> = stop
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with(';'))
+            .collect();
+        assert_eq!(
+            lines.first().copied(),
+            Some(r#"${If} ${FileExists} "$INSTDIR\cli-bundle\*.*""#),
+            "{stop}"
+        );
+        assert_eq!(lines.last().copied(), Some("${EndIf}"), "{stop}");
+        assert_eq!(stop.matches("${If}").count(), 1, "{stop}");
+        assert_eq!(stop.matches("${EndIf}").count(), 1, "{stop}");
+        // Everything it runs is inside the check: the folder handed on, PowerShell, its result.
+        for step in ["System::Call", "nsExec::Exec", "Pop $0"] {
+            let at = lines
+                .iter()
+                .position(|line| line.starts_with(step))
+                .unwrap_or_else(|| panic!("no {step} in {stop}"));
+            assert!(
+                at > 0 && at < lines.len() - 1,
+                "{step} runs outside the check"
+            );
+        }
+        // It is the same folder the script stops processes under.
+        assert!(stop.contains(r#"("OPENBOT_CLI_BUNDLE", "$INSTDIR\cli-bundle")"#));
+        // And it still runs on every install and uninstall, after the old version is removed.
+        let preinstall = nsis_macro("NSIS_HOOK_PREINSTALL");
+        assert!(
+            preinstall.find("OPENBOT_UNINSTALL_OLD_VERSION").unwrap()
+                < preinstall
+                    .find("!insertmacro OPENBOT_STOP_BUNDLED_CLI")
+                    .unwrap(),
+            "{preinstall}"
+        );
+        assert!(
+            nsis_macro("NSIS_HOOK_PREUNINSTALL").contains("!insertmacro OPENBOT_STOP_BUNDLED_CLI")
+        );
+    }
+
     /// The text of `hooks.nsh`'s macro `name`, between `!macro name` and `!macroend`.
     fn nsis_macro(name: &str) -> String {
         include_str!("../windows/hooks.nsh")
@@ -1492,16 +1539,23 @@ mod tests {
 
     #[test]
     fn keeping_the_host_installed_returns_at_once() {
-        let started = std::time::Instant::now();
+        // The install is let go only once the call has returned. One run before the call returned would wait out its
+        // patience unreleased, however fast or slow the computer.
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let (report, reported) = std::sync::mpsc::channel();
         let handle = keep_recorder_host_installed(
-            || {
-                std::thread::sleep(std::time::Duration::from_secs(2));
+            move || {
+                let _ = report.send(released.recv_timeout(Duration::from_secs(30)).is_ok());
                 Ok(vec![])
             },
             None,
         );
-        assert!(started.elapsed() < std::time::Duration::from_millis(100));
+        let _ = release.send(());
         handle.join().unwrap();
+        assert!(
+            reported.recv().unwrap(),
+            "the install ran before the call returned"
+        );
     }
 
     #[test]

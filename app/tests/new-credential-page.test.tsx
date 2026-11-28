@@ -12,6 +12,13 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NewCredentialPage } from "@/components/manage/new-credential-page";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import {
+  CREDENTIALS_PATH,
+  credentialBody,
+  credentialPage,
+  MODEL_KEY_PATH,
+  modelKeyBody,
+} from "./models-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -25,45 +32,46 @@ import { settleReactWork } from "./settle-react-work";
 
 const originalFetch = globalThis.fetch;
 let posted: unknown[] = [];
+let keys: (string | null)[] = [];
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(() => {
   cleanup();
   globalThis.fetch = originalFetch;
   posted = [];
+  keys = [];
 });
 afterAll(async () => {
   await settleReactWork();
   GlobalRegistrator.unregister();
 });
 
-/** The server's credential routes, as the personal edition answers them with no key saved yet. */
+/** The API's vault, as the personal edition answers it with no key saved yet. */
 function serve(modelKey: { provider: string; keyId: string }) {
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "http://openbot.test");
-      if (url.pathname !== "/api/admin/credentials")
+      if (url.pathname === MODEL_KEY_PATH)
+        return Response.json(modelKeyBody(modelKey));
+      if (url.pathname !== CREDENTIALS_PATH)
         return new Response(JSON.stringify({ error: "not served" }), {
           status: 404,
         });
       if (init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         posted.push(body);
+        keys.push(new Headers(init.headers).get("idempotency-key"));
         return Response.json(
-          {
-            credential: {
-              id: "credential-1",
-              kind: body.kind,
-              provider: body.provider,
-              keyId: body.keyId ?? modelKey.keyId,
-              metadata: {},
-              revokedAt: null,
-            },
-          },
+          credentialBody({
+            id: "credential-1",
+            kind: String(body.kind),
+            provider: String(body.provider),
+            keyId: String(body.keyId ?? modelKey.keyId),
+          }),
           { status: 201 },
         );
       }
-      return Response.json({ credentials: [], modelKey });
+      return Response.json(credentialPage([]));
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -125,9 +133,11 @@ test("a model key needs only its provider and the secret, and is saved under the
   expect(posted[0]).toEqual({
     kind: "model",
     provider: "openai",
-    plaintext: "sk-added-in-the-vault",
+    secret: "sk-added-in-the-vault",
     metadata: {},
   });
+  // A write, made once: a retry of it would carry the same key.
+  expect(keys[0]).toBeTruthy();
   expect(await view.findByText("The Vault")).toBeTruthy();
 });
 

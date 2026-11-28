@@ -1,0 +1,1871 @@
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+  useParams,
+} from "@tanstack/react-router";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
+import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
+import {
+  InvitationPage,
+  InvitationsPage,
+} from "@/components/organizations/invitations-page";
+import { OrganizationBoundary } from "@/components/organizations/organization-boundary";
+import { OrganizationSettingsPage } from "@/components/organizations/organization-settings-page";
+import { settingsSidebarItems } from "@/components/settings/settings-sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { Toaster } from "@/components/ui/toast";
+import type { PersonRole } from "@/lib/api/generated/model";
+import { getGetDeploymentResponseMock } from "@/lib/api/generated/organization-settings/organization-settings.msw";
+import { GetDeploymentResponse } from "@/lib/api/generated/organization-settings/organization-settings.zod";
+import { ListOrganizationMembersResponse } from "@/lib/api/generated/organizations/organizations.zod";
+import { signedInUser } from "@/lib/auth/queries";
+import {
+  currentOrganizationId,
+  setCurrentOrganization,
+} from "@/lib/organizations/current";
+import { organizationsOnly } from "@/lib/organizations/guard";
+import {
+  type OrganizationMemberSummary,
+  organizationMembersQueryOptions,
+  ownOrganizationsQueryOptions,
+  type ReceivedInvitation,
+  receivedInvitationQueryOptions,
+  receivedInvitationsQueryOptions,
+  type SentInvitation,
+} from "@/lib/organizations/queries";
+import {
+  givableRoles,
+  initialsOf,
+  invitationLink,
+  memberControl,
+  memberLine,
+  personName,
+  receivedInvitationLine,
+  roleName,
+  sentInvitationLine,
+} from "@/lib/organizations/words";
+import { SectionProvider } from "@/lib/sections";
+import { queryClient } from "@/query-client";
+import { settleReactWork } from "./settle-react-work";
+
+/**
+ * People join an organization by invitation, and an organization has settings: its name, its
+ * members and the invitations it sent.
+ *
+ * The server here answers as the API describes (api/openapi/organizations.yaml). Dana has an
+ * organization of her own and is in Acme, where she works. The app is the real sidebar with its
+ * account menu and the real screens, on the app's one query client.
+ */
+
+class OfflineWebSocket extends EventTarget {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  readyState = 0;
+  onclose = null;
+  onerror = null;
+  onmessage = null;
+  onopen = null;
+  close() {}
+  send() {}
+}
+
+type Listed = {
+  id: string;
+  slug: string;
+  name: string;
+  role: "owner" | "admin" | "member";
+  personal: boolean;
+};
+
+const OWN: Listed = {
+  id: "org_dana",
+  slug: "dana",
+  name: "Dana's organization",
+  role: "owner",
+  personal: true,
+};
+const ACME = { id: "org_acme", slug: "acme", name: "Acme" };
+const RESEARCH = {
+  id: "org_research",
+  slug: "acme-research",
+  name: "Acme Research",
+};
+const DAY = 86_400_000;
+const inDays = (days: number) =>
+  new Date(Date.now() + days * DAY).toISOString();
+const SENDER = { name: "Lee Park", email: "lee.park@example.com" };
+
+const member = (
+  id: string,
+  name: string | null,
+  role: OrganizationMemberSummary["role"],
+): OrganizationMemberSummary => ({
+  id,
+  email: `${id}@example.com`,
+  name,
+  image: null,
+  role,
+  joinedAt: "2026-11-01T09:00:00.000Z",
+  // As the server answers it: the owner stays.
+  removable: role !== "owner",
+  // Said for the person asking when the list is read: see `asListed`.
+  assignableRoles: [],
+});
+
+/**
+ * A member at OpenBot by CopilotKit, on a hosted OpenBot, who hasn't opened OpenBot yet, as the
+ * server answers them: their id there, an empty address when none is known, and nothing to change.
+ */
+const notOpened = (
+  id: string,
+  name: string | null,
+  email: string,
+  role: OrganizationMemberSummary["role"],
+): OrganizationMemberSummary => ({
+  ...member(id, name, role),
+  email,
+  removable: false,
+  notOpenedYet: true,
+});
+
+const ROLES = ["owner", "admin", "member"] as const;
+
+/**
+ * A member as the list says them to somebody with `asker`'s role: the roles that person may give
+ * them, their current one left out. An owner gives any role, and an owner's own role changes only
+ * while another owner exists. An admin moves people between admin and member. A member gives none.
+ */
+function asListed(
+  one: OrganizationMemberSummary,
+  asker: Listed["role"],
+  all: OrganizationMemberSummary[],
+): OrganizationMemberSummary {
+  // Nobody may give a role to somebody who hasn't opened OpenBot yet, as the spec says.
+  if (one.notOpenedYet) return { ...one, assignableRoles: [] };
+  const others = ROLES.filter((role) => role !== one.role);
+  const owners = all.filter((each) => each.role === "owner").length;
+  const assignableRoles =
+    asker === "member"
+      ? []
+      : one.role === "owner"
+        ? asker === "owner" && owners > 1
+          ? others
+          : []
+        : asker === "owner"
+          ? others
+          : others.filter((role) => role !== "owner");
+  return { ...one, assignableRoles };
+}
+
+const sent = (
+  id: string,
+  email: string,
+  status: SentInvitation["status"],
+  days: number,
+): SentInvitation => ({
+  id,
+  email,
+  role: "member",
+  status,
+  invitedBy: { name: "Dana Fresh", email: "dana@example.com" },
+  createdAt: inDays(days - 7),
+  expiresAt: inDays(days),
+});
+
+const received = (
+  id: string,
+  status: ReceivedInvitation["status"],
+  days = 6,
+): ReceivedInvitation => ({
+  id,
+  organization: RESEARCH,
+  role: "member",
+  status,
+  invitedBy: SENDER,
+  createdAt: inDays(days - 7),
+  expiresAt: inDays(days),
+});
+
+/** The server: what it keeps, and how it answers. Reset before each test. */
+let server: {
+  edition: "team" | "personal";
+  /** A hosted OpenBot (`hostedSignIn`): invitations are emailed by OpenBot by CopilotKit. */
+  hosted: boolean;
+  /** Dana's organizations, the one she joined first at the top. */
+  organizations: Listed[];
+  /** The one her session works in. */
+  active: string;
+  /** How many of a list one page holds. */
+  pageSize: number;
+  /** Acme's members, in the order they joined. */
+  members: OrganizationMemberSummary[];
+  /** The invitations Acme sent that nobody accepted. */
+  sent: SentInvitation[];
+  /** Every invitation sent to Dana's address, answered or not. */
+  received: ReceivedInvitation[];
+  /** How a new invitation reaches the person. */
+  delivery: "emailed" | "link";
+  /** What the next write is refused with, when it is. */
+  refusal: { status: number; detail: string } | null;
+  /**
+   * Seats Acme has paid for and not given to anybody, where it pays for each member; null where it
+   * doesn't. With none, an invitation is refused with SEAT_REQUIRED, as the API describes.
+   */
+  freeSeats: number | null;
+  /**
+   * What every read of the person's own organizations or invitations is answered with instead,
+   * when it is: a refusal, or the answer of a server that has no such address.
+   */
+  ownRefusal: {
+    of: "organizations" | "invitations";
+    answer: () => Response;
+  } | null;
+};
+/** Every request, in order, and each write's body and whether it carried an Idempotency-Key. */
+let requests: string[] = [];
+let writes: { request: string; body: unknown; keyed: boolean }[] = [];
+const DEPLOYMENT = "/api/v2/organizations/default/deployment";
+/** The server's sentence when an invitation needs a seat, as the API's example says it. */
+const SEAT_SENTENCE =
+  "Each member is $5 a month. Add a seat to invite someone.";
+
+function problem(status: number, code: string, detail: string): Response {
+  return new Response(JSON.stringify({ status, code, detail, title: code }), {
+    status,
+    headers: { "content-type": "application/problem+json" },
+  });
+}
+
+const page = <T,>(key: string, items: T[], url: URL) => {
+  // Two to a page unless a test says otherwise, so a list longer than that is only whole when
+  // every page is read.
+  const size = server.pageSize;
+  const from = Number(url.searchParams.get("cursor") ?? 0);
+  const next = from + size < items.length ? String(from + size) : null;
+  return Response.json({
+    [key]: items.slice(from, from + size),
+    nextCursor: next,
+  });
+};
+
+async function answer(
+  input: Parameters<typeof fetch>[0],
+  init?: RequestInit,
+): Promise<Response> {
+  const url = new URL(String(input), "http://openbot.invalid");
+  const method = (init?.method ?? "GET").toUpperCase();
+  const path = url.pathname;
+  requests.push(`${method} ${path}`);
+  const body = init?.body ? (JSON.parse(String(init.body)) as unknown) : null;
+  if (method !== "GET") {
+    writes.push({
+      request: `${method} ${path}`,
+      body,
+      keyed: !!new Headers(init?.headers).get("idempotency-key"),
+    });
+  }
+  const refused = () => {
+    const refusal = server.refusal;
+    server.refusal = null;
+    return refusal ? problem(refusal.status, "CONFLICT", refusal.detail) : null;
+  };
+  const listed = (one: Listed) => ({
+    ...one,
+    active: one.id === server.active,
+  });
+
+  // Answered as the API answers it, checked against the schema generated from the spec.
+  if (path === DEPLOYMENT)
+    return Response.json(
+      GetDeploymentResponse.parse({
+        ...getGetDeploymentResponseMock(),
+        generativeUi: true,
+        selfHostBanner: false,
+        localEvaluation: server.edition === "personal",
+        edition: server.edition,
+        hostedSignIn: server.hosted,
+      }),
+    );
+
+  if (
+    server.ownRefusal &&
+    method === "GET" &&
+    path.startsWith(`/api/v2/people/me/${server.ownRefusal.of}`)
+  )
+    return server.ownRefusal.answer();
+
+  if (path === "/api/v2/people/me/organizations" && method === "GET")
+    return Response.json({
+      organizations: server.organizations.map(listed),
+      canCreate: true,
+      nextCursor: null,
+    });
+
+  if (path === "/api/auth/organization/set-active" && method === "POST") {
+    const wanted = (body as { organizationId: string }).organizationId;
+    if (!server.organizations.some((one) => one.id === wanted))
+      return Response.json({ message: "Not a member." }, { status: 403 });
+    server.active = wanted;
+    return Response.json({ id: wanted });
+  }
+
+  if (path === "/api/v2/people/me/invitations" && method === "GET")
+    return page(
+      "invitations",
+      server.received.filter(
+        (one) => one.status === "pending" || one.status === "expired",
+      ),
+      url,
+    );
+
+  const mine =
+    /^\/api\/v2\/people\/me\/invitations\/([^/]+)(?:\/(accept|decline))?$/.exec(
+      path,
+    );
+  if (mine) {
+    const [, id, verb] = mine;
+    const invitation = server.received.find((one) => one.id === id);
+    if (!invitation)
+      return problem(
+        404,
+        "INVITATION_NOT_FOUND",
+        "Couldn't find that invitation. Check that you're signed in with the address it was sent to.",
+      );
+    if (!verb) return Response.json({ invitation });
+    if (invitation.status !== "pending")
+      return problem(
+        409,
+        "CONFLICT",
+        "This invitation has expired. Ask whoever invited you to send a new one.",
+      );
+    if (verb === "decline") {
+      invitation.status = "declined";
+      return new Response(null, { status: 204 });
+    }
+    invitation.status = "accepted";
+    const joined: Listed = {
+      ...invitation.organization,
+      role: invitation.role,
+      personal: false,
+    };
+    server.organizations.push(joined);
+    return Response.json({ organization: listed(joined) });
+  }
+
+  const addressed = /^\/api\/v2\/organizations\/([^/]+)\/(.+)$/.exec(path);
+  if (addressed) {
+    const [, organization, rest] = addressed;
+    const here = server.organizations.find((one) => one.id === organization);
+    // An organization the person is not in is one that does not exist.
+    if (!here)
+      return problem(
+        404,
+        "ORGANIZATION_NOT_FOUND",
+        "Couldn't find that organization.",
+      );
+    const manages = here.role !== "member";
+    const adminOnly = () =>
+      problem(403, "FORBIDDEN", "Only an admin can do that.");
+    if (rest === "people/me")
+      return Response.json({
+        person: {
+          id: "dana",
+          email: "dana@example.com",
+          name: "Dana Fresh",
+          needsName: false,
+          image: null,
+          role: here.role,
+          onboarding: null,
+        },
+        openbotVersion: null,
+      });
+    if (rest === "conversations")
+      return Response.json({ conversations: [], nextCursor: null });
+    if (rest === "bots") return Response.json({ bots: [], nextCursor: null });
+    if (rest === "profile" && method === "PATCH") {
+      if (!manages) return adminOnly();
+      const no = refused();
+      if (no) return no;
+      here.name = (body as { name: string }).name;
+      return Response.json({ organization: listed(here) });
+    }
+    if (rest === "members" && method === "GET") {
+      // Answered as the API answers it, checked against the schema generated from the spec.
+      const answered = page(
+        "members",
+        server.members.map((one) => asListed(one, here.role, server.members)),
+        url,
+      );
+      return Response.json(
+        ListOrganizationMembersResponse.parse(await answered.json()),
+      );
+    }
+    const removed = /^members\/([^/]+)$/.exec(rest as string);
+    if (removed && method === "PATCH") {
+      const no = refused();
+      if (no) return no;
+      if (!manages) return adminOnly();
+      const { role } = body as { role: PersonRole };
+      const changed = server.members.find((one) => one.id === removed[1]);
+      if (!changed)
+        return problem(404, "PERSON_NOT_FOUND", "Couldn't find that person.");
+      changed.role = role;
+      if (changed.id === "dana") here.role = role;
+      return Response.json({
+        member: asListed(changed, here.role, server.members),
+      });
+    }
+    if (removed && method === "DELETE") {
+      const no = refused();
+      if (no) return no;
+      const who = removed[1] === "me" ? "dana" : removed[1];
+      if (who !== "dana" && !manages) return adminOnly();
+      server.members = server.members.filter((one) => one.id !== who);
+      if (who === "dana")
+        server.organizations = server.organizations.filter(
+          (one) => one.id !== organization,
+        );
+      return new Response(null, { status: 204 });
+    }
+    if (rest === "invitations") {
+      if (!manages) return adminOnly();
+      if (method === "GET") return page("invitations", server.sent, url);
+      const no = refused();
+      if (no) return no;
+      if (server.freeSeats === 0)
+        return new Response(
+          JSON.stringify({
+            type: "https://open.bot/errors/seat-required",
+            title: "This organization needs another seat.",
+            status: 402,
+            detail: SEAT_SENTENCE,
+            code: "SEAT_REQUIRED",
+            category: "permission",
+            retryable: false,
+            requestId: "req_example",
+            traceId: "trace_example",
+            addSeatUrl: `/api/auth/hosted/add-seat?organizationId=${organization}`,
+          }),
+          {
+            status: 402,
+            headers: { "content-type": "application/problem+json" },
+          },
+        );
+      if (server.freeSeats !== null) server.freeSeats -= 1;
+      const { email, role } = body as { email: string; role: "member" };
+      const made = server.sent.some((one) => one.id === "inv_new")
+        ? `inv_new_${server.sent.length}`
+        : "inv_new";
+      const invitation = { ...sent(made, email, "pending", 7), role };
+      server.sent.unshift(invitation);
+      return Response.json(
+        { invitation, delivery: server.delivery },
+        { status: 201 },
+      );
+    }
+    const canceled = /^invitations\/([^/]+)$/.exec(rest as string);
+    if (canceled && method === "DELETE") {
+      if (!manages) return adminOnly();
+      server.sent = server.sent.filter((one) => one.id !== canceled[1]);
+      return new Response(null, { status: 204 });
+    }
+  }
+
+  return Response.json({ error: "not served" }, { status: 404 });
+}
+
+const originalFetch = globalThis.fetch;
+const originalWebSocket = globalThis.WebSocket;
+
+beforeAll(() => {
+  GlobalRegistrator.register({ url: "http://openbot.invalid/" });
+  globalThis.WebSocket = OfflineWebSocket as unknown as typeof WebSocket;
+});
+beforeEach(() => {
+  server = {
+    edition: "team",
+    hosted: false,
+    organizations: [{ ...OWN }, { ...ACME, role: "owner", personal: false }],
+    active: ACME.id,
+    pageSize: 2,
+    members: [
+      member("dana", "Dana Fresh", "owner"),
+      member("lee", "Lee Park", "admin"),
+      member("sam", null, "member"),
+    ],
+    sent: [
+      sent("inv_wait", "ana@example.com", "pending", 6),
+      sent("inv_old", "bo@example.com", "expired", -3),
+      sent("inv_no", "cy@example.com", "declined", 2),
+    ],
+    received: [],
+    delivery: "link",
+    refusal: null,
+    freeSeats: null,
+    ownRefusal: null,
+  };
+  requests = [];
+  writes = [];
+  // A browser that has just opened OpenBot: nothing read, no organization known.
+  setCurrentOrganization(undefined);
+  queryClient.clear();
+  globalThis.fetch = Object.assign(answer, {
+    preconnect: originalFetch.preconnect,
+  });
+});
+afterEach(() => {
+  cleanup();
+  queryClient.clear();
+  globalThis.fetch = originalFetch;
+});
+afterAll(async () => {
+  await settleReactWork();
+  globalThis.WebSocket = originalWebSocket;
+  GlobalRegistrator.unregister();
+  setCurrentOrganization("default");
+});
+
+/** Dana is a plain member of Acme, which Lee owns. */
+function asMember() {
+  server.organizations = [
+    { ...OWN },
+    { ...ACME, role: "member", personal: false },
+  ];
+  server.members = [
+    member("lee", "Lee Park", "owner"),
+    member("dana", "Dana Fresh", "member"),
+  ];
+}
+
+function LinkedInvitation() {
+  const { invitationId } = useParams({ strict: false }) as {
+    invitationId: string;
+  };
+  return <InvitationPage invitationId={invitationId} />;
+}
+
+/** The app as a signed-in person opens it at `start`: the gate, then the sidebar beside the page. */
+async function open(start: string) {
+  await signedInUser(queryClient);
+  const rootRoute = createRootRoute({
+    component: () => (
+      <OrganizationBoundary>
+        <SectionProvider>
+          <SidebarProvider>
+            <AppSidebar />
+            <main>
+              <Outlet />
+            </main>
+            <Toaster />
+          </SidebarProvider>
+        </SectionProvider>
+      </OrganizationBoundary>
+    ),
+  });
+  const at = (path: string, component: () => ReactNode) =>
+    createRoute({ getParentRoute: () => rootRoute, path, component });
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: [start] }),
+    routeTree: rootRoute.addChildren([
+      at("/", () => <p>Home</p>),
+      at("/settings/organization", OrganizationSettingsPage),
+      at("/invitations", InvitationsPage),
+      at("/invitations/$invitationId", LinkedInvitation),
+      at("/bots", () => <p>Bots</p>),
+      at("/routines", () => <p>Routines</p>),
+      at("/skills", () => <p>Skills</p>),
+      at("/connections", () => <p>Connections</p>),
+    ]),
+  });
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+  const person = userEvent.setup({ document });
+  return {
+    view,
+    router,
+    person,
+    async openAccountMenu() {
+      await person.click(
+        await view.findByRole("button", { name: /Dana Fresh/ }),
+      );
+      return view.findByRole("menu");
+    },
+  };
+}
+
+const sentWrites = () => writes.map((write) => write.request);
+
+describe("the words and the controls", () => {
+  test("a role, an invitation's line and its link read as the screens say them", () => {
+    expect(["owner", "admin", "member"].map(roleName)).toEqual([
+      "Owner",
+      "Admin",
+      "Member",
+    ]);
+    expect(sentInvitationLine(sent("a", "ana@example.com", "pending", 6))).toBe(
+      "Member · Pending · Expires in 6 days",
+    );
+    expect(
+      sentInvitationLine(sent("a", "ana@example.com", "expired", -3)),
+    ).toBe("Member · Expired");
+    expect(
+      sentInvitationLine(sent("a", "ana@example.com", "declined", 2)),
+    ).toBe("Member · Declined");
+    expect(invitationLink("inv_1", "https://openbot.example")).toBe(
+      "https://openbot.example/invitations/inv_1",
+    );
+    expect(receivedInvitationLine(received("a", "pending"))).toBe(
+      "Lee Park invited you to join as a member. Expires in 6 days.",
+    );
+    expect(
+      receivedInvitationLine({ ...received("a", "pending"), role: "admin" }),
+    ).toStartWith("Lee Park invited you to join as an admin.");
+    expect(receivedInvitationLine(received("a", "expired", -1))).toBe(
+      "This invitation has expired. Ask Lee Park to send a new one.",
+    );
+    expect(receivedInvitationLine(received("a", "accepted"))).toBe(
+      "You're a member of Acme Research.",
+    );
+  });
+
+  test("a member's row offers leaving on your own, removing to an owner or admin, and nothing where the membership cannot end", () => {
+    // `removable` is the server's verdict: false for the owner, and for somebody OpenBot's
+    // settings keep as an admin.
+    const row = (
+      id: string,
+      role: OrganizationMemberSummary["role"],
+      removable = role !== "owner",
+    ) => ({ id, role, removable });
+    // An admin the settings keep is offered no Leave, and nobody is offered to remove them.
+    expect(
+      memberControl(row("dana", "admin", false), { id: "dana", role: "admin" }),
+    ).toBeNull();
+    expect(
+      memberControl(row("lee", "admin", false), { id: "dana", role: "admin" }),
+    ).toBeNull();
+    for (const role of ["owner", "admin"]) {
+      const viewer = { id: "dana", role };
+      expect(memberControl(row("sam", "member"), viewer)).toBe("remove");
+      expect(memberControl(row("lee", "admin"), viewer)).toBe("remove");
+      expect(memberControl(row("ona", "owner"), viewer)).toBeNull();
+    }
+    const plain = { id: "dana", role: "member" };
+    expect(memberControl(row("sam", "member"), plain)).toBeNull();
+    expect(memberControl(row("dana", "member"), plain)).toBe("leave");
+    expect(
+      memberControl(row("dana", "admin"), { ...plain, role: "admin" }),
+    ).toBe("leave");
+    // The owner stays, their own row included.
+    expect(
+      memberControl(row("dana", "owner"), { id: "dana", role: "owner" }),
+    ).toBeNull();
+    // With two owners either can go, but only an owner removes one. An owner may still leave.
+    const coOwner = row("ona", "owner", true);
+    expect(memberControl(coOwner, { id: "dana", role: "owner" })).toBe(
+      "remove",
+    );
+    expect(memberControl(coOwner, { id: "dana", role: "admin" })).toBeNull();
+    expect(memberControl(coOwner, { id: "ona", role: "owner" })).toBe("leave");
+  });
+
+  test("somebody who hasn't opened OpenBot yet is offered no role, and removal only where the server says they can be removed", () => {
+    const waiting = notOpened(
+      "cpk_ola",
+      "Ola Berg",
+      "ola@example.com",
+      "member",
+    );
+    for (const role of ["owner", "admin"]) {
+      // As the server answers today: not removable, so no Remove.
+      expect(memberControl(waiting, { id: "dana", role })).toBeNull();
+      // Once it says they can be removed, Remove is offered like on any other row.
+      expect(
+        memberControl({ ...waiting, removable: true }, { id: "dana", role }),
+      ).toBe("remove");
+    }
+    // A plain member removes nobody, not-opened or not.
+    expect(
+      memberControl(
+        { ...waiting, removable: true },
+        { id: "dana", role: "member" },
+      ),
+    ).toBeNull();
+    // Roles to give, as a server that got it wrong might say: still no Role menu.
+    const withRoles = { ...waiting, assignableRoles: ["admin"] };
+    expect(givableRoles(withRoles)).toEqual([]);
+    expect(givableRoles({ ...withRoles, notOpenedYet: undefined })).toEqual([
+      "admin",
+    ]);
+  });
+
+  test("a member's name and second line, with or without a name or an address", () => {
+    expect(personName({ name: "Ola Berg", email: "" })).toBe("Ola Berg");
+    expect(personName({ name: null, email: "sam@example.com" })).toBe(
+      "sam@example.com",
+    );
+    expect(personName({ name: " ", email: "" })).toBe("Unnamed member");
+    expect(initialsOf({ name: null, email: "" })).toBe("");
+    expect(initialsOf({ name: "Ola Berg", email: "" })).toBe("OB");
+    expect(memberLine(member("lee", "Lee Park", "admin"))).toBe(
+      "lee@example.com · Admin",
+    );
+    expect(memberLine(member("sam", null, "member"))).toBe("Member");
+    expect(
+      memberLine(notOpened("cpk_ola", "Ola Berg", "ola@example.com", "owner")),
+    ).toBe("ola@example.com · Owner · Hasn't opened OpenBot yet");
+    expect(memberLine(notOpened("cpk_kim", "Kim Lee", "", "member"))).toBe(
+      "Member · Hasn't opened OpenBot yet",
+    );
+    expect(memberLine(notOpened("cpk_anon", null, "", "admin"))).toBe(
+      "Admin · Hasn't opened OpenBot yet",
+    );
+  });
+});
+
+describe("reading", () => {
+  test("every page of an organization's members is read, in the order they joined", async () => {
+    setCurrentOrganization(ACME.id);
+    const members = await queryClient.fetchQuery(
+      organizationMembersQueryOptions(ACME.id),
+    );
+    expect(members.map((one) => one.id)).toEqual(["dana", "lee", "sam"]);
+    expect(
+      requests.filter((request) => request.endsWith("/members")),
+    ).toHaveLength(2);
+  });
+
+  test("an invitation the server does not find for this person is an answer, not a failure", async () => {
+    setCurrentOrganization(ACME.id);
+    expect(
+      await queryClient.fetchQuery(receivedInvitationQueryOptions("inv_gone")),
+    ).toBeNull();
+    server.received = [received("inv_1", "canceled")];
+    expect(
+      await queryClient.fetchQuery(receivedInvitationQueryOptions("inv_1")),
+    ).toMatchObject({ id: "inv_1", status: "canceled" });
+  });
+
+  /** What a read answers: its value, or the sentence it failed with. */
+  async function outcome<T>(read: () => Promise<T>) {
+    try {
+      return { value: await read() };
+    } catch (error) {
+      return { failed: (error as Error).message };
+    }
+  }
+
+  /** A server that has no such address: the API's own not found, with nothing to say. */
+  const NO_SUCH_ADDRESS = () =>
+    new Response(JSON.stringify({ status: 404, code: "NOT_FOUND" }), {
+      status: 404,
+      headers: { "content-type": "application/problem+json" },
+    });
+  /** What an app's sign-in without the permission is told, as the API says it. */
+  const NOT_ALLOWED =
+    "This sign-in can't see your organizations. Sign in again and allow it.";
+  const REFUSALS: [string, () => Response][] = [
+    [
+      "a sign-in not allowed to see them",
+      () => problem(403, "PERMISSION_DENIED", NOT_ALLOWED),
+    ],
+    [
+      "an organization the request named that the person is not in",
+      () =>
+        problem(
+          404,
+          "ORGANIZATION_NOT_FOUND",
+          "Couldn't find that organization.",
+        ),
+    ],
+    [
+      "an expired sign-in",
+      () =>
+        problem(
+          401,
+          "AUTH_UNAUTHENTICATED",
+          "Your sign-in has expired. Sign in again.",
+        ),
+    ],
+  ];
+
+  test("a refusal of the person's invitations is a failure in the server's sentence, never an empty list", async () => {
+    for (const [, answer] of REFUSALS) {
+      server.ownRefusal = { of: "invitations", answer };
+      queryClient.clear();
+      const read = await outcome(() =>
+        queryClient.fetchQuery(receivedInvitationsQueryOptions()),
+      );
+      expect(read).toEqual({
+        failed: ((await answer().json()) as { detail: string }).detail,
+      });
+    }
+    // An OpenBot that keeps one organization has no such address, and so no invitations.
+    server.ownRefusal = { of: "invitations", answer: NO_SUCH_ADDRESS };
+    queryClient.clear();
+    expect(
+      await outcome(() =>
+        queryClient.fetchQuery(receivedInvitationsQueryOptions()),
+      ),
+    ).toEqual({ value: [] });
+  });
+
+  test("a refusal of the person's organizations is a failure, and only an OpenBot without the address keeps one organization", async () => {
+    for (const [name, answer] of REFUSALS) {
+      // Not signed in is an answer there, as it is for who is signed in.
+      if (name === "an expired sign-in") continue;
+      server.ownRefusal = { of: "organizations", answer };
+      queryClient.clear();
+      setCurrentOrganization(undefined);
+      const read = await outcome(() =>
+        queryClient.fetchQuery(ownOrganizationsQueryOptions()),
+      );
+      expect(read).toEqual({
+        failed: ((await answer().json()) as { detail: string }).detail,
+      });
+    }
+    server.ownRefusal = { of: "organizations", answer: NO_SUCH_ADDRESS };
+    queryClient.clear();
+    setCurrentOrganization(undefined);
+    expect(
+      await outcome(() =>
+        queryClient.fetchQuery(ownOrganizationsQueryOptions()),
+      ),
+    ).toEqual({
+      value: { organizations: [], canCreate: false, currentId: "default" },
+    });
+  });
+
+  test("an invitation's page is not found only when the invitation is not, and a refusal is a failure", async () => {
+    server.ownRefusal = {
+      of: "invitations",
+      answer: () =>
+        problem(
+          404,
+          "ORGANIZATION_NOT_FOUND",
+          "Couldn't find that organization.",
+        ),
+    };
+    expect(
+      await outcome(() =>
+        queryClient.fetchQuery(receivedInvitationQueryOptions("inv_1")),
+      ),
+    ).toEqual({ failed: "Couldn't find that organization." });
+    server.ownRefusal = {
+      of: "invitations",
+      answer: () => problem(403, "PERMISSION_DENIED", NOT_ALLOWED),
+    };
+    queryClient.clear();
+    expect(
+      await outcome(() =>
+        queryClient.fetchQuery(receivedInvitationQueryOptions("inv_1")),
+      ),
+    ).toEqual({ failed: NOT_ALLOWED });
+  });
+});
+
+describe("the account menu", () => {
+  test("offers the organization's settings, marks nothing as waiting when nothing is, and counts the invitations that are", async () => {
+    const app = await open("/");
+    let menu = await app.openAccountMenu();
+    expect(
+      within(menu)
+        .getAllByRole("menuitemradio")
+        .map((choice) => choice.textContent),
+    ).toEqual(["Dana's organization", "Acme"]);
+    expect(within(menu).queryByRole("menuitem", { name: /Invitations/ })).toBe(
+      null,
+    );
+    await app.person.click(
+      within(menu).getByRole("menuitem", { name: "Organization settings" }),
+    );
+    await waitFor(() =>
+      expect(app.router.state.location.pathname).toBe("/settings/organization"),
+    );
+
+    // Two arrive, and one of them has already run out of time: one is waiting.
+    server.received = [
+      received("inv_1", "pending"),
+      received("inv_2", "expired", -1),
+    ];
+    await queryClient.invalidateQueries();
+    menu = await app.openAccountMenu();
+    const entry = await within(menu).findByRole("menuitem", {
+      name: /Invitations/,
+    });
+    expect(
+      entry.querySelector("[data-slot=invitations-waiting]")?.textContent,
+    ).toBe("1, 1 waiting");
+    await app.person.click(entry);
+    await waitFor(() =>
+      expect(app.router.state.location.pathname).toBe("/invitations"),
+    );
+  });
+
+  test("invitations it could not read are offered without a count, never as none, and their page says why", async () => {
+    server.received = [received("inv_1", "pending")];
+    server.ownRefusal = {
+      of: "invitations",
+      answer: () =>
+        problem(
+          403,
+          "PERMISSION_DENIED",
+          "This sign-in can't see your organizations. Sign in again and allow it.",
+        ),
+    };
+    const app = await open("/");
+    /*
+     * Not read yet is not "could not read": until the one retry every read gets (query-client.ts)
+     * has failed too, the menu offers no entry, as it does for none waiting. The menu is opened
+     * once the read has failed, however long the retry's wait takes on a busy machine.
+     */
+    await waitFor(
+      () =>
+        expect(
+          queryClient.getQueryState(receivedInvitationsQueryOptions().queryKey)
+            ?.status,
+        ).toBe("error"),
+      { timeout: 5_000 },
+    );
+    const menu = await app.openAccountMenu();
+    const entry = within(menu).getByRole("menuitem", { name: /Invitations/ });
+    expect(entry.querySelector("[data-slot=invitations-waiting]")).toBe(null);
+    await app.person.click(entry);
+    // The page reads them again, with its own retry.
+    expect(
+      (await app.view.findByRole("alert", undefined, { timeout: 5_000 }))
+        .textContent,
+    ).toBe(
+      "This sign-in can't see your organizations. Sign in again and allow it.",
+    );
+    expect(app.view.queryByText("No invitations")).toBe(null);
+  });
+
+  test("the invitations page belongs to no section, so the strip keeps the section that was open", async () => {
+    server.received = [received("inv_1", "pending")];
+    const app = await open("/bots");
+    const marked = () =>
+      [
+        ...app.view.container.querySelectorAll(
+          "[data-slot=strip] [aria-current=page], [data-slot=strip] [aria-pressed=true]",
+        ),
+      ].map(
+        (item) => item.querySelector("[data-slot=strip-label]")?.textContent,
+      );
+    await waitFor(() => expect(marked()).toEqual(["Bots"]));
+    const menu = await app.openAccountMenu();
+    await app.person.click(
+      await within(menu).findByRole("menuitem", { name: /Invitations/ }),
+    );
+    await waitFor(() =>
+      expect(app.router.state.location.pathname).toBe("/invitations"),
+    );
+    expect(marked()).toEqual(["Bots"]);
+    // Nor is any row drawn as if it were, by focus or by the pointer the menu left over it.
+    const bots = app.view.getByRole("button", { name: /^Bots/ });
+    expect(document.activeElement).not.toBe(bots);
+  });
+
+  test("coming back to the window, which stayed shown, picks up a membership and an invitation made elsewhere", async () => {
+    const app = await open("/");
+    let menu = await app.openAccountMenu();
+    expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(2);
+    expect(within(menu).queryByRole("menuitem", { name: /Invitations/ })).toBe(
+      null,
+    );
+    await app.person.keyboard("{Escape}");
+
+    // In the browser beside it: she joined Acme Research, and Lee invited her somewhere else.
+    server.organizations.push({ ...RESEARCH, role: "member", personal: false });
+    server.received = [received("inv_2", "pending")];
+    const before = requests.length;
+    // OpenBot Desktop's window is focused again. Nothing was ever hidden.
+    expect(document.visibilityState).toBe("visible");
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() =>
+      expect(requests.slice(before)).toEqual(
+        expect.arrayContaining([
+          "GET /api/v2/people/me/organizations",
+          "GET /api/v2/people/me/invitations",
+        ]),
+      ),
+    );
+
+    menu = await app.openAccountMenu();
+    await waitFor(() =>
+      expect(
+        within(menu)
+          .getAllByRole("menuitemradio")
+          .map((choice) => choice.textContent),
+      ).toEqual(["Dana's organization", "Acme", "Acme Research"]),
+    );
+    const entry = await within(menu).findByRole("menuitem", {
+      name: /Invitations/,
+    });
+    expect(
+      entry.querySelector("[data-slot=invitations-waiting]")?.textContent,
+    ).toBe("1, 1 waiting");
+  });
+
+  test("the personal edition has no organization settings and no invitations, in the menu or in Settings", async () => {
+    server.edition = "personal";
+    // One person and the one organization every install has, which the app asks for no list of.
+    server.organizations = [{ ...OWN, id: "default" }];
+    server.active = "default";
+    server.received = [received("inv_1", "pending")];
+    const app = await open("/");
+    const menu = await app.openAccountMenu();
+    expect(menu.textContent).not.toContain("Organization settings");
+    expect(menu.textContent).not.toContain("Invitations");
+    expect(requests).not.toContain("GET /api/v2/people/me/invitations");
+    expect(
+      settingsSidebarItems("personal").map((item) => item.title),
+    ).not.toContain("Organization");
+    expect(settingsSidebarItems("team").map((item) => item.title)).toContain(
+      "Organization",
+    );
+    // And its pages send the person home.
+    let thrown: unknown;
+    try {
+      await organizationsOnly({ context: { queryClient } });
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as { options?: { to?: string } }).options?.to).toBe("/");
+  });
+});
+
+describe("organization settings, for its owner", () => {
+  // Its lists show a page at a time, as the API's 50 by default: everybody here fits on one.
+  // Paging itself is people-lists.test.tsx's, in a real browser.
+  beforeEach(() => {
+    server.pageSize = 50;
+  });
+
+  test("renames it from the Name row, and a refusal stays in the dialog in the server's sentence", async () => {
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await app.person.click(await page.findByRole("button", { name: /Name/ }));
+    const dialog = await app.view.findByRole("dialog", {
+      name: "Rename organization",
+    });
+    const field = within(dialog).getByLabelText("Name");
+    expect(field).toHaveProperty("value", "Acme");
+
+    server.refusal = { status: 409, detail: "That name can't be used here." };
+    await app.person.clear(field);
+    await app.person.type(field, "Acme Labs");
+    await app.person.click(
+      within(dialog).getByRole("button", { name: "Save" }),
+    );
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(
+      "That name can't be used here.",
+    );
+    expect(field).toHaveProperty("value", "Acme Labs");
+
+    await app.person.click(
+      within(dialog).getByRole("button", { name: "Save" }),
+    );
+    await waitFor(() =>
+      expect(
+        app.view.queryByRole("dialog", { name: "Rename organization" }),
+      ).toBeNull(),
+    );
+    // The row and the account row both say the new name, read back from the server.
+    await waitFor(() =>
+      expect(page.getByRole("button", { name: /Name/ }).textContent).toContain(
+        "Acme Labs",
+      ),
+    );
+    expect(writes.at(-1)).toEqual({
+      request: `PATCH /api/v2/organizations/${ACME.id}/profile`,
+      body: { name: "Acme Labs" },
+      keyed: true,
+    });
+  });
+
+  test("lists every member with their role, and removes one after asking", async () => {
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await page.findByText("sam@example.com");
+    expect(page.getByText("dana@example.com · Owner")).toBeTruthy();
+    expect(page.getByText("lee@example.com · Admin")).toBeTruthy();
+    // The owner stays: nothing on her own row, Remove on the others.
+    expect(page.queryByRole("button", { name: "Leave organization" })).toBe(
+      null,
+    );
+    expect(page.queryByRole("button", { name: "Remove Dana Fresh" })).toBe(
+      null,
+    );
+    expect(page.getByRole("button", { name: "Remove Lee Park" })).toBeTruthy();
+
+    await app.person.click(
+      page.getByRole("button", { name: "Remove sam@example.com" }),
+    );
+    const dialog = await app.view.findByRole("dialog", {
+      name: "Remove sam@example.com from Acme?",
+    });
+    expect(
+      within(dialog).getByText(
+        "They keep their account and their other organizations. What they made here stays here.",
+      ),
+    ).toBeTruthy();
+    // Asked first: nothing is sent until the answer.
+    expect(sentWrites()).toEqual([]);
+    await app.person.click(
+      within(dialog).getByRole("button", { name: "Remove" }),
+    );
+    await waitFor(() => expect(page.queryByText("sam@example.com")).toBeNull());
+    expect(writes.at(-1)).toMatchObject({
+      request: `DELETE /api/v2/organizations/${ACME.id}/members/sam`,
+      keyed: true,
+    });
+  });
+
+  test("somebody who hasn't opened OpenBot yet is listed with their role, and their row offers nothing while the server says they can't be removed", async () => {
+    server.hosted = true;
+    server.members = [
+      ...server.members,
+      notOpened("cpk_ola", "Ola Berg", "ola@example.com", "admin"),
+      notOpened("cpk_kim", "Kim Lee", "", "member"),
+      notOpened("cpk_anon", null, "", "member"),
+    ];
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await page.findByText("Ola Berg");
+
+    const rowOf = (name: string) =>
+      page
+        .getByText(name, { selector: "[data-slot=item-title] span" })
+        .closest("[data-slot=item]") as HTMLElement;
+    const lineOf = (name: string) =>
+      within(rowOf(name)).getByText(/Hasn't opened OpenBot yet/).textContent;
+    // The role from the answer, the address when there is one, and that they haven't opened it.
+    expect(lineOf("Ola Berg")).toBe(
+      "ola@example.com · Admin · Hasn't opened OpenBot yet",
+    );
+    // No address: the name, and never an empty " · ".
+    expect(lineOf("Kim Lee")).toBe("Member · Hasn't opened OpenBot yet");
+    // Neither a name nor an address: a neutral label, and a person's mark for initials.
+    expect(lineOf("Unnamed member")).toBe("Member · Hasn't opened OpenBot yet");
+    expect(rowOf("Unnamed member").querySelector("svg")).toBeTruthy();
+
+    for (const name of ["Ola Berg", "Kim Lee", "Unnamed member"]) {
+      const row = within(rowOf(name));
+      // No role to change, nobody to remove, and no page of theirs to open.
+      expect(row.queryByRole("button")).toBeNull();
+      expect(row.queryByRole("link")).toBeNull();
+    }
+    // Everybody else's row is as it was.
+    expect(
+      page.getByRole("button", { name: "Change role for Lee Park" }),
+    ).toBeTruthy();
+    expect(page.getByRole("button", { name: "Remove Lee Park" })).toBeTruthy();
+    expect(sentWrites()).toEqual([]);
+  });
+
+  test("somebody who hasn't opened OpenBot yet is removed, after asking, once the server says they can be", async () => {
+    server.hosted = true;
+    server.members = [
+      ...server.members,
+      {
+        ...notOpened("cpk_cara", "Cara Invitee", "", "member"),
+        removable: true,
+      },
+    ];
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    const row = (
+      await page.findByText("Cara Invitee", {
+        selector: "[data-slot=item-title] span",
+      })
+    ).closest("[data-slot=item]") as HTMLElement;
+    expect(
+      within(row).getByText("Member · Hasn't opened OpenBot yet"),
+    ).toBeTruthy();
+    // Still no Role menu: only Remove.
+    expect(
+      within(row)
+        .getAllByRole("button")
+        .map(
+          (button) => button.getAttribute("aria-label") ?? button.textContent,
+        ),
+    ).toEqual(["Remove Cara Invitee"]);
+
+    await app.person.click(
+      within(row).getByRole("button", { name: "Remove Cara Invitee" }),
+    );
+    const dialog = await app.view.findByRole("dialog", {
+      name: "Remove Cara Invitee from Acme?",
+    });
+    // They never made anything here, so the dialog says only what removing them does.
+    expect(
+      within(dialog).getByText(
+        "This takes them out of Acme. They haven't opened OpenBot yet.",
+      ),
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(/made here/)).toBeNull();
+    await app.person.click(
+      within(dialog).getByRole("button", { name: "Remove" }),
+    );
+    await waitFor(() => expect(page.queryByText("Cara Invitee")).toBeNull());
+    expect(writes.at(-1)).toMatchObject({
+      request: `DELETE /api/v2/organizations/${ACME.id}/members/cpk_cara`,
+      keyed: true,
+    });
+  });
+
+  test("offers a Role menu where the server says a role can be given, and changing a member to an admin applies at once", async () => {
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await page.findByText("sam@example.com");
+    // Dana is the only owner, so her own role stays: no menu on her row.
+    expect(
+      page.queryByRole("button", { name: "Change role for Dana Fresh" }),
+    ).toBeNull();
+    expect(
+      page.getByRole("button", { name: "Change role for Lee Park" }),
+    ).toBeTruthy();
+
+    const role = page.getByRole("button", {
+      name: "Change role for sam@example.com",
+    });
+    const row = role.closest("[data-slot=item]") as HTMLElement;
+    expect(within(row).getByText("Member")).toBeTruthy();
+    await app.person.click(role);
+    const menu = await app.view.findByRole("menu");
+    // The roles she may give Sam, by name, without the one he has.
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((choice) => choice.textContent),
+    ).toEqual(["Owner", "Admin"]);
+    await app.person.click(
+      within(menu).getByRole("menuitem", { name: "Admin" }),
+    );
+
+    // The row says the new role, read back from the server.
+    await waitFor(() => expect(within(row).getByText("Admin")).toBeTruthy());
+    expect(writes).toEqual([
+      {
+        request: `PATCH /api/v2/organizations/${ACME.id}/members/sam`,
+        body: { role: "admin" },
+        keyed: true,
+      },
+    ]);
+  });
+
+  test("asks before making somebody an owner, saying what an owner can do", async () => {
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await app.person.click(
+      await page.findByRole("button", { name: "Change role for Lee Park" }),
+    );
+    await app.person.click(
+      within(await app.view.findByRole("menu")).getByRole("menuitem", {
+        name: "Owner",
+      }),
+    );
+    const dialog = await app.view.findByRole("dialog", {
+      name: "Make Lee Park an owner of Acme?",
+    });
+    expect(dialog.textContent).toContain(
+      "An owner can rename the organization, invite and remove people, and change who owns it.",
+    );
+    // Asked first: nothing is sent until the answer.
+    expect(sentWrites()).toEqual([]);
+    await app.person.click(
+      within(dialog).getByRole("button", { name: "Make owner" }),
+    );
+    await page.findByText("lee@example.com · Owner");
+    expect(writes).toEqual([
+      {
+        request: `PATCH /api/v2/organizations/${ACME.id}/members/lee`,
+        body: { role: "owner" },
+        keyed: true,
+      },
+    ]);
+    // With a second owner, Dana's own role can change, and stepping down is asked about too.
+    await app.person.click(
+      await page.findByRole("button", { name: "Change role for Dana Fresh" }),
+    );
+    await app.person.click(
+      within(await app.view.findByRole("menu")).getByRole("menuitem", {
+        name: "Admin",
+      }),
+    );
+    await app.view.findByRole("dialog", {
+      name: "Step down as an owner of Acme?",
+    });
+    expect(writes).toHaveLength(1);
+  });
+
+  test("a role change the server refuses is said in the server's sentence, and the role stays", async () => {
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    server.refusal = {
+      status: 409,
+      detail: "Their role just changed. Reload the page and try again.",
+    };
+    await app.person.click(
+      await page.findByRole("button", {
+        name: "Change role for sam@example.com",
+      }),
+    );
+    await app.person.click(
+      within(await app.view.findByRole("menu")).getByRole("menuitem", {
+        name: "Admin",
+      }),
+    );
+    expect((await page.findByRole("alert")).textContent).toBe(
+      "Their role just changed. Reload the page and try again.",
+    );
+    expect(server.members.find((one) => one.id === "sam")?.role).toBe("member");
+  });
+
+  test("lists the invitations it sent with their status, copies a waiting one's link and cancels one", async () => {
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await page.findByText("ana@example.com");
+    expect(page.getByText("Member · Pending · Expires in 6 days")).toBeTruthy();
+    expect(page.getByText("Member · Expired")).toBeTruthy();
+    expect(page.getByText("Member · Declined")).toBeTruthy();
+    // Only one still waiting has a link worth passing on. Every one can be taken back.
+    expect(
+      page.getAllByRole("button", { name: /^Copy link for/ }),
+    ).toHaveLength(1);
+    expect(
+      page.getAllByRole("button", { name: /^Cancel invitation for/ }),
+    ).toHaveLength(3);
+
+    await app.person.click(
+      page.getByRole("button", { name: "Copy link for ana@example.com" }),
+    );
+    await waitFor(async () =>
+      expect(await navigator.clipboard.readText()).toBe(
+        "http://openbot.invalid/invitations/inv_wait",
+      ),
+    );
+
+    await app.person.click(
+      page.getByRole("button", {
+        name: "Cancel invitation for bo@example.com",
+      }),
+    );
+    await waitFor(() => expect(page.queryByText("bo@example.com")).toBeNull());
+    expect(writes.at(-1)).toMatchObject({
+      request: `DELETE /api/v2/organizations/${ACME.id}/invitations/inv_old`,
+      keyed: true,
+    });
+  });
+
+  test("invites an address and says what happened: a link to pass on, or an email sent", async () => {
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    const invite = async (email: string) => {
+      await app.person.click(
+        await page.findByRole("button", { name: "Invite" }),
+      );
+      const dialog = await app.view.findByRole("dialog", {
+        name: "Invite to Acme",
+      });
+      await app.person.type(within(dialog).getByLabelText("Email"), email);
+      await app.person.click(
+        within(dialog).getByRole("button", { name: "Invite" }),
+      );
+      return dialog;
+    };
+
+    // Already invited: the server's sentence, with the address still typed.
+    server.refusal = {
+      status: 409,
+      detail:
+        "They already have an invitation waiting. Cancel it to send a new one.",
+    };
+    const form = await invite("ana@example.com");
+    expect((await within(form).findByRole("alert")).textContent).toBe(
+      "They already have an invitation waiting. Cancel it to send a new one.",
+    );
+    expect(within(form).getByLabelText("Email")).toHaveProperty(
+      "value",
+      "ana@example.com",
+    );
+    await app.person.click(
+      within(form).getByRole("button", { name: "Cancel" }),
+    );
+
+    // OpenBot could not email it: the inviter copies the link.
+    await invite("sam.ortiz@example.com");
+    const ready = await app.view.findByRole("dialog", {
+      name: "Invitation ready",
+    });
+    expect(within(ready).getByRole("status").textContent).toBe(
+      "Copy the link and send it to sam.ortiz@example.com.",
+    );
+    expect(writes.at(-1)).toEqual({
+      request: `POST /api/v2/organizations/${ACME.id}/invitations`,
+      body: { email: "sam.ortiz@example.com", role: "member" },
+      keyed: true,
+    });
+    await app.person.click(
+      within(ready).getByRole("button", { name: "Copy link" }),
+    );
+    await waitFor(async () =>
+      expect(await navigator.clipboard.readText()).toBe(
+        "http://openbot.invalid/invitations/inv_new",
+      ),
+    );
+    await app.person.click(within(ready).getByRole("button", { name: "Done" }));
+    // It is in the list now, waiting.
+    await page.findByText("sam.ortiz@example.com");
+
+    // OpenBot emailed it: nothing to copy.
+    server.delivery = "emailed";
+    await invite("kit@example.com");
+    const emailed = await app.view.findByRole("dialog", {
+      name: "Invitation sent",
+    });
+    expect(within(emailed).getByRole("status").textContent).toBe(
+      "We emailed kit@example.com an invitation.",
+    );
+    expect(within(emailed).queryByRole("button", { name: "Copy link" })).toBe(
+      null,
+    );
+  });
+
+  test("with every paid seat taken, the invitation says what a member costs and offers Add a seat, and back from adding it, Invite sends it", async () => {
+    /*
+     * Found end to end on OpenBot Cloud: once an organization paid, inviting a second person said
+     * "That couldn't be done just now. Try again." for good. The organization pays for each
+     * member and had no seat to spare; adding one is the way on, and a try again never is.
+     */
+    sessionStorage.clear();
+    server.freeSeats = 0;
+    // Following a link leaves this page; here the press is what matters, not the page it opens.
+    const stay = (event: Event) => {
+      if ((event.target as Element | null)?.closest?.("a"))
+        event.preventDefault();
+    };
+    document.addEventListener("click", stay, true);
+    try {
+      let app = await open("/settings/organization");
+      let page = within(await app.view.findByRole("main"));
+      await app.person.click(
+        await page.findByRole("button", { name: "Invite" }),
+      );
+      let dialog = await app.view.findByRole("dialog", {
+        name: "Invite to Acme",
+      });
+      await app.person.type(
+        within(dialog).getByLabelText("Email"),
+        "kit@example.com",
+      );
+      await app.person.click(
+        within(dialog).getByRole("button", { name: "Invite" }),
+      );
+
+      // The server's sentence, and one way on: Add a seat, to the address the server gave,
+      // coming back to these settings.
+      expect((await within(dialog).findByRole("alert")).textContent).toBe(
+        SEAT_SENTENCE,
+      );
+      expect(dialog.textContent).not.toMatch(/try again/i);
+      const add = within(dialog).getByRole("link", { name: "Add a seat" });
+      const address = new URL(
+        add.getAttribute("href") ?? "",
+        "http://openbot.invalid",
+      );
+      expect(address.pathname).toBe("/api/auth/hosted/add-seat");
+      expect(address.searchParams.get("organizationId")).toBe(ACME.id);
+      expect(address.searchParams.get("returnTo")).toBe(
+        "http://openbot.invalid/settings/organization",
+      );
+      expect(within(dialog).queryByRole("button", { name: "Invite" })).toBe(
+        null,
+      );
+      expect(within(dialog).getByLabelText("Email")).toHaveProperty(
+        "value",
+        "kit@example.com",
+      );
+      expect(server.sent.map((one) => one.email)).not.toContain(
+        "kit@example.com",
+      );
+      await app.person.click(add);
+
+      // The seat is added, and the browser comes back to the organization's settings.
+      server.freeSeats = 1;
+      cleanup();
+      queryClient.clear();
+      app = await open("/settings/organization");
+      // The Invite dialog is open again by itself, the address still typed, ready to send.
+      dialog = await app.view.findByRole("dialog", { name: "Invite to Acme" });
+      expect(within(dialog).getByLabelText("Email")).toHaveProperty(
+        "value",
+        "kit@example.com",
+      );
+      expect(within(dialog).queryByRole("alert")).toBe(null);
+      await app.person.click(
+        within(dialog).getByRole("button", { name: "Invite" }),
+      );
+      await app.view.findByRole("dialog", { name: "Invitation ready" });
+      expect(writes.at(-1)).toEqual({
+        request: `POST /api/v2/organizations/${ACME.id}/invitations`,
+        body: { email: "kit@example.com", role: "member" },
+        keyed: true,
+      });
+
+      // Read once: opening the settings again later starts the dialog closed and empty.
+      await app.person.click(
+        within(
+          await app.view.findByRole("dialog", { name: "Invitation ready" }),
+        ).getByRole("button", { name: "Done" }),
+      );
+      cleanup();
+      queryClient.clear();
+      app = await open("/settings/organization");
+      page = within(await app.view.findByRole("main"));
+      await page.findByText("kit@example.com");
+      expect(app.view.queryByRole("dialog")).toBe(null);
+    } finally {
+      document.removeEventListener("click", stay, true);
+    }
+  });
+});
+
+describe("invitations on a hosted OpenBot", () => {
+  beforeEach(() => {
+    server.pageSize = 50;
+  });
+
+  /** Opens the Invite dialog and answers what it says the person will see. */
+  async function inviteDialogSays(app: Awaited<ReturnType<typeof open>>) {
+    const page = within(await app.view.findByRole("main"));
+    await app.person.click(await page.findByRole("button", { name: "Invite" }));
+    const dialog = await app.view.findByRole("dialog", {
+      name: "Invite to Acme",
+    });
+    return within(dialog).getByText(/It lasts 7 days\./).textContent;
+  }
+
+  test("self-hosted, the invitation is seen in OpenBot, and a waiting one's link can be copied", async () => {
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await page.findByText("ana@example.com");
+    expect(
+      page.getAllByRole("button", { name: /^Copy link for/ }),
+    ).toHaveLength(1);
+    expect(await inviteDialogSays(app)).toBe(
+      "They see the invitation in OpenBot when they sign in with this address. It lasts 7 days.",
+    );
+  });
+
+  test("hosted, the invitation is an email from OpenBot by CopilotKit, accepted there, and there's no link to copy", async () => {
+    server.hosted = true;
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await page.findByText("ana@example.com");
+    // Every invitation can still be taken back; none has a link to pass on.
+    await waitFor(() =>
+      expect(page.queryAllByRole("button", { name: /^Copy link for/ })).toEqual(
+        [],
+      ),
+    );
+    expect(
+      page.getAllByRole("button", { name: /^Cancel invitation for/ }),
+    ).toHaveLength(3);
+    expect(await inviteDialogSays(app)).toBe(
+      "They get an email from OpenBot by CopilotKit and accept the invitation from it. It lasts 7 days.",
+    );
+  });
+});
+
+describe("organization settings, for a member", () => {
+  beforeEach(() => {
+    server.pageSize = 50;
+  });
+
+  test("shows the name and the members, and nothing a member cannot use", async () => {
+    asMember();
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await page.findByText("lee@example.com · Owner");
+    // The name is read, not opened; nobody is removed; no invitations are asked for or drawn.
+    expect(page.queryByRole("button", { name: /Name/ })).toBeNull();
+    expect(page.getByText("Acme")).toBeTruthy();
+    expect(page.queryByRole("button", { name: /^Remove/ })).toBeNull();
+    expect(page.queryByRole("button", { name: /^Change role/ })).toBeNull();
+    expect(page.queryByText("Invitations")).toBeNull();
+    expect(page.queryByRole("button", { name: "Invite" })).toBeNull();
+    expect(requests).not.toContain(
+      `GET /api/v2/organizations/${ACME.id}/invitations`,
+    );
+  });
+
+  test("leaves after being asked, and is then working in another of their organizations, from home", async () => {
+    asMember();
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await app.person.click(
+      await page.findByRole("button", { name: "Leave organization" }),
+    );
+    const dialog = await app.view.findByRole("dialog", { name: "Leave Acme?" });
+    expect(sentWrites()).toEqual([]);
+    requests = [];
+    await app.person.click(
+      within(dialog).getByRole("button", { name: "Leave" }),
+    );
+
+    await waitFor(() => expect(currentOrganizationId()).toBe(OWN.id));
+    expect(app.router.state.location.pathname).toBe("/");
+    expect(sentWrites()).toEqual([
+      `DELETE /api/v2/organizations/${ACME.id}/members/me`,
+      "POST /api/auth/organization/set-active",
+    ]);
+    expect(server.active).toBe(OWN.id);
+    // Nothing more was asked of the organization left once she had gone.
+    const left = requests.indexOf(
+      `DELETE /api/v2/organizations/${ACME.id}/members/me`,
+    );
+    expect(
+      requests.slice(left + 1).filter((request) => request.includes(ACME.id)),
+    ).toEqual([]);
+    const menu = await app.openAccountMenu();
+    await waitFor(() =>
+      expect(
+        within(menu)
+          .getAllByRole("menuitemradio")
+          .map((choice) => choice.textContent),
+      ).toEqual(["Dana's organization"]),
+    );
+  });
+});
+
+describe("invitations, for the person invited", () => {
+  test("accepting joins without switching, and then offers the switch", async () => {
+    server.received = [
+      received("inv_1", "pending"),
+      received("inv_2", "expired", -1),
+    ];
+    server.received[1] = {
+      ...(server.received[1] as ReceivedInvitation),
+      organization: { id: "org_other", slug: "other", name: "Other Co" },
+    };
+    const app = await open("/invitations");
+    const page = within(await app.view.findByRole("main"));
+    await page.findByText(
+      "Lee Park invited you to join as a member. Expires in 6 days.",
+    );
+    // The expired one says so and cannot be accepted.
+    expect(
+      page.getByText(
+        "This invitation has expired. Ask Lee Park to send a new one.",
+      ),
+    ).toBeTruthy();
+    expect(page.getAllByRole("button", { name: /^Accept/ })).toHaveLength(1);
+
+    await app.person.click(
+      page.getByRole("button", { name: "Accept invitation to Acme Research" }),
+    );
+    await page.findByText("You're a member of Acme Research.");
+    expect(sentWrites()).toEqual([
+      "POST /api/v2/people/me/invitations/inv_1/accept",
+    ]);
+    expect(writes[0]?.keyed).toBe(true);
+    // Still where she was working.
+    expect(currentOrganizationId()).toBe(ACME.id);
+    expect(app.router.state.location.pathname).toBe("/invitations");
+
+    await app.person.click(
+      await page.findByRole("button", { name: "Switch to Acme Research" }),
+    );
+    await waitFor(() => expect(currentOrganizationId()).toBe(RESEARCH.id));
+    expect(server.active).toBe(RESEARCH.id);
+    expect(app.router.state.location.pathname).toBe("/");
+  });
+
+  test("declining takes the invitation away, and with none left the page says so", async () => {
+    server.received = [received("inv_1", "pending")];
+    const app = await open("/invitations");
+    const page = within(await app.view.findByRole("main"));
+    await app.person.click(
+      await page.findByRole("button", {
+        name: "Decline invitation to Acme Research",
+      }),
+    );
+    await page.findByText("No invitations");
+    expect(sentWrites()).toEqual([
+      "POST /api/v2/people/me/invitations/inv_1/decline",
+    ]);
+    expect(server.organizations.map((one) => one.id)).not.toContain(
+      RESEARCH.id,
+    );
+  });
+
+  test("an invitation that ran out while the page was open says so once", async () => {
+    server.received = [received("inv_1", "pending")];
+    const app = await open("/invitations/inv_1");
+    const main = await app.view.findByRole("main");
+    const page = within(main);
+    const accept = await page.findByRole("button", {
+      name: "Accept invitation to Acme Research",
+    });
+    (server.received[0] as ReceivedInvitation).status = "expired";
+    await app.person.click(accept);
+    /*
+     * Found in testing: beside the refusal the row still said "Expires in 7 days" and offered
+     * Accept until a reload. The refusal means the invitation changed, so the row is read again and
+     * says what it is now, with nothing left to press.
+     */
+    expect(
+      await page.findByText(
+        "This invitation has expired. Ask Lee Park to send a new one.",
+      ),
+    ).toBeTruthy();
+    expect(page.queryByText(/Expires in/)).toBeNull();
+    expect(
+      page.queryByRole("button", {
+        name: "Accept invitation to Acme Research",
+      }),
+    ).toBeNull();
+    /*
+     * And it is said once. The refusal underneath said the same thing again in other words ("Ask
+     * whoever invited you to send a new one."), which the row, read again, already says.
+     */
+    await settleReactWork();
+    expect(page.queryByRole("alert")).toBeNull();
+    expect(main.textContent?.match(/expired/g)).toHaveLength(1);
+  });
+
+  test("a refusal that leaves the invitation waiting is said under its row", async () => {
+    server.received = [received("inv_1", "pending")];
+    const app = await open("/invitations/inv_1");
+    const page = within(await app.view.findByRole("main"));
+    const accept = await page.findByRole("button", {
+      name: "Accept invitation to Acme Research",
+    });
+    const answering = globalThis.fetch;
+    globalThis.fetch = Object.assign(
+      async (input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+        String(input).endsWith("/accept")
+          ? problem(
+              409,
+              "CONFLICT",
+              "Couldn't accept the invitation. Try again.",
+            )
+          : answering(input, init),
+      { preconnect: originalFetch.preconnect },
+    );
+    await app.person.click(accept);
+    expect((await page.findByRole("alert")).textContent).toBe(
+      "Couldn't accept the invitation. Try again.",
+    );
+    expect(
+      page.getByRole("button", { name: "Accept invitation to Acme Research" }),
+    ).toBeTruthy();
+  });
+
+  test("on the list, an invitation refused as expired is read again: no Expires in, no Accept", async () => {
+    server.received = [received("inv_1", "pending")];
+    const app = await open("/invitations");
+    const page = within(await app.view.findByRole("main"));
+    const accept = await page.findByRole("button", {
+      name: "Accept invitation to Acme Research",
+    });
+    (server.received[0] as ReceivedInvitation).status = "expired";
+    await app.person.click(accept);
+    expect(
+      await page.findByText(
+        "This invitation has expired. Ask Lee Park to send a new one.",
+      ),
+    ).toBeTruthy();
+    expect(page.queryByText(/Expires in/)).toBeNull();
+    expect(
+      page.queryByRole("button", {
+        name: "Accept invitation to Acme Research",
+      }),
+    ).toBeNull();
+    expect(
+      page.queryByRole("button", {
+        name: "Decline invitation to Acme Research",
+      }),
+    ).toBeNull();
+  });
+
+  test.each([
+    [
+      "pending",
+      "Lee Park invited you to join as a member. Expires in 6 days.",
+      [
+        "Decline invitation to Acme Research",
+        "Accept invitation to Acme Research",
+      ],
+    ],
+    [
+      "accepted",
+      "You're a member of Acme Research.",
+      ["Switch to Acme Research"],
+    ],
+    ["declined", "You declined this invitation.", []],
+    [
+      "canceled",
+      "This invitation was canceled. Ask Lee Park to send a new one.",
+      [],
+    ],
+    [
+      "expired",
+      "This invitation has expired. Ask Lee Park to send a new one.",
+      [],
+    ],
+  ] as const)(
+    "the page a link opens says what happened to a %s invitation, to somebody working elsewhere",
+    async (status, sentence, buttons) => {
+      server.received = [received("inv_1", status)];
+      const app = await open("/invitations/inv_1");
+      const main = await app.view.findByRole("main");
+      const page = within(main);
+      await page.findByText(sentence);
+      expect(page.getByText("Acme Research")).toBeTruthy();
+      expect(
+        [...main.querySelectorAll("[data-slot=item-actions] button")].map(
+          (button) => button.getAttribute("aria-label") ?? button.textContent,
+        ),
+      ).toEqual([...buttons]);
+      // Read as her own invitation, not as something of the organization she is working in.
+      expect(requests).toContain("GET /api/v2/people/me/invitations/inv_1");
+      expect(currentOrganizationId()).toBe(ACME.id);
+    },
+  );
+
+  test("a link to an invitation that is not hers says what to check", async () => {
+    const app = await open("/invitations/inv_someone_elses");
+    const page = within(await app.view.findByRole("main"));
+    await page.findByText("Invitation not found");
+    expect(
+      page.getByText(
+        "Check that you're signed in with the address it was sent to.",
+      ),
+    ).toBeTruthy();
+    expect(page.queryByRole("alert")).toBeNull();
+  });
+});

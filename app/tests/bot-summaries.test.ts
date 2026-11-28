@@ -19,16 +19,19 @@ test("counts read as words", () => {
 
 test("sharing names the audience", () => {
   expect(sharingSummary(undefined, "private")).toBe("Not shared");
-  expect(sharingSummary({ audience: "team" }, "private")).toBe("Whole team");
+  // The wire's `team` is everybody: a person reads "organization", never "team", for it.
+  expect(sharingSummary({ audience: "team" }, "private")).toBe(
+    "Everyone in the organization",
+  );
   expect(sharingSummary({ audience: "people" }, "private")).toBe(
-    "Specific people and groups",
+    "Specific people and teams",
   );
 });
 
-test("setup names where it runs", () => {
+test("setup names where a connected Bot runs, and says nothing for one that runs inside OpenBot", () => {
   expect(
     setupSummary({ builtIn: true, endpoint: "http://localhost:4201/ag-ui" }),
-  ).toBe("Built in");
+  ).toBe("");
   expect(
     setupSummary({
       builtIn: false,
@@ -38,7 +41,7 @@ test("setup names where it runs", () => {
   expect(setupSummary({ builtIn: false, endpoint: "not a url" })).toBe(
     "not a url",
   );
-  expect(setupSummary({ builtIn: false, endpoint: null })).toBe("Built in");
+  expect(setupSummary({ builtIn: false, endpoint: null })).toBe("");
 });
 
 /*
@@ -67,11 +70,23 @@ test("the personal edition names what runs a Bot instead of its address", () => 
       { builtIn: true, endpoint: null, framework: "OpenBot" },
       "personal",
     ),
-  ).toBe("Built in");
+  ).toBe("");
 });
 
-test("a public Bot nobody published is still open to everyone, not 'Not shared'", () => {
-  expect(sharingSummary(undefined, "public")).toBe("Everyone (public)");
+test("a public Bot nobody published is open to everyone in the organization, not 'Not shared'", () => {
+  expect(sharingSummary(undefined, "public")).toBe(
+    "Everyone in the organization (public)",
+  );
+  expect(
+    sharingSummary(undefined, "public", { organizationName: "Acme" }),
+  ).toBe("Everyone in Acme (public)");
+  // The organization's only member is told it's only them.
+  expect(
+    sharingSummary(undefined, "public", {
+      organizationName: "Sam's organization",
+      alone: true,
+    }),
+  ).toBe("Only you (public)");
 });
 
 test("reach names the places a Bot continues the conversation", () => {

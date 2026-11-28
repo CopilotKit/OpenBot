@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { connectionKindFor } from "@/components/manage/plugin-page";
+import { appBody } from "./apps-api";
 
 /**
  * Which shape the connector page draws, decided from the row rather than guessed.
@@ -15,22 +16,33 @@ import { connectionKindFor } from "@/components/manage/plugin-page";
  * thing worth pinning can be pinned without a router, a query client or a document.
  */
 
-test("a Composio-provenance row is brokered, whatever the catalogue says", () => {
+test("an app from the directory is brokered, whatever the catalogue says", () => {
   expect(
-    connectionKindFor({ provenance: "composio" } as never, undefined),
+    connectionKindFor(
+      appBody({ id: "composio-gmail", title: "Gmail", provenance: "composio" }),
+      undefined,
+    ),
   ).toBe("brokered");
 });
 
 test("a server added by URL still falls back to the shared-token shape", () => {
-  expect(connectionKindFor({ provenance: "custom" } as never, undefined)).toBe(
-    "deployment-bearer",
-  );
+  expect(
+    connectionKindFor(
+      appBody({ id: "wiki", title: "Wiki", provenance: "custom" }),
+      undefined,
+    ),
+  ).toBe("deployment-bearer");
 });
 
 test("a server added by URL and marked with an Entra scope is reached as the person asking, with no token to paste", () => {
   expect(
     connectionKindFor(
-      { provenance: "custom", entraScope: "api://hr-api/.default" } as never,
+      appBody({
+        id: "hr",
+        title: "HR",
+        provenance: "custom",
+        entraScope: "api://hr-api/.default",
+      }),
       undefined,
     ),
   ).toBe("person-entra");

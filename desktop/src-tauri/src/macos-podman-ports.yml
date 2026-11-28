@@ -1,6 +1,10 @@
 # Podman's macOS VM strips host IPs before configuring rootless port forwarding. Publishing
 # IPv4 and IPv6 loopback for the same port therefore creates two identical internal mappings.
 # !override replaces the port list; ordinary Compose merging would retain the IPv6 entries.
+#
+# Every service any installation may define. Only the ones the installation's own Compose files
+# define are written (`macos_podman_ports` in stack.rs): Compose refuses a file that names a
+# service with no image, and an installation being updated still has the previous release's file.
 services:
   postgres:
     ports: !override
@@ -11,6 +15,10 @@ services:
   agent-computer:
     ports: !override
       - "127.0.0.1:${COMPUTER_PORT:-4100}:4100"
+  agent-langgraph-agui:
+    ports: !override
+      - "127.0.0.1:${LANGGRAPH_PORT:-4201}:4206"
+  # An installation from before the managed Bot was the LangGraph harness still defines these two.
   agent-bot:
     ports: !override
       - "127.0.0.1:${BOT_PORT:-4200}:4200"

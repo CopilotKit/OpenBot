@@ -13,11 +13,15 @@ import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import AgentOrb from "@/components/agents/orb/agent-orb";
-import { BotsNavBadge } from "@/components/bot-profile/attention";
+import {
+  BotsNavBadge,
+  useWaitingCount,
+} from "@/components/bot-profile/attention";
+import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
+import { MovedAppsBanner } from "@/components/moves/moved-apps-notice";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { approvalInboxOptions } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
 import {
@@ -26,20 +30,14 @@ import {
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
+import { loadFailureText } from "@/lib/load-failure";
 import { cn } from "@/lib/utils";
 import { BotsSheet } from "./bots-sheet";
 import { chooseBot, useChosenBotId } from "./chosen-bot";
 import { FuseContext, type FuseSheetKind } from "./context";
 import { MainChatLink } from "./links";
 import { MenuSheet } from "./menu-sheet";
-import {
-  centreBot,
-  inColumn,
-  type FuseTab,
-  statusLine,
-  tabFor,
-  waitingOnYou,
-} from "./model";
+import { centreBot, type FuseTab, inColumn, statusLine, tabFor } from "./model";
 import { NotificationsSheet } from "./notifications-sheet";
 import { type FuseIcon, RoundButton } from "./ui";
 
@@ -85,7 +83,6 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
     enabled: Boolean(params.channelId),
   });
   const attention = useQuery(botAttentionQueryOptions());
-  const inbox = useQuery(approvalInboxOptions());
   const user = useQuery(currentUserQueryOptions());
   const userId = user.data?.id;
   const chosenId = useChosenBotId(userId);
@@ -124,19 +121,32 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
   // A conversation's computer or Bot settings, open beside the transcript.
   const sidePanelOpen = search.watch === true || search.settings === true;
   const column = inColumn(pathname, sidePanelOpen);
-  const waiting = waitingOnYou(inbox.data).count;
+  // OpenBot's own count, the one its Bots badge shows: never a count of the skin's own.
+  const waiting = useWaitingCount();
   const status = statusLine({
-    attention: attention.data?.find((entry) => entry.agentId === bot?.id),
+    attention: attention.data?.find((entry) => entry.botId === bot?.id),
     channels: channels.data,
     agentId: bot?.id,
   });
 
   return (
-    <FuseContext.Provider value={{ bot, userId, openSheet: setSheet }}>
+    <FuseContext.Provider
+      value={{
+        bot,
+        roster: {
+          pending: agents.isPending,
+          failed: agents.data === undefined ? agents.error : null,
+        },
+        userId,
+        openSheet: setSheet,
+      }}
+    >
       <div
         className="openfuse-frame flex h-svh flex-col overflow-hidden bg-background text-foreground"
         data-openfuse-tab={tab ?? "none"}
       >
+        <ConnectionBanner />
+        <MovedAppsBanner />
         <UpdateBanner />
         <SelfHostBanner />
         {/* Beside the header, the column's own margin moves the window too (`data-desktop-drag`). */}
@@ -198,7 +208,17 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
                   className="mb-1.5 max-w-full truncate text-[11px] text-muted-foreground"
                   data-testid="openfuse-status"
                 >
-                  {bot ? status : agents.isPending ? "" : "No Bots yet"}
+                  {/* A read that failed is said, never drawn as having no Bots. */}
+                  {bot
+                    ? status
+                    : agents.isPending
+                      ? ""
+                      : agents.data === undefined
+                        ? loadFailureText(
+                            agents.error,
+                            "Couldn't load your Bots.",
+                          )
+                        : "No Bots yet"}
                 </span>
               </button>
             </div>

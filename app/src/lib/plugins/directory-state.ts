@@ -1,6 +1,5 @@
-import type { PluginsProvider } from "@/lib/plugins/provider-vocabulary";
+import type { DirectoryApp } from "@/lib/apps/queries";
 import {
-  type ComposioApp,
   type PluginConnection,
   type PluginServer,
   personalConnections,
@@ -31,12 +30,12 @@ export type DirectoryAppState =
 
 /** How a person connects an app: a sign-in page, a key typed in, or nothing at all. */
 export function directoryConnect(
-  app: Pick<ComposioApp, "connection">,
+  app: Pick<DirectoryApp, "connectsWith">,
 ): "sign-in" | "key" | "none" {
-  switch (app.connection.kind) {
-    case "fields":
+  switch (app.connectsWith) {
+    case "key":
       return "key";
-    case "no-auth":
+    case "nothing":
       return "none";
     default:
       return "sign-in";
@@ -44,33 +43,46 @@ export function directoryConnect(
 }
 
 /**
- * The row this deployment recorded for a directory app, if it has one: the broker's own row at the
- * app's address. Several rows may share an address; the first one listed answers for the app, as it
- * does on the server.
+ * The directory entry that offers this app's key version, while it isn't added: for an app added as
+ * the sign-in an entry lists in place of its key. Undefined for any other app, and from a server that
+ * doesn't say (no `keyVersion`).
  */
-export function directoryServer(
-  servers: PluginServer[],
-  provider: PluginsProvider,
-  slug: string,
-): PluginServer | undefined {
-  return servers.find(
-    (server) =>
-      server.provenance === provider && server.url === `${provider}://${slug}`,
+export function keyVersionOffer(
+  entries: readonly DirectoryApp[] | undefined,
+  appId: string,
+): DirectoryApp | undefined {
+  return entries?.find(
+    (entry) => entry.appId === appId && entry.keyVersion?.appId === null,
+  );
+}
+
+/**
+ * Whether an added app could be the sign-in a directory app is listed as in place of its key: the
+ * directory's own sign-in app, or a server added by its address that signs each person in (the
+ * vendor's own server). Only these can have a key version to offer; which of them do is the
+ * directory's answer (`keyVersionOffer`).
+ */
+export function signsInForDirectory(
+  server: Pick<PluginServer, "connectsWith" | "source" | "signIn">,
+): boolean {
+  return (
+    server.connectsWith === "sign-in" ||
+    (server.source === "address" && server.signIn === true)
   );
 }
 
 export function directoryAppState(
-  app: Pick<ComposioApp, "slug" | "enabled" | "connection">,
+  app: Pick<DirectoryApp, "appId" | "connectsWith">,
   input: {
-    provider: PluginsProvider;
     servers: PluginServer[] | undefined;
     connections: PluginConnection[] | undefined;
   },
 ): DirectoryAppState {
-  if (!app.enabled) return { kind: "addable" };
+  if (app.appId === null) return { kind: "addable" };
   if (directoryConnect(app) === "none") return { kind: "added" };
   if (!input.servers || !input.connections) return { kind: "loading" };
-  const server = directoryServer(input.servers, input.provider, app.slug);
+  // The app the directory says this entry was added as, which answers for it on the server too.
+  const server = input.servers.find((row) => row.id === app.appId);
   // Listed as added by the directory and not yet in the app list: the refetch is on its way.
   if (!server) return { kind: "loading" };
   if (server.accountMode === "shared") return { kind: "added" };

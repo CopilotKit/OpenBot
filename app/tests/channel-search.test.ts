@@ -9,6 +9,7 @@ import {
   isChannelSearchable,
   normalizeChannelSearch,
 } from "../src/lib/channels/queries";
+import { conversationPage } from "./conversations-api";
 
 /** A roster row as the search box sees it. */
 function channel(overrides: Partial<ChannelSummary>): ChannelSummary {
@@ -115,17 +116,16 @@ test("only two or more characters are searched", () => {
 });
 
 test("asks the search endpoint with the query, the page size, the cursor and the query's signal", async () => {
-  const seen = serve({
-    channels: [channel({ id: "found" })],
-    nextCursor: "next/page",
-  });
+  const seen = serve(conversationPage([channel({ id: "found" })], "next/page"));
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   const options = channelSearchInfiniteQueryOptions("100% & more", 5);
 
   const first = await queryClient.fetchInfiniteQuery(options);
-  expect(seen[0]?.url).toBe("/api/channels/search?q=100%25+%26+more&limit=5");
+  expect(seen[0]?.url).toBe(
+    "/api/v2/organizations/default/conversations?q=100%25+%26+more&limit=5",
+  );
   expect(seen[0]?.signal).toBeInstanceOf(AbortSignal);
   expect(first.pages[0]?.nextCursor).toBe("next/page");
   // Flattened for the caller, like the roster.
@@ -134,7 +134,7 @@ test("asks the search endpoint with the query, the page size, the cursor and the
   // Two pages: the first again, then the one its cursor names.
   await queryClient.fetchInfiniteQuery({ ...options, pages: 2 });
   expect(seen.at(-1)?.url).toBe(
-    "/api/channels/search?q=100%25+%26+more&limit=5&cursor=next%2Fpage",
+    "/api/v2/organizations/default/conversations?q=100%25+%26+more&limit=5&cursor=next%2Fpage",
   );
   // A search never writes into the roster's cache.
   expect(queryClient.getQueryData(channelKeys.list())).toBeUndefined();

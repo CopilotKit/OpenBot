@@ -90,7 +90,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    runs-on: windows-2025
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'windows-2025' || 'openbot-windows-16core' }}
     timeout-minutes: 60
     defaults:
       run:
@@ -134,7 +134,7 @@ jobs:
         with:
           bun-version: 1.4.3
           no-cache: true
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
       - name: Install pinned AzureSignTool
@@ -186,9 +186,6 @@ jobs:
           WINDOWS_SIGNING: keyvault
           # To read the release's container-images.json when this build is a candidate.
           GH_TOKEN: ${{ github.token }}
-          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID }}
-          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
-          OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT }}
         run: bun scripts/signed-build.ts win32 x64 src-tauri/tauri.windows-signing.conf.json --bundles nsis
         working-directory: desktop
       # Tauri restores the unsigned build output after bundling. Verify the app
@@ -314,6 +311,8 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_TAG: ${{ inputs.release-tag }}
       MAKE_LATEST: ${{ inputs.make-latest }}
+      # Tags kept from Latest for a staged rollout (scripts/release-make-latest.sh).
+      HOLD_LATEST: ${{ vars.RELEASE_HOLD_LATEST }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
