@@ -31,14 +31,14 @@ boot() {
     if grep -q "^$1=" "$config"; then sed -i "s|^$1=.*|$1=$2|" "$config"; else echo "$1=$2" >> "$config"; fi
   }
   set_config hw.keyboard no
-  set_config hw.ramSize 4096
+  set_config hw.ramSize 6144
   set_config disk.dataPartition.size 8G
   set_config hw.gpu.enabled yes
   set_config hw.gpu.mode swiftshader_indirect
   set_config hw.camera.back none
   set_config hw.camera.front none
   set_config showDeviceFrame no
-  nohup emulator -avd shell -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
+  nohup emulator -avd shell -memory 6144 -cores 4 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
     -camera-back none -camera-front none -netdelay none -netspeed full > "$ARTIFACTS/emulator.log" 2>&1 &
   adb wait-for-device
   local started=$SECONDS
@@ -46,6 +46,9 @@ boot() {
     if [ $((SECONDS - started)) -gt 600 ]; then echo "the emulator did not boot in 10 minutes"; tail -n 50 "$ARTIFACTS/emulator.log"; exit 1; fi
     sleep 3
   done
+  # The package manager and the launcher answering, not just the boot flag.
+  until adb shell pm path android > /dev/null 2>&1; do sleep 2; done
+  adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.HOME > /dev/null 2>&1 || true
   echo "booted in $((SECONDS - started)) s"
 }
 

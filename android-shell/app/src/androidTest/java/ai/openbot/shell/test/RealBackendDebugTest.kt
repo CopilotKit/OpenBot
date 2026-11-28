@@ -41,6 +41,92 @@ class RealBackendDebugTest : ShellTestBase() {
         check(content, "the web view showed no web content within 60 s")
     }
 
+    // Cloudflare's bot check on my.open.bot (seen in the WebView after a cold relaunch). ----------------
+
+    private fun cookieNames(): List<String> =
+        (android.webkit.CookieManager.getInstance().getCookie(PRODUCTION) ?: "").split(";")
+            .map { it.substringBefore("=").trim() }.filter { it.isNotEmpty() }
+
+    private fun challengeShown(): Boolean {
+        val title = pageString("document.title")
+        return title.startsWith("Just a moment") || pageText().contains("Performing security verification")
+    }
+
+    /** One load of my.open.bot in the WebView: was it the bot check, and did it clear by itself. */
+    private fun observeLoad(label: String) {
+        val deadline = System.currentTimeMillis() + 30_000
+        while (System.currentTimeMillis() < deadline) {
+            if (pageString("document.readyState") == "complete" && pageString("document.title").isNotEmpty()) break
+            sleep(1_000)
+        }
+        sleep(2_000)
+        val challenged = challengeShown()
+        var clearedAfter = -1
+        if (challenged) {
+            screenshot("$label-challenge")
+            val started = System.currentTimeMillis()
+            while (System.currentTimeMillis() - started < 45_000) {
+                sleep(3_000)
+                if (!challengeShown()) {
+                    clearedAfter = ((System.currentTimeMillis() - started) / 1000).toInt()
+                    break
+                }
+            }
+        }
+        screenshot(label)
+        note("challenge probe, $label: bot check shown $challenged; " +
+            (if (challenged) (if (clearedAfter >= 0) "cleared by itself after ${clearedAfter} s" else "still there after 45 s") else "page '${pageString("document.title")}'") +
+            "; path ${pageString("location.pathname")}; cookie names ${cookieNames()}")
+    }
+
+    /**
+     * Where the bot check shows: a first load, a reload, an in-process relaunch, and my.open.bot in
+     * a Custom Tab (Chrome) on the same emulator. The next test is a cold relaunch. No account.
+     */
+    @Test
+    fun testRealChallengeProbe() {
+        requireProduction()
+        launch(null, "load-1", plain = true)
+        check(waitFor("openbot_webview", 20_000) != null, "no web view")
+        note("challenge probe: user agent ${pageString("navigator.userAgent")}")
+        observeLoad("1-first-load")
+        pageJs("location.reload()")
+        sleep(2_000)
+        observeLoad("2-reload")
+        launch(null, "load-3", reset = false, plain = true)
+        observeLoad("3-in-process-relaunch")
+        // The same address in a Custom Tab: Chrome's own user agent and cookie jar.
+        launch(null, "tab", reset = false, extras = mapOf("openbot.debug_tab_url" to "$PRODUCTION/"))
+        waitFor("sign_in_button", 15_000)?.click()
+        var browser = ""
+        val deadline = System.currentTimeMillis() + 20_000
+        while (System.currentTimeMillis() < deadline) {
+            dismissChromeScreens()
+            browser = foregroundPackage()
+            if (browser.isNotEmpty() && browser != pkg) break
+            sleep(500)
+        }
+        sleep(8_000)
+        val text = appText(browser)
+        val challenged = text.contains("performing security verification") || text.contains("just a moment")
+        screenshot("4-custom-tab")
+        note("challenge probe, 4-custom-tab ($browser): bot check shown $challenged; OpenBot sign-in shown ${text.contains("sign in to openbot")}")
+        device.pressBack()
+        // Let the cookie store reach the disk before the next test kills the process.
+        device.pressHome()
+        sleep(4_000)
+    }
+
+    /** Runs right after testRealChallengeProbe, in a new process. */
+    @Test
+    fun testRealChallengeProbe_2_relaunch() {
+        requireProduction()
+        note("challenge probe, before the cold relaunch: cookie names ${cookieNames()}")
+        launch(null, "load-5", reset = false, plain = true)
+        check(waitFor("openbot_webview", 20_000) != null, "no web view")
+        observeLoad("5-cold-relaunch")
+    }
+
     /** Texts of everything another app (the Custom Tab) shows, lower-cased. */
     private fun tabText(browser: String): String =
         device.findObjects(By.pkg(browser)).flatMap { listOfNotNull(it.text, it.contentDescription) }.joinToString("\n").lowercase()
@@ -275,6 +361,7 @@ class RealBackendDebugTest : ShellTestBase() {
             check(!exists("sign_in_button"), "a cold relaunch showed the sign-in screen")
             sleep(6_000)
             screenshot("j9-relaunched")
+            note("cold relaunch: bot check shown ${challengeShown()}; cookie names ${cookieNames()}")
             note("relaunched: ${debugState()}")
         } finally {
             note("video-mark end ${System.currentTimeMillis() / 1000.0}")

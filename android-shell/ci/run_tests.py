@@ -53,6 +53,8 @@ SUITE1_RELEASE = [
 SUITE1_DEBUG = [
     "RealBackendDebugTest#testLoadsHostedWebApp",
     "RealBackendDebugTest#testRealSignInPathInCustomTab",
+    "RealBackendDebugTest#testRealChallengeProbe",
+    "RealBackendDebugTest#testRealChallengeProbe_2_relaunch",
     "RealBackendDebugTest#testRealGoogleSignInInCustomTab",
     "RealBackendDebugTest#testRealSignedInJourneyWithSessionCookie",
     "RealBackendDebugTest#testRealSignedInJourneyWithSessionCookie_2_relaunch",
@@ -170,6 +172,22 @@ def video_seconds(path):
         return float(out.stdout.strip())
     except ValueError:
         return 0.0
+
+
+def system_dialog_guard():
+    """A recording never starts over a system "isn't responding" or crash dialog: the run fails."""
+    for attempt in range(3):
+        windows = adb("shell", "dumpsys window windows").stdout
+        bad = [line.strip() for line in windows.splitlines()
+               if "Application Not Responding" in line or "Application Error" in line or "AppNotResponding" in line]
+        if not bad:
+            return
+        print(f"  system dialog on screen: {bad[:2]}; closing it", flush=True)
+        adb("shell", "am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS")
+        adb("shell", "input keyevent KEYCODE_BACK")
+        time.sleep(5)
+    print("::error::a system dialog is on screen; not recording through it")
+    sys.exit(1)
 
 
 def trim_and_copy(path, recording_started, instrument_log):
@@ -331,6 +349,7 @@ def main():
         if MODE == "video":
             for first, last, name, secret in RECORD:
                 if test_id == first:
+                    system_dialog_guard()
                     recorders[name] = Recorder(name)
                     recorders[name].start()
         status = run_one(test_id, results, logs)

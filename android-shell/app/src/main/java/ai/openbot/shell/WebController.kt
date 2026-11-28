@@ -495,7 +495,17 @@ class WebController(
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
             val status = errorResponse.statusCode
             if (request.isForMainFrame) {
-                diagnostics.log("navigation-response", mapOf("url" to Diagnostics.redact(request.url.toString()), "mainFrame" to true, "status" to status))
+                // Header names a bot check sets (Cloudflare), and the challenge marker's value only.
+                val headers = errorResponse.responseHeaders?.mapKeys { it.key.lowercase() } ?: emptyMap()
+                diagnostics.log("navigation-response", mapOf(
+                    "url" to Diagnostics.redact(request.url.toString()),
+                    "mainFrame" to true,
+                    "status" to status,
+                    "server" to headers["server"],
+                    "cfMitigated" to headers["cf-mitigated"],
+                    "cfRay" to headers.containsKey("cf-ray"),
+                    "setCookieNames" to (headers["set-cookie"]?.split(",")?.map { it.substringBefore("=").trim() } ?: emptyList<String>()),
+                ))
             }
             if (request.isForMainFrame && status >= 500) failMainFrame("http $status")
         }

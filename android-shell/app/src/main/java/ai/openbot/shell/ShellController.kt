@@ -126,7 +126,6 @@ class ShellController(
     var pageLoading = false
         private set
     private var loadingSince = 0L
-    private var contentChecks = 0
 
     /** A native sign-out is waiting for the web app's own sign-out to land on /sign. */
     var signingOut = false
@@ -473,7 +472,6 @@ class ShellController(
     override fun onFullLoad() {
         main.removeCallbacks(hideSkeleton)
         main.removeCallbacks(checkContent)
-        contentChecks = 0
         if (!pageLoading) {
             pageLoading = true
             loadingSince = System.currentTimeMillis()
@@ -493,17 +491,12 @@ class ShellController(
         main.postDelayed(hideSkeleton, delay)
     }
 
-    /** No bridge (production today): finished and the body has text. Asked every 500 ms for 10 s. */
+    /** Finished and no `ready` came: the skeleton goes, whatever the page shows. */
     private fun checkPageContent() {
         if (!pageLoading || web.pageReady) return
-        web.evaluateJson("JSON.stringify({n: (document.body && document.body.innerText.trim().length) || 0})") { answer ->
-            val length = answer?.optInt("n", 0) ?: 0
-            contentChecks += 1
-            if (length > 0 || contentChecks >= 20) {
-                pageShown(if (length > 0) "content" else "content-timeout", 0)
-            } else {
-                main.postDelayed(checkContent, 500)
-            }
+        web.evaluateJson("JSON.stringify({n: (document.body && document.body.innerText.trim().length) || 0, t: document.title})") { answer ->
+            pageShown("finished-no-ready", 0)
+            diagnostics.log("page-after-finish", mapOf("textLength" to (answer?.optInt("n", 0) ?: 0), "title" to (answer?.optString("t") ?: "")))
         }
     }
 
@@ -763,8 +756,10 @@ class ShellController(
         // end the skeleton once its body has text.
         refreshChrome()
         if (pageLoading && !web.pageReady) {
+            // No `ready` within 1.5 s of finishing: a page without the bridge (production today),
+            // or one that is not the web app at all (an interactive bot check): never keep it covered.
             main.removeCallbacks(checkContent)
-            checkPageContent()
+            main.postDelayed(checkContent, NO_READY_MS)
         }
     }
 
@@ -777,5 +772,6 @@ class ShellController(
     companion object {
         const val MIN_SKELETON_MS = 300L
         const val SIGN_OUT_TIMEOUT_MS = 8_000L
+        const val NO_READY_MS = 1_500L
     }
 }
