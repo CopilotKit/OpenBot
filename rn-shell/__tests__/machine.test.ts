@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import type { HandoffMode } from "../src/logic/handoffConfig";
 import {
   type Config,
+  decideBack,
   decideNavigation,
+  edgeSwipeMode,
   type Effect,
   type Event,
   initialState,
@@ -1100,5 +1102,105 @@ describe("the senior review's second pass", () => {
         10_000,
       ).effects.some((e) => e.type === "openExternal"),
     ).toBe(false);
+  });
+});
+
+describe("per-tab back (the page's own stacks)", () => {
+  const route = (canGoBack?: boolean): Event => ({
+    type: "page",
+    message: {
+      kind: "bridge",
+      message: {
+        type: "route",
+        path: "/bots/b1",
+        tab: "bots",
+        signedIn: true,
+        ...(canGoBack === undefined ? {} : { canGoBack }),
+      },
+    },
+  });
+
+  test("without canGoBack (production today): the web view's history, then the system", () => {
+    let state = run([route()], signedIn()).state;
+    expect(state.pageCanGoBack).toBeNull();
+    expect(decideBack(state)).toBe("system");
+    state = run(
+      [
+        {
+          type: "urlChanged",
+          url: "https://my.open.bot/bots/b1",
+          canGoBack: true,
+        },
+      ],
+      state,
+    ).state;
+    expect(decideBack(state)).toBe("webHistory");
+    expect(edgeSwipeMode(state)).toBe("webkit");
+  });
+
+  test("with canGoBack: Back is the page's command, and leaves the app at a tab root", () => {
+    let state = run(
+      [
+        {
+          type: "urlChanged",
+          url: "https://my.open.bot/bots/b1",
+          canGoBack: true,
+        },
+        route(true),
+      ],
+      signedIn(),
+    ).state;
+    expect(decideBack(state)).toBe("pageBack");
+    expect(edgeSwipeMode(state)).toBe("page");
+    state = run([route(false)], state).state;
+    expect(decideBack(state)).toBe("system");
+    expect(edgeSwipeMode(state)).toBe("off");
+  });
+
+  test("the keyboard first; the web sign-in cancels when it cannot go back; the lock is the system's", () => {
+    let state = run(
+      [route(true), { type: "keyboard", visible: true }],
+      signedIn(),
+    ).state;
+    expect(decideBack(state)).toBe("dismissKeyboard");
+    expect(edgeSwipeMode(state)).toBe("off");
+    const web = run(
+      [
+        { type: "signInPressed" },
+        {
+          type: "configAnswered",
+          mode: { kind: "webSignIn", reason: "x" },
+          pair,
+        },
+      ],
+      signedOut(),
+    ).state;
+    expect(decideBack(web)).toBe("cancelWebSignIn");
+    state = run([{ type: "network", offline: true }], signedIn()).state;
+    expect(decideBack(state)).toBe("system");
+  });
+
+  test("tapping the tab already selected still sends its root to the page", () => {
+    const state = run([route(true)], signedIn()).state;
+    const { effects } = run([{ type: "tabPressed", tab: "bots" }], state);
+    expect(effects.find((e) => e.type === "inject")).toEqual({
+      type: "inject",
+      script:
+        'window.__openbotShellOpen && window.__openbotShellOpen("/bots"); true;',
+    });
+  });
+
+  test("sign-out forgets the page's stacks", () => {
+    const state = run(
+      [
+        route(true),
+        {
+          type: "page",
+          message: { kind: "bridge", message: { type: "signed-out" } },
+        },
+      ],
+      signedIn(),
+    ).state;
+    expect(state.pageCanGoBack).toBeNull();
   });
 });

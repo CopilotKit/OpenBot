@@ -100,7 +100,13 @@ export type PageMessage =
       message:
         | { type: "ready" }
         | { type: "signed-out" }
-        | { type: "route"; path: string; tab: Tab | null; signedIn: boolean };
+        | {
+            type: "route";
+            path: string;
+            tab: Tab | null;
+            signedIn: boolean;
+            canGoBack?: boolean;
+          };
     };
 
 export type Event =
@@ -193,6 +199,9 @@ export type State = {
   callbackArrived: boolean;
   /** The main-frame navigation in flight failed: its error page's commit and finish are not a page of ours. */
   navFailed: boolean;
+  /** The page's own per-tab history: true when the current tab is deeper than its root; null when
+   * the page does not say (production today), and the web view's own history is used. */
+  pageCanGoBack: boolean | null;
   /** What waits for the site's data to be cleared before it loads (enter, or the web sign-in). */
   afterClear: WebSource | null;
   /** A renewal's enter is loading: the outgoing page's signed-out and /sign say nothing. */
@@ -262,6 +271,7 @@ export function initialState(): State {
     lastNavigation: "none",
     callbackArrived: false,
     navFailed: false,
+    pageCanGoBack: null,
     afterClear: null,
     renewalEntering: false,
     pageColor: null,
@@ -341,6 +351,7 @@ export function debugState(s: State, origin: string): string {
     `skeleton=${showsSkeleton(s) ? 1 : 0}`,
     `bridge=${s.bridgeSeen ? 1 : 0}`,
     `ready=${s.pageReady ? 1 : 0}`,
+    `back=${s.pageCanGoBack === null ? "-" : s.pageCanGoBack ? 1 : 0}`,
   ].join(" ");
 }
 
@@ -564,6 +575,7 @@ function sessionEnded(step: Step, reason: string) {
     lastOwnUrl: null,
     currentUrl: null,
     keyboard: false,
+    pageCanGoBack: null,
   });
   fx(step, { type: "dismissKeyboard" }, { type: "clearSiteData" });
 }
@@ -1167,7 +1179,13 @@ function handleBridge(
   message:
     | { type: "ready" }
     | { type: "signed-out" }
-    | { type: "route"; path: string; tab: Tab | null; signedIn: boolean },
+    | {
+        type: "route";
+        path: string;
+        tab: Tab | null;
+        signedIn: boolean;
+        canGoBack?: boolean;
+      },
   at: number,
 ) {
   const s = step.state;
@@ -1182,6 +1200,10 @@ function handleBridge(
     }
     case "route": {
       if (message.tab) set(step, { tab: message.tab });
+      set(step, {
+        pageCanGoBack:
+          typeof message.canGoBack === "boolean" ? message.canGoBack : null,
+      });
       if (message.signedIn) {
         if (s.phase !== "signedIn" || s.renewing) {
           if (
@@ -1351,4 +1373,44 @@ export function decideNavigation(
       },
     ],
   };
+}
+
+// Back (Android's Back, iOS's edge swipe). -----------------------------------------------------------
+
+/** The page's own back command: it pops the current tab's stack. */
+export const PAGE_BACK_SCRIPT =
+  'window.dispatchEvent(new CustomEvent("openbot:back")); true;';
+
+export type BackDecision =
+  /** The keyboard is up: Back closes it. */
+  | "dismissKeyboard"
+  /** The web sign-in has nowhere to go back to: Back cancels it. */
+  | "cancelWebSignIn"
+  /** The page keeps per-tab stacks and this tab is deeper than its root: `openbot:back`. */
+  | "pageBack"
+  /** A page without per-tab stacks (production today): the web view's own history. */
+  | "webHistory"
+  /** Not handled: Android leaves the app. */
+  | "system";
+
+/**
+ * What Back does. Synchronous (Android's BackHandler needs the answer at once). Once a page reports
+ * `canGoBack`, Back is a command to the page, never the web view's history; at a tab root it leaves
+ * the app. Without it, the web view's history, which a fresh web view after every sign-in keeps
+ * clear of /sign, /api/ and other sites.
+ */
+export function decideBack(s: State): BackDecision {
+  if (showsLock(s)) return "system";
+  if (s.keyboard) return "dismissKeyboard";
+  if (s.phase === "signedOut" && s.signIn === "webFallback")
+    return s.canGoBack ? "webHistory" : "cancelWebSignIn";
+  if (s.phase !== "signedIn") return "system";
+  if (s.pageCanGoBack !== null) return s.pageCanGoBack ? "pageBack" : "system";
+  return s.canGoBack ? "webHistory" : "system";
+}
+
+/** iOS: the page has its own stacks, so WebKit's back gesture is off and the app's edge swipe sends `openbot:back`. */
+export function edgeSwipeMode(s: State): "webkit" | "page" | "off" {
+  if (s.pageCanGoBack === null) return "webkit";
+  return s.pageCanGoBack && !s.keyboard ? "page" : "off";
 }

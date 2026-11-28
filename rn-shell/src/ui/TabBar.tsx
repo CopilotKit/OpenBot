@@ -4,7 +4,7 @@ import { BotsIcon, ConversationsIcon, HomeIcon } from "./Icons";
 import type { Colors } from "./theme";
 
 const ITEMS: { tab: Tab; label: string; Icon: typeof HomeIcon }[] = [
-  { tab: "conversations", label: "Conversations", Icon: ConversationsIcon },
+  { tab: "conversations", label: "Chats", Icon: ConversationsIcon },
   { tab: "home", label: "Home", Icon: HomeIcon },
   { tab: "bots", label: "Bots", Icon: BotsIcon },
 ];
@@ -12,7 +12,7 @@ const ITEMS: { tab: Tab; label: string; Icon: typeof HomeIcon }[] = [
 export const TAB_BAR_HEIGHT = 56;
 
 /**
- * The bottom bar: Conversations, Home, Bots. Native views drawn by React Native (not UITabBar or
+ * The bottom bar: Chats, Home, Bots (the bridge still calls the first tab `conversations`). Native views drawn by React Native (not UITabBar or
  * BottomNavigationView: the one web view stays put under all three tabs, which the system tab bars,
  * each hosting a screen per tab, do not allow without re-parenting the web view).
  */

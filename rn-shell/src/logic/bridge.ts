@@ -88,6 +88,9 @@ function parseBridge(message: unknown): PageMessage | null {
           path: record.path.slice(0, 2_000),
           tab,
           signedIn: record.signedIn === true,
+          ...(typeof record.canGoBack === "boolean"
+            ? { canGoBack: record.canGoBack }
+            : {}),
         },
       };
     }

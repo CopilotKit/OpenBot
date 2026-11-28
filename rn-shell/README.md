@@ -82,7 +82,7 @@ own origin) and only from the own origin.
 ```sh
 cd rn-shell
 npm ci                                   # applies patches/ (postinstall)
-npm run typecheck && npm test            # tsc strict; bun test for the pure logic (60+ cases)
+npm run typecheck && npm test            # tsc strict; bun test for the pure logic (53 cases)
 npx expo prebuild                        # store build: https://my.open.bot, no hooks
 EXPO_PUBLIC_OPENBOT_TEST_BUILD=1 npx expo prebuild --clean   # test build (hooks, localhost)
 npx expo run:ios --configuration Release        # on a Mac with Xcode
@@ -105,16 +105,22 @@ store bundle made after a test bundle reused the test build's modules (see COMPA
   keyboard effects, process death), the navigation policy, URL building against the contract's worked
   example, PKCE against RFC 7636, the hand-off config, the bridge's checks.
 - **Maestro flows** (`maestro/`): `flows/` against the mock stacks of this branch's built web app
-  (first screen, hand-off sign-in through the system sheet, tabs, keyboard, relaunch, sign-out, web
-  sign-in fallback, skeleton, lock offline / recovering / 5xx / silent server, stale session, the header
-  probe, web content process death, dark mode, and on Android a foreign `openbotshell://` callback),
-  `real/` against https://my.open.bot (first screen and web sign-in, lock when unreachable, the
-  signed-in journey on `OPENBOT_SHELL_TEST_SESSION`), `demo/` for the recording.
+  (first screen, hand-off sign-in through the system sheet, tabs, keyboard on Home and in a
+  conversation, relaunch, sign-out, web sign-in fallback, skeleton, lock offline / recovering / 5xx /
+  silent server, stale session, the header probe, web content process death, dark mode, and on Android
+  a foreign `openbotshell://` callback), `real/` against https://my.open.bot (first screen, the web
+  sign-in to the identity provider's page, lock when unreachable, the signed-in journey on
+  `OPENBOT_SHELL_TEST_SESSION`), `demo/` for the recording. Flows that need a signed-in app start
+  from cleared data and the mock's session cookie, so one failing sign-in does not fail the rest.
   `ci/run_flows.py` runs them one by one and writes `SUMMARY.md`, `results-*.json` and `shots/`.
-- **Workflows**: `.github/workflows/rn-shell-ios.yml` (macOS, iPhone simulator),
-  `rn-shell-android.yml` (Linux, KVM emulator, guest GPU), `rn-shell-checks.yml` (unit tests, the store
-  configuration and store bundles, the Android store APK and its size), `rn-shell-video.yml` (the demo
-  recordings). Each uploads its artifacts per run.
+- **Workflows**: `.github/workflows/rn-shell-ios.yml` (macOS: one build job, then 2 simulator test
+  shards side by side), `rn-shell-android.yml` (Linux, KVM: 2 emulator shards, guest GPU),
+  `rn-shell-checks.yml` (unit tests, the store configuration and store bundles, the Android store APK
+  and its size), `rn-shell-video.yml` (the demo recordings, when the demo flow changes). The built
+  app and APK are cached on their sources (git's index), so a change to flows or CI does not rebuild;
+  a newer push waits for a running iOS workflow rather than cancelling its 15-minute build. Each
+  flow has a deadline (2 to 3 minutes) and each shard's suite 15 minutes; a flow runs once more only
+  when Maestro's own driver died. Each run uploads SUMMARY.md, results and screenshots per shard.
 
 ## Known gaps
 

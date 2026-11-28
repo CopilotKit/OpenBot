@@ -6,6 +6,7 @@ import {
   Dimensions,
   Keyboard,
   type KeyboardEvent,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -28,10 +29,13 @@ import type {
 } from "react-native-webview/lib/WebViewTypes";
 import { BASE_URL, hooks, PLATFORM, USER_AGENT_MARK, VERSION } from "../config";
 import { parsePageMessage } from "../logic/bridge";
-import { injectedScript } from "../logic/injected";
+import { BLUR_SCRIPT, injectedScript } from "../logic/injected";
 import {
   debugState,
+  decideBack,
   decideNavigation,
+  edgeSwipeMode,
+  PAGE_BACK_SCRIPT,
   lockReason,
   showsLock,
   showsSignInScreen,
@@ -140,27 +144,48 @@ function Shell() {
     };
   }, [dispatch]);
 
-  // Android Back: back in the web view while there is somewhere in the app to go, else the system's.
+  // Android Back (src/logic/machine.ts decideBack): the keyboard, the page's own per-tab back, or
+  // the web view's history for a page without it; at a tab root the system leaves the app.
   useEffect(() => {
     const subscription = BackHandler.addEventListener(
       "hardwareBackPress",
       () => {
-        const s = stateRef.current;
-        if (showsLock(s)) return false;
-        if (s.phase === "signedOut" && s.signIn === "webFallback") {
-          if (s.canGoBack) webRef.current?.goBack();
-          else dispatch({ type: "cancelWebSignIn" });
-          return true;
+        switch (decideBack(stateRef.current)) {
+          case "dismissKeyboard":
+            webRef.current?.injectJavaScript(BLUR_SCRIPT);
+            Keyboard.dismiss();
+            return true;
+          case "cancelWebSignIn":
+            dispatch({ type: "cancelWebSignIn" });
+            return true;
+          case "pageBack":
+            webRef.current?.injectJavaScript(PAGE_BACK_SCRIPT);
+            return true;
+          case "webHistory":
+            webRef.current?.goBack();
+            return true;
+          default:
+            return false;
         }
-        if (s.phase === "signedIn" && s.canGoBack) {
-          webRef.current?.goBack();
-          return true;
-        }
-        return false;
       },
     );
     return () => subscription.remove();
   }, [dispatch, stateRef]);
+
+  // iOS: once the page keeps its own per-tab stacks, WebKit's back-forward swipe is off and a swipe
+  // from the left edge sends the page's back command instead.
+  const edgeSwipe = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          gesture.dx > 12 && Math.abs(gesture.dy) < gesture.dx,
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dx > 60 && edgeSwipeMode(stateRef.current) === "page")
+            webRef.current?.injectJavaScript(PAGE_BACK_SCRIPT);
+        },
+      }),
+    [stateRef],
+  );
 
   const onShouldStart = useCallback(
     (request: ShouldStartLoadRequest) => {
@@ -345,7 +370,9 @@ function Shell() {
               hideKeyboardAccessoryView
               contentInsetAdjustmentBehavior="never"
               automaticallyAdjustContentInsets={false}
-              allowsBackForwardNavigationGestures
+              allowsBackForwardNavigationGestures={
+                edgeSwipeMode(state) === "webkit"
+              }
               // Inline (not the imported TEST_BUILD) so a store bundle folds it away with what it guards.
               webviewDebuggingEnabled={
                 process.env.EXPO_PUBLIC_OPENBOT_TEST_BUILD === "1"
@@ -358,6 +385,13 @@ function Shell() {
               androidLayerType={hooks.softwareLayer ? "software" : "none"}
               style={{ backgroundColor: chromeBackground }}
               containerStyle={{ backgroundColor: chromeBackground }}
+            />
+          ) : null}
+          {Platform.OS === "ios" && edgeSwipeMode(state) === "page" ? (
+            <View
+              testID="edge-swipe"
+              style={styles.edge}
+              {...edgeSwipe.panHandlers}
             />
           ) : null}
           {showsSkeleton(state) ? (
@@ -410,6 +444,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   column: { flex: 1 },
   webArea: { flex: 1, overflow: "hidden" },
+  edge: { position: "absolute", left: 0, top: 0, bottom: 0, width: 20 },
   cancelBar: {
     height: 44,
     justifyContent: "center",

@@ -229,6 +229,55 @@ describe("bridge messages", () => {
       parsePageMessage("not json", "https://my.open.bot/", origin, token),
     ).toBeNull();
   });
+  test("route's canGoBack, when the page sends it", () => {
+    expect(
+      parsePageMessage(
+        msg({
+          kind: "bridge",
+          message: {
+            type: "route",
+            path: "/bots/b1",
+            tab: "bots",
+            signedIn: true,
+            canGoBack: true,
+          },
+        }),
+        origin,
+        origin,
+        token,
+      ),
+    ).toEqual({
+      kind: "bridge",
+      message: {
+        type: "route",
+        path: "/bots/b1",
+        tab: "bots",
+        signedIn: true,
+        canGoBack: true,
+      },
+    });
+    expect(
+      parsePageMessage(
+        msg({
+          kind: "bridge",
+          message: {
+            type: "route",
+            path: "/",
+            tab: "home",
+            signedIn: true,
+            canGoBack: "yes",
+          },
+        }),
+        origin,
+        origin,
+        token,
+      ),
+    ).toEqual({
+      kind: "bridge",
+      message: { type: "route", path: "/", tab: "home", signedIn: true },
+    });
+  });
+
   test("the web app's messages", () => {
     expect(
       parsePageMessage(
