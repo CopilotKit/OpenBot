@@ -568,6 +568,8 @@ class ShellController(
     private val checkContent = Runnable { checkPageContent() }
 
     override fun onFullLoad() {
+        // A new document has said nothing about its tabs yet.
+        pageCanGoBack = null
         main.removeCallbacks(hideSkeleton)
         main.removeCallbacks(checkContent)
         contentSince = 0L
@@ -658,11 +660,20 @@ class ShellController(
         }
     }
 
-    /** Whether system Back goes back in the WebView (or cancels the web sign-in) instead of leaving. */
+    /**
+     * The page's last `route` said whether its current tab can go back (`canGoBack`); null when the
+     * field was absent (production today) or no page of the bridge has spoken since the last load.
+     */
+    private var pageCanGoBack: Boolean? = null
+
+    private val signedInBack: BackPolicy.Action
+        get() = BackPolicy.decide(keyboardVisible, pageCanGoBack, web.canGoBackInApp())
+
+    /** Whether system Back stays in the app (page back, WebView history, cancel the web sign-in). */
     val handlesBack: Boolean
         get() = !showsLock && when {
             phase == Phase.SIGNED_OUT && signIn == SignInStep.WEB_FALLBACK -> true
-            phase == Phase.SIGNED_IN -> web.canGoBackInApp()
+            phase == Phase.SIGNED_IN -> BackPolicy.handles(signedInBack)
             phase == Phase.PLAIN -> web.webView.canGoBack()
             else -> false
         }
@@ -672,9 +683,18 @@ class ShellController(
             cancelWebSignIn()
             return
         }
-        diagnostics.log("back", mapOf("canGoBack" to web.webView.canGoBack()))
-        val allowed = if (phase == Phase.SIGNED_IN) web.canGoBackInApp() else web.webView.canGoBack()
-        if (allowed) web.webView.goBack()
+        if (phase != Phase.SIGNED_IN) {
+            if (web.webView.canGoBack()) web.webView.goBack()
+            return
+        }
+        val action = signedInBack
+        diagnostics.log("back", mapOf("action" to action.name, "pageCanGoBack" to pageCanGoBack))
+        when (action) {
+            BackPolicy.Action.CLOSE_KEYBOARD -> activity.hideKeyboard()
+            BackPolicy.Action.PAGE_BACK -> web.pageBack()
+            BackPolicy.Action.WEBVIEW_HISTORY -> web.webView.goBack()
+            BackPolicy.Action.LEAVE_APP -> activity.leaveBySystemBack()
+        }
     }
 
     fun refreshChrome() {
@@ -766,6 +786,8 @@ class ShellController(
                 val path = message.optString("path")
                 val signedIn = message.optBoolean("signedIn", false)
                 if (!message.isNull("tab")) ShellTab.fromKey(message.optString("tab"))?.let { selectedTab = it }
+                pageCanGoBack = if (message.has("canGoBack") && !message.isNull("canGoBack")) message.optBoolean("canGoBack") else null
+                changed()
                 if (signedIn) {
                     if ((phase != Phase.SIGNED_IN || renewing) && enterMayFinish) finishSignIn()
                 } else if (path == "/sign" || path.startsWith("/sign/")) {

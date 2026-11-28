@@ -63,6 +63,13 @@ What is native:
   navigate with the `openbot:open` event and loads the page if nobody handled it. The page's `route`
   messages select the tab. One WebView for all tabs. The bar hides while the keyboard is up. The bar,
   the status bar and the navigation bar take the page's background colour and light or dark style.
+  Tapping a tab, even the one already selected, sends the page `openbot:open` with that tab's root
+  path; the page decides (another tab: back to where it was left; the same tab: its root). The
+  selected item follows the `route` message's `tab`. **Back** (`BackPolicy`, `BackPolicyTest`): the
+  keyboard closes first; then, when the page's last `route` carried `canGoBack: true`, Back is the
+  command `openbot:back` to the page (its tab's own stack); `canGoBack: false` turns the back callback
+  off, so the system leaves the app with the predictive back-to-home preview; with no `canGoBack`
+  (production today) the WebView's own history, never to another site's page, `/sign` or `/api/`.
 - **Signing out.** The web app's own sign-out: the shell notices the bridge's `signed-out` message at
   once, and a landing on `/sign` (a `route` message, or the URL of a web app without the bridge)
   after a 2.5 s confirmation (still on `/sign`, or no session cookie: the web app's /sign sends a

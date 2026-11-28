@@ -291,6 +291,12 @@ class ShellActivity : AppCompatActivity() {
         }
     }
 
+    /** Back should leave after all: the callback steps aside and the system's default runs. */
+    fun leaveBySystemBack() {
+        backCallback.isEnabled = false
+        onBackPressedDispatcher.onBackPressed()
+    }
+
     fun onBackStateChanged() {
         if (started) backCallback.isEnabled = controller.handlesBack
     }

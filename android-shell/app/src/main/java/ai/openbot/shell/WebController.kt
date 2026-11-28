@@ -252,6 +252,13 @@ class WebController(
         }
     }
 
+    /** Back as a command to the page (its tab's own stack), in the main frame of the app's origin. */
+    fun pageBack() {
+        if (!config.isOwnOrigin(webView.url)) return
+        webView.evaluateJavascript("""window.dispatchEvent(new CustomEvent("openbot:back"))""", null)
+        diagnostics.log("page-back")
+    }
+
     /**
      * Loads the hand-off's enter address with the header the server requires for it (login CSRF:
      * only the app sends `OpenBot-Shell`). The address itself (ticket, verifier) is never kept or
