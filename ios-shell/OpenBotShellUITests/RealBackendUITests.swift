@@ -88,9 +88,10 @@ class RealBackendTestCase: ShellTestCase {
         let totpSecret: Data
     }
 
-    func googleInputs() throws -> GoogleInputs {
-        guard ProcessInfo.processInfo.environment["OPENBOT_SHELL_RUN_GOOGLE"] == "true" else {
-            throw XCTSkip("the Google sign-in runs only when the workflow is started by hand with google_sign_in: each attempt sends a sign-in prompt to the account's phone")
+    /// `gate`: the dispatch input that must be "true" (each attempt sends a prompt to the phone).
+    func googleInputs(gate: String = "OPENBOT_SHELL_RUN_GOOGLE") throws -> GoogleInputs {
+        guard ProcessInfo.processInfo.environment[gate] == "true" else {
+            throw XCTSkip("this Google sign-in runs only when the workflow is started by hand with its input on: each attempt sends a sign-in prompt to the account's phone")
         }
         let names = ["OPENBOT_SHELL_GOOGLE_EMAIL", "OPENBOT_SHELL_GOOGLE_PASSWORD", "OPENBOT_SHELL_GOOGLE_TOTP_SECRET"]
         note("secret-inputs: \(names.allSatisfy { secret($0) != nil } ? "present" : "absent")")
@@ -103,20 +104,25 @@ class RealBackendTestCase: ShellTestCase {
         return GoogleInputs(email: email, password: password, totpSecret: totpSecret)
     }
 
-    /// Google's email, password and authenticator pages, wherever they show (`roots`). One attempt.
-    /// Stops (XCTSkip with the reason) at any CAPTCHA, "verify it's you" or other challenge: nothing
-    /// here tries to get past one. Screenshots only before a value goes in and after the page is left.
-    func googleSteps(app: XCUIApplication, roots: [XCUIApplication], inputs: GoogleInputs) throws {
+    /// Google's email, password and 2-Step Verification pages, wherever they show (`roots`). One
+    /// attempt. On the 2-Step page it answers only with the account's own authenticator code: when
+    /// `tryAnotherWay`, it may pick that option under "Try another way" (the user decided so). It stops
+    /// (XCTSkip with the reason) at any CAPTCHA, bot check or anything else Google asks for: nothing
+    /// here tries to get past one. Screenshots only before a value goes in and after a page is left.
+    func googleSteps(app: XCUIApplication, roots: [XCUIApplication], inputs: GoogleInputs, tryAnotherWay: Bool = false) throws {
         func live() -> [XCUIApplication] { roots.filter { $0.state != .notRunning } }
         func pageText() -> String {
             live().flatMap { labels(in: $0, limit: 200) }.joined(separator: "\n").lowercased()
         }
-        func stopIfChallenged(_ step: String) throws {
+        func stopIfChallenged(_ step: String, allowSecondStep: Bool = false) throws {
             let text = pageText()
-            let signs = ["captcha", "verify it\u{2019}s you", "verify it's you", "confirm it\u{2019}s you", "confirm it's you",
-                         "unusual activity", "not a robot", "type the text you hear or see", "check your phone",
+            var signs = ["captcha", "unusual activity", "not a robot", "type the text you hear or see",
                          "this browser or app may not be secure", "couldn\u{2019}t sign you in", "couldn't sign you in",
                          "try again later", "suspicious", "disallowed_useragent"]
+            // The 2-Step Verification page itself says "verify it's you"; anywhere else that is a challenge.
+            if !(allowSecondStep && text.contains("2-step verification")) {
+                signs += ["verify it\u{2019}s you", "verify it's you", "confirm it\u{2019}s you", "confirm it's you", "check your phone"]
+            }
             if let sign = signs.first(where: { text.contains($0) }) {
                 screenshot("challenge-at-\(step.replacingOccurrences(of: " ", with: "-"))")
                 note("challenged by Google at \(step) (page says '\(sign)')")
@@ -181,10 +187,36 @@ class RealBackendTestCase: ShellTestCase {
         submit(passwordField)
         sleep(10)
         screenshot("google-after-password")
-        try stopIfChallenged("after password")
+        try stopIfChallenged("after password", allowSecondStep: tryAnotherWay)
 
-        let text = pageText()
-        if text.contains("authenticator") || text.contains("enter code") || text.contains("2-step verification") {
+        var text = pageText()
+        let codePage = { (t: String) in t.contains("google authenticator") || t.contains("authenticator app") || t.contains("enter code") }
+        if text.contains("2-step verification") && !codePage(text) {
+            guard tryAnotherWay else { throw XCTSkip("Google asked for its 2-Step Verification phone prompt") }
+            let another = NSPredicate(format: "label CONTAINS[c] 'Try another way'")
+            guard let tryAnother = first({ $0.buttons.matching(another).firstMatch }, timeout: 8)
+                    ?? first({ $0.links.matching(another).firstMatch }, timeout: 2) else {
+                screenshot("google-no-try-another-way")
+                throw XCTSkip("the 2-Step page offered no 'Try another way'")
+            }
+            tryAnother.tap()
+            sleep(6)
+            screenshot("google-other-ways")
+            let options = pageText()
+            note("other ways offered: authenticator \(options.contains("authenticator")), backup codes \(options.contains("backup code")), text message \(options.contains("text message") || options.contains("sms"))")
+            let authenticator = NSPredicate(format: "label CONTAINS[c] 'Authenticator'")
+            guard let option = first({ $0.links.matching(authenticator).firstMatch }, timeout: 5)
+                    ?? first({ $0.buttons.matching(authenticator).firstMatch }, timeout: 2)
+                    ?? first({ $0.staticTexts.matching(authenticator).firstMatch }, timeout: 2) else {
+                throw XCTSkip("the authenticator app is not among Google's other ways")
+            }
+            option.tap()
+            sleep(6)
+            screenshot("google-authenticator-page")
+            try stopIfChallenged("authenticator page", allowSecondStep: true)
+            text = pageText()
+        }
+        if codePage(text) || text.contains("2-step verification") {
             guard let codeField = first({ $0.webViews.textFields.firstMatch }, timeout: 10)
                     ?? first({ $0.textFields.firstMatch }, timeout: 3) else {
                 throw XCTSkip("2-Step Verification page without a code field reachable")
@@ -194,6 +226,7 @@ class RealBackendTestCase: ShellTestCase {
             sleep(12)
             screenshot("google-after-code")
             try stopIfChallenged("after code")
+            note("the authenticator code was accepted: \(!pageText().contains("wrong code") && !pageText().contains("2-step verification"))")
         } else {
             note("no authenticator page after the password")
         }
@@ -347,7 +380,7 @@ final class RealBackendUITests: RealBackendTestCase {
     /// The real sign-in with Google inside the app's web view, then (if it lets the person in) the
     /// whole signed-in journey in that same session, with no hook at all.
     func testRealGoogleSignInInWebViewAndJourney() throws {
-        let inputs = try googleInputs()
+        let inputs = try googleInputs(gate: "OPENBOT_SHELL_RUN_GOOGLE_WEBVIEW")
         try requireProduction()
         note("video-mark start \(Date().timeIntervalSince1970)")
         defer { note("video-mark end \(Date().timeIntervalSince1970)") }
@@ -412,10 +445,15 @@ final class RealBackendDebugUITests: RealBackendTestCase {
         google.tap()
         sleep(10)
         screenshot("2-google")
-        try googleSteps(app: app, roots: [app, service], inputs: inputs)
-        let landed = firstExisting([app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Start a conversation'")).firstMatch,
-                                    app.textViews.firstMatch], timeout: 20) != nil
-        note("the sheet ended on OpenBot signed in: \(landed)")
+        try googleSteps(app: app, roots: [app, service], inputs: inputs, tryAnotherWay: true)
+        // Production has no hand-off yet: the sheet should end on my.open.bot, signed in, inside the sheet.
+        sleep(8)
+        screenshot("3-where-the-sheet-ended")
+        let home = NSPredicate(format: "label CONTAINS 'Start a conversation' OR label CONTAINS 'Ask anything'")
+        let landed = firstExisting([app.staticTexts.matching(home).firstMatch, service.staticTexts.matching(home).firstMatch,
+                                    app.textViews.matching(home).firstMatch], timeout: 20) != nil
+        let ended = labels(in: app, limit: 200).joined(separator: "\n")
+        note("the sheet ended on OpenBot signed in: \(landed); OpenBot sign-in page \(ended.contains("Sign in to OpenBot")); Google page \(ended.contains("Google"))")
         guard landed else { throw XCTSkip("Google's sign-in in the sheet did not end on OpenBot signed in") }
     }
 

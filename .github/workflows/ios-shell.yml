@@ -24,7 +24,15 @@ on:
   workflow_dispatch:
     inputs:
       google_sign_in:
-        description: Run the Google sign-in tests (each attempt sends a sign-in prompt to the account's phone)
+        description: Run the Google sign-in in the system sheet (sends one sign-in prompt to the account's phone)
+        type: boolean
+        default: false
+      google_sign_in_webview:
+        description: Also run the Google sign-in in the app's web view (a second prompt)
+        type: boolean
+        default: false
+      real_backend_only:
+        description: Run only the real-backend suite (skip the mock suite, the probe and the demo)
         type: boolean
         default: false
 
@@ -194,10 +202,14 @@ jobs:
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
           TEST_RUNNER_OPENBOT_SHELL_RUN_GOOGLE: ${{ inputs.google_sign_in }}
+          TEST_RUNNER_OPENBOT_SHELL_RUN_GOOGLE_WEBVIEW: ${{ inputs.google_sign_in_webview }}
+          REAL_BACKEND_ONLY: ${{ inputs.real_backend_only }}
         run: |
           export TEST_RUNNER_OPENBOT_SHELL_LATE_STACK_TRIGGER="$LATE_STACK_TRIGGER"
+          only=()
+          if [ "$REAL_BACKEND_ONLY" = "true" ]; then only=(-only-testing:OpenBotShellUITests/RealBackendDebugUITests); fi
           set -o pipefail
-          xcodebuild test-without-building \
+          xcodebuild test-without-building "${only[@]}" \
             -project ios-shell/OpenBotShell.xcodeproj \
             -scheme OpenBotShell \
             -configuration Debug \
@@ -211,7 +223,7 @@ jobs:
             2>&1 | tee xcodebuild.log
 
       - name: Record the demo tour
-        if: always() && steps.build.outcome == 'success'
+        if: always() && steps.build.outcome == 'success' && inputs.real_backend_only != true
         timeout-minutes: 12
         run: |
           mkdir -p artifacts/video
@@ -259,6 +271,7 @@ jobs:
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
           TEST_RUNNER_OPENBOT_SHELL_RUN_GOOGLE: ${{ inputs.google_sign_in }}
+          TEST_RUNNER_OPENBOT_SHELL_RUN_GOOGLE_WEBVIEW: ${{ inputs.google_sign_in_webview }}
         run: |
           status=0
           : > xcodebuild-release.log
