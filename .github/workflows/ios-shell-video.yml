@@ -212,10 +212,16 @@ jobs:
 
       - name: Cut the recording and make a phone-size copy
         if: always()
+        env:
+          WHICH: ${{ inputs.which }}
         run: |
           echo "$(date +%s) cut" >> "$RUNNER_TEMP/timing"
           [ -f artifacts/video/demo-tour.mp4 ] || exit 0
-          python3 ios-shell/ci/trim_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log "$STARTED" || true
+          # The swipe clip is kept whole: its marks are seconds apart and simctl's variable frame
+          # rate made the cut miss the swipe once.
+          if [ "$WHICH" != "swipe" ]; then
+            python3 ios-shell/ci/trim_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log "$STARTED" || true
+          fi
           ls -la artifacts/video
           python3 ios-shell/ci/check_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log "${MIN_SECONDS:-30}"
 
