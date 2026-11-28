@@ -171,24 +171,27 @@ final class ShellController: NSObject, WebControllerDelegate {
         model.pageLoading = true
     }
 
-    /// The page has drawn (its `ready`, or content after didFinish): the skeleton fades out, after
+    /// Once the page has drawn, the skeleton fades out after
     /// at least 0.3 s so it never flashes.
     private func endPageLoad(_ reason: String) {
         guard model.pageLoading else { return }
         loadingCheck?.cancel()
-        let shown = Date().timeIntervalSince(loadingSince ?? .distantPast)
+        let started = loadingSince
+        let shown = Date().timeIntervalSince(started ?? .distantPast)
         let wait = max(0, 0.3 - shown)
         DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
-            guard let self = self, self.model.pageLoading else { return }
+            guard let self = self, self.model.pageLoading, self.loadingSince == started else { return }
             self.diagnostics.log("page-load-end", ["reason": reason, "ms": Int(Date().timeIntervalSince(self.loadingSince ?? Date()) * 1000)])
             self.model.pageLoading = false
         }
     }
 
-    /// After didFinish, without a `ready` (an older web app): ends the skeleton once the document is
-    /// complete and the body has something in it, checking a few times.
+    /// A mounted router can still be showing an empty page while its first route loads.
+    /// Keep the skeleton until the document has visible content or the fallback timer expires.
     private func checkPageDrawn(attempt: Int = 0) {
         guard model.pageLoading else { return }
+        loadingCheck?.cancel()
+        let started = loadingSince
         // Drawn: the document is complete and at least three pieces of text are really on screen:
         // inside the viewport, not hidden, not faded out, more than 4 px (screen-reader-only text
         // measures 1 px).
@@ -216,7 +219,7 @@ final class ShellController: NSObject, WebControllerDelegate {
         })()
         """
         web.webView.evaluateJavaScript(script) { [weak self] result, _ in
-            guard let self = self else { return }
+            guard let self = self, self.model.pageLoading, self.loadingSince == started else { return }
             if (result as? Bool) == true {
                 self.endPageLoad("drawn")
             } else if attempt >= 20 {
@@ -354,7 +357,7 @@ final class ShellController: NSObject, WebControllerDelegate {
         }
         enterTimeout = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + SignInFlow.timeoutSeconds, execute: timeout)
-        web.load(enterURL(ticket: ticket, verifier: verifier, to: path))
+        web.load(enterURL(ticket: ticket, verifier: verifier, to: path), shellEntry: true)
     }
 
     private func startWebSignIn() {
@@ -518,7 +521,7 @@ final class ShellController: NSObject, WebControllerDelegate {
         let type = message["type"] as? String ?? ""
         switch type {
         case "ready":
-            endPageLoad("ready")
+            checkPageDrawn()
             refreshChrome()
         case "route":
             let path = message["path"] as? String ?? ""
@@ -634,7 +637,7 @@ final class ShellController: NSObject, WebControllerDelegate {
         // Every new document on the web app's origin starts empty: the skeleton covers it until it draws.
         // In the web sign-in, any site's new document (an identity provider's redirects) too.
         if model.webVisible, let url = controller.webView.url, url.absoluteString != "about:blank",
-           config.isOwnOrigin(url) || model.signIn == .webFallback, !model.pageLoading {
+           config.isOwnOrigin(url) || model.signIn == .webFallback {
             beginPageLoad("commit")
         }
         if failureSource == .some(.web) || failureSource == nil { clearLoadFailure() }

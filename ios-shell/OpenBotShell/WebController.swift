@@ -142,12 +142,14 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     // MARK: - Loading
 
     /// Loads a path of the web app (or any URL) as a full page load.
-    func load(_ url: URL) {
+    func load(_ url: URL, shellEntry: Bool = false) {
         lastRequestedURL = url
         lastLoadFailed = false
         diagnostics.log("load", ["url": Diagnostics.redact(url)])
         armWatchdog(for: url)
-        webView.load(URLRequest(url: url))
+        var request = URLRequest(url: url)
+        if shellEntry { request.setValue("ios", forHTTPHeaderField: "OpenBot-Shell") }
+        webView.load(request)
     }
 
     /// Loads about:blank (no network) and calls back when it has loaded, or after 3 s.
