@@ -110,6 +110,11 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
     why: "the last resort: the person installs Compose v2 themselves",
   },
   {
+    file: "desktop/src-tauri/src/acquire.rs",
+    word: /Windows Subsystem for Linux/,
+    why: "a Windows admin turns on the services Windows names Windows Subsystem for Linux",
+  },
+  {
     file: "desktop/src/ProviderPicker.tsx",
     word: /\bcontainers?\b/i,
     why: "an advanced field for a model the person hosts: the address OpenBot's containers use",
