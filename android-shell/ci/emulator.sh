@@ -50,6 +50,12 @@ boot() {
 }
 
 prepare() {
+  # A freshly booted emulator's launcher often answers slowly: no "isn't responding" dialogs over the
+  # tests (Settings.Global.HIDE_ERROR_DIALOGS), and a moment for the system to settle.
+  adb shell settings put global hide_error_dialogs 1
+  adb shell settings put global anr_show_background 0
+  sleep 20
+  adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS > /dev/null 2>&1 || true
   adb shell settings put global window_animation_scale 0
   adb shell settings put global transition_animation_scale 0
   adb shell settings put global animator_duration_scale "${ANIMATOR_SCALE:-0}"

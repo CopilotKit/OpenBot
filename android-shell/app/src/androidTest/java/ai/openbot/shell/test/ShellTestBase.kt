@@ -64,7 +64,18 @@ abstract class ShellTestBase {
     fun baseSetUp() {
         device.wakeUp()
         shell("input keyevent KEYCODE_MENU")
+        dismissSystemDialogs()
         note("variant: $variant ($pkg)")
+    }
+
+    /** "<app> isn't responding" (a slow emulator's launcher): Wait. Never over our own app. */
+    fun dismissSystemDialogs() {
+        repeat(3) {
+            val anr = device.findObject(By.textContains("isn't responding")) ?: device.findObject(By.textContains("isn\u2019t responding")) ?: return
+            note("system dialog: ${anr.text}; tapping Wait")
+            (device.findObject(By.text("Wait")) ?: device.findObject(By.text("Close app")))?.click()
+            sleep(1_000)
+        }
     }
 
     @After
@@ -124,6 +135,7 @@ abstract class ShellTestBase {
         instrumentation.targetContext.startActivity(intent)
         device.wait(Until.hasObject(By.pkg(pkg).depth(0)), 15_000)
         sleep(800)
+        dismissSystemDialogs()
     }
 
     /** Back from the background: the launcher's intent, no extras, the existing task. */
