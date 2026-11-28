@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A relative time in the app that rounds up to the end of its unit now reads in the next unit: 59.7 seconds ago is "1 minute ago" and 23 hours 45 minutes ago is "yesterday", where they read "60 seconds ago" and "24 hours ago".
+
 - **The API takes Privatemode as an AI connection.** `replaceAiConnection` and the other AI
   connection writes take `provider: privatemode` with `login: endpoint`, an address and a key.
   `AiConnectionProviderAnswer` can name it. `signIns` keeps the values it had, since Privatemode
