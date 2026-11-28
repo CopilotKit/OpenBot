@@ -26,6 +26,8 @@ paths:
         '200':
           description: The Windows computer, who is using it, and its recording.
           headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
           content:
@@ -68,6 +70,8 @@ paths:
         '200':
           description: Who is using the Windows computer afterwards.
           headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
           content:
@@ -114,6 +118,8 @@ paths:
         '200':
           description: Who is using the Windows computer afterwards.
           headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
           content:
@@ -175,6 +181,8 @@ paths:
         '200':
           description: The recording, started.
           headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
           content:
@@ -236,6 +244,8 @@ paths:
         '200':
           description: The recording, stopped.
           headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
           content:
@@ -412,6 +422,9 @@ components:
       description: >-
         There is no Windows computer for the caller: none is set up, or it was set up
         for somebody else, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -433,6 +446,9 @@ components:
         The Windows computer can't do this now: a recording is already running, or
         none is, or the Windows computer refused. Or the Idempotency-Key was already
         used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -464,6 +480,9 @@ components:
       description: >-
         The Windows computer didn't answer, or Learning isn't set up or didn't answer:
         nothing was done, and it is worth trying again in a moment.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
