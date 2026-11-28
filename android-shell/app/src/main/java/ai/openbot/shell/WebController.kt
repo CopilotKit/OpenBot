@@ -61,7 +61,7 @@ class WebController(
         fun onLoadFailed(detail: String)
 
         /** A main-frame load committed and painted (onPageCommitVisible). */
-        fun onCommit()
+        fun onCommit(url: String?)
 
         /** A main-frame load finished. */
         fun onFinished()
@@ -533,7 +533,7 @@ class WebController(
         currentNavigationCommitted = true
         lastLoadFailed = false
         diagnostics.log("main-frame-commit", mapOf("url" to Diagnostics.redact(url), "how" to how))
-        delegate?.onCommit()
+        delegate?.onCommit(url)
     }
 
     private fun failMainFrame(detail: String) {

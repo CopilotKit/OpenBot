@@ -71,6 +71,7 @@ SUITE2 = [
     "ShellFlowTest#testFirstScreenIsNative",
     "ShellFlowTest#testNativeSignInThroughCustomTab",
     "ShellFlowTest#testNativeSignInThroughCustomTab_2_relaunch",
+    "ShellFlowTest#testHandoffToAPageWithoutTheBridge",
     "ShellFlowTest#testTabsRouteTheWebView",
     "ShellFlowTest#testSignedOutByServerReturnsToNativeSignIn",
     "ShellFlowTest#testSignOutFromAccountMenu",

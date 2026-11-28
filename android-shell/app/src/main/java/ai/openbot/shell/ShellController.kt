@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.webkit.CookieManager
 import androidx.annotation.IdRes
+import androidx.core.net.toUri
 import org.json.JSONObject
 
 /** Where the app is. `PLAIN` is the debug probe mode: a bare full-screen WebView. */
@@ -758,8 +759,18 @@ class ShellController(
         }
     }
 
-    override fun onCommit() {
+    override fun onCommit(url: String?) {
         mainFrameCommits += 1
+        // The ticket sets the cookie and redirects to the app. An older web build may have no bridge.
+        if (signIn == SignInStep.ENTERING && url != null) {
+            val destination = url.toUri()
+            val path = destination.path.orEmpty()
+            if (config.isOwnOrigin(destination) && path != "/sign" && !path.startsWith("/sign/") &&
+                !path.startsWith("/api/") && SessionCookies.present(config)) {
+                diagnostics.log("handoff-session-confirmed")
+                finishSignIn()
+            }
+        }
         if (failureSource == FailureSource.WEB || failureSource == null) clearLoadFailure()
         changed()
     }

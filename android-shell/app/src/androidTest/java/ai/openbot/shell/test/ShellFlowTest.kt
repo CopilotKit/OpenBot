@@ -124,6 +124,15 @@ class ShellFlowTest : ShellTestBase() {
 
     // c.
     @Test
+    fun testHandoffToAPageWithoutTheBridge() {
+        launch("http://localhost:3013", "without-bridge")
+        if (!check(signInThroughCustomTab("without-bridge"), "the ticket did not return to the tabs")) return
+        check(homeRendered(), "the authenticated landing page did not render")
+        check(waitForState("signIn=idle", 30_000), "the native handoff did not finish")
+        check(tab(Tab.HOME) != null, "the shell returned to Sign in after the server accepted the ticket")
+    }
+
+    @Test
     fun testTabsRouteTheWebView() {
         if (!launchSignedIn()) return
         check(homeRendered(), "Home did not render")

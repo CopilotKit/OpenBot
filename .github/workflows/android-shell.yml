@@ -123,6 +123,7 @@ jobs:
           # B: the same without the hand-off.
           MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3002 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-b.log" 2>&1 &
           APP_PORT=3011 SERVER_PORT=3002 nohup bun app/serve.ts > "$ARTIFACTS/app-b.log" 2>&1 &
+          nohup bun ios-shell/Probe/without-bridge.ts > "$ARTIFACTS/without-bridge.log" 2>&1 &
           nohup python3 ios-shell/Probe/serve.py > "$ARTIFACTS/probe-server.log" 2>&1 &
           nohup python3 android-shell/ci/silent_server.py > "$ARTIFACTS/silent-server.log" 2>&1 &
           challenge="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
