@@ -70,6 +70,24 @@ What is native:
   command `openbot:back` to the page (its tab's own stack); `canGoBack: false` turns the back callback
   off, so the system leaves the app with the predictive back-to-home preview; with no `canGoBack`
   (production today) the WebView's own history, never to another site's page, `/sign` or `/api/`.
+- **A self-hosted OpenBot.** The first screen's one big action is Sign in (OpenBot Cloud). Under it,
+  a quiet "Or sign in to a self-hosted OpenBot" opens an address field in place (Continue, Cancel;
+  the mark and the line step aside while the keyboard is up). `ServerAddress` takes `host`,
+  `host:port` or `https://host[:port]`, drops any path, lower-cases the host, refuses user names and
+  passwords, and refuses `http://` except in a debug build for a development host (localhost,
+  127.0.0.1, [::1], 10.0.2.2, *.localhost, *.test). `ServerCheck` then asks
+  `/api/auth/shell/config?platform=android` (10 s, no cookies, no redirects): the config JSON is
+  accepted; a 404 or anything else, a DNS failure, a certificate failure (never a way past it) and no
+  answer each get their own sentence. Accepted, the origin is kept in SharedPreferences
+  (`ServerChoice`; it survives sign-out and relaunch), the pending sign-in is dropped, all site data
+  is cleared, awaited, and the activity restarts: `ShellConfig` builds every own-origin use from it
+  (bridge and marker, navigation policy, dialogs, media, new windows, downloads, `enter` and its
+  header, the renewal, the lock screen's retries, cookie reads). The first screen then says "Signs in
+  to `<host>`" with a quiet "Use OpenBot Cloud"; the lock screen names the host it is trying to reach
+  and, for a self-hosted OpenBot, offers Change address (the field over the lock, filled in). A
+  ticket is only ever sent to the origin whose sign-in started the attempt, and an https callback
+  only on the chosen origin; App Links cover my.open.bot alone, so a self-hosted OpenBot uses the
+  custom scheme its config names. Wording and layout: the Decisions in the spec this follows.
 - **Signing out.** The web app's own sign-out: the shell notices the bridge's `signed-out` message at
   once, and a landing on `/sign` (a `route` message, or the URL of a web app without the bridge)
   after a 2.5 s confirmation (still on `/sign`, or no session cookie: the web app's /sign sends a
@@ -229,6 +247,18 @@ debug tests also read the page with JavaScript through the app's own WebView. Sc
 On a public repository Actions artifacts can be downloaded by any signed-in GitHub user.
 
 ## Known gaps and release tasks
+
+- **Follow-ups for a self-hosted OpenBot (not built).** A managed setting from device management
+  (`serverURL`, an app restriction) that skips the field. A company whose OpenBot uses a certificate
+  from its own private authority: Android apps trust only the system's authorities by default, so
+  the app would need that authority in a `network-security-config` (`<certificates src="user"/>`
+  for authorities a person installs, or the authority bundled in a company build); the default stays.
+- **The status bar in CI.** In runs that start the mock servers (the mock shard, the self-hosted
+  tests, every mock video) the emulator drew its status bar with the clock and icons cut off below
+  their first row, on the launcher before the app ran too (`launcher-before-app.png`); the app
+  reports the bar visible with dark icons (`HardeningTest#testStatusBarIconsOnLightScreens`).
+  `ci/emulator.sh prepare` restarts SystemUI once the boot has settled; if a run still shows it, it
+  is the emulator's, not the app's.
 
 - **Release signing.** There is no release signing config: `release` builds unsigned. A Play upload
   needs an upload key and Play App Signing; then `/.well-known/assetlinks.json` on my.open.bot must

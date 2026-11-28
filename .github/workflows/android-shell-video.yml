@@ -25,6 +25,7 @@ on:
           - both
           - demo
           - real
+          - self-hosted
         default: both
       real_google_sign_in:
         description: Record the real Google sign-in instead of the session cookie (sends one sign-in prompt to the account's phone)
@@ -101,6 +102,11 @@ jobs:
           (cd app && bun run build)
           MOCK_REPLY=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-a.log" 2>&1 &
           APP_PORT=3010 SERVER_PORT=3001 nohup bun app/serve.ts > "$ARTIFACTS/app-a.log" 2>&1 &
+          if [ "$WHICH" = self-hosted ]; then
+            # C: the self-hosted OpenBot, its own person and organization.
+            MOCK_PERSON_NAME="Priya Shah" MOCK_ORG_NAME="Northwind" MOCK_REPLY=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3003 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-c.log" 2>&1 &
+            APP_PORT=3013 SERVER_PORT=3003 nohup bun app/serve.ts > "$ARTIFACTS/app-c.log" 2>&1 &
+          fi
           for _ in $(seq 1 60); do
             if [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3010/ || true)" = 200 ]; then echo "mock stack A is up"; exit 0; fi
             sleep 1
@@ -137,7 +143,7 @@ jobs:
           # two apps claiming openbotshell:// would make Chrome ask which one during the demo.
 
       - name: Record the demo tour
-        if: env.WHICH != 'real'
+        if: env.WHICH == 'demo' || env.WHICH == 'both'
         timeout-minutes: 4
         env:
           RUN_MODE: video
@@ -145,8 +151,17 @@ jobs:
           PER_TEST_SECONDS: "220"
         run: python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
 
+      - name: Record the self-hosted clip
+        if: env.WHICH == 'self-hosted'
+        timeout-minutes: 3
+        env:
+          RUN_MODE: video
+          VIDEO_PLAN: self-hosted
+          PER_TEST_SECONDS: "150"
+        run: python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
+
       - name: Record the real-backend journey (private)
-        if: always() && env.WHICH != 'demo'
+        if: always() && (env.WHICH == 'real' || env.WHICH == 'both')
         timeout-minutes: 9
         env:
           RUN_MODE: video

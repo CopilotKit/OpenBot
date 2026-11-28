@@ -42,11 +42,11 @@ class SignInFlow(private val diagnostics: Diagnostics) {
         executor.execute {
             try {
                 val (status, body) = get(url, readBody = true)
-                finish(HandoffConfig.decide(status, body, config.baseHost, httpsCallbackSupported), status, null)
+                finish(HandoffConfig.decide(status, body, config.origin, httpsCallbackSupported), status, null)
             } catch (error: IOException) {
-                finish(HandoffConfig.decide(null, null, config.baseHost, httpsCallbackSupported), -1, error.javaClass.simpleName)
+                finish(HandoffConfig.decide(null, null, config.origin, httpsCallbackSupported), -1, error.javaClass.simpleName)
             } catch (error: RuntimeException) {
-                finish(HandoffConfig.decide(null, null, config.baseHost, httpsCallbackSupported), -1, error.javaClass.simpleName)
+                finish(HandoffConfig.decide(null, null, config.origin, httpsCallbackSupported), -1, error.javaClass.simpleName)
             }
         }
     }

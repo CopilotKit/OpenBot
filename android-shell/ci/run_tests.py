@@ -112,6 +112,7 @@ RECORD = [
     ("RealBackendDebugTest#testRealGoogleSignInInCustomTab",
      "RealBackendDebugTest#testRealGoogleSignInInCustomTab", "real-google-custom-tab.mp4", True),
     ("DemoTourTest#testDemoTour", "DemoTourTest#testDemoTour", "demo-tour.mp4", False),
+    ("SelfHostedTest#testClipSelfHostedThenCloud", "SelfHostedTest#testClipSelfHostedThenCloud", "self-hosted.mp4", False),
 ]
 VIDEO_REAL = [
     "RealBackendDebugTest#testRealSignedInJourneyWithSessionCookie",
@@ -422,6 +423,8 @@ def main():
         # The demo (mock, deterministic) first, then the real journey.
         if VIDEO_PLAN in ("demo", "both"):
             plan += DEMO
+        if VIDEO_PLAN == "self-hosted":
+            plan += ["SelfHostedTest#testClipSelfHostedThenCloud"]
         after_release = -1
         if VIDEO_PLAN in ("real", "both"):
             if GOOGLE:

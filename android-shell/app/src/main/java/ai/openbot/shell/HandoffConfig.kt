@@ -28,10 +28,10 @@ object HandoffConfig {
     /**
      * Decides from the HTTP status (null: no answer) and body. Strict: `handoff` must be a boolean;
      * when true, `callback` must be "scheme" with `callbackUrl` exactly openbotshell://signed-in, or
-     * "https" with an https `callbackUrl` on the base URL's own host and a path. Anything else is the
+     * "https" with an https `callbackUrl` on the chosen origin (scheme, host, port) with a path. Anything else is the
      * web sign-in. Other keys are ignored, so the server can add some.
      */
-    fun decide(status: Int?, body: String?, baseHost: String, httpsCallbackSupported: Boolean): HandoffMode {
+    fun decide(status: Int?, body: String?, baseOrigin: String, httpsCallbackSupported: Boolean): HandoffMode {
         if (status == null) return HandoffMode.Unreachable("no-answer")
         if (status != 200) return HandoffMode.WebSignIn("status-$status")
         val json = try {
@@ -56,7 +56,7 @@ object HandoffConfig {
                 val host = uri.host?.lowercase()
                 val path = uri.rawPath ?: ""
                 val ok = uri.scheme.equals("https", ignoreCase = true) && host != null &&
-                    host == baseHost.lowercase() && uri.port == -1 && uri.rawQuery == null &&
+                    Origins.same(callbackUrl, baseOrigin) && uri.port == -1 && uri.rawQuery == null &&
                     uri.rawFragment == null && path.isNotEmpty() && path != "/"
                 when {
                     !ok -> HandoffMode.WebSignIn("https-url-unexpected")

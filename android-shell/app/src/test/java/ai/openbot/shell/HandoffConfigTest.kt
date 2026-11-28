@@ -7,7 +7,7 @@ import org.junit.Test
 
 /** The hand-off config decision and the callback check (the same cases as iOS's HandoffConfigTests). */
 class HandoffConfigTest {
-    private val host = "my.open.bot"
+    private val host = "https://my.open.bot"
 
     private fun decide(status: Int?, body: String?, https: Boolean = true) =
         HandoffConfig.decide(status, body, host, https)
@@ -50,6 +50,7 @@ class HandoffConfigTest {
             "http://my.open.bot/api/auth/shell/callback",
             "https://evil.example/api/auth/shell/callback",
             "https://my.open.bot:8443/api/auth/shell/callback",
+            "http://my.open.bot/api/auth/shell/callback",
             "https://my.open.bot/api/auth/shell/callback?x=1",
             "https://my.open.bot/",
             "https://my.open.bot",
@@ -92,5 +93,11 @@ class HandoffConfigTest {
         assertEquals(43, pair.challenge.length)
         assertEquals(PkcePair.challengeFor(pair.verifier), pair.challenge)
         assertEquals("PkcePair(redacted)", pair.toString())
+    }
+
+    @Test
+    fun aSelfHostedServerOnAnotherPortGetsNoHttpsCallbackOffItsOrigin() {
+        val config = """{"handoff":true,"callback":"https","callbackUrl":"https://openbot.example.com/api/auth/shell/callback"}"""
+        assertEquals(HandoffMode.WebSignIn("https-url-unexpected"), HandoffConfig.decide(200, config, "https://openbot.example.com:8443", true))
     }
 }

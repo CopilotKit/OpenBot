@@ -211,7 +211,7 @@ jobs:
             second="http://127.0.0.1:3011/api/auth/shell/config?platform=android"; want=404
           else
             # C: a self-hosted OpenBot on another origin, with the hand-off.
-            MOCK_SIGNED_OUT=1 SERVER_PORT=3003 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-c.log" 2>&1 &
+            MOCK_PERSON_NAME="Priya Shah" MOCK_ORG_NAME="Northwind" MOCK_SIGNED_OUT=1 SERVER_PORT=3003 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-c.log" 2>&1 &
             APP_PORT=3013 SERVER_PORT=3003 nohup bun app/serve.ts > "$ARTIFACTS/app-c.log" 2>&1 &
             second="http://127.0.0.1:3013/api/auth/shell/config?platform=android"; want=200
           fi

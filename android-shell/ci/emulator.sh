@@ -92,6 +92,17 @@ prepare() {
   # The test servers on the host, as localhost on the emulator (after adb root, which drops these).
   for port in 3010 3011 3012 3013 8765 8766 8797; do adb reverse "tcp:$port" "tcp:$port" > /dev/null; done
   adb reverse --list
+  # SystemUI that started while the runner was busy (the web build, the mock servers) can keep a
+  # half-drawn status bar for good: the clock and icons cut off below their first row, on every
+  # screen, the launcher included. Restarting it once the boot has settled draws the bar whole.
+  adb shell 'pkill -f com.android.systemui' > /dev/null 2>&1 || true
+  local ui_deadline=$((SECONDS + 30))
+  until adb shell pidof com.android.systemui > /dev/null 2>&1; do
+    if [ $SECONDS -gt $ui_deadline ]; then echo "SystemUI did not come back in 30 s"; break; fi
+    sleep 1
+  done
+  sleep 6
+  adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS > /dev/null 2>&1 || true
 }
 
 describe() {

@@ -182,6 +182,39 @@ class SelfHostedTest : ShellTestBase() {
         screenshot("7-cloud-home")
     }
 
+    /** The recording (video workflow, which=self-hosted): spec tests 2 then 5, paced, 20-30 s. */
+    @Test
+    fun testClipSelfHostedThenCloud() {
+        mark("start")
+        try {
+            launch(MOCK_A, "clip")
+            check(waitFor("sign_in_button", 20_000) != null, "no Sign in button")
+            sleep(1_200)
+            if (!openField("clip")) return
+            sleep(600)
+            val field = find("self_hosted_address") ?: return
+            field.text = MOCK_C
+            sleep(900)
+            find("self_hosted_continue")?.click()
+            val host = device.wait(Until.findObject(res("server_host")), 25_000)
+            check(host != null, "clip: the first screen does not name the self-hosted server")
+            sleep(1_500)
+            if (!check(signInThroughCustomTab("clip", shots = false, paceMs = 700), "clip: the self-hosted sign-in did not reach the tabs")) return
+            check(waitPageText("Start a conversation", 30_000), "clip: no Home on the self-hosted server")
+            sleep(2_000)
+            check(tapWeb("Account"), "clip: no Account button")
+            sleep(1_200)
+            check(tapWeb("Sign out"), "clip: no Sign out")
+            check(device.wait(Until.findObject(res("server_host")), 20_000) != null, "clip: no self-hosted first screen after signing out")
+            sleep(1_500)
+            find("self_hosted_toggle")?.click()
+            check(device.wait(Until.gone(res("server_host")), 20_000), "clip: not back on OpenBot Cloud")
+            sleep(2_000)
+        } finally {
+            mark("end")
+        }
+    }
+
     // 7. The lock screen names the server; Change address opens the field with the address in it.
     @Test
     fun testLockNamesTheServer() {
