@@ -1,6 +1,12 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   type DecisionAnswer,
