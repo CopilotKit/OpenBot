@@ -14,6 +14,21 @@ import org.junit.runner.RunWith
 class DemoTourTest : ShellTestBase() {
     private fun pause(ms: Long = 1_200) = sleep(ms)
 
+    private fun softwareLayer(on: Boolean) {
+        instrumentation.runOnMainSync {
+            val activity = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).firstOrNull()
+            fun walk(view: android.view.View): android.webkit.WebView? {
+                if (view is android.webkit.WebView) return view
+                if (view is android.view.ViewGroup) for (i in 0 until view.childCount) walk(view.getChildAt(i))?.let { return it }
+                return null
+            }
+            activity?.window?.decorView?.let { walk(it) }
+                ?.setLayerType(if (on) android.view.View.LAYER_TYPE_SOFTWARE else android.view.View.LAYER_TYPE_NONE, null)
+        }
+        note("recording: the WebView drawn in ${if (on) "software" else "hardware"}")
+    }
+
     @Test
     fun testDemoTour() {
         mark("start")
@@ -27,9 +42,7 @@ class DemoTourTest : ShellTestBase() {
     private fun tour() {
         step("launch")
         // The first page load answers 1.5 s late (debug hook), so the loading skeleton reads on video.
-        // Drawn in software for the recording: the emulator's GPU compositing misdraws the Bots page
-        // (RenderingTest); the app itself draws with the GPU.
-        launch(MOCK_A, "tour", extras = mapOf("openbot.delay_first_load_ms" to "1500", "openbot.software_layer" to "1"))
+        launch(MOCK_A, "tour", extras = mapOf("openbot.delay_first_load_ms" to "1500"))
         check(waitFor("sign_in_button", 20_000) != null, "demo: no Sign in button")
         pause(800)
         step("sign in through the Custom Tab")
@@ -81,6 +94,10 @@ class DemoTourTest : ShellTestBase() {
 
         step("bots, open one")
         // Bots: open one.
+        // The emulator's GPU compositing misdraws the Bots page (RenderingTest: the DOM is right, a
+        // software layer draws it right), so for this one scene of the recording the WebView is
+        // drawn in software. The app itself always draws with the GPU.
+        softwareLayer(true)
         tab(Tab.BOTS)?.click()
         check(waitPageText("Research Bot", 15_000), "demo: no Bots")
         pause(800)
@@ -91,6 +108,7 @@ class DemoTourTest : ShellTestBase() {
         dismissKeyboardIfUp()
 
         step("account menu, sign out")
+        softwareLayer(false)
         // Home, the Account menu, Sign out: the native sign-in screen.
         tab(Tab.HOME)?.click()
         pause(1_200)
@@ -102,7 +120,7 @@ class DemoTourTest : ShellTestBase() {
 
         step("lock screen")
         // The lock screen, then the connection comes back.
-        launch(MOCK_A, "tour-offline", reset = false, extras = mapOf("openbot.force_offline_seconds" to "4", "openbot.software_layer" to "1"))
+        launch(MOCK_A, "tour-offline", reset = false, extras = mapOf("openbot.force_offline_seconds" to "4"))
         check(waitFor("offline_lock", 5_000) != null, "demo: no lock screen")
         check(waitGone("offline_lock", 12_000), "demo: the lock did not lift")
         pause(1_500)

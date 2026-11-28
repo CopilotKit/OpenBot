@@ -451,10 +451,10 @@ abstract class ShellTestBase {
         val now = SystemClock.uptimeMillis()
         val down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, x.toFloat(), y.toFloat(), 0)
         down.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
-        automation.injectInputEvent(down, true)
+        automation.injectInputEvent(down, false)
         val up = android.view.MotionEvent.obtain(now, now + 40, android.view.MotionEvent.ACTION_UP, x.toFloat(), y.toFloat(), 0)
         up.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
-        automation.injectInputEvent(up, true)
+        automation.injectInputEvent(up, false)
         down.recycle()
         up.recycle()
     }
@@ -583,7 +583,17 @@ abstract class ShellTestBase {
         }
         sleep(paceMs)
         button.click()
-        val link = waitInCustomTab(MOCK_LINK, 40_000)
+        var link = waitInCustomTab(MOCK_LINK, 15_000)
+        if (link == null && foregroundPackage() == "com.android.chrome" && device.hasObject(By.text("Mock sign-in"))) {
+            // Chrome sometimes keeps its page out of the accessibility tree (seen in CI with the
+            // page on screen): the mock page is centred, so its one link is at a known place.
+            note("$moment: the Custom Tab's page is not in the accessibility tree; tapping the mock link by its place")
+            if (shots) screenshot("$moment-custom-tab")
+            sleep(paceMs)
+            device.click(device.displayWidth / 2, (device.displayHeight * 0.595).toInt())
+            return finishCustomTabSignIn(moment)
+        }
+        if (link == null) link = waitInCustomTab(MOCK_LINK, 20_000)
         if (link == null) {
             screenshot("$moment-no-custom-tab-link")
             note("$moment: the Custom Tab's link never showed; foreground ${foregroundPackage()}; state ${debugState()}")
@@ -601,6 +611,10 @@ abstract class ShellTestBase {
         }
         sleep(paceMs)
         (waitInCustomTab(MOCK_LINK, 3_000) ?: link).click()
+        return finishCustomTabSignIn(moment)
+    }
+
+    private fun finishCustomTabSignIn(moment: String): Boolean {
         sleep(1_500)
         // Chrome may ask before leaving for an app.
         for (label in listOf("Open", "Continue", "Open app")) {
