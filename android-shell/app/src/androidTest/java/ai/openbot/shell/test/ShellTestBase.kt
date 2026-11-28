@@ -199,7 +199,7 @@ abstract class ShellTestBase {
     fun waitGone(id: String, timeoutMs: Long): Boolean = device.wait(Until.gone(res(id)), timeoutMs) ?: false
 
     enum class Tab(val key: String, val title: String) {
-        CONVERSATIONS("conversations", "Conversations"), HOME("home", "Home"), BOTS("bots", "Bots")
+        CONVERSATIONS("conversations", "Chats"), HOME("home", "Home"), BOTS("bots", "Bots")
     }
 
     /** A tab of the native bottom bar (BottomNavigationView item, resource id tab_<name>). */

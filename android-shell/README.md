@@ -1,5 +1,7 @@
 # Android web view shell (experiment)
 
+The bottom tabs are Chats, Home and Bots. Chats opens a full-width table with conversation titles, bot names, unread markers and times. Bots groups conversations beneath expandable bot rows. Both screens keep search above the scrolling list. Opening a saved conversation leaves the transcript visible. Its leading Back button restores the originating tab, search and scroll position, including while typing.
+
 The Android twin of `ios-shell/`: a small native app around one `android.webkit.WebView` showing the
 OpenBot web app (https://my.open.bot by default). It is an experiment, not a product. The Expo app in
 `mobile/` is unchanged. It speaks the same bridge and the same server contracts as the iOS shell
@@ -32,7 +34,7 @@ What is native:
   Every step has a timeout and an error line on the native screen; closing the Custom Tab returns
   quietly. While signed in, the hosted sign-in's renewal (`/api/auth/hosted/sign-in`) runs through the
   Custom Tab the same way when the server has the hand-off.
-- **The bottom bar.** A Material 3 `BottomNavigationView`: Conversations, Home, Bots (`tab_conversations`,
+- **The bottom bar.** A Material 3 `BottomNavigationView`: Chats, Home, Bots (`tab_conversations`,
   `tab_home`, `tab_bots`; Home selected at start). A tap (also on the selected tab) asks the page to
   navigate with the `openbot:open` event and loads the page if nobody handled it. The page's `route`
   messages select the tab. One WebView for all tabs. The bar hides while the keyboard is up. The bar,
@@ -40,15 +42,12 @@ What is native:
 - **Signing out.** The web app's own sign-out: the shell notices the bridge's `signed-out` message or
   the WebView landing on `/sign`, deletes the two session cookies (and no others) and shows its own
   sign-in screen.
-- **The loading skeleton.** `LoadingSkeletonView` (`loading_skeleton`, "Loading") is the web area's
-  default state: it covers the area (between the status bar and the bottom bar, which stays usable)
-  from the instant the area is shown (cold launch with a session, the return from the Custom Tab before
-  `enter` loads, the web sign-in, the lock lifting, a recreated WebView) and from the start of every
-  full page load, until the page has rendered: 200 ms after the page's `ready`, or 1.5 s after the page
-  finished without one (a web app without the bridge, or a bot check that must stay usable), never
-  shorter than 300 ms. The WebView's own background is the app's or the page's colour, never white. Neutral shapes in
-  surface-variant tones with a left-to-right highlight (1.3 s, linear); still when animations are off.
-  A load failure hands over to the lock screen.
+- **The loading skeleton.** `LoadingSkeletonView` covers the WebView during ticket entry, full-page
+  navigation and renderer recovery. The bridge’s `ready` message starts a check for visible route
+  content. Three text fragments must be inside the viewport with visible dimensions and opacity.
+  Older pages can reveal as soon as one text fragment appears. The overlay stays for at least
+  300 ms. The fallback releases an older page after 8 s and a mounted router after 20 s.
+  The shimmer respects the system animation setting. A failed load shows the offline screen.
 - **The lock screen.** No network (`ConnectivityManager` default-network callback), or the web app
   did not load (a failed main-frame load, a 5xx main document, an SSL error, 20 s without a commit, or
   no answer to a sign-in step): one native screen covers everything (`offline_lock`), "Cannot reach the
@@ -154,6 +153,10 @@ Chrome's first-run screens off through its command-line file), reaches the serve
 `.github/workflows/android-shell-video.yml` makes the recordings apart from the tests (`which`:
 demo, real, both; `real_google_sign_in`), each trimmed to the test's own marks with a 600-px copy:
 `android-shell-video-<run id>` (`video/demo-tour.mp4`) and `android-shell-video-private-<run id>`.
+
+The recording check reads the video track in both sizes and fails if a track is missing, short or
+truncated. The API 35 hosted workbench run 46139394466 produced two playable two-minute tracks
+in 6 min 4 s and produced two playable recordings of about 136 s. [Recording run](https://github.com/CopilotKit/OpenBot/actions/runs/46143649083)
 
 Real-account screenshots and recordings upload only in private repositories. On a public repository, run the journey locally to retain that evidence.
 

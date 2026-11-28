@@ -23,7 +23,7 @@ https://my.open.bot.
 | Play Store requirements coded for | Real backend (build checks) | target API 36; edge to edge; predictive back (`enableOnBackInvokedCallback`, `OnBackPressedDispatcher`); `onReceivedSslError` always cancels; an origin-checked bridge with no `addJavascriptInterface`; file access off; Safe Browsing on; the photo picker for images instead of media permissions; no `POST_NOTIFICATIONS`; `allowBackup="false"` and backup rules excluding everything; microphone and camera asked at run time only when the page asks. Lint passes with no errors. Not proven: Play's pre-launch report and review. |
 | Push notifications, FCM | Not tested here | Not implemented. |
 | Microphone and camera | Not tested here | Granted only to the base origin after Android's runtime permission; the emulator has neither. Test dictation and a call on a device. |
-| Background, Doze, the live socket | Simulated (mock), real backend | `testResumeFromBackground` and the journey send the app home for 40 s and check the page still routes. Doze, App Standby buckets and the cached-app freezer act after minutes to hours on a phone; the WebView's WebSocket is then closed and the web app must reconnect. Test overnight on a device. |
+| Background, Doze, the live socket | Local emulator, workbench | On a Pixel 9, Chats survived separate one-hour and four-hour background intervals. A fresh socket opened 269 ms and 842 ms after the respective stale connections closed. A Pixel Tablet separately retained the page after five minutes of forced deep Doze. A handset on a carrier network still needs a physical-device test. |
 | Process and renderer termination | Local emulators | The cold-relaunch tests exercise the Android process and persisted session. A separate test terminates the WebView renderer through Android’s API, waits for a replacement WebView, checks the exact open conversation, then opens Bots. Before the fix it returned to Home. A pending sign-in verifier is held in memory and the user restarts sign-in if Android ends the app process. A physical-device low-memory eviction remains untested. |
 | Play review | Not tested here | A WebView app needs native value; only a submission tells. |
 
@@ -45,3 +45,5 @@ In [run 46122796578](https://github.com/CopilotKit/OpenBot/actions/runs/46122796
 5. Dictation and a call: the microphone prompt names OpenBot and works.
 6. A Samsung and a Xiaomi device, three-button navigation, a tablet, dark mode switched while open.
 7. Do not open the app for 8 days, then open it: the native sign-in screen.
+
+The Chats and Bots panel revision was built locally against the matching web draft. The deployed website has its own release schedule. Changes to the online destination require deployment of the web draft.

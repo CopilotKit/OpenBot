@@ -164,6 +164,10 @@ class ShellFlowTest : ShellTestBase() {
         check(waitForState("tab=conversations", 5_000), "Conversations is not selected: ${debugState()}")
         check(waitForState("nav=event", 5_000), "the Conversations tap was not handled by openbot:open: ${debugState()}")
         sleep(1_000)
+        val rowsHaveTouchTargets = pageString(
+            "String(Array.from(document.querySelectorAll('[data-slot=mobile-chat-row]')).every(row => row.getBoundingClientRect().height >= 72))",
+        )
+        check(rowsHaveTouchTargets == "true", "a conversation row is smaller than the mobile table layout")
         screenshot("2-conversations")
         find("openbot_webview")?.let { web ->
             web.swipe(androidx.test.uiautomator.Direction.UP, 0.8f)
@@ -181,12 +185,7 @@ class ShellFlowTest : ShellTestBase() {
         val opened = waitPageText("Here is the first draft.", 25_000) || waitPageText("Can you draft the quarterly forecast?", 2_000)
         check(opened, "the conversation did not open")
         sleep(1_000)
-        if (keyboardShown()) {
-            // Finding for the web app: a conversation focuses its message box when it opens.
-            screenshot("3a-conversation-opened-with-keyboard")
-            note("opening a conversation raised the keyboard (the message box took focus)")
-            dismissKeyboardIfUp()
-        }
+        check(!keyboardShown(), "opening a saved conversation covered the transcript with the keyboard")
         check(waitForTab(Tab.CONVERSATIONS, 5_000) != null, "no bottom bar in the conversation")
         check(debugState().contains("tab=conversations"), "opening a conversation moved the tab selection: ${debugState()}")
         sleep(1_000)
@@ -215,9 +214,17 @@ class ShellFlowTest : ShellTestBase() {
         }
         check(waitForState("tab=bots", 5_000), "Bots is not selected: ${debugState()}")
         sleep(1_000)
+        check(pageString("document.querySelector('input[aria-label=\"Search Bots\"]') !== null") == "true", "Bots search is missing")
+        check(waitPageText("Competitor pricing notes", 10_000), "the Bots tab did not show its conversation groups")
+        check(pageString("String(document.querySelectorAll('[data-slot=bot-row]').length >= 2)") == "true", "expected both workbench Bot groups")
         screenshot("4-bots")
         assertNoWebNavigation("bots")
         check(accountIsVisible(), "no Account button on Bots")
+        check(tapWeb("Competitor pricing notes"), "the Research Bot thread could not be opened")
+        check(waitForState("path=/channel", 10_000), "the thread did not open")
+        check(waitForState("tab=bots", 5_000), "a Bots conversation changed the selected tab")
+        check(tapWeb("Back to Bots", cssSelector = "button[aria-label='Back to Bots']"), "the conversation has no visible way back to Bots")
+        check(waitForState("path=/bots", 10_000), "the conversation Back button did not return to Bots")
 
         tab(Tab.HOME)?.click()
         check(homeRendered(20_000), "Home did not come back")
