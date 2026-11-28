@@ -35,7 +35,9 @@ export function computerToolsOffered({
   capabilities,
 }: {
   /** Undefined when it could not be read, or the run names no Bot: then nothing is offered. */
-  profile: { visibility: string; canManage: boolean } | undefined;
+  profile:
+    | { visibility: string; canManage: boolean; computer?: string }
+    | undefined;
   capabilities: Partial<Record<CapabilityKey, boolean>> | undefined;
 }): ComputerToolsOffered {
   const mine = computerDrivable(profile);
@@ -59,7 +61,9 @@ export function computerToolsOffered({
  * wherever the Bot is this person's to drive, whatever the computer switches say.
  */
 export function computerDrivable(
-  profile: { visibility: string; canManage: boolean } | undefined,
+  profile:
+    | { visibility: string; canManage: boolean; computer?: string }
+    | undefined,
 ): boolean {
   /*
    * UNKNOWN IS NO. A computer belongs to a Bot, and a Bot nobody could read may be a Team Bot whose
@@ -67,6 +71,11 @@ export function computerDrivable(
    * would fall back to whichever Bot is on screen. Both used to be offered every computer tool.
    */
   if (!profile) return false;
+  /*
+   * ONE COMPUTER AT A TIME. A Bot set to work on a Windows computer (Bot.computer) has none of its browser
+   * computer's tools: its desktop tools come from the server instead, as its own.
+   */
+  if (profile.computer === "windows") return false;
   return profile.visibility === "public" || profile.canManage;
 }
 

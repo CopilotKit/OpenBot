@@ -13,6 +13,7 @@ import type {
 } from "../model";
 
 export const getGetWindowsComputerResponseMock = (): WindowsComputer => ({
+  botId: "general-assistant",
   available: true,
   control: {
     holder: "bot",

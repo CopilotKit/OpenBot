@@ -93,3 +93,20 @@ describe("what the deployment allows", () => {
     ).toEqual({ browser: true, navigate: true, computer: true });
   });
 });
+
+describe("which computer it works on", () => {
+  test("a Bot set to a Windows computer is offered none of its browser computer's tools: one computer at a time", () => {
+    expect(
+      computerToolsOffered({
+        profile: { ...mine, computer: "windows" },
+        capabilities: everything,
+      }),
+    ).toEqual({ browser: false, navigate: false, computer: false });
+    expect(
+      computerToolsOffered({
+        profile: { ...mine, computer: "browser" },
+        capabilities: everything,
+      }),
+    ).toEqual({ browser: true, navigate: true, computer: true });
+  });
+});

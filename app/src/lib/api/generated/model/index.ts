@@ -278,6 +278,7 @@ export * from "./botCheckInUsageRunsSkipped";
 export * from "./botComponent";
 export * from "./botComponentNotFoundResponse";
 export * from "./botComponentPage";
+export * from "./botComputer";
 export * from "./botConnectionTest";
 export * from "./botConnectionTestRequest";
 export * from "./botConnectionTestRequestHeaders";

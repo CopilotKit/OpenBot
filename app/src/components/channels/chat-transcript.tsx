@@ -188,6 +188,7 @@ import {
   type ToolGroup,
   type TranscriptItem,
   useDrawnTool,
+  useReportsDesktopActivity,
 } from "./tool-activity";
 import { ToolRenderBoundary, toolCallFinal } from "./tool-boundary";
 import { ToolLine } from "./tool-line";
@@ -1874,6 +1875,7 @@ const ToolRow = memo(function ToolRow({
   spokeAfter,
 }: ToolRowProps) {
   const [only] = steps;
+  useReportsDesktopActivity(steps, active);
   return (
     <TurnInFlightContext.Provider value={inFlight}>
       <Arriving>

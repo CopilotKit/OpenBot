@@ -25462,6 +25462,12 @@ components:
         isolated:
           type: boolean
           description: Whether its owner asked for it to have a computer of its own. isolationActive says whether it has one now.
+        computer:
+          type: string
+          x-extensible-enum:
+            - browser
+            - windows
+          description: 'The computer it works on: browser, the Bot''s own browser computer, which every Bot has unless told otherwise; or windows, a person''s Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.'
         instructions:
           type: string
           description: What the starter Bot is told, kept apart from its role description. Only the starter Bot has instructions.
@@ -25662,6 +25668,8 @@ components:
           $ref: '#/components/schemas/BotKey'
         isolated:
           $ref: '#/components/schemas/BotIsolated'
+        computer:
+          $ref: '#/components/schemas/BotComputer'
         instructions:
           $ref: '#/components/schemas/BotInstructions'
         defaultModel:
@@ -28457,6 +28465,12 @@ components:
       minLength: 1
       maxLength: 5000
       description: New instructions for the starter Bot, 1 to 5000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
+    BotComputer:
+      type: string
+      enum:
+        - browser
+        - windows
+      description: The computer it works on. browser unless set; windows only for the Bot a Windows computer is set up for, and refused for any other. Absent leaves it as it is. Experimental.
     ServiceTermsVersionId:
       type: string
       minLength: 1
@@ -40264,6 +40278,9 @@ components:
         - control
         - recording
       properties:
+        botId:
+          type: string
+          description: 'The Bot it is set up for: the one Bot that can be told to work on it (computer: windows).'
         available:
           type: boolean
           description: True when the Windows computer answers, its session is unlocked and the Bot can use it.
@@ -54740,6 +54757,7 @@ components:
         narration: external
     WindowsComputerExample:
       value:
+        botId: general-assistant
         available: true
         control:
           holder: bot

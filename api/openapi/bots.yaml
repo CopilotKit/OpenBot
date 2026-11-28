@@ -1626,6 +1626,14 @@ components:
           description: >-
             Whether its owner asked for it to have a computer of its own.
             isolationActive says whether it has one now.
+        computer:
+          type: string
+          x-extensible-enum: [browser, windows]
+          description: >-
+            The computer it works on: browser, the Bot's own browser computer,
+            which every Bot has unless told otherwise; or windows, a person's
+            Windows computer, which only the Bot that computer is set up for
+            can work on. One at a time. Experimental.
         instructions:
           type: string
           description: >-
@@ -1811,6 +1819,13 @@ components:
       description: >-
         Whether it gets a computer of its own. Absent leaves it as it is. True
         needs the owner's Isolated Bots switch.
+    BotComputer:
+      type: string
+      enum: [browser, windows]
+      description: >-
+        The computer it works on. browser unless set; windows only for the
+        Bot a Windows computer is set up for, and refused for any other.
+        Absent leaves it as it is. Experimental.
     BotInstructions:
       type: string
       minLength: 1
@@ -1837,6 +1852,8 @@ components:
           $ref: '#/components/schemas/BotKey'
         isolated:
           $ref: '#/components/schemas/BotIsolated'
+        computer:
+          $ref: '#/components/schemas/BotComputer'
         instructions:
           $ref: '#/components/schemas/BotInstructions'
         defaultModel:
