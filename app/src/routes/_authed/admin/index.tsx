@@ -16,8 +16,51 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { computerModeQueryOptions } from "@/lib/enterprise/queries";
+import {
+  asksForManagement,
+  managementQueryOptions,
+} from "@/lib/management/queries";
+import { loadFirstScreenAfter } from "@/lib/route-data";
 
 export const Route = createFileRoute("/_authed/admin/")({
+  /*
+   * Asks only for what the page would ask for: managed updates and the computer mode each carry the
+   * condition their component sets, because `ensureQueryData` ignores `enabled` and would send reads
+   * that the personal edition answers with a 404. A failed capabilities read counts as unknown, as
+   * it does in the components.
+   */
+  loader: async ({ context }) => {
+    // A router built without the app's context, as some tests build, has nothing to warm.
+    if (!context.queryClient) return;
+    const { queryClient } = context;
+    await loadFirstScreenAfter(queryClient, {
+      deciding: [
+        currentUserQueryOptions(),
+        deploymentCapabilitiesQueryOptions(),
+      ],
+      choose: () => {
+        const user = queryClient.getQueryData(
+          currentUserQueryOptions().queryKey,
+        );
+        const capabilities = queryClient.getQueryData(
+          deploymentCapabilitiesQueryOptions().queryKey,
+        );
+        return [
+          ...(asksForManagement({ isPending: false, data: capabilities })
+            ? [managementQueryOptions()]
+            : []),
+          ...(isOrganizationAdmin(user?.role) &&
+          capabilities?.edition === "team"
+            ? [computerModeQueryOptions()]
+            : []),
+        ];
+      },
+    });
+  },
   component: RouteComponent,
 });
 

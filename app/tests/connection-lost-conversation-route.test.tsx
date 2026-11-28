@@ -132,6 +132,7 @@ function listed(name: string) {
 
 function opened(channelId: string) {
   const router = createRouter({
+    context: { queryClient },
     routeTree: rootRoute.addChildren([
       authedRoute.addChildren([appRoute.addChildren([conversationRoute])]),
     ]),

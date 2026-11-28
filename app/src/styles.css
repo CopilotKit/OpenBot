@@ -472,12 +472,44 @@
   animation-delay: 300ms;
   animation-duration: 850ms;
 }
+.home-intro [data-intro="hint"] {
+  animation-delay: 300ms;
+  animation-duration: 850ms;
+}
 .home-intro [data-intro="explore"] {
   animation-delay: 560ms;
 }
 @media (prefers-reduced-motion: reduce) {
   .home-intro [data-intro] {
     animation: none;
+  }
+}
+/*
+ * Home's greeting when it waited for the conversation list (`Greeting` in routes/_authed/_app/index.tsx):
+ * the words fade in on the line kept for them rather than appear at once. Only opacity, so nothing
+ * moves, and only when motion is allowed.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .home-said {
+    animation: page-arrive 200ms ease-out both;
+  }
+}
+
+/*
+ * A page arriving (`PageArrival` in components/layout/page-arrival.tsx): a short fade, so a switch
+ * between pages reads as a change and not a flash. Only opacity, and only when motion is allowed.
+ */
+@keyframes page-arrive {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .page-arrival {
+    animation: page-arrive 150ms ease-out both;
   }
 }
 

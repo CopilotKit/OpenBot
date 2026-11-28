@@ -549,15 +549,6 @@ function createStates(where: Where): States {
             caution: null,
           },
           {
-            id: "unbiased",
-            name: "Unbiased AI",
-            summary:
-              "Sign in with Unbiased AI to use Pareto, or use an API key.",
-            logins: ["oauth", "endpoint"],
-            mark: "unbiased",
-            caution: null,
-          },
-          {
             id: "trustedrouter",
             name: "TrustedRouter",
             summary:

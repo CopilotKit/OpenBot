@@ -75,6 +75,7 @@ const GROUP_TAKES_NO_FILES =
   "A conversation with more than one Bot can't take files yet. Remove them to send.";
 
 export const Route = createFileRoute("/_authed/_app/channel/new")({
+  staticData: { arrival: "conversation" },
   /*
    * The pending recipient's id, read as text whatever the router parsed it into (`searchText`):
    * search values are JSON-parsed, so a Bot id made of digits would otherwise arrive as a number

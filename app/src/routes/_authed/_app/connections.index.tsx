@@ -73,6 +73,7 @@ import {
 } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useAppsOpen } from "@/lib/enterprise/apps-open";
+import { appsSettingQueryOptions } from "@/lib/enterprise/queries";
 import {
   identityProvidersQueryOptions,
   linkedAccountsQueryOptions,
@@ -97,6 +98,7 @@ import {
   personalConnections,
 } from "@/lib/plugins/queries";
 import { searchTextEntry } from "@/lib/search-text";
+import { loadFirstScreen } from "@/lib/route-data";
 
 /**
  * The services a Bot reads as you.
@@ -107,6 +109,32 @@ import { searchTextEntry } from "@/lib/search-text";
  * these runs on your own grant, so it sees exactly what you can see and nothing else.
  */
 export const Route = createFileRoute("/_authed/_app/connections/")({
+  loader: async ({ context }) => {
+    // A router built without the app's context, as some tests build, has nothing to warm.
+    if (!context.queryClient) return;
+    /*
+     * Whether apps are open is read only in the team edition (`useAppsOpen`), and `ensureQueryData`
+     * ignores the `enabled` it sets, so the edition is read first. A capabilities read that failed
+     * counts as the team edition, as the hook reads it.
+     */
+    const capabilities = await context.queryClient
+      .ensureQueryData(deploymentCapabilitiesQueryOptions())
+      .catch(() => undefined);
+    await loadFirstScreen(context.queryClient, [
+      appsQueryOptions(),
+      catalogueQueryOptions(),
+      appSetupQueryOptions(),
+      connectionsQueryOptions(),
+      deploymentCapabilitiesQueryOptions(),
+      // The list stays a skeleton until both answer, so the click must not be the first to ask.
+      linkedAccountsQueryOptions(),
+      identityProvidersQueryOptions(),
+      // Without it the team edition draws the locked-down page first and then opens it up.
+      ...(capabilities?.edition !== "personal"
+        ? [appsSettingQueryOptions()]
+        : []),
+    ]);
+  },
   component: RouteComponent,
   /*
    * `?connected=` is how the OAuth callback reports back, carrying a server key on success and
@@ -559,7 +587,9 @@ function RouteComponent() {
     links.isPending ||
     providers.isPending ||
     // Which rows there are depends on the edition, so the team list never flashes before the personal one.
-    capabilities.isPending;
+    capabilities.isPending ||
+    // And on whether apps are open, so a slow read never draws the locked-down page and then opens it.
+    open === undefined;
   /*
    * Whether there is a list to draw: apps here, or the directory to find more in. A new
    * organization with no apps yet still has its search and Browse apps.

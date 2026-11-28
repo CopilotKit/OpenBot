@@ -61,14 +61,6 @@ export const AI_PROVIDERS: AiProvider[] = [
     mark: "xai",
   },
   {
-    id: "unbiased",
-    name: "Unbiased AI",
-    summary: "Sign in with Unbiased AI to use Pareto, or use an API key.",
-    keySummary: "Use an Unbiased AI API key for Pareto.",
-    logins: ["oauth", "endpoint"],
-    mark: "unbiased",
-  },
-  {
     id: "trustedrouter",
     name: "TrustedRouter",
     summary: "Use a TrustedRouter API key for models from many providers.",
@@ -108,12 +100,6 @@ export const ENDPOINT_PRESETS: Partial<
     keyUrl: "https://console.x.ai/",
     keyLink: "Get an xAI API key",
   },
-  unbiased: {
-    baseUrl: "https://api.unbiased.ai/v1",
-    model: "pareto",
-    keyUrl: "https://platform.unbiased.ai/dashboard/keys",
-    keyLink: "Get an Unbiased AI API key",
-  },
   trustedrouter: {
     baseUrl: "https://api.trustedrouter.com/v1",
     model: "anthropic/claude-sonnet-5.5",
@@ -138,7 +124,7 @@ export function loginsHere(
 /**
  * The ways in for a person's own AI: the provider's sign-in first where the server runs it itself
  * (`signIns`), then the provider's key or address. The sign-in is the one the setup window offers
- * for that provider: a ChatGPT or Claude plan (`plan`), or an xAI or Unbiased AI sign-in
+ * for that provider: a ChatGPT or Claude plan (`plan`), or an xAI sign-in
  * (`oauth`). A provider with no sign-in here (Google Gemini) is offered its key alone, whatever
  * an older server lists. The server keeps it for the person and renews it, so it is never one OpenBot Desktop
  * holds, even inside Desktop: the server runs the person's Bots.
@@ -155,8 +141,7 @@ export function personalLogins(
 
 /**
  * The providers whose sign-in an admin on OpenBot Cloud may share as the organization's AI: a
- * ChatGPT or Claude plan, or an xAI sign-in (replaceAiConnection with `plan` or `oauth`). Unbiased
- * AI's sign-in ends in a key kept for the person alone, so it is never shared.
+ * ChatGPT or Claude plan, or an xAI sign-in (replaceAiConnection with `plan` or `oauth`).
  */
 const SHAREABLE: readonly AiConnectionProvider[] = [
   "openai",

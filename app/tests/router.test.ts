@@ -97,3 +97,8 @@ test("does not manually chunk lazy content or dependencies", () => {
     ),
   ).toBeUndefined();
 });
+
+test("preloads on intent and leaves freshness to the query cache", () => {
+  expect(router.options.defaultPreload).toBe("intent");
+  expect(router.options.defaultPreloadStaleTime).toBe(0);
+});
