@@ -81,6 +81,8 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         // No form-assistant bar above the keyboard (KeyboardAccessory.swift), so the keyboard goes
         // away by dragging the page down.
         webView.scrollView.keyboardDismissMode = .interactive
+        // A page too short to scroll (Home) still takes the drag that dismisses the keyboard.
+        webView.scrollView.alwaysBounceVertical = true
         #if DEBUG
         // Lets Safari's Web Inspector attach to debug builds.
         webView.isInspectable = true
@@ -201,6 +203,12 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
             armWatchdog(for: webView.url)
             webView.reload()
         }
+    }
+
+    /// Ends editing in the page: the keyboard goes before the shell moves somewhere else.
+    func endEditing() {
+        webView.endEditing(true)
+        webView.evaluateJavaScript("(function(){var a=document.activeElement; if (a && a.blur) a.blur();})()", completionHandler: nil)
     }
 
     func stop() {

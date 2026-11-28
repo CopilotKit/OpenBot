@@ -390,6 +390,7 @@ final class ShellController: NSObject, WebControllerDelegate {
             return
         }
         guard model.signIn == .entering else { return }
+        web.endEditing()
         web.stop()
         model.pageLoading = false
         model.phase = .signedOut
@@ -400,6 +401,7 @@ final class ShellController: NSObject, WebControllerDelegate {
     /// The page says nobody is signed in any more.
     private func sessionEnded(reason: String) {
         diagnostics.log("session-ended", ["reason": reason])
+        web.endEditing()
         model.pageLoading = false
         enterTimeout?.cancel()
         renewing = false
@@ -415,6 +417,7 @@ final class ShellController: NSObject, WebControllerDelegate {
     // MARK: - Tabs
 
     func selectTab(_ tab: ShellTab) {
+        web.endEditing()
         model.selectedTab = tab
         web.open(path: tab.path) { [weak self] mode in
             self?.model.lastNavigation = mode
@@ -427,7 +430,11 @@ final class ShellController: NSObject, WebControllerDelegate {
         guard model.webVisible else { return }
         web.readChrome { [weak self] color, dark, css in
             guard let self = self else { return }
-            if let color = color { self.model.pageBackground = color }
+            if let color = color {
+                self.model.pageBackground = color
+                // A drag past the page's edge shows the page's own colour.
+                self.web.webView.underPageBackgroundColor = color
+            }
             if let dark = dark { self.model.pageIsDark = dark }
             self.diagnostics.log("chrome", ["css": css, "dark": dark.map { $0 ? 1 : 0 } ?? -1])
         }
@@ -438,7 +445,10 @@ final class ShellController: NSObject, WebControllerDelegate {
     private func networkChanged(offline: Bool) {
         diagnostics.log("network", ["offline": offline, "reason": network.lastReason])
         model.offline = offline
-        guard !offline else { return }
+        guard !offline else {
+            web.endEditing()
+            return
+        }
         if model.loadFailed {
             retryNow()
         } else if model.webVisible, web.lastLoadFailed {
@@ -452,6 +462,7 @@ final class ShellController: NSObject, WebControllerDelegate {
     /// every 15 s after 6 tries, and when the network comes back. It lifts when a page commits.
     private func showLoadFailure(_ source: FailureSource, detail: String) {
         diagnostics.log("load-failure-lock", ["source": source == .web ? "web" : "sign-in", "detail": detail])
+        web.endEditing()
         model.pageLoading = false
         failureSource = source
         model.loadFailed = true
@@ -503,6 +514,10 @@ final class ShellController: NSObject, WebControllerDelegate {
         })
         observers.append(center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] _ in
             self?.model.keyboardVisible = false
+        })
+        // Leaving the app ends editing: no keyboard waiting over a page on the way back.
+        observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.web.endEditing()
         })
     }
 

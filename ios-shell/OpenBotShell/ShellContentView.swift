@@ -42,6 +42,10 @@ final class ShellContentView: UIView, UITabBarDelegate {
     let tabBar = UITabBar()
     var onSelect: ((ShellTab) -> Void)?
     var onLayout: ((CGFloat, CGRect) -> Void)?
+    /// How much of this view the software keyboard covers (0 when it is down or a hardware keyboard
+    /// is used without one). The web view's bottom follows the keyboard's top edge.
+    private var keyboardOverlap: CGFloat = 0
+    private var keyboardObservers: [NSObjectProtocol] = []
 
     private var tabBarVisible = false
     private var lastReported: (CGFloat, CGRect)?
@@ -49,6 +53,7 @@ final class ShellContentView: UIView, UITabBarDelegate {
     init(webView: WKWebView) {
         self.webView = webView
         super.init(frame: .zero)
+        observeKeyboard()
         backgroundColor = .clear
         webView.removeFromSuperview()
         addSubview(webView)
@@ -117,12 +122,20 @@ final class ShellContentView: UIView, UITabBarDelegate {
         super.layoutSubviews()
         let bottomInset = safeAreaInsets.bottom
         var barHeight: CGFloat = 0
-        if tabBarVisible {
+        // With the keyboard up the bar is hidden and the web view ends at the keyboard's top.
+        let showBar = tabBarVisible && keyboardOverlap == 0
+        tabBar.isHidden = !showBar
+        if showBar {
             let fitted = tabBar.sizeThatFits(CGSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)).height
             barHeight = max(fitted, 49 + bottomInset)
         }
         tabBar.frame = CGRect(x: 0, y: bounds.height - barHeight, width: bounds.width, height: barHeight)
-        let webBottom = bounds.height - (tabBarVisible ? barHeight : bottomInset)
+        let webBottom: CGFloat
+        if keyboardOverlap > 0 {
+            webBottom = bounds.height - keyboardOverlap
+        } else {
+            webBottom = bounds.height - (showBar ? barHeight : bottomInset)
+        }
         let webFrame = CGRect(x: 0, y: 0, width: bounds.width, height: max(webBottom, 0))
         if webView.frame != webFrame { webView.frame = webFrame }
         if lastReported == nil || lastReported!.0 != barHeight || lastReported!.1 != webFrame {
@@ -130,6 +143,57 @@ final class ShellContentView: UIView, UITabBarDelegate {
             let report = onLayout
             let global = convert(webFrame, to: nil)
             DispatchQueue.main.async { report?(barHeight, global) }
+        }
+    }
+
+    // MARK: - The keyboard
+
+    deinit {
+        for observer in keyboardObservers { NotificationCenter.default.removeObserver(observer) }
+    }
+
+    private func observeKeyboard() {
+        let center = NotificationCenter.default
+        let change: (Notification) -> Void = { [weak self] note in self?.keyboardChanged(note, hiding: false) }
+        keyboardObservers.append(center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main, using: change))
+        keyboardObservers.append(center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] note in
+            self?.keyboardChanged(note, hiding: true)
+        })
+        keyboardObservers.append(center.addObserver(forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.resetLeftoverScroll()
+        })
+        keyboardObservers.append(center.addObserver(forName: UIResponder.keyboardDidShowNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.resetLeftoverScroll()
+        })
+    }
+
+    private func keyboardChanged(_ note: Notification, hiding: Bool) {
+        let info = note.userInfo ?? [:]
+        var overlap: CGFloat = 0
+        if !hiding, let end = (info[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue, window != nil {
+            let local = convert(end, from: UIScreen.main.coordinateSpace)
+            if local.height > 0, local.minY < bounds.maxY {
+                overlap = max(0, bounds.maxY - local.minY)
+            }
+        }
+        guard overlap != keyboardOverlap else { return }
+        keyboardOverlap = overlap
+        let duration = (info[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.25
+        let curve = (info[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.uintValue ?? 7
+        setNeedsLayout()
+        UIView.animate(withDuration: duration, delay: 0,
+                       options: [UIView.AnimationOptions(rawValue: curve << 16), .beginFromCurrentState]) {
+            self.layoutIfNeeded()
+        }
+    }
+
+    /// WebKit scrolls its scroll view to keep the caret in sight while the keyboard comes and goes;
+    /// once the web view fits above the keyboard (or the keyboard is gone) a page that does not
+    /// scroll as a whole must sit at the top again, or it stays shifted up with a gap.
+    private func resetLeftoverScroll() {
+        let scrollView = webView.scrollView
+        if scrollView.contentSize.height <= scrollView.bounds.height + 1, scrollView.contentOffset != .zero {
+            scrollView.setContentOffset(.zero, animated: false)
         }
     }
 

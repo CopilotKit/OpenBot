@@ -462,6 +462,55 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertFalse(row.exists, "Settings offers notifications in this browser inside the shell")
     }
 
+    // The keyboard: the web view ends at its top edge (the send button stays above it), a drag down
+    // dismisses it, the tab bar comes back with the web view right above it, and tabs work after.
+    func testKeyboardKeepsTheMessageBoxVisible() throws {
+        let app = launchSignedIn()
+        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
+        try checkKeyboardRoundTrip(app, place: "home")
+
+        tab(app, .conversations).tap()
+        let row = webText(app, "Quarterly forecast")
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        row.tap()
+        XCTAssertTrue(webText(app, "Here is the first draft.").waitForExistence(timeout: 15))
+        try checkKeyboardRoundTrip(app, place: "conversation")
+        XCTAssertTrue(webText(app, "Here is the first draft.").exists, "the latest message is no longer on screen")
+
+        tab(app, .bots).tap()
+        XCTAssertTrue(webText(app, "Research Bot").waitForExistence(timeout: 15), "a tab did not work after dismissing the keyboard")
+        screenshot("bots-after-keyboard")
+    }
+
+    private func checkKeyboardRoundTrip(_ app: XCUIApplication, place: String) throws {
+        let composer = app.webViews.textViews.firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 10), "\(place): no message box")
+        if !app.keyboards.firstMatch.exists { composer.tap() }
+        guard app.keyboards.firstMatch.waitForExistence(timeout: 8) else {
+            throw XCTSkip("the software keyboard did not show under XCUITest")
+        }
+        sleep(1)
+        let keyboardTop = app.keyboards.firstMatch.frame.minY
+        let send = webElement(app, label: "Send message")
+        XCTAssertTrue(send.waitForExistence(timeout: 5), "\(place): no Send button")
+        XCTAssertLessThanOrEqual(send.frame.maxY, keyboardTop + 1, "\(place): the Send button is under the keyboard")
+        XCTAssertGreaterThan(send.frame.minY, 0, "\(place): the Send button is off screen")
+        XCTAssertTrue(send.isHittable, "\(place): the Send button cannot be tapped")
+        let web = app.webViews.firstMatch
+        XCTAssertLessThanOrEqual(web.frame.maxY, keyboardTop + 1, "\(place): the web view runs under the keyboard")
+        note("\(place): keyboard top \(keyboardTop), send \(send.frame), web view \(web.frame)")
+        screenshot("\(place)-keyboard-up")
+
+        web.swipeDown()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "\(place): dragging down did not dismiss the keyboard")
+        let bar = app.tabBars.firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 5), "\(place): the tab bar did not come back")
+        sleep(1)
+        XCTAssertEqual(web.frame.maxY, bar.frame.minY, accuracy: 1.5, "\(place): the web view does not end at the tab bar")
+        note("\(place): after the drag, web view \(web.frame), tab bar \(bar.frame)")
+        screenshot("\(place)-keyboard-dismissed")
+    }
+
     // The native skeleton while the first page loads (the first load is held back 3 s here).
     func testLoadingSkeleton() throws {
         var app = launchSignedIn(moment: "sign-in")
