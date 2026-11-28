@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
-import { postToShell } from "@/lib/native-shell/bridge";
+import { tellShell } from "@/lib/native-shell/route-reports";
 
 /**
  * The sign-in page inside the phone app's native shell, which shows its own sign-in screen over the
@@ -13,7 +13,7 @@ import { postToShell } from "@/lib/native-shell/bridge";
  */
 export function NativeSignedOut() {
   useEffect(() => {
-    postToShell({ type: "signed-out" });
+    tellShell({ type: "signed-out" });
   }, []);
   return (
     <div

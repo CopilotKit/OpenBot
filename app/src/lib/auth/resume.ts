@@ -52,3 +52,57 @@ export function resumeUrlFor(
   const path = verifierPathFor(flowId);
   return path === null ? origin : `${origin}${path}`;
 }
+
+/**
+ * The phone app's sign-in hand-off, on this origin (docs/shell-sign-in.md on the server, "Returning
+ * through /sign"). On a self-hosted OpenBot a signed-out sign-in sheet lands on `/sign` carrying
+ * `shell_challenge`, `shell_platform` and `shell_callback`; once signed in, the sheet goes on to the
+ * hand-off, which shows "Continue to the OpenBot app", rather than into the web app inside the sheet.
+ */
+export const SHELL_HANDOFF_PATH = "/api/auth/shell/handoff";
+
+/** What `/sign` was handed for the sheet, as its search names it. */
+export type ShellReturnSearch = {
+  shell_challenge?: string;
+  shell_platform?: string;
+  shell_callback?: string;
+};
+
+/** A PKCE S256 challenge: 43 characters of base64url, nothing else. */
+const SHELL_CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
+
+/**
+ * The hand-off's path, built here from the 3 values once each checks out: the challenge exactly 43
+ * base64url characters, the platform absent, `ios` or `android`, the callback absent or `https`.
+ * Anything else and all 3 are ignored (null). Values, never an address: as with `flow_id`, nothing
+ * taken from the query is ever a place to go.
+ */
+export function shellHandoffPathFor(search: ShellReturnSearch): string | null {
+  const challenge = search.shell_challenge;
+  const platform = search.shell_platform;
+  const callback = search.shell_callback;
+  if (typeof challenge !== "string" || !SHELL_CHALLENGE.test(challenge))
+    return null;
+  if (platform !== undefined && platform !== "ios" && platform !== "android")
+    return null;
+  if (callback !== undefined && callback !== "https") return null;
+  return [
+    `${SHELL_HANDOFF_PATH}?challenge=${challenge}`,
+    platform ? `&platform=${platform}` : "",
+    callback ? `&callback=${callback}` : "",
+  ].join("");
+}
+
+/**
+ * Where sign-in on `/sign` sends the browser back to: the phone app's hand-off when the sheet's
+ * values check out (they win over `flow_id`: the sheet is the app's), else as `resumeUrlFor` says.
+ */
+export function signInReturnUrlFor(
+  origin: string,
+  search: ShellReturnSearch & { flow_id?: string },
+): string {
+  const handoff = shellHandoffPathFor(search);
+  return handoff === null
+    ? resumeUrlFor(origin, search.flow_id)
+    : `${origin}${handoff}`;
+}
