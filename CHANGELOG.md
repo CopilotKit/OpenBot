@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **A workspace file whose name holds half of an emoji downloads instead of failing.** A name with an unpaired surrogate, as a Windows disk can hold, made the download answer an error. The half is now written as `_`, as the other characters a header cannot carry already were.
+
 ## 1.2.2
 
 **Before upgrading.**

@@ -29,4 +29,16 @@ describe("workspace download headers", () => {
     expect(headers.get("content-disposition")).not.toMatch(/[\r\n]/);
     expect(headers.get("x-injected")).toBeNull();
   });
+
+  test("replaces an unpaired surrogate instead of throwing, and keeps a real pair", () => {
+    for (const name of ["\uD800.pdf", "a\uDC00b.pdf", "tail\uD83D"]) {
+      expect(() => downloadHeaders(name, 1)).not.toThrow();
+    }
+    expect(contentDisposition("\uD800.pdf")).toBe(
+      "attachment; filename=\"_.pdf\"; filename*=UTF-8''_.pdf",
+    );
+    expect(contentDisposition("\u{1F4C4}.pdf")).toBe(
+      "attachment; filename=\"_.pdf\"; filename*=UTF-8''%F0%9F%93%84.pdf",
+    );
+  });
 });
