@@ -28,7 +28,11 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         OpenBotBaseURL: https://my.open.bot
-        UILaunchScreen: {}
+        # The system background and the OpenBot mark, the same as the first screen's, so launch
+        # shows no blank white frame.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: LaunchMark
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations:

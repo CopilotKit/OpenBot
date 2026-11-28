@@ -30,6 +30,10 @@ on:
         description: Real backend - sign in with Google in the web view first (sends one prompt to the account's phone)
         type: boolean
         default: false
+      real_sign_out:
+        description: Real backend on the session cookie - end with the web app's Sign out (ends the session the secret holds)
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -232,8 +236,10 @@ jobs:
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
+          REAL_SIGN_OUT: ${{ inputs.real_sign_out }}
         run: |
           echo "$(date +%s) record" >> "$RUNNER_TEMP/timing"
+          if [ "$REAL_SIGN_OUT" = "true" ]; then export TEST_RUNNER_OPENBOT_SHELL_REAL_SIGN_OUT=1; fi
           if [ "$CONFIGURATION" = "Release" ]; then
             # Fresh install, no hook: the sign-in a person does today.
             export TEST_RUNNER_OPENBOT_SHELL_RUN_GOOGLE_WEBVIEW=true

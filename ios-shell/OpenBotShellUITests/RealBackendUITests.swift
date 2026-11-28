@@ -358,7 +358,7 @@ class RealBackendTestCase: ShellTestCase {
         screenshot("j10-relaunched")
 
         guard signOut else {
-            note("sign-out skipped: it would end the session the secret holds")
+            note("sign-out skipped: it would end the session the secret holds (video input real_sign_out runs it)")
             return
         }
         // Sign out from the web app's own menu: on production the drawer (its sidebar toggle), then
@@ -367,13 +367,21 @@ class RealBackendTestCase: ShellTestCase {
             webElement(app, label: "Show sidebar").tap()
             sleep(2)
         }
-        let screen = app.windows.firstMatch.frame
-        let candidates = (app.webViews.popUpButtons.allElementsBoundByIndex + app.webViews.buttons.allElementsBoundByIndex)
-            .filter { $0.exists && $0.frame.midX < 80 && $0.frame.midY > screen.height * 0.7 && $0.frame.height > 10 }
-            .sorted { $0.frame.midY > $1.frame.midY }
+        // Production's account button is not exposed as a button: look at anything in the drawer's
+        // bottom-left corner, and failing that tap where its avatar sits.
+        let web = app.webViews.firstMatch
+        let area = web.frame
+        let corner = web.descendants(matching: .any).allElementsBoundByIndex.prefix(600).filter { element in
+            guard element.exists else { return false }
+            let frame = element.frame
+            return frame.width > 12 && frame.width < 220 && frame.height > 12 && frame.height < 80
+                && frame.midX < area.minX + 70 && frame.midY > area.minY + area.height * 0.8
+        }.sorted { $0.frame.midY > $1.frame.midY }
         var signedOut = false
-        for candidate in candidates.prefix(3) where candidate.isHittable {
-            candidate.tap()
+        var attempts: [() -> Void] = corner.prefix(3).map { element in { element.tap() } }
+        attempts.append { web.coordinate(withNormalizedOffset: CGVector(dx: 24 / max(area.width, 1), dy: 0.94)).tap() }
+        for attempt in attempts {
+            attempt()
             let item = webElement(app, label: "Sign out")
             if item.waitForExistence(timeout: 3) {
                 screenshot("j11-account-menu")
@@ -523,7 +531,9 @@ final class RealBackendDebugUITests: RealBackendTestCase {
             XCTFail("production rejected the session cookie (it may be stale or copied wrong)")
             return
         }
-        realSignedInJourney(app, relaunch: { self.launch(base: nil, moment: "relaunch", reset: false) }, signOut: false)
+        // Signing out ends the session the secret holds: only when asked (video input real_sign_out).
+        let signOut = ProcessInfo.processInfo.environment["OPENBOT_SHELL_REAL_SIGN_OUT"] == "1"
+        realSignedInJourney(app, relaunch: { self.launch(base: nil, moment: "relaunch", reset: false) }, signOut: signOut)
     }
 
     /// The hosted sign-in in the system sheet, without credentials: what is reachable there.

@@ -589,8 +589,8 @@ final class ShellController: NSObject, WebControllerDelegate {
             // the bridge): as soon as the page shows text, or after 8 s at most.
             checkPageDrawn()
         } else if model.signIn == .webFallback {
-            // The identity provider's page: no skeleton over another site.
-            endPageLoad("other-site")
+            // The identity provider's page: the skeleton until it shows text.
+            checkPageDrawn()
         }
     }
 
@@ -601,7 +601,9 @@ final class ShellController: NSObject, WebControllerDelegate {
     func webControllerDidCommit(_ controller: WebController) {
         model.mainFrameCommits += 1
         // Every new document on the web app's origin starts empty: the skeleton covers it until it draws.
-        if model.webVisible, let url = controller.webView.url, config.isOwnOrigin(url), !model.pageLoading {
+        // In the web sign-in, any site's new document (an identity provider's redirects) too.
+        if model.webVisible, let url = controller.webView.url, url.absoluteString != "about:blank",
+           config.isOwnOrigin(url) || model.signIn == .webFallback, !model.pageLoading {
             beginPageLoad("commit")
         }
         if failureSource == .some(.web) || failureSource == nil { clearLoadFailure() }
