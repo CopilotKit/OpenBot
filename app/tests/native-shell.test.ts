@@ -423,3 +423,50 @@ describe("the shell's fields", () => {
     expect(fields).toContain("font-size: 1rem;");
   });
 });
+
+describe("the shell's type", () => {
+  const styles = readFileSync(
+    join(import.meta.dir, "..", "src", "styles.css"),
+    "utf8",
+  );
+  const rule = (selector: string) => {
+    const at = styles.indexOf(selector);
+    expect(at).toBeGreaterThan(-1);
+    return styles.slice(at, styles.indexOf("}", at));
+  };
+
+  test("body text is on Tailwind's own 16px base", () => {
+    expect(rule("html[data-native-shell] .text-sm {")).toContain(
+      "font-size: 0.875rem;",
+    );
+    expect(rule("html[data-native-shell] .text-xs {")).toContain(
+      "font-size: 0.75rem;",
+    );
+    expect(rule("html[data-native-shell] .text-base {")).toContain(
+      "font-size: 1rem;",
+    );
+  });
+
+  /*
+   * The shell's sizes outrank a responsive one, so each responsive text size the app uses has the
+   * shell's size at its own width (styles.css). One with no line there would show the shell's
+   * unprefixed size on an iPad or a phone held sideways.
+   */
+  test("every responsive text size the app uses has the shell's size at its width", () => {
+    const { Glob } = Bun;
+    const used = new Set<string>();
+    for (const file of new Glob("**/*.tsx").scanSync(
+      join(import.meta.dir, "..", "src"),
+    ))
+      for (const [found] of readFileSync(
+        join(import.meta.dir, "..", "src", file),
+        "utf8",
+      ).matchAll(/\b(?:sm|md|lg|xl|2xl|max-\w+):text-(?:xs|sm|base)\b/g))
+        used.add(found);
+    expect(used.size).toBeGreaterThan(0);
+    for (const variant of used)
+      expect(styles).toContain(
+        `html[data-native-shell] .${variant.replace(":", "\\:")} {`,
+      );
+  });
+});
