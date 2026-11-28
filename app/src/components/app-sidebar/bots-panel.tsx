@@ -242,7 +242,11 @@ function BotRow({
               params={{ agentId: bot.id }}
               to="/bots/$agentId"
             >
-              <BotOrb name={bot.name} seed={bot.avatarSeed} size={mobile ? 32 : 24} />
+              <BotOrb
+                name={bot.name}
+                seed={bot.avatarSeed}
+                size={mobile ? 32 : 24}
+              />
               <span className="min-w-0 flex-1 truncate">{bot.name}</span>
               {waiting ? (
                 <span
@@ -281,7 +285,10 @@ function BotRow({
         </button>
       </div>
       {expanded ? (
-        <div data-slot="bot-threads" className="ml-[21px] border-sidebar-border border-l pl-1.5">
+        <div
+          data-slot="bot-threads"
+          className="ml-[21px] border-sidebar-border border-l pl-1.5"
+        >
           <BotConversations botId={bot.id} botName={bot.name} />
         </div>
       ) : null}
@@ -340,7 +347,13 @@ export function BotsPanel({
   }, []);
   const held = heldReads.values().next().value;
   const searchField = (
-    <PanelSearch label="Search Bots" placeholder="Search Bots…" onChange={setSearch} value={search} mobile={standalone} />
+    <PanelSearch
+      label="Search Bots"
+      placeholder="Search Bots…"
+      onChange={setSearch}
+      value={search}
+      mobile={standalone}
+    />
   );
 
   return (

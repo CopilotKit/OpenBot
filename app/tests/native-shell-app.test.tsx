@@ -355,7 +355,9 @@ describe("the Conversations page", () => {
       view.getByRole("textbox", { name: "Search conversations" }),
     ).toBeTruthy();
     expect(newConversationLinks(view.container)).toEqual(["/channel/new"]);
-    expect(view.container.querySelectorAll('[data-slot="mobile-chat-row"]')).toHaveLength(3);
+    expect(
+      view.container.querySelectorAll('[data-slot="mobile-chat-row"]'),
+    ).toHaveLength(3);
     const search = view.getByRole("textbox", { name: "Search conversations" });
     const user = userEvent.setup({ document: view.container.ownerDocument });
     await user.type(search, "q");
@@ -378,7 +380,9 @@ describe("the Conversations page", () => {
     const { view } = renderApp("/conversations");
     await view.findByText("No conversations yet");
     expect(newConversationLinks(view.container)).toEqual(["/channel/new"]);
-    expect(view.getByRole("textbox", { name: "Search conversations" })).toBeTruthy();
+    expect(
+      view.getByRole("textbox", { name: "Search conversations" }),
+    ).toBeTruthy();
     expect(
       view.container.querySelector('[data-slot="native-tab-panel"]'),
     ).not.toBeNull();
