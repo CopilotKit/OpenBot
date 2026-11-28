@@ -25,6 +25,7 @@ import {
   type NetworkReplayReport,
   networkReplayQueryOptions,
 } from "@/lib/enterprise/queries";
+import { failureSaid } from "@/lib/load-failure";
 
 /** What came back for one description, kept beside the words it came from. */
 export type WrittenAllowlist = NetworkAllowlistTranslation & { text: string };
@@ -138,7 +139,7 @@ export function AllowlistPreview({
       <FieldLabel id="network-preview">On recent page visits</FieldLabel>
       {preview.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {preview.error.message}
+          {failureSaid(preview.error)}
         </p>
       ) : (
         <ReplayAnswer report={preview.data} />
@@ -257,7 +258,7 @@ function HostRows({ hosts }: { hosts: NetworkReplayHost[] }) {
                   className={
                     block
                       ? "font-medium text-destructive text-sm"
-                      : "font-medium text-emerald-600 text-sm dark:text-emerald-400"
+                      : "font-medium text-success text-sm"
                   }
                 >
                   {block ? "Would block" : "Would allow"}

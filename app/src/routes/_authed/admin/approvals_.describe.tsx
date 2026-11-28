@@ -19,6 +19,7 @@ import {
 } from "@/lib/approval-rules/translate";
 import type { ApprovalRuleInput } from "@/lib/approvals";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 export const Route = createFileRoute("/_authed/admin/approvals_/describe")({
   component: DescribeTeamRulesPageInEveryEdition,
@@ -91,8 +92,8 @@ function DescribeTeamRulesPage() {
   return (
     <PageShell
       backButton={BACK}
-      description="Say what Bots should do before an action, and your model writes the team rules. Nothing changes until you save them."
-      title="Describe team rules"
+      description="Say what Bots should do before an action, and your model writes the organization rules. Nothing changes until you save them."
+      title="Describe organization rules"
     >
       <form
         noValidate
@@ -174,7 +175,7 @@ function DescribeTeamRulesPage() {
           </FieldGroup>
           {save.error ? (
             <p className="mt-5 text-destructive text-sm" role="alert">
-              {save.error.message}
+              {failureSaid(save.error)}
             </p>
           ) : null}
         </PageCard>
@@ -187,10 +188,10 @@ function DescribeTeamRulesPage() {
 function DescribeTeamRulesPageInEveryEdition() {
   return (
     <TeamPage
-      description="Say what Bots should do before an action, and your model writes the team rules. Nothing changes until you save them."
+      description="Say what Bots should do before an action, and your model writes the organization rules. Nothing changes until you save them."
       backButton={BACK}
       more={<YourOwnApprovals />}
-      title="Describe team rules"
+      title="Describe organization rules"
     >
       <DescribeTeamRulesPage />
     </TeamPage>

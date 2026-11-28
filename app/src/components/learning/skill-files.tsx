@@ -1,6 +1,5 @@
-import { Streamdown } from "streamdown";
 import { readableSkillBody } from "@/lib/learning/display";
-import { markdownComponents } from "@/lib/markdown";
+import { BotMarkdown, markdownComponents } from "@/lib/markdown";
 
 /**
  * A learned skill's files: SKILL.md rendered as the skill's own content, with no file name over it, and any other file
@@ -20,13 +19,13 @@ export function SkillFiles({
   return (
     <>
       {skill?.text != null && (
-        <Streamdown
+        <BotMarkdown
           className="min-w-0 text-sm [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-sm [&_li]:my-0 [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
           components={markdownComponents}
           mode="static"
         >
           {readableSkillBody(skill.text)}
-        </Streamdown>
+        </BotMarkdown>
       )}
       {others.length > 0 && (
         <section className="grid gap-1.5">

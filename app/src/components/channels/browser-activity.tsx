@@ -62,9 +62,43 @@ export function awaitingFreshLook(step: BrowserStep): boolean {
   );
 }
 
+/** The steps that act on one element of the page, which the computer names in its answer. */
+const ELEMENT_STEPS: ReadonlySet<string> = new Set([
+  "computer_click",
+  "computer_type",
+]);
+
+/**
+ * The element a click or a field acted on, by the name the computer resolved for it (`element.name`
+ * in its answer): the field's label or placeholder, the button's text. Never the ref, a handle only
+ * the Bot can read.
+ *
+ * NEVER WHAT WAS TYPED. The name is the page's label, not the field's contents, but a page can keep
+ * a field's label in step with its value. A name that holds the typed text is left out, so a
+ * password never reaches the step.
+ */
+function elementOf(
+  name: string,
+  result: Record<string, unknown>,
+  args: Record<string, unknown>,
+): string | undefined {
+  if (!ELEMENT_STEPS.has(name)) return undefined;
+  const element = result.element;
+  if (!element || typeof element !== "object") return undefined;
+  const label = (element as { name?: unknown }).name;
+  if (typeof label !== "string") return undefined;
+  const said = label.replace(/\s+/g, " ").trim();
+  if (!said) return undefined;
+  const typed = typeof args.text === "string" ? args.text.trim() : "";
+  if (typed.length >= 3 && said.toLowerCase().includes(typed.toLowerCase()))
+    return undefined;
+  return said;
+}
+
 export function browserStepDetails(step: BrowserStep) {
   const result = objectOf(step.result);
   const args = objectOf(step.toolCall.function.arguments);
+  const element = elementOf(step.toolCall.function.name, result, args);
   const navigation = step.toolCall.function.name === "computer_navigate";
   const rawUrl = navigation ? (result.url ?? args.url) : undefined;
   let url: URL | undefined;
@@ -96,10 +130,11 @@ export function browserStepDetails(step: BrowserStep) {
   return {
     label: ownToolLabel(step.toolCall.function.name) ?? undefined,
     href: url?.href,
+    // What the line names beside its words: the page opened, or the field or button acted on.
     title:
       navigation && typeof result.title === "string" && result.title.trim()
         ? result.title
-        : url?.hostname,
+        : (url?.hostname ?? element),
     failed,
     reason:
       typeof result.reason === "string"

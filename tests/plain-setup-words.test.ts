@@ -115,11 +115,6 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
     why: "an advanced field for a model the person hosts: the address OpenBot's containers use",
   },
   {
-    file: "desktop/src/Welcome.tsx",
-    word: /\bbackend\b/i,
-    why: "the first screen says OpenBot's backend runs on this computer too, which is what self-contained means",
-  },
-  {
     file: "desktop/src/localEvalCli.ts",
     word: /back ?end/i,
     why: "the marker a native stop failure line starts with, matched and never the headline",
@@ -146,7 +141,15 @@ const LOGGING = /^(console\.\w+|log|logger\.\w+|this\.log|options\.log)$/;
 function* files(directory: string, source: RegExp): Generator<string> {
   for (const name of readdirSync(directory)) {
     if (
-      ["node_modules", "dist", "target", "tests", "gen", "marks"].includes(name)
+      [
+        "node_modules",
+        "dist",
+        "target",
+        "tests",
+        "fakeNative",
+        "gen",
+        "marks",
+      ].includes(name)
     )
       continue;
     const path = join(directory, name);

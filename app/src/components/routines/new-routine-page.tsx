@@ -1,4 +1,4 @@
-import { useForm, useSelector } from "@tanstack/react-form";
+import { useSelector } from "@tanstack/react-form";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, linkOptions, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
@@ -8,6 +8,10 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import {
+  ScheduleWhen,
+  useRoutineForm,
+} from "@/components/routines/schedule-when";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -27,6 +31,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import type { RoutineDraft } from "@/lib/api/generated/model";
 import { untitledLine } from "@/lib/channels/label";
 import {
   type ChannelSummary,
@@ -34,7 +39,6 @@ import {
 } from "@/lib/channels/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
-  type ProactiveSetting,
   proactiveAllowedQueryOptions,
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
@@ -42,27 +46,27 @@ import {
   browserTimeZone,
   DOES,
   EVENT_SOURCES,
-  MONTH_DAYS,
   NEW_CONVERSATION,
-  REPEAT_LABEL,
-  REPEATS,
-  type Repeat,
   ROUTINE_FORM_DEFAULTS,
   type RoutineEventSource,
   type RoutineFormValues,
-  routineFormSchema,
   STARTS,
-  scheduleSentence,
-  WEEKDAY_LABEL,
 } from "@/lib/routines/form";
+import { draftValues } from "@/lib/routines/draft";
 import { CHECK_IN_INTERVALS } from "@/lib/routines/merged";
 import {
   createFromPlanMutationOptions,
   SavedButRefused,
 } from "@/lib/routines/mutations";
-import { checkInSubject, planRoutine } from "@/lib/routines/plan";
+import { planRoutine } from "@/lib/routines/plan";
+import {
+  brokenRules,
+  type RuleField,
+  type RuleMessages,
+} from "@/lib/routines/rules";
 import { openingOf } from "@/lib/voice/cut";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** The conversations a routine for this Bot may post in: live ones the Bot is in. */
 function conversationsWith(
@@ -81,85 +85,16 @@ function conversationName(channel: ChannelSummary): string {
   return title ? openingOf(title, 60) : "New conversation";
 }
 
-/** What Name says when an Only tell you would land on a check-in the Bot already has. */
-const SAME_CHECK_IN =
-  "This Bot already checks in on this. Give this one a different name, or change that one on its row.";
-
-/**
- * Whether an Only tell you called `title` (`checkInSubject`: its Name, else its instruction) is a
- * check-in this Bot already has. The server counts a check-in with no link and the same subject, in
- * any case, as the same one. Asked for a new one, as this screen asks, it refuses that with 409 and
- * this sentence (`refuseExisting` in `proactiveStore.create`); this check says it while Name is typed.
- */
-function sameCheckIn(
-  settings: ProactiveSetting[] | undefined,
-  agentId: string,
-  title: string,
-): boolean {
-  const subject = title.trim().toLowerCase();
-  return (settings ?? []).some(
-    (setting) =>
-      setting.agentId === agentId &&
-      !setting.sourceLink &&
-      (setting.subject ?? "").toLowerCase() === subject,
-  );
-}
-
-/** What It should says when Only tell you was picked and an admin then turned check-ins off. */
-const TELL_OFF =
-  "An admin turned check-ins off, so it can't only tell you. Choose Act for you to go on.";
-
-type FieldName = keyof RoutineFormValues;
-
 /** The id of a field's message, which its control names in `aria-describedby`. */
-const errorId = (name: FieldName) => `${name}-error`;
+const errorId = (name: RuleField) => `${name}-error`;
 
-/** One message per field: the first rule its answer breaks. */
-type Messages = Partial<Record<FieldName, string>>;
-
-/**
- * What the answers break now, field by field. The schema holds every rule about the answers alone,
- * its own fields' and the ones that read other answers (`crossFieldIssues`); the two below also read
- * what the server said: whether an admin allows check-ins, and the check-ins the Bot already has.
- */
-function brokenRules(
-  values: RoutineFormValues,
-  allowed: boolean,
-  checkIns: ProactiveSetting[] | undefined,
-): Messages {
-  const messages: Messages = {};
-  const add = (name: FieldName, message: string) => {
-    messages[name] ??= message;
-  };
-  const parsed = routineFormSchema.safeParse(values);
-  if (!parsed.success)
-    for (const issue of parsed.error.issues)
-      add(issue.path[0] as FieldName, issue.message);
-  if (values.does === "tell" && !allowed) add("does", TELL_OFF);
-  // Only a check-in can clash: not acting, and not a tell held because check-ins are off.
-  else if (
-    values.does === "tell" &&
-    sameCheckIn(checkIns, values.agentId, checkInSubject(values))
-  )
-    add("title", SAME_CHECK_IN);
-  return messages;
-}
-
-function sameMessages(a: Messages, b: Messages): boolean {
-  const names = Object.keys(a) as FieldName[];
+function sameMessages(a: RuleMessages, b: RuleMessages): boolean {
+  const names = Object.keys(a) as RuleField[];
   return (
     names.length === Object.keys(b).length &&
     names.every((name) => a[name] === b[name])
   );
 }
-
-const MONTH_DAY_LABEL = Object.fromEntries(
-  MONTH_DAYS.map((day) => [day, day]),
-) as Record<string, string>;
-
-const WEEKDAY_ITEMS = Object.fromEntries(
-  WEEKDAY_LABEL.map((label, index) => [String(index), label]),
-) as Record<string, string>;
 
 type Does = (typeof DOES)[number];
 
@@ -199,14 +134,18 @@ export function routinesOf(agentId: string | undefined) {
  * The shape other assistants use for scheduled work. A frequency picker with a time, read back as
  * a sentence, and a way out for anything the picker does not cover: ask the Bot, which writes any
  * schedule through the same store this page does. `agentId` and `channelId` arrive pre-filled from
- * a Bot's Routines page and from the clock beside a conversation's message box.
+ * a Bot's Routines page and from the clock beside a conversation's message box. A `draft` is the
+ * Routines box's reading of a sentence, which fills in the rest.
  */
 export function NewRoutinePage({
   agentId: presetAgentId,
   channelId: presetChannelId,
+  draft,
 }: {
   agentId?: string;
   channelId?: string;
+  /** What the Routines box read from a sentence: it opens the form already filled in. */
+  draft?: RoutineDraft;
 }) {
   const navigate = useNavigate();
   // Cancel and the back link go to the Routines list it came from: the Bot's own, or every Bot's in
@@ -239,18 +178,20 @@ export function NewRoutinePage({
   const plan = createFromPlan.variables;
   const savedFor = plan
     ? plan.kind === "goal"
-      ? plan.goal.agentId
+      ? plan.goal.botId
       : plan.kind === "routine"
-        ? plan.routine.agentId
-        : plan.checkIn.agentId
+        ? plan.routine.botId
+        : plan.checkIn.botId
     : "";
 
-  const defaultValues: RoutineFormValues = {
-    ...ROUTINE_FORM_DEFAULTS,
-    agentId: presetAgentId ?? "",
-    channelId:
-      presetChannelId && presetAgentId ? presetChannelId : NEW_CONVERSATION,
-  };
+  const defaultValues: RoutineFormValues = draft
+    ? draftValues(draft, presetAgentId ?? "")
+    : {
+        ...ROUTINE_FORM_DEFAULTS,
+        agentId: presetAgentId ?? "",
+        channelId:
+          presetChannelId && presetAgentId ? presetChannelId : NEW_CONVERSATION,
+      };
 
   // Whether this page is still open, read after the create's requests come back.
   const open = useRef(true);
@@ -261,23 +202,20 @@ export function NewRoutinePage({
     };
   }, []);
 
-  const form = useForm({
-    defaultValues,
-    onSubmit: async ({ value }) => {
-      if (saved) return;
-      // Answers that break a rule write nothing. Pressing Create shows every message (`shown`).
-      if (Object.keys(brokenRules(value, allowed, checkIns.data)).length > 0)
-        return;
-      try {
-        // A tell with check-ins off is held by the rule on It should, so this is what was chosen.
-        await createFromPlan.mutateAsync(planRoutine(value, timeZone));
-      } catch {
-        // The alert under the form says what happened, from `createFromPlan.error`.
-        return;
-      }
-      // The person may have left, by the sidebar, while this ran; then there is nowhere to send them.
-      if (open.current) await navigate(after(value.agentId));
-    },
+  const form = useRoutineForm(defaultValues, async (value) => {
+    if (saved) return;
+    // Answers that break a rule write nothing. Pressing Create shows every message (`shown`).
+    if (Object.keys(brokenRules(value, allowed, checkIns.data)).length > 0)
+      return;
+    try {
+      // A tell with check-ins off is held by the rule on It should, so this is what was chosen.
+      await createFromPlan.mutateAsync(planRoutine(value, timeZone));
+    } catch {
+      // The alert under the form says what happened, from `createFromPlan.error`.
+      return;
+    }
+    // The person may have left, by the sidebar, while this ran; then there is nowhere to send them.
+    if (open.current) await navigate(after(value.agentId));
   });
 
   /**
@@ -296,10 +234,10 @@ export function NewRoutinePage({
     form.store,
     (state) => {
       const pressed = state.submissionAttempts > 0;
-      const messages: Messages = {};
+      const messages: RuleMessages = {};
       for (const [name, message] of Object.entries(
         brokenRules(state.values, allowed, checkIns.data),
-      ) as [FieldName, string][])
+      ) as [RuleField, string][])
         if (name === "does" || pressed || state.fieldMeta[name]?.isTouched)
           messages[name] = message;
       return messages;
@@ -624,175 +562,18 @@ export function NewRoutinePage({
                           </form.Field>
 
                           {starts === "schedule" ? (
-                            <Field>
-                              <FieldLabel htmlFor="repeat">When</FieldLabel>
-                              <div className="flex flex-wrap gap-3">
-                                <form.Field name="repeat">
-                                  {(field) => (
-                                    <Select
-                                      disabled={saved}
-                                      items={REPEAT_LABEL}
-                                      onValueChange={(value) =>
-                                        field.handleChange(value as Repeat)
-                                      }
-                                      value={field.state.value}
-                                    >
-                                      <SelectTrigger
-                                        className="min-w-40 flex-1"
-                                        id="repeat"
-                                      >
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectGroup>
-                                          {REPEATS.map((repeat) => (
-                                            <SelectItem
-                                              key={repeat}
-                                              value={repeat}
-                                            >
-                                              {REPEAT_LABEL[repeat]}
-                                            </SelectItem>
-                                          ))}
-                                        </SelectGroup>
-                                      </SelectContent>
-                                    </Select>
-                                  )}
-                                </form.Field>
-                                <form.Subscribe
-                                  selector={(state) => state.values.repeat}
-                                >
-                                  {(repeat) => (
-                                    <>
-                                      {repeat === "weekly" ? (
-                                        <form.Field name="weekday">
-                                          {(field) => (
-                                            <Select
-                                              disabled={saved}
-                                              items={WEEKDAY_ITEMS}
-                                              onValueChange={(value) =>
-                                                field.handleChange(
-                                                  String(value),
-                                                )
-                                              }
-                                              value={field.state.value}
-                                            >
-                                              <SelectTrigger
-                                                aria-label="Day of the week"
-                                                className="min-w-36 flex-1"
-                                              >
-                                                <SelectValue />
-                                              </SelectTrigger>
-                                              <SelectContent>
-                                                <SelectGroup>
-                                                  {WEEKDAY_LABEL.map(
-                                                    (label, index) => (
-                                                      <SelectItem
-                                                        key={label}
-                                                        value={String(index)}
-                                                      >
-                                                        {label}
-                                                      </SelectItem>
-                                                    ),
-                                                  )}
-                                                </SelectGroup>
-                                              </SelectContent>
-                                            </Select>
-                                          )}
-                                        </form.Field>
-                                      ) : null}
-                                      {repeat === "monthly" ? (
-                                        <form.Field name="monthDay">
-                                          {(field) => (
-                                            <Select
-                                              disabled={saved}
-                                              items={MONTH_DAY_LABEL}
-                                              onValueChange={(value) =>
-                                                field.handleChange(
-                                                  String(value),
-                                                )
-                                              }
-                                              value={field.state.value}
-                                            >
-                                              <SelectTrigger
-                                                aria-label="Day of the month"
-                                                className="min-w-24"
-                                              >
-                                                <SelectValue />
-                                              </SelectTrigger>
-                                              <SelectContent>
-                                                <SelectGroup>
-                                                  {MONTH_DAYS.map((day) => (
-                                                    <SelectItem
-                                                      key={day}
-                                                      value={day}
-                                                    >
-                                                      {day}
-                                                    </SelectItem>
-                                                  ))}
-                                                </SelectGroup>
-                                              </SelectContent>
-                                            </Select>
-                                          )}
-                                        </form.Field>
-                                      ) : null}
-                                      {repeat === "hourly" ? null : (
-                                        <form.Field name="time">
-                                          {(field) => {
-                                            const isInvalid =
-                                              field.name in shown;
-                                            return (
-                                              <>
-                                                <Input
-                                                  disabled={saved}
-                                                  aria-invalid={isInvalid}
-                                                  aria-describedby={
-                                                    isInvalid
-                                                      ? errorId(field.name)
-                                                      : undefined
-                                                  }
-                                                  aria-label="Time"
-                                                  className="w-32"
-                                                  onBlur={field.handleBlur}
-                                                  onChange={(event) =>
-                                                    field.handleChange(
-                                                      event.target.value,
-                                                    )
-                                                  }
-                                                  step={900}
-                                                  type="time"
-                                                  value={field.state.value}
-                                                />
-                                                {isInvalid ? (
-                                                  <FieldError
-                                                    id={errorId(field.name)}
-                                                  >
-                                                    {shown[field.name]}
-                                                  </FieldError>
-                                                ) : null}
-                                              </>
-                                            );
-                                          }}
-                                        </form.Field>
-                                      )}
-                                    </>
-                                  )}
-                                </form.Subscribe>
-                              </div>
-                              <form.Subscribe
-                                selector={(state) => state.values}
-                              >
-                                {(values) => (
-                                  <FieldDescription>
-                                    <span className="font-medium text-foreground">
-                                      {scheduleSentence(values)}
-                                    </span>
-                                    , your time ({timeZone}). For anything else,
-                                    like every other Tuesday, ask the Bot in a
-                                    conversation.
-                                  </FieldDescription>
-                                )}
-                              </form.Subscribe>
-                            </Field>
+                            <ScheduleWhen
+                              describe={
+                                <>
+                                  , your time ({timeZone}). For anything else,
+                                  like every other Tuesday, ask the Bot in a
+                                  conversation.
+                                </>
+                              }
+                              disabled={saved}
+                              form={form}
+                              timeError={shown.time}
+                            />
                           ) : null}
 
                           {starts === "event" ? (
@@ -1067,7 +848,7 @@ export function NewRoutinePage({
 
         {createFromPlan.error ? (
           <p className="mt-8 text-destructive text-sm" role="alert">
-            {createFromPlan.error.message}
+            {failureSaid(createFromPlan.error)}
           </p>
         ) : null}
         <div className="mt-8 flex justify-end gap-2">

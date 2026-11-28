@@ -18,6 +18,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { recordingsQueryOptions } from "@/lib/recorder/queries";
 
 const STOP_REASONS: Record<string, string> = {
@@ -83,7 +84,7 @@ export function YourRecordings({
     <PageSection action={action} title="Your recordings">
       {failure && rows.length === 0 ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {failure.message}
+          {failureSaid(failure)}
         </p>
       ) : rows.length === 0 && !recordings.hasNextPage && !unavailable ? (
         variant === "pane" ? (
@@ -131,9 +132,12 @@ export function YourRecordings({
           ) : null}
           {failure ? (
             <p className="mt-4 text-destructive text-sm">
-              {recordings.isFetchNextPageError
-                ? "Couldn't load more recordings. Try again."
-                : "Couldn't refresh your recordings."}
+              {loadFailure(
+                failure,
+                recordings.isFetchNextPageError
+                  ? "Couldn't load more recordings. Try again."
+                  : "Couldn't refresh your recordings.",
+              )}
             </p>
           ) : null}
           {recordings.hasNextPage ? (

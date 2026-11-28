@@ -2,6 +2,7 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   test,
@@ -20,6 +21,7 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useRouterState,
 } from "@tanstack/react-router";
 import {
   act,
@@ -36,7 +38,18 @@ import { ActiveBotProvider, useActiveBot } from "@/lib/copilot/active-bot";
 import { carryOnMessage } from "@/lib/copilot/carry-on";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { REFUSAL_MARKER } from "@/lib/plugins/tool-result";
+import { APPS_SETTING_PATH, appsSettingResponse } from "./admin-settings-api";
 import { appAccess } from "./app-access-fixture";
+import { APPS_PATH, answerAppsApi, appBody } from "./apps-api";
+import {
+  APP_ACCESS_REQUESTS_PATH,
+  appAccessApprovalResponse,
+  appAccessRequest,
+  botAppPath,
+  botAppResponse,
+} from "./bot-grants-api";
+import { botPath, botResponse } from "./bots-api";
+import { startResponse } from "./connections-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -62,18 +75,34 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-/** Answers the live read with `live`, and records which Bot and app it was asked about. */
-function serving(live: AppAccess | null) {
+/**
+ * Answers the live read with `live`, and records which Bot and app it was asked about. Apps are
+ * locked down unless `open` says how they are open: every test here that pins Request access or an
+ * admin's sentence pins it locked down. Open, the Bot is the person's own where `owner` says so.
+ */
+function serving(live: AppAccess | null, open?: { owner: boolean }) {
   const asked: string[] = [];
   global.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     asked.push(url);
+    if (url === APPS_SETTING_PATH) return appsSettingResponse(!open);
+    if (url === botPath("expenses"))
+      return botResponse({
+        id: "expenses",
+        name: "Expenses",
+        mine: open?.owner ?? false,
+      });
     if (url.includes("/apps/"))
       return live
-        ? Response.json({ app: live })
+        ? botAppResponse(live)
         : Response.json({ error: "nope" }, { status: 500 });
     if (url.includes("/api/plugins/connections"))
       return Response.json({ connections: [], redirectUri: null });
+    // The connect route, answering a sign-in as it does for an app that signs in.
+    if (url.endsWith("/connect"))
+      return startResponse({
+        authorizationUrl: "https://accounts.gmail.test/consent",
+      });
     return Response.json({});
   }) as unknown as typeof fetch;
   return asked;
@@ -92,7 +121,11 @@ function mount(children: ReactNode) {
   const settings = createRoute({
     getParentRoute: () => root,
     path: "/connections/$key",
-    component: () => null,
+    // Where a Reconnect lands, read back by a test as the address it reached.
+    component: function AppPage() {
+      const at = useRouterState({ select: (state) => state.location.href });
+      return <p data-testid="app-page">{at}</p>;
+    },
   });
   const router = createRouter({
     routeTree: root.addChildren([page, settings]),
@@ -126,7 +159,7 @@ test("asks about the app on the Bot that refused, not on another", async () => {
   const asked = serving(appAccess({ state: "not_connected" }));
   mount(<AppAccessCard prompt={prompt()} />);
   await waitFor(() =>
-    expect(asked).toContain("/api/plugins/for/expenses/apps/composio-gmail"),
+    expect(asked).toContain(botAppPath("expenses", "composio-gmail")),
   );
 });
 
@@ -156,7 +189,6 @@ test("a Shared app with no team account: Request access, not a sentence", async 
     appAccess({
       state: "shared_not_connected",
       account: "shared",
-      accountMode: "shared",
       requestKind: "connect_shared",
     }),
   );
@@ -178,23 +210,49 @@ test("a Shared app with no team account: Request access, not a sentence", async 
   ).toBeTruthy();
 });
 
-test("an account the vendor lost: Reconnect, though the server still reads ready", async () => {
-  serving(
+test("an account the vendor lost: Reconnect, though the server still reads ready, starts its sign-in in one press", async () => {
+  const asked = serving(
     appAccess({ state: "ready", connectedAt: "2026-10-01T00:00:00.000Z" }),
   );
-  const view = mount(
-    <AppAccessCard
-      prompt={prompt({ reason: "reconnect", at: "2026-10-20T12:00:00.000Z" })}
-    />,
-  );
-  const drawn = await card(view);
-  expect(drawn.getAttribute("data-state")).toBe("reconnect");
-  expect(drawn.textContent).toContain(
-    "Your Gmail connection needs reconnecting.",
-  );
-  expect(
-    (await view.findByText("Reconnect")).closest("a")?.getAttribute("href"),
-  ).toBe("/connections/composio-gmail");
+  // The sign-in's tab, as the browser hands it over, and where it was sent.
+  const opened: string[] = [];
+  const originalOpen = window.open;
+  window.open = (() => ({
+    opener: {},
+    closed: false,
+    location: { replace: (next: string) => opened.push(next) },
+    close: () => {},
+  })) as unknown as typeof window.open;
+  try {
+    const view = mount(
+      <AppAccessCard
+        prompt={prompt({ reason: "reconnect", at: "2026-10-20T12:00:00.000Z" })}
+      />,
+    );
+    const drawn = await card(view);
+    expect(drawn.getAttribute("data-state")).toBe("reconnect");
+    expect(drawn.textContent).toContain(
+      "Your Gmail connection needs reconnecting.",
+    );
+    fireEvent.click(
+      await view.findByRole("button", { name: "Reconnect Gmail" }),
+    );
+    await waitFor(() =>
+      expect(opened).toEqual(["https://accounts.gmail.test/consent"]),
+    );
+    expect(
+      asked.some((url) =>
+        url.endsWith("/people/me/connections/composio-gmail/connect"),
+      ),
+    ).toBe(true);
+    // The card stays where it is: the sign-in is in the tab that opened.
+    expect(view.queryByTestId("app-page")).toBeNull();
+    expect(
+      await view.findByText("Finish in the tab that opened."),
+    ).toBeTruthy();
+  } finally {
+    window.open = originalOpen;
+  }
 });
 
 test("an account lost and then connected again: the newer connection wins", async () => {
@@ -225,7 +283,7 @@ test.each([
   ["disabled", "enable", /Gmail isn't turned on yet/],
   ["not_granted", "grant", /This Bot hasn't been given Gmail/],
 ] as const)(
-  "the Bot asked about an app that is %s: Request access",
+  "apps locked down, the Bot asked about an app that is %s: Request access",
   async (state, kind, sentence) => {
     serving(appAccess({ state, requestKind: kind, granted: false }));
     const view = mount(
@@ -238,6 +296,197 @@ test.each([
     ).toBeTruthy();
   },
 );
+
+/*
+ * APPS OPEN. Nobody asks an admin for an app nobody has added, or for one open to Bot owners: the
+ * Bot's owner connects it and gives it to their Bot in one press. Anybody else is told only the
+ * owner or an admin can give it, and asks with Request access.
+ */
+describe("apps open", () => {
+  // The tab a press claims for a sign-in, which goes nowhere here.
+  let realOpen: typeof window.open;
+  beforeEach(() => {
+    realOpen = window.open;
+    window.open = (() => ({
+      opener: {},
+      closed: false,
+      location: { replace: () => {} },
+      close: () => {},
+    })) as unknown as typeof window.open;
+  });
+  afterEach(() => {
+    window.open = realOpen;
+  });
+
+  /** Every request the card made. */
+  function servingOpen(live: AppAccess, owner: boolean) {
+    const sent: { method: string; url: string; body: unknown }[] = [];
+    global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      sent.push({
+        method,
+        url,
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      if (url === APPS_SETTING_PATH) return appsSettingResponse(false);
+      if (url === botPath("expenses"))
+        return botResponse({ id: "expenses", name: "Expenses", mine: owner });
+      if (method === "POST" && url.endsWith("/approve"))
+        return appAccessApprovalResponse({
+          request: appAccessRequest({ status: "approved" }),
+        });
+      const apps = answerAppsApi(input, init, {
+        directory: [
+          { slug: "gmail", name: "Gmail", connection: { kind: "consent" } },
+        ],
+      });
+      if (apps) return apps;
+      if (method === "POST" && url === APPS_PATH)
+        return Response.json(
+          appBody({
+            id: "composio-gmail",
+            title: "Gmail",
+            url: "composio://gmail",
+          }),
+        );
+      if (url.includes("/apps/")) return botAppResponse(live);
+      if (url.includes("/api/plugins/connections"))
+        return Response.json({ connections: [], redirectUri: null });
+      return Response.json({});
+    }) as unknown as typeof fetch;
+    return sent;
+  }
+
+  const notAdded = appAccess({
+    state: "disabled",
+    unavailable: "absent",
+    granted: false,
+    requestKind: "enable",
+  });
+
+  test("the Bot's owner: Connect and give it to the Bot, in one press, and no Request access", async () => {
+    const sent = servingOpen(notAdded, true);
+    const view = mount(
+      <AppAccessCard prompt={prompt({ reason: "access", message: "" })} />,
+    );
+    const press = await view.findByRole("button", {
+      name: "Connect Gmail and give it to Expenses",
+    });
+    expect((await card(view)).textContent).toContain(
+      "Gmail isn't connected yet.",
+    );
+    expect(view.container.textContent).not.toMatch(/admin/i);
+    expect(view.queryByRole("button", { name: /Request access/ })).toBeNull();
+    fireEvent.click(press);
+    await waitFor(() =>
+      expect(
+        sent.some(
+          (call) =>
+            call.method === "POST" &&
+            call.url === `${botAppPath("expenses", "composio-gmail")}/approve`,
+        ),
+      ).toBe(true),
+    );
+    // Nothing was asked of an admin.
+    expect(sent.some((call) => call.url === APP_ACCESS_REQUESTS_PATH)).toBe(
+      false,
+    );
+  });
+
+  /*
+   * FOUND IN DOGFOODING: "Connect it, and this Bot's owner can give it to the Bot". A member did, on
+   * a shared Bot he could only view, and the Bot still didn't have it. The card says first who can
+   * give it, and Request access asks; his own Connect is beside it, said to be his.
+   */
+  test("anybody else: told only the owner or an admin can give it, Request access asks, and Connect is only their own account", async () => {
+    const sent = servingOpen(notAdded, false);
+    const view = mount(
+      <AppAccessCard prompt={prompt({ reason: "access", message: "" })} />,
+    );
+    const press = await view.findByRole("button", { name: "Connect Gmail" });
+    expect(
+      await view.findByRole("button", { name: "Request access to Gmail" }),
+    ).toBeTruthy();
+    await waitFor(async () =>
+      expect((await card(view)).textContent).toContain(
+        "Only Expenses's owner or an admin can give it Gmail. Request access to ask for it. You can connect your own account now too.",
+      ),
+    );
+    expect(view.container.textContent).not.toMatch(/owner can give it to/);
+    fireEvent.click(press);
+    await waitFor(() =>
+      expect(
+        sent.find((call) => call.method === "POST" && call.url === APPS_PATH)
+          ?.body,
+      ).toEqual({ from: "directory", directoryEntryId: "directory:gmail" }),
+    );
+    // Added for everybody, never given to somebody else's Bot.
+    expect(sent.some((call) => call.url.endsWith("/approve"))).toBe(false);
+    expect(sent.some((call) => call.url === APP_ACCESS_REQUESTS_PATH)).toBe(
+      false,
+    );
+  });
+
+  /*
+   * FOUND IN DOGFOODING: connected, and still "This Bot hasn't been given Gmail. Its owner can give
+   * it." with nothing to press, on a shared Bot whose owner the member couldn't reach from here.
+   */
+  test("an app open to owners on somebody else's Bot: only its owner or an admin can give it, and Request access asks for it", async () => {
+    const sent = servingOpen(
+      appAccess({
+        state: "not_granted",
+        granted: false,
+        requestKind: "grant",
+        connectedAt: "2026-10-01T00:00:00.000Z",
+      }),
+      false,
+    );
+    const view = mount(
+      <AppAccessCard prompt={prompt({ reason: "access", message: "" })} />,
+    );
+    await waitFor(async () =>
+      expect((await card(view)).textContent).toContain(
+        "Only Expenses's owner or an admin can give it Gmail. Request access to ask for it.",
+      ),
+    );
+    const ask = await view.findByRole("button", {
+      name: "Request access to Gmail",
+    });
+    // His account is connected: nothing of his own to connect.
+    expect(view.queryByRole("button", { name: "Connect Gmail" })).toBeNull();
+    fireEvent.click(ask);
+    await waitFor(() =>
+      expect(
+        sent.find(
+          (call) =>
+            call.method === "POST" && call.url === APP_ACCESS_REQUESTS_PATH,
+        )?.body,
+      ).toEqual({ botId: "expenses", appId: "composio-gmail" }),
+    );
+  });
+
+  test("an app an admin kept to admins still asks an admin, open or not", async () => {
+    servingOpen(
+      appAccess({
+        state: "not_granted",
+        granted: false,
+        requestKind: "grant",
+        ownerGrants: "admin",
+      }),
+      false,
+    );
+    const view = mount(
+      <AppAccessCard prompt={prompt({ reason: "access", message: "" })} />,
+    );
+    expect(
+      await view.findByRole("button", { name: "Request access to Gmail" }),
+    ).toBeTruthy();
+    expect((await card(view)).textContent).toContain(
+      "This Bot hasn't been given Gmail. Only an admin can give it.",
+    );
+  });
+});
 
 test("asked about an app that is ready, it says so without claiming it was just connected", async () => {
   serving(appAccess());
@@ -273,7 +522,6 @@ test("a Shared app whose audience is not approved: says so, with nothing to pres
     appAccess({
       state: "shared_not_approved",
       account: "shared",
-      accountMode: "shared",
     }),
   );
   const view = mount(<AppAccessCard prompt={prompt({ reason: "access" })} />);
@@ -305,7 +553,7 @@ test("an older refusal that names no Bot asks about the Bot the surface declared
   );
   const drawn = await card(view);
   expect(drawn.getAttribute("data-state")).toBe("not_connected");
-  expect(asked).toContain("/api/plugins/for/travel/apps/composio-gmail");
+  expect(asked).toContain(botAppPath("travel", "composio-gmail"));
 });
 
 test("with no Bot to ask about at all, it is the Connect card it always was", async () => {
@@ -421,7 +669,7 @@ describe("carrying the task on once the app is ready", () => {
   function servingNow(state: { live: AppAccess }) {
     global.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/apps/")) return Response.json({ app: state.live });
+      if (url.includes("/apps/")) return botAppResponse(state.live);
       if (url.includes("/api/plugins/connections"))
         return Response.json({ connections: [], redirectUri: null });
       return Response.json({});
@@ -528,6 +776,26 @@ describe("carrying the task on once the app is ready", () => {
       expect(view.asked).toEqual([]);
     },
   );
+
+  /*
+   * FOUND IN DOGFOODING. Asked to connect a personal mailbox beside a connected work one, a Bot
+   * showed Gmail's card, the latest thing in the conversation, and it read "Gmail is ready now": the
+   * job looked done. Gmail had been ready all along, and the card says only what is true of it.
+   */
+  test("show_app_access about an app ready all along never says it is ready now", async () => {
+    servingNow({ live: appAccess({ state: "ready" }) });
+    const view = inConversation(
+      <AppAccessCard
+        place={{ toolCallId: nextId(), latest: true }}
+        prompt={prompt({ reason: "access", blocked: false })}
+      />,
+    );
+    const drawn = await card(view);
+    await settleReactWork();
+    expect(drawn.textContent).toContain("Ready to use.");
+    expect(drawn.textContent).not.toContain("ready now");
+    expect(view.asked).toEqual([]);
+  });
 
   test("with no conversation around it, the card only says the app is ready", async () => {
     servingNow({ live: appAccess({ state: "ready" }) });

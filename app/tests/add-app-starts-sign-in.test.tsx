@@ -22,8 +22,23 @@ import userEvent from "@testing-library/user-event";
 import { BrokerDirectory } from "@/components/plugins/broker-directory";
 import { connectionRows } from "@/lib/connections/rows";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import {
+  CONSENT_HANDOFF_PATH,
+  readConsentHandoff,
+} from "@/lib/plugins/consent-handoff";
 import type { PluginsProvider } from "@/lib/plugins/provider-vocabulary";
-import type { ComposioApp, PluginServer } from "@/lib/plugins/queries";
+import {
+  APPS_PATH,
+  answerAppsApi,
+  appBody,
+  type TodayDirectoryApp,
+  type TodayServer,
+} from "./apps-api";
+import {
+  connectionPage,
+  connectionsCall,
+  startResponse,
+} from "./connections-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -36,8 +51,8 @@ import { settleReactWork } from "./settle-react-work";
  * as a Bot's Connect card does. And an app that is added and not signed in to says "Not connected"
  * beside Connect, in either edition, never "Added" on its own.
  *
- * Every response below is the shape the real route answers: the directory's rows, the `server` the
- * add route returns (201), and the `authorizationUrl` the connect route returns for a sign-in app.
+ * Every response below is the shape the real API answers: the directory's entries, the app createApp
+ * returns (201), and the `authorizationUrl` connectApp returns for a sign-in app.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -47,7 +62,7 @@ afterAll(async () => {
   GlobalRegistrator.unregister();
 });
 
-type Kind = ComposioApp["connection"]["kind"];
+type Kind = TodayDirectoryApp["connection"]["kind"];
 
 function app(slug: string, name: string, kind: Kind, enabled: boolean) {
   return {
@@ -62,10 +77,10 @@ function app(slug: string, name: string, kind: Kind, enabled: boolean) {
     scopedActionCount: null,
     connection: { kind },
     enabled,
-  } satisfies ComposioApp;
+  } satisfies TodayDirectoryApp;
 }
 
-function server(provider: PluginsProvider, slug: string): PluginServer {
+function server(provider: PluginsProvider, slug: string): TodayServer {
   return {
     id: `${provider}-${slug}`,
     title: slug,
@@ -83,11 +98,11 @@ function server(provider: PluginsProvider, slug: string): PluginServer {
     tools: [],
     withdrawn: [],
     accountMode: "personal",
-  } as unknown as PluginServer;
+  };
 }
 
-let apps: ComposioApp[] = [];
-let servers: PluginServer[] = [];
+let apps: TodayDirectoryApp[] = [];
+let servers: TodayServer[] = [];
 let connected: string[] = [];
 let provider: PluginsProvider = "composio";
 const writes: string[] = [];
@@ -100,46 +115,42 @@ beforeEach(() => {
   global.fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const path = String(input).split("?")[0] ?? "";
-      if (init?.method === "POST" && path === "/api/plugins/composio/apps") {
-        const { slug } = JSON.parse(String(init.body)) as { slug: string };
+      if (init?.method === "POST" && path === APPS_PATH) {
+        const { directoryEntryId } = JSON.parse(String(init.body)) as {
+          directoryEntryId: string;
+        };
+        const slug = directoryEntryId.replace(/^directory:/, "");
         writes.push(`add ${slug}`);
-        servers = [...servers, server(provider, slug)];
+        const added = server(provider, slug);
+        servers = [...servers, added];
         apps = apps.map((row) =>
           row.slug === slug ? { ...row, enabled: true } : row,
         );
-        return Response.json(
-          { server: { id: `${provider}-${slug}` } },
-          { status: 201 },
-        );
+        return Response.json(appBody(added), { status: 201 });
       }
-      if (init?.method === "POST" && path.endsWith("/connect")) {
-        const id = decodeURIComponent(path.split("/")[4] ?? "");
+      const call = connectionsCall(path, init);
+      if (call?.operation === "connect") {
+        const id = call.appId ?? "";
         writes.push(`connect ${id}`);
-        return Response.json({
+        return startResponse({
           authorizationUrl: `https://sign-in.example/${id}`,
         });
       }
-      if (path === "/api/plugins/composio/apps") return Response.json({ apps });
-      if (path === "/api/plugins")
-        return Response.json({
-          catalogue: [],
-          servers,
-          skills: [],
-          botsMayCallBack: true,
-          redirectUri: null,
-          composioConfigured: true,
-          provider,
-        });
-      if (path === "/api/plugins/connections")
-        return Response.json({
-          connections: connected.map((serverId) => ({
+      const answered = answerAppsApi(input, init, {
+        servers,
+        directory: apps,
+        botsMayCallBack: true,
+        composioConfigured: true,
+        provider,
+      });
+      if (answered) return answered;
+      if (call?.operation === "list")
+        return connectionPage(
+          connected.map((serverId) => ({
             serverId,
-            scope: "",
             connectedAt: "2026-11-09T00:00:00.000Z",
-            holder: "person",
           })),
-          redirectUri: null,
-        });
+        );
       return new Response(null, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
@@ -178,6 +189,23 @@ beforeEach(() => {
 afterEach(() => {
   window.open = originalOpen;
 });
+
+/** Whether a tab was sent to OpenBot's own step before the sign-in (`/connecting`). */
+function stepShown(url: string | null | undefined): boolean {
+  return url?.includes(`${CONSENT_HANDOFF_PATH}#`) ?? false;
+}
+
+/** Where a tab ends up: the sign-in itself, or the one OpenBot's step was left to go on to. */
+function signInBehind(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const marker = `${CONSENT_HANDOFF_PATH}#`;
+  const at = url.indexOf(marker);
+  if (at < 0) return url;
+  return (
+    readConsentHandoff(decodeURIComponent(url.slice(at + marker.length)))
+      ?.url ?? null
+  );
+}
 
 function draw(edition: "team" | "personal") {
   const client = new QueryClient({
@@ -228,9 +256,9 @@ const SIGN_IN_APPS: {
   { provider: "arcade", slug: "Gmail", name: "Gmail" },
 ];
 
-describe("Add in the personal edition", () => {
+describe("Connect in the personal edition", () => {
   for (const target of SIGN_IN_APPS) {
-    test(`Add on ${target.name} adds it and starts the sign-in in a new tab`, async () => {
+    test(`Connect on ${target.name} adds it and starts the sign-in in a new tab`, async () => {
       provider = target.provider;
       apps = [
         app(target.slug, target.name, "consent", false),
@@ -239,13 +267,19 @@ describe("Add in the personal edition", () => {
       const { view, user } = draw("personal");
 
       const row = await view.findByTestId(`directory-${target.slug}`);
-      await user.click(within(row).getByRole("button", { name: "Add" }));
+      await user.click(
+        within(row).getByRole("button", { name: `Connect ${target.name}` }),
+      );
 
       const id = `${target.provider}-${target.slug}`;
       await waitFor(() => {
         expect(writes).toEqual([`add ${target.slug}`, `connect ${id}`]);
         expect(tabs).toHaveLength(1);
-        expect(tabs[0]?.url).toBe(`https://sign-in.example/${id}`);
+        // Through Composio the tab shows OpenBot's step first, which then goes on to the sign-in.
+        expect(stepShown(tabs[0]?.url)).toBe(target.provider === "composio");
+        expect(signInBehind(tabs[0]?.url)).toBe(
+          `https://sign-in.example/${id}`,
+        );
       });
       // Added and not yet signed in: said plainly, while the other tab is open.
       await waitFor(() => {
@@ -266,13 +300,15 @@ describe("Add in the personal edition", () => {
     });
   }
 
-  test("Add on an app that takes a key adds it and opens its key form", async () => {
+  test("Connect on an app that takes a key adds it and opens its key form", async () => {
     provider = "composio";
     apps = [app("posthog", "PostHog", "fields", false)];
     const { view, user, history } = draw("personal");
 
     const row = await view.findByTestId("directory-posthog");
-    await user.click(within(row).getByRole("button", { name: "Add" }));
+    await user.click(
+      within(row).getByRole("button", { name: "Connect PostHog" }),
+    );
 
     await waitFor(() => {
       expect(history.location.pathname).toBe("/connections/composio-posthog");
@@ -319,21 +355,34 @@ describe("an added app nobody has signed in to", () => {
         within(slack).getByRole("button", { name: "Connect Slack" }),
       );
       await waitFor(() => {
-        expect(tabs[0]?.url).toBe("https://sign-in.example/composio-slack");
+        expect(stepShown(tabs[0]?.url)).toBe(true);
+        expect(signInBehind(tabs[0]?.url)).toBe(
+          "https://sign-in.example/composio-slack",
+        );
       });
     });
   }
 
-  test("in the team edition Add stays the admin's act and starts no sign-in", async () => {
+  /*
+   * Admin's Browse apps used to stop at Add, and the admin then had to find a second Connect. Its
+   * one press now adds the app for everyone and starts the admin's own sign-in, as everywhere else.
+   */
+  test("in the team edition Admin's Connect adds it and starts the admin's sign-in", async () => {
     provider = "composio";
     apps = [app("slack", "Slack", "consent", false)];
     const { view, user } = draw("team");
 
     const row = await view.findByTestId("directory-slack");
-    await user.click(within(row).getByRole("button", { name: "Add" }));
-    await waitFor(() => expect(writes).toEqual(["add slack"]));
-    await settleReactWork();
-    expect(tabs).toHaveLength(0);
+    expect(within(row).queryByRole("button", { name: "Add" })).toBeNull();
+    await user.click(
+      within(row).getByRole("button", { name: "Connect Slack" }),
+    );
+    await waitFor(() => {
+      expect(writes).toEqual(["add slack", "connect composio-slack"]);
+      expect(signInBehind(tabs[0]?.url)).toBe(
+        "https://sign-in.example/composio-slack",
+      );
+    });
   });
 });
 
@@ -341,7 +390,9 @@ describe("the Connections tile", () => {
   test("an added app that signs in reads Not connected until it is", () => {
     const rows = connectionRows({
       catalogue: [],
-      brokered: [server("composio", "slack"), server("arcade", "Gmail")],
+      brokered: [server("composio", "slack"), server("arcade", "Gmail")].map(
+        appBody,
+      ),
       shared: [],
       connected: new Set(["arcade-Gmail"]),
       links: [],
@@ -356,7 +407,7 @@ describe("the Connections tile", () => {
   });
 
   test("GitHub is not Connected off the sign-in link while its tools are not connected", () => {
-    const github = server("composio", "github");
+    const github = appBody(server("composio", "github"));
     const rows = connectionRows({
       catalogue: [],
       brokered: [github],
@@ -379,4 +430,25 @@ describe("the Connections tile", () => {
       rows.filter((row) => row.title === "GitHub" || row.key === github.id),
     ).toHaveLength(1);
   });
+});
+
+/*
+ * Found in a dark-mode pass over Admin, Apps, Browse apps: GitHub's mark is black, and on the dark
+ * page it all but vanished. A vendor's artwork is never recoloured, so in dark mode every mark sits
+ * on a white tile, the same rule the framework marks follow (`harness-mark.tsx`).
+ */
+test("Browse apps draws each vendor's mark on a white tile in dark mode, so a black mark still shows", async () => {
+  provider = "composio";
+  apps = [
+    {
+      ...app("github", "GitHub", "consent", false),
+      logo: "https://logos.example/github.svg",
+    },
+  ];
+  const { view } = draw("team");
+  const row = await view.findByTestId("directory-github");
+  const mark = row.querySelector('img[src="https://logos.example/github.svg"]');
+  if (!mark) throw new Error("Expected GitHub's mark on its row");
+  const tile = mark.closest("[data-slot=item-media]");
+  expect(tile?.className).toContain("dark:bg-white");
 });

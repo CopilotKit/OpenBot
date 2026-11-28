@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { accountModePreview, grantPlugin } from "../src/lib/plugins/mutations";
+import { accountModePreview } from "../src/lib/apps/mutations";
+import { grantPlugin } from "../src/lib/plugins/mutations";
 import { personalConnections } from "../src/lib/plugins/queries";
 import { describeApproval } from "../src/lib/plugins/shared-use";
+import { appPath } from "./apps-api";
 
 const originalFetch = global.fetch;
 const sent: { path: string; method: string; body: unknown }[] = [];
@@ -15,12 +17,10 @@ beforeEach(() => {
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
       return Response.json({
-        changed: false,
-        preview: {
-          mode: "shared",
-          wouldRevoke: { holder: "person", count: 3 },
-          bots: [],
-        },
+        mode: "shared",
+        applied: false,
+        accountsEnded: { holder: "person", count: 3 },
+        bots: [],
       });
     },
     { preconnect: originalFetch.preconnect },
@@ -39,16 +39,13 @@ describe("grantPlugin", () => {
       approval: { audience: "owner", outsideInput: false, members: [] },
     });
     expect(sent[0]?.body).toEqual({
-      kind: "mcp",
-      ref: "gh/X",
-      agentId: "b",
       approval: { audience: "owner", outsideInput: false, members: [] },
     });
   });
 
   test("sends no approval key when there is none", async () => {
     await grantPlugin({ kind: "mcp", ref: "gh/X", agentId: "b" });
-    expect(sent[0]?.body).toEqual({ kind: "mcp", ref: "gh/X", agentId: "b" });
+    expect(sent[0]?.body).toEqual({});
   });
 });
 
@@ -56,9 +53,9 @@ describe("accountModePreview", () => {
   test("asks without confirming", async () => {
     const preview = await accountModePreview("gh", "shared");
     expect(sent[0]).toEqual({
-      path: "/api/plugins/servers/gh/account-mode",
+      path: `${appPath("gh")}/account-mode`,
       method: "PUT",
-      body: { mode: "shared", confirm: false },
+      body: { mode: "shared", validateOnly: true },
     });
     expect(preview.wouldRevoke.count).toBe(3);
   });
@@ -99,5 +96,27 @@ describe("describeApproval", () => {
         ],
       }),
     ).toBe("The group platform and 1 person");
+  });
+
+  test("calls a team by its name, never its id, and says when one is gone", () => {
+    const approval = {
+      audience: "people" as const,
+      outsideInput: true,
+      members: [
+        { kind: "team" as const, value: "team_1" },
+        { kind: "team" as const, value: "team_2" },
+        { kind: "team" as const, value: "team_gone" },
+      ],
+    };
+    expect(
+      describeApproval(approval, [
+        { id: "team_1", name: "Support" },
+        { id: "team_2", name: "Field Sales" },
+      ]),
+    ).toBe(
+      "The teams Support, Field Sales and a team that no longer exists, and outside input",
+    );
+    // Before the organization's teams have arrived, only how many is known.
+    expect(describeApproval(approval)).toBe("3 teams, and outside input");
   });
 });

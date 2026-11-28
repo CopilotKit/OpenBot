@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { GithubSources } from "@/components/settings/github-sources";
+import { GITHUB_EVENT_SOURCES_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** Settings → Connected accounts: the repositories whose events can start a responsibility. */
@@ -31,21 +32,28 @@ function serving() {
         body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
       });
       return Response.json({
-        binding: {
+        githubEventSource: {
           id: "g2",
           source: "github",
           repository: "acme/web",
           createdAt: "2026-10-09T10:00:00Z",
+          webhookPath: "/api/events/github/g2",
         },
       });
     }
+    // Anywhere but the API's GitHub event sources, nothing is connected.
+    if (pathOf(input) !== GITHUB_EVENT_SOURCES_PATH)
+      return Response.json({ error: "not served" }, { status: 404 });
     return Response.json({
-      bindings: [
+      nextCursor: null,
+      githubEventSources: [
         {
           id: "g1",
           source: "github",
           repository: "acme/app",
           createdAt: "2026-10-09T10:00:00Z",
+          // The server's own address for it, which the screen shows rather than builds from the id.
+          webhookPath: "/api/events/github/hook-g1",
         },
       ],
     });
@@ -63,11 +71,13 @@ function draw() {
   );
 }
 
-test("a connected repository shows the webhook address to paste into GitHub", async () => {
+test("a connected repository shows the webhook address the server answers, to paste into GitHub", async () => {
   serving();
   const view = draw();
   expect(await view.findByText("acme/app")).toBeTruthy();
-  expect(view.getByText(/\/api\/events\/github\/g1$/)).toBeTruthy();
+  expect(
+    view.getByText(`${window.location.origin}/api/events/github/hook-g1`),
+  ).toBeTruthy();
 });
 
 test("connecting a repository sends it with its secret", async () => {
@@ -84,7 +94,7 @@ test("connecting a repository sends it with its secret", async () => {
   fireEvent.click(view.getByRole("button", { name: "Connect events" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      request: "POST /api/responsibilities/sources/github",
+      request: `POST ${GITHUB_EVENT_SOURCES_PATH}`,
       body: { repository: "acme/web", secret: "s3cret" },
     }),
   );

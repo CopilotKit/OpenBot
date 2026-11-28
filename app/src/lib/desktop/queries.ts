@@ -123,8 +123,30 @@ export type DesktopUsageData = {
   offByEnvironment: boolean;
 };
 
+/**
+ * Where the OpenBot this window shows runs: on this computer, which the desktop app started itself,
+ * or somewhere else, at an address the person typed and signed in to. Never the sign-in itself: the
+ * desktop app keeps that and the page never holds it.
+ */
+export type DesktopConnection =
+  /**
+   * `canConnect`: the desktop app is one that can connect to an OpenBot elsewhere. `moveToCloud`:
+   * its build offers OpenBot Cloud and this OpenBot hasn't moved there, so it can move everything
+   * there from this computer.
+   */
+  | { mode: "local"; address: null; canConnect: boolean; moveToCloud: boolean }
+  | { mode: "connected"; address: string };
+
+const ON_THIS_COMPUTER: DesktopConnection = {
+  mode: "local",
+  address: null,
+  canConnect: false,
+  moveToCloud: false,
+};
+
 export const desktopKeys = {
   all: ["desktop"] as const,
+  connection: ["desktop", "connection"] as const,
   aiConnection: ["desktop", "ai-connection"] as const,
   usageData: ["desktop", "usage-data"] as const,
   status: (memory: boolean) => ["desktop", "status", { memory }] as const,
@@ -142,6 +164,40 @@ export async function invokeDesktop<T>(
   const shell = desktopShell();
   if (!shell) throw new Error("This page needs the OpenBot desktop app.");
   return (await shell.invoke(`${PLUGIN}|${command}`, args)) as T;
+}
+
+/**
+ * Whether this window shows an OpenBot on this computer or one it is connected to. In a browser,
+ * and in a desktop app from before it could connect (which refuses the question the same way every
+ * time), the answer is this computer. It does not change while the page shows: changing it sends
+ * the window back to setup.
+ */
+export function desktopConnectionQueryOptions() {
+  return queryOptions({
+    queryKey: desktopKeys.connection,
+    queryFn: async (): Promise<DesktopConnection> => {
+      if (desktopShell() === null) return ON_THIS_COMPUTER;
+      try {
+        const answer = await invokeDesktop<{
+          mode?: string;
+          address?: string | null;
+          moveToCloud?: boolean;
+        }>("connection");
+        return answer?.mode === "connected" && answer.address
+          ? { mode: "connected", address: answer.address }
+          : {
+              mode: "local",
+              address: null,
+              canConnect: true,
+              moveToCloud: answer?.moveToCloud === true,
+            };
+      } catch {
+        return ON_THIS_COMPUTER;
+      }
+    },
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  });
 }
 
 /**

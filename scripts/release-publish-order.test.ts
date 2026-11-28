@@ -77,7 +77,6 @@ test("the gate decides with release-ci-gate.ts, and re-runs the checks that read
     "bun run format:check",
     "bun run lint",
     "bun desktop/scripts/desktop-version.ts check",
-    "charts/openbot/Chart.yaml",
     "-e CHANGELOG.md -e release-policy.json",
   ]) {
     expect(runs).toContain(check);
@@ -192,15 +191,39 @@ test("the merge-back still follows a published final, whether or not the full ch
   );
 });
 
+test("a stable release from main opens the PR that runs main's images again", () => {
+  expect(needs("main-images")).toEqual(["metadata", "github-release"]);
+  expect(condition("main-images")).toBe(
+    "!cancelled() && github.ref == 'refs/heads/main' && needs.metadata.outputs.is_release == 'true' && needs.github-release.result == 'success'",
+  );
+  const run = job("main-images").steps?.[0]?.run ?? "";
+  expect(run).toContain("FILE=backend-images.env");
+  expect(run).toContain("gh pr create");
+});
+
+test("the merge-back keeps main's own image tag and CLI", () => {
+  const run = job("merge-back").steps?.[0]?.run ?? "";
+  expect(run).toContain(
+    "MAIN_KEEPS=(desktop/intelligence-cli.json backend-images.env)",
+  );
+});
+
 // v0.3.1's checks waited five minutes for a run of main's CI they shared a group with, and cancelled
 // the pending run of the commit the release sat on, so that commit never got the result the gate
 // now needs.
+// Pull requests from forks share one group of their own (contributor CI, one run at a time); every
+// other event keeps the group it always had.
 test("CI keeps a run for every commit on main, and the release's own checks out of main's group", () => {
   const ci = workflow("ci.yml");
+  const fork =
+    "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository";
   expect(ci.concurrency).toEqual({
-    group:
-      `ci-${expression("github.workflow")}-` +
-      expression("github.ref == 'refs/heads/main' && github.sha || github.ref"),
-    "cancel-in-progress": expression("github.ref != 'refs/heads/main'"),
+    group: expression(
+      `${fork} && format('ci-{0}-forks', github.workflow) || ` +
+        "format('ci-{0}-{1}', github.workflow, github.ref == 'refs/heads/main' && github.sha || github.ref)",
+    ),
+    "cancel-in-progress": expression(
+      `github.ref != 'refs/heads/main' && !(${fork})`,
+    ),
   });
 });

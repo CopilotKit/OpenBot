@@ -3,11 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
-import { LoadingRows } from "@/components/layout/loading-rows";
 import {
   attentionSummary,
+  useStoppedTasks,
   waitingOnYou,
 } from "@/components/bot-profile/attention";
+import { LoadingRows } from "@/components/layout/loading-rows";
 import {
   PageEmpty,
   PageRows,
@@ -33,11 +34,12 @@ import {
   botAttentionQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 
 /**
  * Every Bot the person can reach, in the one place they are listed: what needs the person first,
- * then pinned, then their own, then the ones shared with them, and the ones they hid folded away at
- * the end.
+ * then pinned, then their own, then the ones shared with them, then the ones included with OpenBot,
+ * and the ones they hid folded away at the end.
  *
  * Needs you is where the sidebar's badge leads, so it holds everything behind that number in one
  * card: the Bots with a question, an approval or a stalled hand-off (answered on the Bot's page),
@@ -52,7 +54,7 @@ export function BotRoster() {
   const hidden = useQuery(agentListQueryOptions(true));
   const attention = useQuery(botAttentionQueryOptions());
   const list = useNeedsYou();
-  const byId = new Map((attention.data ?? []).map((bot) => [bot.agentId, bot]));
+  const byId = new Map((attention.data ?? []).map((bot) => [bot.botId, bot]));
 
   if (agents.isPending)
     return (
@@ -64,13 +66,28 @@ export function BotRoster() {
   if (agents.data === undefined) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        Couldn't load your Bots. Reload the page.
+        {loadFailure(
+          agents.error,
+          "Couldn't load your Bots. Try again in a moment.",
+        )}
       </p>
     );
   }
   // Every Bot stays in its own section; what it waits on is on the board above, by name.
-  const { pinned, yours, shared } = groupRoster(agents.data);
-  const available = pinned.length + yours.length + shared.length;
+  const roster = groupRoster(agents.data);
+  const { pinned, yours } = roster;
+  /*
+   * A Bot OpenBot provides is included with OpenBot, never "shared with you": nobody shared it, and
+   * on OpenBot Cloud, where each person has an organization of their own, "shared" read as their
+   * conversations being out in the open. The personal edition has nobody to share with, so every
+   * Bot that isn't the person's comes with OpenBot.
+   */
+  const shared = personal ? [] : roster.shared;
+  const included = personal
+    ? [...roster.shared, ...roster.included]
+    : roster.included;
+  const available =
+    pinned.length + yours.length + shared.length + included.length;
   const hiddenCount = hidden.data?.length ?? 0;
   const newBot = (
     <Button
@@ -107,10 +124,13 @@ export function BotRoster() {
         </PageSection>
       ) : null}
       {shared.length ? (
-        <PageSection
-          title={personal ? "Included with OpenBot" : "Shared with you"}
-        >
+        <PageSection title="Shared with you">
           <RosterRows agents={shared} byId={byId} />
+        </PageSection>
+      ) : null}
+      {included.length ? (
+        <PageSection title="Included with OpenBot">
+          <RosterRows agents={included} byId={byId} />
         </PageSection>
       ) : null}
       {available === 0 ? (
@@ -166,7 +186,14 @@ function HiddenSection({
   return (
     <PageSection
       action={
-        <Button onClick={() => setOpen(!open)} size="sm" variant="ghost">
+        // Short on screen; to a screen reader it says which list it opens, beside Done's own Show.
+        <Button
+          aria-expanded={open}
+          aria-label={open ? "Hide hidden Bots" : "Show hidden Bots"}
+          onClick={() => setOpen(!open)}
+          size="sm"
+          variant="ghost"
+        >
           {open ? "Hide" : "Show"}
         </Button>
       }
@@ -209,8 +236,9 @@ function RosterRow({
   agent: AgentProfile;
   state: BotAttention | undefined;
 }) {
+  const stopped = useStoppedTasks();
   const summary = state
-    ? [state.paused ? "Paused" : "", attentionSummary(state)]
+    ? [state.paused ? "Paused" : "", attentionSummary(state, stopped(agent.id))]
         .filter(Boolean)
         .join(" · ")
     : "";
@@ -231,7 +259,7 @@ function RosterRow({
       </ItemContent>
       <ItemActions>
         {waiting > 0 ? (
-          <span className="rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground tabular-nums">
+          <span className="rounded-full bg-primary px-1.5 text-xs font-medium text-primary-foreground tabular-nums">
             {waiting}
           </span>
         ) : null}

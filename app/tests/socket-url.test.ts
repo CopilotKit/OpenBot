@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { socketUrl } from "../src/lib/socket-url";
+import { apiSocketPath, socketUrl } from "../src/lib/socket-url";
 
 const at = (protocol: string, hostname: string, host: string) => ({
   protocol,
@@ -61,4 +61,13 @@ describe("where a socket is opened", () => {
       ),
     ).toBe("wss://openbot.example:3001/api/computers/a/stream");
   });
+});
+
+test("the API's sockets sit under the organization's address, as its REST resources do", () => {
+  expect(apiSocketPath("/conversation-events")).toBe(
+    "/api/v2/organizations/default/conversation-events",
+  );
+  expect(apiSocketPath("/computers/notes-bot/screen")).toBe(
+    "/api/v2/organizations/default/computers/notes-bot/screen",
+  );
 });

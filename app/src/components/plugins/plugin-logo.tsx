@@ -1,5 +1,14 @@
 import { IconPlug } from "@tabler/icons-react";
 import { useState } from "react";
+import { cn } from "@/lib/utils";
+
+/**
+ * ON A WHITE TILE IN DARK MODE, BECAUSE SOME MARKS DISAPPEAR WITHOUT ONE. GitHub's mark is black,
+ * and on the dark page it all but vanished. A vendor's artwork is never recoloured, so dark mode
+ * gives every mark a white tile instead: the same rule the framework marks follow
+ * (`agents/harness-mark.tsx`). Every mark reads on white.
+ */
+export const LOGO_TILE = "rounded-sm dark:bg-white dark:p-0.5";
 
 /**
  * An app's logo, or its initial where it has none.
@@ -24,7 +33,7 @@ export function PluginLogo({
     <img
       alt=""
       src={logo}
-      className="size-6 object-contain"
+      className={cn("size-6 object-contain", LOGO_TILE)}
       referrerPolicy="no-referrer"
       loading="lazy"
       onError={() => setFailedUrl(logo)}

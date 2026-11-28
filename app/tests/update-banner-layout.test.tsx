@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, Page } from "playwright-core";
@@ -29,10 +29,10 @@ const APP = join(import.meta.dir, "..");
 const ORIGIN = "http://openbot.test";
 
 /**
- * The content column's width: at the default 1000px window, less the 340px sidebar and the panel's
+ * The content column's width: at the default 1000px window, less the 360px sidebar and the panel's
  * inset (measured on Windows, D50), and at the 720px narrowest window the app allows.
  */
-const DEFAULT_WIDTH = 650;
+const DEFAULT_WIDTH = 630;
 const NARROWEST_WIDTH = 370;
 
 const RELEASE = "1.0.1";
@@ -146,18 +146,24 @@ async function stylesheet(classes: string[]): Promise<string> {
   return compiler.build(classes);
 }
 
+/**
+ * The page's script and the browser, ready before any test starts. This waits for the bundle to be
+ * built and for Chromium to say it has started (Playwright's own launch timeout bounds that), not
+ * on a hook's clock: a `beforeAll` gets 5 s, and on a cold runner the two can take longer.
+ */
+async function ready(): Promise<{ script: string; browser: Browser }> {
+  const script = await bundle();
+  const { chromium } = await import("playwright-core");
+  // The CI job installs full Chromium without the headless shell.
+  const browser = await chromium.launch({ channel: "chromium" });
+  return { script, browser };
+}
+
 let browser: Browser;
 let script: string;
 /** The classes every state's banner wears, gathered once so one stylesheet styles them all. */
 let css: string;
-
-beforeAll(async () => {
-  if (!asked) return;
-  script = await bundle();
-  const { chromium } = await import("playwright-core");
-  // The CI job installs full Chromium without the headless shell.
-  browser = await chromium.launch({ channel: "chromium" });
-});
+if (asked) ({ script, browser } = await ready());
 
 afterAll(async () => {
   await browser?.close();

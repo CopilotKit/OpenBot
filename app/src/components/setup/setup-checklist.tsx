@@ -19,7 +19,9 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
+import { loadFailure } from "@/lib/load-failure";
 import { recheckSetupMutationOptions } from "@/lib/setup/mutations";
 import {
   type SetupFix,
@@ -57,7 +59,7 @@ const PRODUCT = appConfig.brand.productName;
  * out of the app would not set it either.
  *
  * NO ALARM FOR WHAT A MEMBER CAN'T FIX. A member is told, in one neutral line, that their admin sets
- * a thing up: no amber or red pill, no "Required", and a summary that counts nothing. The pills and
+ * a thing up: no warning or destructive pill, no "Required", and a summary that counts nothing. The pills and
  * the counts are for the admin, who can act on them.
  */
 export function SetupChecklist({
@@ -71,6 +73,8 @@ export function SetupChecklist({
 }) {
   const checklist = useQuery(setupChecklistQueryOptions());
   const recheck = useMutation(recheckSetupMutationOptions(queryClient));
+  const hosted =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
 
   /*
    * Check again asks the server to ask Intelligence, the model provider and the computers again,
@@ -96,16 +100,20 @@ export function SetupChecklist({
 
   return (
     <div className="flex w-full flex-col gap-3" data-setup-checklist="">
+      {/* OpenBot holding off (a move, or the database out of reach) is said calmly, in its words. */}
       {recheck.error ? (
         <p className="text-sm text-destructive" role="alert">
-          Couldn't check again. Try again.
+          {loadFailure(recheck.error, "Couldn't check again. Try again.")}
         </p>
       ) : null}
       {/* Nothing while the first answer is on its way: OpenBot has no loading placeholder. */}
       {checklist.isPending ? null : checklist.error ? (
         <>
           <p className="text-sm text-destructive" role="alert">
-            Couldn't check your setup. Check again.
+            {loadFailure(
+              checklist.error,
+              "Couldn't check your setup. Check again.",
+            )}
           </p>
           {checkAgain}
         </>
@@ -114,7 +122,7 @@ export function SetupChecklist({
           <p className="text-sm text-muted-foreground" role="status">
             {checklist.data.audience === "member"
               ? memberSummaryOf(checklist.data.rows)
-              : summaryOf(checklist.data.rows)}
+              : summaryOf(checklist.data.rows, hosted)}
           </p>
           <PageRows className="mt-0">
             <ul aria-label="Setup">
@@ -142,8 +150,13 @@ export function SetupChecklist({
   );
 }
 
-/** One line over the list, so the state of the whole list is said before its rows are read. */
-export function summaryOf(rows: SetupRow[]): string {
+/**
+ * One line over the list, so the state of the whole list is said before its rows are read.
+ *
+ * `hosted` is a hosted OpenBot (`hostedSignIn`), whose server sends an organization admin no fix
+ * for what OpenBot by CopilotKit sets up, so not every optional row says how to add it.
+ */
+export function summaryOf(rows: SetupRow[], hosted = false): string {
   const gaps = rows.filter((row) => row.status === "needs_setup");
   const unchecked = rows.filter((row) => row.status === "not_checked").length;
   const notChecked =
@@ -167,7 +180,9 @@ export function summaryOf(rows: SetupRow[]): string {
   const needs =
     required > 0
       ? `${things} setup, and ${required === 1 ? "1 is" : `${required} are`} required. Set up the required ${required === 1 ? "one" : "ones"} first.`
-      : `${PRODUCT} is ready to use. ${optional}. Each says how to add it.`;
+      : hosted
+        ? `${PRODUCT} is ready to use. ${optional}.`
+        : `${PRODUCT} is ready to use. ${optional}. Each says how to add it.`;
   return notChecked ? `${needs} ${notChecked}` : needs;
 }
 
@@ -178,23 +193,23 @@ export function memberSummaryOf(rows: SetupRow[]): string {
     : "Your admin sets up anything that isn't ready yet.";
 }
 
-/** The pill's words and colours: done green, a gap that blocks red, everything else amber. */
+/** The pill's words and colours: done in success, a gap that blocks in destructive, everything else in warning. */
 function pillFor(row: SetupRow) {
   if (row.status === "ready")
     return {
       label: "Ready",
-      tone: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+      tone: "bg-success/10 text-success",
     };
   if (row.status === "not_checked")
     return {
       label: "Not checked",
-      tone: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+      tone: "bg-warning/10 text-warning",
     };
   return {
     label: "Needs setup",
     tone: row.required
       ? "bg-destructive/10 text-destructive"
-      : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+      : "bg-warning/10 text-warning",
   };
 }
 

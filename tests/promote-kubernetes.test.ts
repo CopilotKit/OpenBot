@@ -247,6 +247,78 @@ test("schema-transition preflight uses the pinned chart and customer files and a
   expect(f.calls.some((command) => command[0] === "kubectl")).toBe(false);
 });
 
+/** The server Deployment of a chart, as `helm template` renders it, with the image and init
+ * containers given. */
+function serverDeployment(image: string, initContainers: string[]) {
+  const init = initContainers.length
+    ? `      initContainers:\n${initContainers.map((name) => `        - name: ${name}\n          image: postgres:17\n`).join("")}`
+    : "";
+  return `apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: openbot-server\n  labels:\n    app.kubernetes.io/component: server\nspec:\n  template:\n    spec:\n${init}      containers:\n        - name: server\n          image: ${image}\n`;
+}
+const TARGET_SERVER = `ghcr.io/acme/openbot:v0.3.0@sha256:${"b".repeat(64)}`;
+
+/** `planKubernetesPromotion` for a promotion that changes the database version, against a target
+ * chart that renders `rendered`. */
+async function planSchemaTransition(rendered: string) {
+  const f = fixture();
+  f.options.candidate.compatibility.database.to = "openbot-db-2";
+  const run: CommandRunner = async (command, options) => {
+    const output = (await f.options.run?.(command, options)) ?? "";
+    return command[0] === "helm" && command[1] === "template"
+      ? rendered
+      : output;
+  };
+  const plan = await planKubernetesPromotion({ ...f.options, run });
+  expect(f.calls.some((command) => command[0] === "kubectl")).toBe(false);
+  return plan;
+}
+
+/**
+ * A chart whose server applies its own migrations when it starts renders no migrations Job. What it
+ * renders instead is a server Deployment that runs the target image behind a `wait-for-database`
+ * init container, and a promotion that changes the database version is accepted on that.
+ */
+test("a schema transition accepts a chart whose server migrates at start: no migrations Job, the target image behind wait-for-database", async () => {
+  const plan = await planSchemaTransition(
+    serverDeployment(TARGET_SERVER, ["wait-for-database"]),
+  );
+  expect(plan.reasons).toEqual([]);
+  expect(plan.allowed).toBe(true);
+});
+
+/** What that acceptance must not let through: each is refused, as before. */
+test.each([
+  [
+    "a server Deployment with no wait-for-database init container",
+    serverDeployment(TARGET_SERVER, []),
+  ],
+  [
+    "a server Deployment that waits on something else",
+    serverDeployment(TARGET_SERVER, ["wait-for-redis"]),
+  ],
+  [
+    "a server Deployment that runs another image",
+    serverDeployment(`ghcr.io/acme/openbot:v0.2.0@sha256:${"a".repeat(64)}`, [
+      "wait-for-database",
+    ]),
+  ],
+  [
+    "a migrations Job that is not the guarded pre-upgrade one, beside such a Deployment",
+    `${serverDeployment(TARGET_SERVER, ["wait-for-database"])}---\napiVersion: batch/v1\nkind: Job\nmetadata:\n  labels:\n    app.kubernetes.io/component: migrations\nspec:\n  template:\n    spec:\n      containers:\n        - name: migrate\n          image: ${TARGET_SERVER}\n          workingDir: /app/server\n          command: ["bun", "scripts/migrate.ts"]\n`,
+  ],
+  [
+    "a wait-for-database init container on a workload that is not the server",
+    serverDeployment(TARGET_SERVER, ["wait-for-database"]).replace(
+      "app.kubernetes.io/component: server",
+      "app.kubernetes.io/component: supervisor",
+    ),
+  ],
+])("a schema transition still refuses %s", async (_, rendered) => {
+  const plan = await planSchemaTransition(rendered);
+  expect(plan.allowed).toBe(false);
+  expect(plan.reasons.join(" ")).toContain("migration Job");
+});
+
 test("kubectl waits and rollout status are never killed before the operator's --timeout", async () => {
   const f = fixture();
   const spawn = spyOn(Bun, "spawn");

@@ -244,11 +244,15 @@ export function AfterStop({
   state,
   connected,
   openbotUrl,
+  onOpenOpenBot,
   onDiscard,
 }: {
   state: RecorderState;
   connected: boolean;
   openbotUrl?: string;
+  /** Opens a page of the OpenBot (the popup's: through OpenBot Desktop's entry address for its own OpenBot). Without it,
+   * the link opens as a plain link. */
+  onOpenOpenBot?: (url: string) => void;
   onDiscard: () => void;
 }) {
   const [asking, setAsking] = useState(false);
@@ -291,6 +295,14 @@ export function AfterStop({
                   target="_blank"
                   rel="noreferrer"
                   className="text-sm underline"
+                  onClick={
+                    onOpenOpenBot
+                      ? (event) => {
+                          event.preventDefault();
+                          onOpenOpenBot(teachABotUrl(openbotUrl));
+                        }
+                      : undefined
+                  }
                 >
                   See it on Teach a Bot
                 </a>

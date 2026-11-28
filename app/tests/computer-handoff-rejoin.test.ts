@@ -61,7 +61,9 @@ test("replayed help call does not create another request", async () => {
     ok: false,
     handoffStatus: "expired",
   });
-  expect(paths).toEqual(["/api/computers/bot-1/control?requestId=request-1"]);
+  expect(paths).toEqual([
+    "/api/v2/organizations/default/computers/bot-1/control?requestId=request-1",
+  ]);
 });
 
 test("a challenge still present in the fresh snapshot joins its new request before resuming", async () => {
@@ -92,7 +94,9 @@ test("a challenge still present in the fresh snapshot joins its new request befo
     snapshotId: 9,
   });
   expect(pendingHandoff("bot-1")?.requestId).toBe("request-2");
-  expect(paths).toContain("/api/computers/bot-1/control?requestId=request-2");
+  expect(paths).toContain(
+    "/api/v2/organizations/default/computers/bot-1/control?requestId=request-2",
+  );
 });
 
 test("Stop cancels a still-waiting request by ID", async () => {
@@ -105,8 +109,8 @@ test("Stop cancels a still-waiting request by ID", async () => {
     await awaitHandoff("bot-1", "request-1", controller.signal),
   ).toMatchObject({ stopped: true, ok: false });
   expect(paths).toEqual([
-    "/api/computers/bot-1/control?requestId=request-1",
-    "/api/computers/bot-1/control/cancel",
+    "/api/v2/organizations/default/computers/bot-1/control?requestId=request-1",
+    "/api/v2/organizations/default/computers/bot-1/control/cancel",
   ]);
 });
 
@@ -120,28 +124,37 @@ test("an abort wakes a long polling delay without waiting for that delay", async
 }, 250);
 
 test("snapshot-required and request identity survive tool refusal shaping", async () => {
-  serve(() =>
-    Response.json(
-      { error: "Take a fresh snapshot", snapshotRequired: true },
-      { status: 409 },
-    ),
-  );
-  expect(await callComputer("bot-1", "/click")).toMatchObject({
+  // The API's problems for the two refusals, at the click's own address.
+  const problem = (body: Record<string, unknown>) =>
+    serve((path) =>
+      path === "/api/v2/organizations/default/computers/bot-1/click"
+        ? Response.json(
+            { status: 409, ...body },
+            {
+              status: 409,
+              headers: { "content-type": "application/problem+json" },
+            },
+          )
+        : Response.json({ error: "Not found." }, { status: 404 }),
+    );
+  const click = () =>
+    callComputer("bot-1", "/click", { body: { ref: "e1", snapshotId: 1 } });
+  problem({
+    code: "COMPUTER_SNAPSHOT_STALE",
+    detail: "Take a fresh snapshot",
+    snapshotRequired: true,
+  });
+  expect(await click()).toMatchObject({
     ok: false,
     snapshotRequired: true,
   });
-  serve(() =>
-    Response.json(
-      {
-        error: "Help is pending",
-        humanHasControl: true,
-        requestId: "request-1",
-        handoff: { id: "request-1", status: "waiting" },
-      },
-      { status: 409 },
-    ),
-  );
-  expect(await callComputer("bot-1", "/click")).toMatchObject({
+  problem({
+    code: "COMPUTER_PERSON_HAS_CONTROL",
+    detail: "Help is pending",
+    controlRequestId: "request-1",
+    handoff: { id: "request-1", status: "waiting" },
+  });
+  expect(await click()).toMatchObject({
     ok: false,
     requestId: "request-1",
     handoff: { id: "request-1" },
@@ -157,7 +170,8 @@ test.each(["navigate", "read"] as const)(
       requestId: "request-1",
     };
     serve((path) => {
-      if (path.endsWith(`/${operation}`))
+      // The page read is `page` in the API; the navigation keeps its name.
+      if (path.endsWith(operation === "read" ? "/page" : "/navigate"))
         return Response.json({
           url: "https://site.test/challenge",
           title: "Verification required",

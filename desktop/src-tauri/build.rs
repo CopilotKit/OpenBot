@@ -63,11 +63,32 @@ fn main() {
                     "speech_abort",
                     // Open log folder: the shell's own log folder. See `src/logging.rs`.
                     "open_logs",
+                    // The page's own problems as they happen, for Get Troubleshooting Logs…. See
+                    // `src/page_problems.rs`.
+                    "record_problem",
+                    // The web app's Get troubleshooting logs: the menus' file, saved and shown.
+                    "save_logs",
                     // A Bot's notification, opening OpenBot at a page when clicked. See `src/notice.rs`.
                     "notify",
                     // Settings' AI model row, and its Change. See `src/ai_connection.rs`.
                     "ai_connection",
                     "change_ai_connection",
+                    // The AI connection changed in the app with no stop: the sign-ins that run
+                    // here, and the one engine a connection needs. See `src/ai_connection.rs`.
+                    "ai_providers",
+                    "begin_plan_sign_in",
+                    "finish_plan_sign_in",
+                    "cancel_plan_sign_in",
+                    "begin_provider_sign_in",
+                    "finish_provider_sign_in",
+                    "cancel_provider_sign_in",
+                    // A provider's redirect caught on this computer for OpenBot Cloud's sign-in.
+                    // See `src/sign_in_redirect.rs`.
+                    "begin_sign_in_redirect",
+                    "await_sign_in_redirect",
+                    "cancel_sign_in_redirect",
+                    "prepare_ai_connection",
+                    "settle_ai_connection",
                     // Settings' Share usage data. See `src/usage_data.rs`.
                     "usage_data",
                     "set_usage_data",
@@ -75,6 +96,15 @@ fn main() {
                     "quit",
                     // The zoom keys no menu carries. See `src/zoom-shortcut.js`.
                     "zoom",
+                    // Where OpenBot runs, and Settings' Sign out, Change and the organisation
+                    // picked, for an app connected to an OpenBot that runs elsewhere. See
+                    // `src/desktop_connected.rs`.
+                    "connection",
+                    "sign_out",
+                    "change_connection",
+                    "set_organization",
+                    // Settings' Move to OpenBot Cloud. See `src/desktop_move.rs`.
+                    "move_to_cloud",
                 ]),
             ),
     )

@@ -61,25 +61,10 @@ describe("the integration job's environment", () => {
     (job) => job.steps.some((step) => step.run?.includes("--output")),
   )!;
 
-  test("has the database CI's test job has", () => {
-    expect(ci.services).toBeDefined();
-    expect(integrate.services).toEqual(ci.services!);
-  });
-
-  test("points the suite at that database", () => {
-    const service = ci.services!.postgres as {
-      env: Record<string, string>;
-      ports: string[];
-    };
-    for (const name of ["DATABASE_URL", "TEST_DATABASE_URL"]) {
-      expect(ci.env?.[name]).toBeDefined();
-      const url = new URL(integrate.env![name]!);
-      expect(url.hostname).toBe("127.0.0.1");
-      expect(url.username).toBe(service.env.POSTGRES_USER!);
-      expect(url.password).toBe(service.env.POSTGRES_PASSWORD!);
-      expect(url.port).toBe(service.ports[0]!.split(":")[0]!);
-      expect(url.pathname).toBe(`/${service.env.POSTGRES_DB}`);
-    }
+  // The default checks are CI's `test` job's steps, so the integration job runs them with what that
+  // job has: no service of its own on either.
+  test("has the services CI's test job has", () => {
+    expect(integrate.services).toEqual(ci.services);
   });
 
   test("defaults to the candidate's own CI checks", () => {
@@ -115,11 +100,6 @@ describe("CI checks", () => {
         "pipefail",
         "-c",
       ]);
-    const migrate = checks.find((check) =>
-      check.command.at(-1)?.includes("scripts/migrate.ts"),
-    );
-    expect(migrate?.cwd).toBe("server");
-    expect(migrate?.env?.DATABASE_URL).toBe(jobs.test!.env!.DATABASE_URL!);
     expect(checks.at(-1)?.command.at(-1)).toBe("bun run test:ci");
   });
 

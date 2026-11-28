@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BreadthNote } from "@/components/plugins/broker-directory";
 import { consentBreadth } from "@/lib/plugins/enablement-notes";
-import type { ComposioApp } from "@/lib/plugins/queries";
-import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
+import type { DirectoryApp } from "@/lib/apps/queries";
+import fixture from "./fixtures/arcade-catalogue.json";
 
 /**
  * The D32 consent-breadth line on the enablement screen. Derived from the three measured counts and
@@ -16,7 +16,7 @@ type FixtureTool = {
 };
 
 /** The counts as the SERVER folds them (`listApps`): distinct non-empty sorted scope sets. */
-function fromFixture(toolkit: string): ComposioApp {
+function fromFixture(toolkit: string): DirectoryApp {
   const tools = (Object.values(fixture.tools) as FixtureTool[]).filter(
     (tool) => tool.toolkit.name === toolkit,
   );
@@ -24,26 +24,27 @@ function fromFixture(toolkit: string): ComposioApp {
     .map((tool) => tool.requirements?.authorization?.oauth2?.scopes ?? [])
     .filter((scopes) => scopes.length > 0);
   return app({
-    name: toolkit,
+    title: toolkit,
     actionCount: tools.length,
     permissionCount: new Set(sets.map((s) => [...s].sort().join(" "))).size,
     scopedActionCount: sets.length,
   });
 }
 
-function app(overrides: Partial<ComposioApp> = {}): ComposioApp {
+function app(overrides: Partial<DirectoryApp> = {}): DirectoryApp {
   return {
-    slug: "app",
-    name: "App",
-    description: "",
+    id: "directory:app",
+    source: "directory",
+    title: "App",
+    summary: "",
+    appId: null,
     logo: null,
     categories: [],
     actionCount: 1,
     classifiedCount: null,
     permissionCount: null,
     scopedActionCount: null,
-    connection: { kind: "consent" },
-    enabled: false,
+    connectsWith: "sign-in",
     ...overrides,
   };
 }

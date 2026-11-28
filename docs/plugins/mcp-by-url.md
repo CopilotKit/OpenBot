@@ -1,7 +1,8 @@
 # MCP servers added by URL
 
 Any remote MCP server OpenBot doesn't list (Figma's, Fireflies', your own) can be added by its
-address from **Connections → Add server**, and given to Bots like any other app.
+address from **Connections → Add custom MCP**, or by an admin from **Admin → Apps → Add custom
+MCP**, and given to Bots like any other app.
 
 OpenBot asks the server, with no credential, how it is reached:
 
@@ -16,7 +17,7 @@ OpenBot asks the server, with no credential, how it is reached:
 The consent request uses PKCE (S256) and the `resource` parameter (RFC 8707). The callback checks the
 `iss` the server sends back against the issuer it discovered (RFC 9207) before redeeming the code.
 Discovery, registration, the authorization URL, the code exchange and refresh are the MCP TypeScript
-SDK's own (`@modelcontextprotocol/sdk/client/auth`), in `server/src/plugins/remote-oauth.ts`.
+SDK's own (`@modelcontextprotocol/sdk/client/auth`).
 
 Each person's token set (access token, refresh token, expiry) is encrypted in the vault as an
 `mcp_user_token`, like the catalogue's OAuth apps. The access token is used until it is about to
@@ -38,12 +39,19 @@ whose metadata names a resource for a different address, or whose authorization 
 a different issuer, is refused.
 
 `OPENBOT_ALLOW_LOOPBACK_MCP=1` admits `http://127.0.0.1:<port>` and `[::1]` for development and the
-end-to-end tests (`server/tests/support/oauth-mcp-server.ts` is a real OAuth MCP server for them).
+end-to-end tests, which run a real OAuth MCP server on this machine.
 Leave it unset anywhere people use OpenBot.
 
 ## The MCP allowlist (team edition)
 
-With **Admin → Apps → MCP servers → Only approved servers** on, a server can only be added by its
-address once an admin has approved that address there (**Approve a server by its address**). An admin
-adding one is offered **Approve and add** on the form. A server added at an approved address is
+With **Admin → Apps → Connectors → Only approved connectors** on, a server can only be added by its
+address once an admin has approved that address there (**Approve a connector by its address**). An
+admin adding one is offered **Approve and add** on the form. A server added at an approved address is
 approved by the same entry, so its calls go through. The personal edition has no allowlist.
+
+Turning the allowlist on approves every app already added, so nothing in use is cut off; the admin
+then turns off the ones they don't want. While it is on, an app an admin adds, connects or gives a
+Bot (from the directory, the chat card, or by approving a request) is approved in the same press. A
+member's request approves nothing until an admin approves it. With it off, each app's switch reads on
+and can't be changed, because every app can be used. Routines and OpenBot settings are always on and
+are never held back.

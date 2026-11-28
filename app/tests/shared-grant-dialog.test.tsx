@@ -62,13 +62,22 @@ describe("SharedApprovalFields", () => {
     });
   });
 
-  test("offers named people only when the Bot is published to named people", () => {
+  test("offers named teams beside its owner and everyone, with no field to type a person into", () => {
     const view = render(
       <SharedApprovalFields
         onChange={() => {}}
         value={{ audience: "owner", outsideInput: false, members: [] }}
       />,
     );
-    expect(view.queryByRole("radio", { name: /named/i })).toBeNull();
+    // Teams are picked from the organization's (team-grants-shared-account.test.tsx); people are
+    // only ever the ones the Bot's audience already names.
+    expect(
+      (
+        view.getByRole("radio", {
+          name: "Named teams and people",
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(false);
+    expect(view.queryByRole("textbox")).toBeNull();
   });
 });

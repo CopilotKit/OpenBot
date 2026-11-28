@@ -3,10 +3,28 @@ import {
   mutationOptions,
   type QueryClient,
 } from "@tanstack/react-query";
+import { agentKeys } from "@/lib/agents/queries";
+import {
+  createConversation,
+  deleteConversation,
+  markConversationRead,
+  recordConversationActivity,
+  signalConversationBusy,
+  updateConversation,
+} from "@/lib/api/generated/conversations/conversations";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
-import { client, tryClient } from "@/lib/client";
 import { settingsKeys } from "@/lib/settings/queries";
-import { type AgentChannel, type ChannelPage, channelKeys } from "./queries";
+import { noteBusyHere } from "./held-busy";
+import {
+  type AgentChannel,
+  type ChannelPage,
+  channelKeys,
+  channelOf,
+} from "./queries";
+
+/** A key for one write, so a retry of it is recognised as the same write. */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
 
 /**
  * Start a new channel with one or more coworkers.
@@ -16,12 +34,13 @@ import { type AgentChannel, type ChannelPage, channelKeys } from "./queries";
 export function createChannelMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentIds: string[]): Promise<AgentChannel> => {
-      const response = await client("/api/channels", {
-        method: "POST",
-        body: { agentIds },
-        fallback: "Couldn't start a conversation.",
-      });
-      return ((await response.json()) as { channel: AgentChannel }).channel;
+      const made = await createConversation(
+        organizationId(),
+        { botIds: agentIds },
+        once(),
+        { fallback: "Couldn't start a conversation." },
+      );
+      return channelOf(made.conversation);
     },
     onSuccess: () =>
       Promise.all([
@@ -51,14 +70,13 @@ export function recordChannelActivityMutationOptions() {
       at: string;
     }) => {
       /* Still fire-and-forget: `tryClient` does not throw, and the result is not read. */
-      await tryClient(`/api/channels/${variables.channelId}/activity`, {
-        method: "POST",
-        body: {
-          agentId: variables.agentId,
-          at: variables.at,
-          text: variables.text,
-        },
-      });
+      // Best effort: the list catches up on its next read if this one is lost.
+      await recordConversationActivity(
+        organizationId(),
+        variables.channelId,
+        { botId: variables.agentId, at: variables.at, text: variables.text },
+        once(),
+      ).catch(() => undefined);
     },
   });
 }
@@ -78,21 +96,28 @@ export async function setChannelBusy(variables: {
   channelId: string;
   busy: boolean;
 }) {
-  await tryClient(`/api/channels/${variables.channelId}/busy`, {
-    method: "POST",
-    body: { busy: variables.busy },
-  });
+  // Held here too, so a read of the roster while this tab's turn runs keeps its row lit.
+  noteBusyHere(variables.channelId, variables.busy);
+  // Best effort: a lost signal is corrected by the next one.
+  await signalConversationBusy(
+    organizationId(),
+    variables.channelId,
+    { busy: variables.busy },
+    once(),
+  ).catch(() => undefined);
 }
 
 /** Pin or unpin a channel for this member. A marker, not a reorder, so no optimistic sort. */
 export function setChannelPinnedMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { channelId: string; pinned: boolean }) => {
-      await client(`/api/channels/${variables.channelId}/pin`, {
-        method: "PUT",
-        body: { pinned: variables.pinned },
-        fallback: "Couldn't pin this conversation.",
-      });
+      await updateConversation(
+        organizationId(),
+        variables.channelId,
+        { pinned: variables.pinned },
+        once(),
+        { fallback: "Couldn't pin this conversation." },
+      );
     },
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: channelKeys.all }),
@@ -108,17 +133,20 @@ export function setChannelPinnedMutationOptions(queryClient: QueryClient) {
 export function renameChannelMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { channelId: string; title: string }) => {
-      await client(`/api/channels/${variables.channelId}/title`, {
-        method: "PUT",
-        body: { title: variables.title.trim() || null },
-        fallback: "Couldn't rename this conversation.",
-      });
+      await updateConversation(
+        organizationId(),
+        variables.channelId,
+        { title: variables.title.trim() || null },
+        once(),
+        { fallback: "Couldn't rename this conversation." },
+      );
     },
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: channelKeys.list() }),
         // A search found it by its old name, or would find it by its new one.
         queryClient.invalidateQueries({ queryKey: channelKeys.searches() }),
+        queryClient.invalidateQueries({ queryKey: channelKeys.byBots() }),
       ]),
   });
 }
@@ -136,8 +164,7 @@ export function renameChannelMutationOptions(queryClient: QueryClient) {
 export function markChannelReadMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (channelId: string) => {
-      await client(`/api/channels/${channelId}/read`, {
-        method: "PUT",
+      await markConversationRead(organizationId(), channelId, once(), {
         fallback: "Couldn't mark this conversation as read.",
       });
     },
@@ -174,6 +201,8 @@ export function markChannelReadMutationOptions(queryClient: QueryClient) {
         { queryKey: channelKeys.searches() },
         markRead,
       );
+      // And under each of its Bots in the Bots panel.
+      queryClient.setQueriesData({ queryKey: channelKeys.byBots() }, markRead);
     },
   });
 }
@@ -185,21 +214,24 @@ export function deleteChannelMutationOptions(
 ) {
   return mutationOptions({
     mutationFn: async (channelId: string) => {
-      await client(
-        `/api/channels/${channelId}${discardFailedStart ? "?discardFailedStart=true" : ""}`,
-        {
-          method: "DELETE",
-          fallback: "Couldn't delete this conversation.",
-        },
+      await deleteConversation(
+        organizationId(),
+        channelId,
+        once(),
+        discardFailedStart ? { discardFailedStart: true } : undefined,
+        { fallback: "Couldn't delete this conversation." },
       );
     },
-    // The roster and its searches only. The open channel's detail query would refetch into the
+    // The roster, its searches and the Bots panel's lists only. The open channel's detail query would refetch into the
     // fresh 404 and flash an error before the navigate-home lands; left alone, it keeps its cache
-    // and the navigation happens with nothing to complain about.
+    // and the navigation happens with nothing to complain about. The Bots list too: its
+    // `lastConversationAt` orders the Bots panel and may have been this conversation's.
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: channelKeys.list() }),
         queryClient.invalidateQueries({ queryKey: channelKeys.searches() }),
+        queryClient.invalidateQueries({ queryKey: channelKeys.byBots() }),
+        queryClient.invalidateQueries({ queryKey: agentKeys.lists() }),
       ]),
   });
 }

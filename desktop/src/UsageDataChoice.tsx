@@ -19,8 +19,9 @@ const WHAT_IT_SHARES =
   "Help make OpenBot better by sharing diagnostics like errors, hangs, updates and available memory, never any content. OpenBot is built to respect your privacy.";
 
 /**
- * Usage data, as a small checkbox at the foot of the last screen of setup: the choice comes once
- * everything else is asked, while OpenBot finishes setting up, and takes one line or two.
+ * Usage data, as a small checkbox on the last screen of setup: the choice comes once everything
+ * else is asked, while OpenBot finishes setting up, and takes one line or two. It sits under the
+ * step's words and above its rows, so it stays where it is while the rows arrive.
  *
  * The same setting as Settings > General > Privacy > Share usage data, through the same commands
  * (`usage_data`, `set_usage_data`): checked by default, as sharing always has been, and unchecked is

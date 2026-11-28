@@ -1,10 +1,17 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  MutationObserver,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
+import { decideApprovalMutationOptions } from "@/lib/approvals";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
+import { answerBotAttention, attentionOf } from "./bots-api";
 import { awayFromOpenBot } from "./desktop-notifications.fixture";
+import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -31,7 +38,7 @@ afterEach(() => {
 });
 
 const attention = (
-  agentId: string,
+  botId: string,
   counts: Partial<{
     questions: number;
     approvals: number;
@@ -41,24 +48,13 @@ const attention = (
     tasks: { needsInput: number; ready: number; failed: number };
     waitingIn: string | null;
   }>,
-) => ({
-  agentId,
-  name: agentId === "expenses" ? "Expenses" : "Knowledge",
-  questions: 0,
-  approvals: 0,
-  handoffs: 0,
-  unread: 0,
-  paused: false,
-  notify: "all",
-  items: 0,
-  tasks: { needsInput: 0, ready: 0, failed: 0 },
-  ...counts,
-});
+) =>
+  attentionOf(botId, botId === "expenses" ? "Expenses" : "Knowledge", counts);
 
-/** An open item as `/api/proactive/suggestions` lists it, carried by `pingId`. */
+/** An open item as the API's check-in items list it, carried by `pingId`. */
 const item = (id: string, agentId: string, title: string, pingId: string) => ({
   id,
-  agentId,
+  botId: agentId,
   title,
   detail: "Why it was raised.",
   sourceApp: "Gmail",
@@ -73,13 +69,14 @@ let lastPingId: string | null = null;
 let items: ReturnType<typeof item>[] = [];
 function serving(bots: ReturnType<typeof attention>[]) {
   served = bots;
-  global.fetch = (async (input: RequestInfo | URL) =>
-    String(input) === "/api/proactive/suggestions"
-      ? Response.json({ suggestions: items })
-      : Response.json({
-          bots: served,
-          lastPingId,
-        })) as unknown as typeof fetch;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    pathOf(input) === CHECK_IN_ITEMS_PATH
+      ? Response.json({ checkInItems: items, nextCursor: null })
+      : (answerBotAttention(input, init, { bots: served, lastPingId }) ??
+        Response.json(
+          { error: "not served" },
+          { status: 404 },
+        ))) as unknown as typeof fetch;
 }
 afterEach(() => {
   lastPingId = null;
@@ -129,6 +126,37 @@ test("the badge adds up what waits on the person across every Bot", async () => 
   const { view } = draw();
   const badge = await view.findByText("3");
   expect(badge.getAttribute("aria-label")).toBe("3 things need you");
+});
+
+test("allowing or denying an action reads the badge again at once, as answering a question does", async () => {
+  serving([attention("expenses", { approvals: 1 })]);
+  const answered = global.fetch;
+  const decided: string[] = [];
+  // The decision, at the API's address, and every other read as before.
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (/\/approvals\/[^/]+\/decide$/.test(pathOf(input))) {
+      decided.push(pathOf(input));
+      return Response.json({ id: "approval-1", status: "completed" });
+    }
+    return answered(input, init);
+  }) as unknown as typeof fetch;
+  const { view, client } = draw();
+  await view.findByText("1");
+
+  // Decided on the Needs you board: the server no longer counts it.
+  served = [attention("expenses", {})];
+  await act(async () => {
+    await new MutationObserver(
+      client,
+      decideApprovalMutationOptions(client),
+    ).mutate({ id: "approval-1", choice: "deny" });
+  });
+  expect(decided).toHaveLength(1);
+  // Well inside the badge's own poll, which is 15 seconds away.
+  await waitFor(() => expect(view.queryByText("1")).toBeNull(), {
+    timeout: 2_000,
+  });
+  expect(view.container.innerHTML).toBe("");
 });
 
 test("with only unread messages the badge is a dot, not a number", async () => {

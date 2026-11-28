@@ -22,6 +22,7 @@ import {
   IconKeyboard,
   IconListDetails,
   IconPointer,
+  IconSend,
   IconTerminal2,
   IconWorld,
 } from "@tabler/icons-react";
@@ -41,6 +42,7 @@ const ICONS = {
   read_file: IconFile,
   write_file: IconFile,
   list_files: IconFolder,
+  send_file: IconSend,
 } as const;
 
 /** What the line says was done. The subject beside it says what it was done to. */
@@ -49,6 +51,7 @@ const LABELS = {
   read_file: "Read",
   write_file: "Saved",
   list_files: "Listed",
+  send_file: "Sent",
 } as const;
 
 const BROWSER_ICONS: Record<BrowserStepName, typeof IconWorld> = {
@@ -122,6 +125,7 @@ function CommandEntry({
           byYou: entry.doneByPerson === true,
           ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}),
           timedOut: entry.timedOut === true,
+          failed: entry.failed === true,
         })}
         truncated={entry.truncated === true}
       />
@@ -184,11 +188,21 @@ function BrowserEntry({ entry }: { entry: ComputerActivity }) {
   );
 }
 
+/** What a file step that did not happen says in place of its label: never "Saved" about an unsaved file. */
+const NOT_DONE_LABELS = {
+  read_file: "Didn't read",
+  write_file: "Didn't save",
+  list_files: "Didn't list",
+  send_file: "Didn't send",
+} as const;
+
 function Entry({ entry }: { entry: ComputerActivity }) {
   if (entry.kind === "browser") return <BrowserEntry entry={entry} />;
   const Icon = ICONS[entry.kind];
+  const notDone = entry.failed === true && entry.kind !== "command";
   const failed =
     entry.refused === true ||
+    notDone ||
     (typeof entry.exitCode === "number" && entry.exitCode !== 0);
 
   return (
@@ -201,7 +215,11 @@ function Entry({ entry }: { entry: ComputerActivity }) {
           }`}
         />
         <span className="shrink-0 text-muted-foreground text-xs">
-          {entry.declined === true ? "Declined" : LABELS[entry.kind]}
+          {entry.declined === true
+            ? "Declined"
+            : notDone && entry.kind !== "command"
+              ? NOT_DONE_LABELS[entry.kind]
+              : LABELS[entry.kind]}
         </span>
         {/*
           The command wraps rather than truncating. In the transcript one line per call is what keeps
@@ -224,6 +242,10 @@ function Entry({ entry }: { entry: ComputerActivity }) {
       {entry.refused === true ? (
         <p className="mt-1 pl-5 text-destructive text-xs">
           {entry.output || "A boundary refused it."}
+        </p>
+      ) : notDone ? (
+        <p className="mt-1 pl-5 text-destructive text-xs">
+          {entry.output || "It did not work."}
         </p>
       ) : entry.doneByPerson === true ? (
         <p className="mt-1 pl-5 text-muted-foreground text-xs">

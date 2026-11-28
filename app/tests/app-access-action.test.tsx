@@ -8,6 +8,7 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useRouterState,
 } from "@tanstack/react-router";
 import {
   act,
@@ -21,8 +22,34 @@ import {
   AppAccessAction,
   appAccessSentence,
 } from "@/components/plugins/app-access-action";
+import { AppSource } from "@/lib/api/generated/model/appSource";
+import { BotAppConnect } from "@/lib/api/generated/model/botAppConnect";
 import type { AppAccess } from "@/lib/app-access/queries";
+import { ME_PATH, meResponse } from "./accounts-api";
+import {
+  APPS_SETTING_PATH,
+  appsSettingResponse,
+  DEPLOYMENT_PATH,
+} from "./admin-settings-api";
 import { appAccess } from "./app-access-fixture";
+import { APPS_PATH } from "./apps-api";
+import {
+  APP_ACCESS_REQUESTS_PATH,
+  APP_SETUP_PATH,
+  appAccessApprovalResponse,
+  appAccessRequest,
+  appAccessRequestPath,
+  appAccessRequestResponse,
+  appSetupResponse,
+  botAppPath,
+  botAppResponse,
+} from "./bot-grants-api";
+import { botPath } from "./bots-api";
+import {
+  connectionsCall,
+  myConnectionPath,
+  startResponse,
+} from "./connections-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -61,6 +88,19 @@ function mounted(
     personal?: boolean;
     /** Holds the connect route's answer until it settles, so a test can refetch first. */
     connectGate?: Promise<void>;
+    /** Holds the apps list's answer, which an app's page waits for before it draws. */
+    appsGate?: Promise<void>;
+    /** The service this OpenBot's directory comes from, as app-setup says. Composio's unless named. */
+    directory?: "composio" | "arcade";
+    /** What the server says the app is now, when the press reads it again after turning it on. */
+    readAgain?: () => AppAccess;
+    /** Holds that read's answer until it settles: the seconds between the turn-on and the rest. */
+    readAgainGate?: Promise<void>;
+    /**
+     * Apps open, and whether the Bot is the person's own. Locked down unless given: every test here
+     * that pins Request access pins it locked down.
+     */
+    open?: { owner: boolean };
   } = {},
 ) {
   const sent: Sent[] = [];
@@ -85,19 +125,44 @@ function mounted(
       url,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     });
-    if (options.admin && url === "/api/me")
-      return Response.json({ user: { id: "usr_admin", role: "admin" } });
-    if (options.personal && url === "/api/capabilities")
+    if (url === APPS_SETTING_PATH) return appsSettingResponse(!options.open);
+    if (method === "GET" && url.startsWith(APPS_PATH)) {
+      await options.appsGate;
+      return Response.json({ apps: [], nextCursor: null });
+    }
+    if (options.open && url === botPath("expenses"))
+      return Response.json({
+        bot: { id: "expenses", name: "Expenses", mine: options.open.owner },
+      });
+    if (options.admin && url === ME_PATH)
+      return meResponse({ user: { id: "usr_admin", role: "admin" } });
+    if (options.personal && url === DEPLOYMENT_PATH)
       return Response.json({ edition: "personal" });
-    if (options.admin && url === "/api/agents/expenses")
-      return Response.json({ agent: { id: "expenses", name: "Expenses" } });
+    if (options.admin && url === botPath("expenses"))
+      return Response.json({ bot: { id: "expenses", name: "Expenses" } });
+    if (url === APP_SETUP_PATH)
+      return appSetupResponse(options.directory ?? "composio");
+    if (
+      options.readAgain &&
+      method === "GET" &&
+      url === botAppPath("expenses", access.key)
+    ) {
+      await options.readAgainGate;
+      return botAppResponse(options.readAgain());
+    }
     if (answer && method !== "GET")
       return Response.json(answer.body, { status: answer.status });
-    if (url.endsWith("/connect?returnTo=settings")) {
+    if (connectionsCall(url, { method })?.operation === "connect") {
       await options.connectGate;
-      return Response.json({ authorizationUrl: "https://gmail.test/consent" });
+      return startResponse({ authorizationUrl: "https://gmail.test/consent" });
     }
-    return Response.json({ request: { id: "req_1" }, created: true });
+    // Each write answers as the API does: the approval, the actions given, or the request filed.
+    if (url.endsWith("/approve"))
+      return appAccessApprovalResponse({
+        request: appAccessRequest({ status: "approved" }),
+      });
+    if (url.endsWith("/give")) return Response.json({ given: [] });
+    return appAccessRequestResponse(appAccessRequest());
   }) as unknown as typeof fetch;
 
   const client = new QueryClient({
@@ -124,7 +189,11 @@ function mounted(
   const settings = createRoute({
     getParentRoute: () => root,
     path: "/connections/$key",
-    component: () => null,
+    // Where a press that ends at a key form lands, read back by the test as the address it reached.
+    component: function AppPage() {
+      const at = useRouterState({ select: (state) => state.location.href });
+      return <p data-testid="app-page">{at}</p>;
+    },
   });
   const directory = createRoute({
     getParentRoute: () => root,
@@ -202,8 +271,8 @@ const COPY: [string, Partial<AppAccess>, RegExp][] = [
     /^Gmail isn't turned on yet\./,
   ],
   [
-    "disabled, with no Composio key",
-    { state: "disabled", unavailable: "composio_unconfigured" },
+    "disabled, with no directory set up",
+    { state: "disabled", unavailable: "directory_unavailable" },
     /^Gmail isn't set up yet\. An admin has to turn it on\.$/,
   ],
   ...(
@@ -213,15 +282,163 @@ const COPY: [string, Partial<AppAccess>, RegExp][] = [
     { state: "disabled", unavailable },
     /^Gmail isn't fully set up yet\. Only an admin can finish setting it up\.$/,
   ]),
+  // Open to Bot owners by default: its owner can give it, not only an admin.
   [
-    "not_granted",
-    { state: "not_granted" },
-    /This Bot hasn't been given Gmail\. Only an admin can give it\./,
+    "not_granted, open to owners",
+    { state: "not_granted", ownerGrants: "any" },
+    /^This Bot hasn't been given Gmail\. Its owner can give it, or an admin\.$/,
+  ],
+  [
+    "not_granted, kept to admins",
+    { state: "not_granted", ownerGrants: "admin" },
+    /^This Bot hasn't been given Gmail\. Only an admin can give it\.$/,
   ],
 ];
 
 test.each(COPY)("says whose move it is: %s", (_, overrides, sentence) => {
   expect(appAccessSentence(appAccess(overrides))).toMatch(sentence);
+});
+
+/*
+ * APPS OPEN: what a member is told, as the Bot's owner and as anybody else. The steps open apps hand
+ * to a member name nobody; what an admin keeps either way (a set-up left unfinished, the shared
+ * account, an app kept to admins) reads as it does locked down.
+ */
+const OPEN_COPY: [string, Partial<AppAccess>, boolean, RegExp][] = [
+  [
+    "not added, the owner",
+    { state: "disabled", unavailable: "absent" },
+    true,
+    /^Gmail isn't connected yet\.$/,
+  ],
+  /*
+   * FOUND IN DOGFOODING: on a shared Bot he could only view, a member was told "Connect it, and this
+   * Bot's owner can give it to the Bot", connected it, and the Bot still didn't have it. Now the first
+   * thing he reads is who can give it, and that Request access asks for it.
+   */
+  [
+    "not added, anybody else",
+    { state: "disabled", unavailable: "absent" },
+    false,
+    /^Only this Bot's owner or an admin can give it Gmail\. Request access to ask for it\. You can connect your own account now too\.$/,
+  ],
+  [
+    "not given, the owner",
+    { state: "not_granted", ownerGrants: "any" },
+    true,
+    /^This Bot hasn't been given Gmail yet\.$/,
+  ],
+  [
+    "not given, anybody else, connected",
+    {
+      state: "not_granted",
+      ownerGrants: "any",
+      connectedAt: "2026-11-27T00:00:00.000Z",
+    },
+    false,
+    /^Only this Bot's owner or an admin can give it Gmail\. Request access to ask for it\.$/,
+  ],
+  [
+    "not given, anybody else, not connected",
+    { state: "not_granted", ownerGrants: "any" },
+    false,
+    /^Only this Bot's owner or an admin can give it Gmail\. Request access to ask for it\. You can connect your own account now too\.$/,
+  ],
+  [
+    "not given, anybody else, already asked",
+    {
+      state: "not_granted",
+      ownerGrants: "any",
+      connectedAt: "2026-11-27T00:00:00.000Z",
+      requestKind: "grant",
+      request: { id: "r1", kind: "grant", createdAt: "2026-11-27T00:00:00Z" },
+    },
+    false,
+    /^Only this Bot's owner or an admin can give it Gmail\.$/,
+  ],
+  [
+    "kept to admins",
+    { state: "not_granted", ownerGrants: "admin" },
+    true,
+    /^This Bot hasn't been given Gmail\. Only an admin can give it\.$/,
+  ],
+  [
+    "set-up unfinished",
+    { state: "disabled", unavailable: "oauth_client_missing" },
+    true,
+    /^Gmail isn't fully set up yet\. Only an admin can finish setting it up\.$/,
+  ],
+  [
+    "shared account not connected",
+    { state: "shared_not_connected", account: "shared" },
+    false,
+    /Only an admin can connect it\.$/,
+  ],
+];
+
+test.each(OPEN_COPY)(
+  "apps open, says whose move it is: %s",
+  (_, overrides, owner, sentence) => {
+    expect(
+      appAccessSentence(appAccess(overrides), undefined, "team", false, [], {
+        owner,
+      }),
+    ).toMatch(sentence);
+  },
+);
+
+test("apps open: the Bot's owner is offered Connect and give it, which turns it on and gives it in one press", async () => {
+  const { view, sent } = mounted(
+    appAccess({ state: "disabled", unavailable: "absent", connect: "key" }),
+    undefined,
+    { open: { owner: true } },
+  );
+  fireEvent.click(
+    await view.findByRole("button", {
+      name: "Connect Gmail and give it to Expenses",
+    }),
+  );
+  await waitFor(() =>
+    expect(sent.find((call) => call.method === "POST")?.url).toBe(
+      `${botAppPath("expenses", "composio-gmail")}/approve`,
+    ),
+  );
+  expect(view.queryByRole("button", { name: /Request access/ })).toBeNull();
+});
+
+test("apps open: on somebody else's Bot, Connect adds a catalogue app and goes on to the person's own key", async () => {
+  const fireflies = appAccess({
+    key: "fireflies",
+    displayName: "Fireflies",
+    source: "catalogue",
+    connect: "key",
+    state: "disabled",
+    unavailable: "absent",
+    requestKind: "enable",
+  });
+  const { view, sent } = mounted(fireflies, undefined, {
+    open: { owner: false },
+    // Added, not given to this Bot, and the person hasn't typed their key yet.
+    readAgain: () =>
+      appAccess({
+        ...fireflies,
+        state: "not_granted",
+        unavailable: null,
+        granted: false,
+      }),
+  });
+  fireEvent.click(
+    await view.findByRole("button", { name: "Connect Fireflies" }),
+  );
+  await waitFor(() =>
+    expect(view.getByTestId("app-page").textContent).toBe(
+      "/connections/fireflies?connect=true",
+    ),
+  );
+  const posts = sent.filter((call) => call.method === "POST");
+  expect(posts.map((call) => [call.url, call.body])).toEqual([
+    [APPS_PATH, { from: "directory", directoryEntryId: "catalogue:fireflies" }],
+  ]);
 });
 
 test("no sentence about a switched-off app says an admin turned it off", () => {
@@ -241,37 +458,138 @@ test("not connected offers Connect, which starts the person's own consent in a n
   fireEvent.click(await view.findByRole("button", { name: "Connect Gmail" }));
   await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
   expect(sent.map((call) => `${call.method} ${call.url}`)).toContain(
-    "POST /api/plugins/servers/composio-gmail/connect?returnTo=settings",
+    `POST ${myConnectionPath("composio-gmail", "connect")}`,
   );
   await view.findByText("Finish in the tab that opened.");
 });
 
-test("an app connected with a typed key goes to its page in Settings, where the form is", async () => {
+test("an app connected with a typed key goes to its page in Settings, with the key form open", async () => {
   const { view } = mounted(
     appAccess({ state: "not_connected", connect: "key" }),
   );
-  // Drawn as a button (`Button` over a `Link`), and an anchor underneath with the address.
-  const link = (await view.findByText("Connect")).closest("a");
-  expect(link?.getAttribute("href")).toBe("/connections/composio-gmail");
+  fireEvent.click(await view.findByRole("button", { name: "Connect Gmail" }));
+  expect((await view.findByTestId("app-page")).textContent).toBe(
+    "/connections/composio-gmail?connect=true",
+  );
 });
 
-test("a brokered app to reconnect goes to its page in Settings, on Composio and on Arcade alike", async () => {
-  /*
-   * ONE DESTINATION FOR BOTH BROKERS, Composio's. A Composio row that stands is refused by the
-   * connect route until it is disconnected on that page. An Arcade row is not, and the same page
-   * offers Reconnect over it in one press, so the card sends both people to the same place.
-   */
-  const composio = mounted(appAccess({ state: "reconnect" }));
-  const toComposio = (await composio.view.findByText("Reconnect")).closest("a");
-  expect(toComposio?.getAttribute("href")).toBe("/connections/composio-gmail");
-  cleanup();
+/*
+ * FOUND AFTER KEY APPS WERE MADE ONE PRESS: Reconnect on an app that signs in through the directory
+ * opened its page as it was, where a second press began the sign-in. Every app that signs in now
+ * starts its sign-in from the press, and the button says so until the sign-in opens.
+ */
+test.each([
+  ["Composio's directory", "composio-gmail", "Gmail", "consent", "composio"],
+  ["Arcade's directory", "arcade-Gmail", "Gmail", "consent", "arcade"],
+  ["OpenBot's own sign-in", "notion", "Notion", "oauth", "composio"],
+  [
+    "an app's own sign-in server",
+    "fireflies-mcp",
+    "Fireflies",
+    "oauth",
+    "composio",
+  ],
+  [
+    "an MCP server that signs people in",
+    "mcp-linear",
+    "Linear",
+    "oauth",
+    "composio",
+  ],
+] as const)(
+  "Reconnect on a sign-in app through %s starts its sign-in in one press",
+  async (_, key, name, connect, directory) => {
+    let release: () => void = () => {};
+    const connectGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { view, sent, opened } = mounted(
+      appAccess({ key, displayName: name, state: "reconnect", connect }),
+      undefined,
+      { connectGate, directory },
+    );
+    fireEvent.click(
+      await view.findByRole("button", { name: `Reconnect ${name}` }),
+    );
+    // Asked for the sign-in from the press, and saying so where it was pressed until it opens.
+    await waitFor(() =>
+      expect(
+        sent.some(
+          (call) =>
+            call.method === "POST" &&
+            call.url === myConnectionPath(key, "connect"),
+        ),
+      ).toBe(true),
+    );
+    const working = await view.findByText("Opening sign-in…");
+    expect(working.closest("button")?.hasAttribute("disabled")).toBe(true);
+    expect(view.getByText(/connection needs reconnecting/)).toBeTruthy();
+    release();
+    await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+    // The screen stays: the sign-in is in the tab that opened.
+    expect(view.queryByTestId("app-page")).toBeNull();
+    expect(
+      await view.findByText("Finish in the tab that opened."),
+    ).toBeTruthy();
+  },
+);
 
-  const arcade = mounted(
-    appAccess({ key: "arcade-Gmail", provider: "arcade", state: "reconnect" }),
+/*
+ * FOUND IN DOGFOODING: Reconnect on Fireflies, whose key the app didn't take, opened its page as it
+ * was, where nothing reconnected it. Every app that takes a key now reconnects in the key form.
+ */
+test.each([
+  ["composio-fireflies", "Fireflies"],
+  ["composio-_1password", "1Password"],
+  ["composio-pipedrive", "Pipedrive"],
+])(
+  "Reconnect on %s, a key the app didn't take, opens its key form",
+  async (key, name) => {
+    const { view, opened } = mounted(
+      appAccess({
+        key,
+        displayName: name,
+        state: "reconnect",
+        connect: "key",
+      }),
+    );
+    fireEvent.click(
+      await view.findByRole("button", { name: `Reconnect ${name}` }),
+    );
+    expect((await view.findByTestId("app-page")).textContent).toBe(
+      `/connections/${key}?connect=true`,
+    );
+    expect(opened).toEqual([]);
+  },
+);
+
+test("Reconnect stays on the screen it was pressed on, saying so, until the app's page can draw", async () => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { view } = mounted(
+    appAccess({
+      key: "composio-fireflies",
+      displayName: "Fireflies",
+      state: "reconnect",
+      connect: "key",
+    }),
+    undefined,
+    { appsGate: held },
   );
-  const toArcade = (await arcade.view.findByText("Reconnect")).closest("a");
-  expect(toArcade?.getAttribute("href")).toBe("/connections/arcade-Gmail");
-  expect(arcade.opened).toEqual([]);
+  fireEvent.click(
+    await view.findByRole("button", { name: "Reconnect Fireflies" }),
+  );
+  // The page's reads are still out: the row is where it was, and its button says it is working.
+  const working = await view.findByText("Connecting…");
+  expect(working.closest("button")?.hasAttribute("disabled")).toBe(true);
+  expect(view.queryByTestId("app-page")).toBeNull();
+  expect(view.getByText(/connection needs reconnecting/)).toBeTruthy();
+  release();
+  expect((await view.findByTestId("app-page")).textContent).toBe(
+    "/connections/composio-fireflies?connect=true",
+  );
 });
 
 test("this deployment's own OAuth app reconnects in place, with a fresh consent", async () => {
@@ -279,7 +597,7 @@ test("this deployment's own OAuth app reconnects in place, with a fresh consent"
     appAccess({
       key: "notion",
       displayName: "Notion",
-      provider: "catalogue",
+      source: "catalogue",
       connect: "oauth",
       state: "reconnect",
     }),
@@ -354,7 +672,6 @@ test("a Shared app waiting on an admin's approval offers nothing: the refused ca
     appAccess({
       state: "shared_not_approved",
       account: "shared",
-      accountMode: "shared",
     }),
   );
   await view.findByText(/Only an admin can approve it/);
@@ -387,12 +704,94 @@ test.each([
     await waitFor(() =>
       expect(sent.find((call) => call.method === "POST")).toEqual({
         method: "POST",
-        url: "/api/plugins/access-requests",
-        body: { agentId: "expenses", app: "composio-gmail" },
+        url: APP_ACCESS_REQUESTS_PATH,
+        body: { botId: "expenses", appId: "composio-gmail" },
       }),
     );
   },
 );
+
+/*
+ * FOUND IN DOGFOODING. Apps open, on a shared Bot a member could only view: the card for an app the
+ * Bot wasn't given offered nothing but connecting his own account, which gave the Bot nothing, and
+ * then nothing at all. Now it offers Request access, which asks for exactly what the Bot needs, and
+ * his own Connect only where his account isn't connected, beside it.
+ */
+test.each([
+  [
+    "not given, his account connected",
+    {
+      state: "not_granted",
+      requestKind: "grant",
+      granted: false,
+      connectedAt: "2026-11-27T00:00:00.000Z",
+    },
+    false,
+  ],
+  [
+    "not given, his account not connected",
+    { state: "not_granted", requestKind: "grant", granted: false },
+    true,
+  ],
+  [
+    "nobody added it",
+    {
+      state: "disabled",
+      unavailable: "absent",
+      requestKind: "enable",
+      granted: false,
+    },
+    true,
+  ],
+] as const)(
+  "apps open, somebody else's Bot (%s): Request access asks for it",
+  async (_, overrides, connectToo) => {
+    const { view, sent } = mounted(appAccess(overrides), undefined, {
+      open: { owner: false },
+    });
+    // Once it is known that apps are open and the Bot isn't theirs.
+    await waitFor(() =>
+      expect(sent.some((call) => call.url === botPath("expenses"))).toBe(true),
+    );
+    await settleReactWork();
+    if (connectToo)
+      expect(
+        await view.findByRole("button", { name: "Connect Gmail" }),
+      ).toBeTruthy();
+    else
+      expect(view.queryByRole("button", { name: "Connect Gmail" })).toBeNull();
+    const press = await view.findByRole("button", {
+      name: "Request access to Gmail",
+    });
+    fireEvent.click(press);
+    await waitFor(() =>
+      expect(sent.find((call) => call.method === "POST")).toEqual({
+        method: "POST",
+        url: APP_ACCESS_REQUESTS_PATH,
+        body: { botId: "expenses", appId: "composio-gmail" },
+      }),
+    );
+    expect(sent.some((call) => call.url.endsWith("/approve"))).toBe(false);
+  },
+);
+
+test("apps open, somebody else's Bot: the sentence names the Bot whose owner can give it", () => {
+  expect(
+    appAccessSentence(
+      appAccess({
+        state: "not_granted",
+        connectedAt: "2026-11-27T00:00:00.000Z",
+      }),
+      "General Assistant",
+      "team",
+      false,
+      [],
+      { owner: false },
+    ),
+  ).toBe(
+    "Only General Assistant's owner or an admin can give it Gmail. Request access to ask for it.",
+  );
+});
 
 test("a pending request reads Requested, and Withdraw cancels it", async () => {
   const { view, sent } = mounted(
@@ -418,7 +817,7 @@ test("a pending request reads Requested, and Withdraw cancels it", async () => {
       sent.some(
         (call) =>
           call.method === "DELETE" &&
-          call.url === "/api/plugins/access-requests/req_9",
+          call.url === appAccessRequestPath("req_9"),
       ),
     ).toBe(true),
   );
@@ -483,8 +882,8 @@ test("the focus follows the press: Request access hands it to Withdraw, and With
 test.each([
   [
     "disabled",
-    "Turn on and give it to Expenses",
-    "Turn on Gmail and give it to Expenses",
+    "Connect and give it to Expenses",
+    "Connect Gmail and give it to Expenses",
   ],
   ["not_granted", "Give it to Expenses", "Give Gmail to Expenses"],
 ] as const)(
@@ -508,7 +907,7 @@ test.each([
     await waitFor(() =>
       expect(sent.find((call) => call.method === "POST")).toStrictEqual({
         method: "POST",
-        url: "/api/plugins/for/expenses/apps/composio-gmail/approve",
+        url: `${botAppPath("expenses", "composio-gmail")}/approve`,
         body: undefined,
       }),
     );
@@ -533,8 +932,8 @@ test.each(["disabled", "not_granted"] as const)(
     expect(
       sent.filter((call) => call.method === "POST").map((call) => call.url),
     ).toEqual([
-      "/api/plugins/for/expenses/apps/composio-gmail/approve",
-      "/api/plugins/servers/composio-gmail/connect?returnTo=settings",
+      `${botAppPath("expenses", "composio-gmail")}/approve`,
+      myConnectionPath("composio-gmail", "connect"),
     ]);
   },
 );
@@ -552,7 +951,9 @@ test("in the personal edition, Connect still opens the sign-in when turning the 
   fireEvent.click(await view.findByRole("button", { name: "Connect Gmail" }));
   await waitFor(() =>
     expect(
-      sent.some((call) => call.url.endsWith("/connect?returnTo=settings")),
+      sent.some(
+        (call) => call.url === myConnectionPath("composio-gmail", "connect"),
+      ),
     ).toBe(true),
   );
   // The refetch after turning it on: the app is on now, and only this person's sign-in is missing.
@@ -568,7 +969,7 @@ test("in the personal edition, Connect still opens the sign-in when turning the 
 test("in the personal edition, an app that isn't set up says what is missing, not who to ask", () => {
   expect(
     appAccessSentence(
-      appAccess({ state: "disabled", unavailable: "composio_unconfigured" }),
+      appAccess({ state: "disabled", unavailable: "directory_unavailable" }),
       undefined,
       "personal",
     ),
@@ -586,7 +987,7 @@ test("in the personal edition, Set it up for an app with no broker key opens the
   const { view } = mounted(
     appAccess({
       state: "disabled",
-      unavailable: "composio_unconfigured",
+      unavailable: "directory_unavailable",
       requestKind: "enable",
     }),
     undefined,
@@ -610,22 +1011,170 @@ test("in the personal edition, the card says what is missing rather than who to 
 test("an admin's press that cannot be carried out says what is missing", async () => {
   const { view } = mounted(
     appAccess({ state: "not_granted", requestKind: "grant" }),
-    { status: 409, body: { error: "Gmail has no tools to give yet." } },
+    {
+      status: 409,
+      body: {
+        error: "Couldn't get Gmail ready for this Bot. Try again in a moment.",
+      },
+    },
     { admin: true },
   );
   fireEvent.click(
     await view.findByRole("button", { name: "Give Gmail to Expenses" }),
   );
   expect((await view.findByRole("alert")).textContent).toBe(
-    "Gmail has no tools to give yet.",
+    "Couldn't get Gmail ready for this Bot. Try again in a moment.",
   );
 });
 
+/*
+ * OpenBot Cloud, an admin in their own organization: a Bot asked for Notion, and the card said
+ * "This Bot hasn't been given Notion. Only an admin can give it." to the admin. Pressing Give it
+ * answered "Notion has no tools to give yet": the app had listed nothing, and the press stopped
+ * before the admin's sign-in, after which the app is asked for its tools again as them. Notion and
+ * Gmail from the directory, each run on the person's own account.
+ */
+const NOTION: Partial<AppAccess> = {
+  key: "composio-notion",
+  displayName: "Notion",
+  source: "directory",
+  connect: "consent",
+  account: "personal",
+  connectedAt: null,
+};
+
 test.each([
   [
+    "not_granted",
+    { state: "not_granted" },
+    "This Bot hasn't been given Gmail yet.",
+  ],
+  [
+    "disabled, never switched on",
+    { state: "disabled", unavailable: "absent" },
+    "Gmail isn't connected yet.",
+  ],
+  [
+    "disabled, with no directory set up",
+    { state: "disabled", unavailable: "directory_unavailable" },
+    "Gmail isn't set up yet.",
+  ],
+  [
+    "disabled, token_missing",
+    { state: "disabled", unavailable: "token_missing" },
+    "Gmail isn't fully set up yet.",
+  ],
+  [
+    "shared_not_connected",
+    { state: "shared_not_connected", account: "shared" },
+    "Your organization's Gmail account isn't connected yet.",
+  ],
+] as const)(
+  "an admin is told what is missing, never to ask an admin: %s",
+  (_, overrides, sentence) => {
+    expect(
+      appAccessSentence(appAccess(overrides), undefined, "team", true),
+    ).toBe(sentence);
+  },
+);
+
+/** Gmail from the directory, run on each person's own account and signed in through its consent. */
+const GMAIL: Partial<AppAccess> = {
+  key: "composio-gmail",
+  displayName: "Gmail",
+  source: "directory",
+  connect: "consent",
+  account: "personal",
+  connectedAt: null,
+};
+
+test.each([
+  ["Notion", NOTION],
+  ["Gmail", GMAIL],
+] as const)(
+  "an admin's one press on %s, which has listed nothing yet, signs them in, then gives it to the Bot once they're connected",
+  async (title, app) => {
+    const before = appAccess({
+      ...app,
+      state: "not_granted",
+      granted: false,
+      requestKind: "grant",
+    });
+    const key = before.key;
+    const { view, sent, opened, swap } = mounted(before, undefined, {
+      admin: true,
+      // Turned on with nothing given: its tools come with the admin's sign-in.
+      readAgain: () => before,
+    });
+    fireEvent.click(
+      await view.findByRole("button", { name: `Give ${title} to Expenses` }),
+    );
+    await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+    await view.findByText("Finish in the tab that opened.");
+    const approve = `POST ${botAppPath("expenses", key)}/approve`;
+    const posts = () =>
+      sent
+        .filter((call) => call.method === "POST")
+        .map((call) => `${call.method} ${call.url}`);
+    expect(posts()).toEqual([
+      approve,
+      `POST ${myConnectionPath(key, "connect")}`,
+    ]);
+
+    // The admin finished signing in in the other tab.
+    await swap({ ...before, connectedAt: "2026-11-23T23:10:00.000Z" });
+    await waitFor(() =>
+      expect(posts()).toEqual([
+        approve,
+        `POST ${myConnectionPath(key, "connect")}`,
+        approve,
+      ]),
+    );
+    expect(view.queryByRole("alert")).toBeNull();
+  },
+);
+
+test("an admin already signed in to Notion gives it in one press, with no sign-in", async () => {
+  const { view, sent, opened } = mounted(
+    appAccess({
+      ...NOTION,
+      state: "not_granted",
+      granted: false,
+      requestKind: "grant",
+      connectedAt: "2026-11-20T09:00:00.000Z",
+    }),
+    undefined,
+    {
+      admin: true,
+      readAgain: () =>
+        appAccess({ ...NOTION, connectedAt: "2026-11-20T09:00:00.000Z" }),
+    },
+  );
+  fireEvent.click(
+    await view.findByRole("button", { name: "Give Notion to Expenses" }),
+  );
+  await waitFor(() =>
+    expect(
+      sent.filter((call) => call.method === "POST").map((call) => call.url),
+    ).toEqual([`${botAppPath("expenses", "composio-notion")}/approve`]),
+  );
+  // Settled: nothing more was asked, and no sign-in was opened.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(sent.filter((call) => call.method === "POST")).toHaveLength(1);
+  expect(opened).toEqual([]);
+});
+
+test.each([
+  // The shared account's sign-in starts as its page opens: one press.
+  [
     { state: "shared_not_connected", requestKind: "connect_shared" },
-    "Connect the team Gmail account",
-    "/admin/plugins/composio-gmail",
+    "Connect the shared Gmail account",
+    "/admin/plugins/composio-gmail?connect=true",
+  ],
+  [
+    { state: "shared_not_connected", requestKind: null },
+    "Reconnect the shared Gmail account",
+    "/admin/plugins/composio-gmail?connect=true",
   ],
   [
     { state: "disabled", unavailable: "token_missing", requestKind: "enable" },
@@ -635,7 +1184,7 @@ test.each([
   [
     {
       state: "disabled",
-      unavailable: "composio_unconfigured",
+      unavailable: "directory_unavailable",
       requestKind: "enable",
     },
     "Set up Gmail",
@@ -650,6 +1199,25 @@ test.each([
     expect(link.getAttribute("target")).toBe("_blank");
   },
 );
+
+test("an admin on an OpenBot whose directory is Arcade's is sent to Arcade's page to set it up", async () => {
+  const { view } = mounted(
+    appAccess({
+      state: "disabled",
+      unavailable: "directory_unavailable",
+      requestKind: "enable",
+    }),
+    undefined,
+    { admin: true, directory: "arcade" },
+  );
+  await waitFor(async () =>
+    expect(
+      (await view.findByRole("button", { name: "Set up Gmail" })).getAttribute(
+        "href",
+      ),
+    ).toBe("/admin/plugins/arcade"),
+  );
+});
 
 test("an owner is asked about their own app, by the Bot's name where the caller has it", () => {
   const owners = appAccess({ state: "owner_grantable", granted: false });
@@ -678,7 +1246,7 @@ test("an owner's Allow gives the app in one press, naming the Bot and the app an
     expect(sent.filter((call) => call.method === "POST")).toStrictEqual([
       {
         method: "POST",
-        url: "/api/plugins/for/expenses/apps/composio-gmail/give",
+        url: `${botAppPath("expenses", "composio-gmail")}/give`,
         body: undefined,
       },
     ]),
@@ -703,3 +1271,280 @@ test("Connect and allow opens the person's consent first, and gives the app once
   swap({ ...waiting, needsConnect: false });
   await waitFor(() => expect(gives()).toHaveLength(1));
 });
+
+/*
+ * ONE PRESS FOR EVERY KIND OF APP. An admin who presses the card's button is taken through every
+ * step they would otherwise press through: turned on, given, and then their own sign-in or, where
+ * the app takes a key, the key form, which is the one place they type. Every kind the API can
+ * describe is run: each source (`AppSource`) with each way of connecting (`BotAppConnect`, and none),
+ * read from the generated client, so a kind the API gains later is run here too, and a way of
+ * connecting this test has no expectation for fails it until somebody says what one press does.
+ */
+type Kind = {
+  name: string;
+  source: AppAccess["source"];
+  connect: AppAccess["connect"];
+  key: string;
+  /** Whether the app lists its tools before anybody signs in. */
+  listed: boolean;
+};
+
+/** The id an app of this source has: from the directory, Composio's and Arcade's both. */
+function keysFor(source: AppAccess["source"]): string[] {
+  switch (source) {
+    case "directory":
+      return ["composio-gmail", "arcade-Gmail"];
+    case "catalogue":
+      return ["google-drive"];
+    case "address":
+      return ["mcp-notes"];
+    default:
+      throw new Error(
+        `No app id for a source this test doesn't know: ${source}`,
+      );
+  }
+}
+
+const CONNECTS: AppAccess["connect"][] = [
+  ...Object.values(BotAppConnect),
+  null,
+];
+const KINDS: Kind[] = Object.values(AppSource).flatMap((source) =>
+  keysFor(source).flatMap((key) =>
+    CONNECTS.flatMap((connect) =>
+      [true, false].map((listed) => ({
+        name: `${key} (${source}, connects by ${connect ?? "nothing"}, ${listed ? "tools listed" : "nothing listed until signed in"})`,
+        source,
+        connect,
+        key,
+        listed,
+      })),
+    ),
+  ),
+);
+
+/** What one press must do for a kind: the writes it sends, and where it ends. */
+function onePress(kind: Kind): {
+  posts: string[];
+  /** The address a sign-in tab is sent to, or the key form the page goes to. */
+  ends: "signed in, then given" | "sign-in" | "key form" | "given";
+} {
+  const approve = `${botAppPath("expenses", kind.key)}/approve`;
+  const connect = myConnectionPath(kind.key, "connect");
+  switch (kind.connect) {
+    case null:
+      return { posts: [approve], ends: "given" };
+    case "key":
+      return { posts: [approve], ends: "key form" };
+    case "oauth":
+    case "consent":
+      return kind.listed
+        ? { posts: [approve, connect], ends: "sign-in" }
+        : { posts: [approve, connect, approve], ends: "signed in, then given" };
+    default:
+      throw new Error(
+        `No one-press expectation for an app that connects by ${kind.connect}. Say what one press does for it.`,
+      );
+  }
+}
+
+/*
+ * "Nothing listed until signed in" is a kind only where there is a sign-in: an app with a key or
+ * with nothing to connect lists what it can do before anybody connects.
+ */
+test.each(
+  KINDS.filter(
+    (kind) =>
+      kind.listed || kind.connect === "oauth" || kind.connect === "consent",
+  ),
+)("one press takes an admin through every step: $name", async (kind) => {
+  const account = kind.connect === null ? "deployment" : "personal";
+  const before = appAccess({
+    key: kind.key,
+    displayName: "The app",
+    source: kind.source,
+    connect: kind.connect,
+    account,
+    accountHolder: account === "personal" ? "you" : null,
+    state: "disabled",
+    unavailable: "absent",
+    granted: false,
+    connectedAt: null,
+    requestKind: "enable",
+  });
+  // What the server says once the press has turned it on.
+  const afterOn = appAccess({
+    ...before,
+    state: !kind.listed
+      ? "not_granted"
+      : kind.connect === null
+        ? "ready"
+        : "not_connected",
+    unavailable: null,
+    granted: kind.listed,
+    requestKind: kind.listed ? null : "grant",
+  });
+  const { view, sent, opened, swap } = mounted(before, undefined, {
+    admin: true,
+    readAgain: () => afterOn,
+  });
+  const expected = onePress(kind);
+  const posts = () =>
+    sent.filter((call) => call.method === "POST").map((call) => call.url);
+
+  fireEvent.click(
+    await view.findByRole("button", {
+      name: "Connect The app and give it to Expenses",
+    }),
+  );
+
+  if (expected.ends === "key form") {
+    const page = await view.findByTestId("app-page");
+    expect(page.textContent).toBe(`/connections/${kind.key}?connect=true`);
+  }
+  if (expected.ends === "sign-in" || expected.ends === "signed in, then given")
+    await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+  if (expected.ends === "signed in, then given") {
+    // Only the person's sign-in was theirs to do; the give follows it without another press.
+    await swap({
+      ...afterOn,
+      connectedAt: "2026-11-23T23:10:00.000Z",
+    });
+  }
+  await waitFor(() => expect(posts()).toEqual(expected.posts));
+  if (expected.ends === "given" || expected.ends === "key form")
+    expect(opened).toEqual([]);
+  expect(view.queryByRole("alert")).toBeNull();
+});
+
+test("every kind the API describes is run", () => {
+  for (const source of Object.values(AppSource))
+    for (const connect of CONNECTS)
+      expect(
+        KINDS.some(
+          (kind) => kind.source === source && kind.connect === connect,
+        ),
+      ).toBe(true);
+});
+
+test("an app already connected that only needs giving is given in one press, for every kind that connects", async () => {
+  for (const kind of KINDS.filter(
+    (each) => each.listed && each.connect !== null,
+  )) {
+    const connected = "2026-11-20T09:00:00.000Z";
+    const { view, sent, opened } = mounted(
+      appAccess({
+        key: kind.key,
+        displayName: "The app",
+        source: kind.source,
+        connect: kind.connect,
+        account: "personal",
+        state: "not_granted",
+        granted: false,
+        connectedAt: connected,
+        requestKind: "grant",
+      }),
+      undefined,
+      {
+        admin: true,
+        readAgain: () =>
+          appAccess({
+            key: kind.key,
+            source: kind.source,
+            connect: kind.connect,
+            connectedAt: connected,
+          }),
+      },
+    );
+    fireEvent.click(
+      await view.findByRole("button", { name: "Give The app to Expenses" }),
+    );
+    await waitFor(() =>
+      expect(
+        sent.filter((call) => call.method === "POST").map((call) => call.url),
+      ).toEqual([`${botAppPath("expenses", kind.key)}/approve`]),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sent.filter((call) => call.method === "POST")).toHaveLength(1);
+    expect(opened).toEqual([]);
+    cleanup();
+  }
+});
+
+/*
+ * FOUND IN DOGFOODING: Connect on an app nobody had turned on went back to rest once the app was
+ * on, and only a few seconds later went on to the sign-in. For those seconds the card looked done.
+ * From the press until the sign-in opens, or the key form, the button says it is still working.
+ */
+test.each([
+  { who: "the personal edition's one person", edition: "personal" as const },
+  { who: "a team edition admin", edition: "team" as const },
+])(
+  "$who's Connect keeps saying it is working until the sign-in opens, and until the key form for a key app",
+  async ({ edition }) => {
+    for (const connect of [null, "key"] as const) {
+      const before = appAccess({
+        key: "composio-fireflies",
+        displayName: "Fireflies",
+        source: "directory",
+        connect,
+        account: "personal",
+        accountHolder: "you",
+        state: "disabled",
+        unavailable: "absent",
+        granted: false,
+        connectedAt: null,
+        requestKind: "enable",
+      });
+      const afterOn = appAccess({
+        ...before,
+        connect: connect ?? "consent",
+        state: "not_connected",
+        unavailable: null,
+        granted: true,
+        requestKind: null,
+      });
+      let release: () => void = () => {};
+      const readAgainGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const { view, sent, opened } = mounted(before, undefined, {
+        ...(edition === "personal" ? { personal: true } : { admin: true }),
+        readAgain: () => afterOn,
+        readAgainGate,
+      });
+      const resting =
+        edition === "personal"
+          ? "Connect Fireflies"
+          : "Connect Fireflies and give it to Expenses";
+      fireEvent.click(await view.findByRole("button", { name: resting }));
+      // Turned on; what is left is still being read.
+      await waitFor(() =>
+        expect(
+          sent.some(
+            (call) =>
+              call.method === "POST" &&
+              call.url ===
+                `${botAppPath("expenses", "composio-fireflies")}/approve`,
+          ),
+        ).toBe(true),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const working = connect === "key" ? "Connecting…" : "Opening sign-in…";
+      const button = await view.findByText(working);
+      expect(button.closest("button")?.hasAttribute("disabled")).toBe(true);
+      expect(view.queryByRole("button", { name: resting })).toBeNull();
+
+      release();
+      if (connect === "key")
+        expect((await view.findByTestId("app-page")).textContent).toBe(
+          "/connections/composio-fireflies?connect=true",
+        );
+      else
+        await waitFor(() =>
+          expect(opened).toEqual(["https://gmail.test/consent"]),
+        );
+      cleanup();
+    }
+  },
+);

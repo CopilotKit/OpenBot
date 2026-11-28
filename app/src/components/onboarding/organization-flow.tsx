@@ -51,12 +51,12 @@ const OUTCOMES: Node[] = [
   {
     label: "Your rules",
     icon: IconShieldCheck,
-    tone: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+    tone: "bg-success/15 text-success",
   },
   {
     label: "Team Bots",
     icon: IconRobot,
-    tone: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+    tone: "bg-warning/15 text-warning",
   },
   {
     label: "Audit trail",

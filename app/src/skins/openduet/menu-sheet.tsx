@@ -14,11 +14,17 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { type ReactNode, useId, useRef, useState } from "react";
 import { isUnread, pinnedFirst } from "@/components/app-sidebar/app-sidebar";
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
-import { waitingOnYou } from "@/components/bot-profile/attention";
+import { waitingAcross } from "@/components/bot-profile/attention";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
 import { BrandName } from "@/components/edition/brand-name";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
+import {
+  COMMAND_MENU_KEYS,
+  CommandMenuKeys,
+  openCommandMenu,
+  useBeforeCommandNavigate,
+} from "@/components/navigation/command-menu";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -44,12 +50,7 @@ import {
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
-import {
-  COMMAND_MENU_KEYS,
-  CommandMenuKeys,
-  openCommandMenu,
-  useBeforeCommandNavigate,
-} from "@/components/navigation/command-menu";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { relativeTime } from "@/lib/relative-time";
 import { useMessageListEmphasis } from "@/lib/settings/message-list";
@@ -200,7 +201,10 @@ export function MenuSheet({
                   className="openduet-type-sub px-3 py-2 text-openduet-problem"
                   role="alert"
                 >
-                  Couldn't load your conversations. Reload the page.
+                  {loadFailure(
+                    channels.error,
+                    "Couldn't load your conversations. Try again in a moment.",
+                  )}
                 </p>
               ) : conversations.length > 0 ? (
                 /*
@@ -294,9 +298,9 @@ export function MenuSheet({
                 className={ROW}
                 disabled={signOut.isPending}
                 onClick={async () => {
-                  await signOut.mutateAsync();
+                  const { leaving } = await signOut.mutateAsync();
                   close();
-                  await navigate({ to: "/sign" });
+                  if (!leaving) await navigate({ to: "/sign" });
                 }}
                 type="button"
               >
@@ -319,7 +323,7 @@ export function MenuSheet({
 function AccentBadge() {
   const attention = useQuery(botAttentionQueryOptions());
   const bots = attention.data ?? [];
-  const waiting = bots.reduce((total, bot) => total + waitingOnYou(bot), 0);
+  const waiting = waitingAcross(bots);
   if (waiting > 0)
     return (
       <span
@@ -398,7 +402,7 @@ function ConversationRow({
   const unread = isUnread(channel, isOpen ? channel.id : undefined);
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Failure | null>(null);
   const title = channel.summary || untitledLine(channel) || "New conversation";
   const when = channel.lastMessageAt
     ? relativeTime(channel.lastMessageAt)
@@ -447,7 +451,7 @@ function ConversationRow({
               setProblem(null);
               setPinned.mutate(
                 { channelId: channel.id, pinned: !channel.pinned },
-                { onError: (thrown) => setProblem(thrown.message) },
+                { onError: (thrown) => setProblem(thrown) },
               );
             }}
           >
@@ -468,7 +472,7 @@ function ConversationRow({
           className="openduet-type-caption px-3 pb-1 text-openduet-problem"
           role="alert"
         >
-          {problem}
+          {failureSaid(problem)}
         </p>
       ) : null}
       <DeleteConversationDialog

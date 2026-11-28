@@ -127,5 +127,5 @@ test("the Activity pane draws a command as the same terminal block", () => {
     view.container
       .querySelector('[style*="background"]')
       ?.getAttribute("style"),
-  ).toContain("#0b0a10");
+  ).toContain("#060b12");
 });

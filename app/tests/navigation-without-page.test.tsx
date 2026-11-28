@@ -8,6 +8,7 @@ import { ComputerView } from "@/components/computer/computer-view";
 import { failedComputerCall } from "@/lib/computers/call";
 import { WAITING_FOR_PERSON } from "@/lib/copilot/approval-context";
 import { ComputerTools } from "@/lib/copilot/computer-tools";
+import { approvalInboxResponse } from "./approvals-api";
 
 /**
  * A navigation that opened no page draws no screen.
@@ -46,7 +47,10 @@ beforeAll(() => {
   // The server, as far as a conversation's screen asks it anything.
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
     const path = String(input);
-    if (path.endsWith("/api/approvals")) return Response.json({ requests: [] });
+    {
+      const approvals = approvalInboxResponse(path, { requests: [] });
+      if (approvals) return approvals;
+    }
     if (path.includes("/page-frame/")) return Response.json({ frame: null });
     if (path.endsWith("/control"))
       return Response.json({

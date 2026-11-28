@@ -1,0 +1,21 @@
+2026-11-25T04:15:18.8924716Z + Received  + 11
+2026-11-25T04:15:18.8924828Z 
+2026-11-25T04:15:18.8925185Z       at <anonymous> (/home/runner/work/OpenBot/OpenBot/app/tests/organization-unavailable-chat.test.tsx:432:24)
+2026-11-25T04:15:18.8926039Z (fail) the chat and the audit log's filters while the organization is moved or out of reach > each says the server's sentence calmly, in chromium, 1440, light [10475.55ms]
+2026-11-25T04:15:19.2992659Z 
+2026-11-25T04:15:19.2993493Z app/tests/service-terms.test.tsx:
+2026-11-25T04:15:19.2994098Z (pass) No terms to agree to > a new person on a self-hosted OpenBot goes to onboarding as before, in chromium [2145.61ms]
+2026-11-25T04:20:09.6362125Z 
+2026-11-25T04:20:09.6362128Z 
+2026-11-25T04:20:09.6362180Z 1 tests failed:
+2026-11-25T04:20:09.6362541Z (fail) the chat and the audit log's filters while the organization is moved or out of reach > each says the server's sentence calmly, in chromium, 1440, light [10475.55ms]
+2026-11-25T04:20:09.6362876Z 
+2026-11-25T04:20:09.6362930Z  571 pass
+2026-11-25T04:20:09.6363047Z  35 skip
+2026-11-25T04:20:09.6363157Z  1 fail
+2026-11-25T04:20:09.6363279Z  3733 expect() calls
+2026-11-25T04:20:09.6363422Z Ran 607 tests across 32 files. [385.13s]
+2026-11-25T04:20:09.8517397Z ##[error]Process completed with exit code 1.
+2026-11-25T04:20:09.8635425Z Post job cleanup.
+2026-11-25T04:20:09.9270710Z [command]/usr/bin/git version
+2026-11-25T04:20:09.9303588Z git version 2.56.1

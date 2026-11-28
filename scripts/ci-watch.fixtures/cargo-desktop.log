@@ -1,0 +1,33 @@
+2026-11-26T08:19:44.7444390Z test windows::tests::vmp_disabled_blocks_before_wsl_or_engine_setup ... ok
+2026-11-26T08:19:44.7445355Z test windows::tests::vmp_probe_failures_keep_the_operation_and_diagnostic ... ok
+2026-11-26T08:19:44.7446289Z test windows::tests::wsl_can_move_only_when_its_help_lists_move ... ok
+2026-11-26T08:19:44.7447159Z test windows::tests::wsl_utf16_diagnostics_remain_readable ... ok
+2026-11-26T08:19:44.8026234Z test windows::tests::a_probe_that_answers_late_is_reported_slow_with_its_duration ... FAILED
+2026-11-26T08:19:44.8033793Z test stack::tests::windows_recording_refuses_incomplete_identity_without_replacing_pidfile ... ok
+2026-11-26T08:19:44.8099945Z test update_ready::tests::a_nudge_wakes_the_wait_and_is_used_up ... ok
+2026-11-26T08:19:44.8311854Z test stack::tests::readiness_ends_at_once_with_the_sentence_when_the_server_refuses ... ok
+2026-11-26T08:19:44.9681614Z test stack::tests::readiness_rechecks_api_after_an_earlier_success ... ok
+2026-11-26T08:19:45.2363203Z test stack::tests::a_refusal_under_podman_is_caught_at_once_though_the_engine_says_running ... ok
+2026-11-26T08:19:45.7874735Z test stack::tests::windows_replacement_recording_failure_retains_handles_and_prior_records ... ok
+2026-11-26T08:19:46.1908586Z test local_images::tests::a_first_setups_download_is_shown_within_seconds_of_its_node_appearing ... ok
+2026-11-26T08:19:46.9906989Z test stack::tests::up_tries_again_while_docker_desktop_cannot_see_a_new_folder_and_only_then ... ok
+2026-11-26T08:19:47.2858426Z test local_eval::tests::an_engine_that_hangs_is_not_measured_and_does_not_hold_the_account_step ... ok
+2026-11-26T08:19:47.4883649Z test stack::tests::start_straight_after_install_waits_for_an_engine_that_is_not_answering_yet ... ok
+2026-11-26T08:19:48.6779716Z test local_eval::tests::a_start_the_engine_refuses_is_asked_again_before_it_fails ... ok
+2026-11-26T08:19:49.6066042Z test troubleshooting::tests::sources_that_never_answer_are_named_and_the_rest_comes_back_in_time ... ok
+2026-11-26T08:19:49.6141280Z test windows::tests::a_hanging_powershell_is_stopped_and_the_check_says_windows_is_busy ... ok
+2026-11-26T08:19:49.6142281Z 
+2026-11-26T08:19:49.6142446Z failures:
+2026-11-26T08:19:49.6142671Z 
+2026-11-26T08:19:49.6143190Z ---- windows::tests::a_probe_that_answers_late_is_reported_slow_with_its_duration stdout ----
+2026-11-26T08:19:49.6144295Z 
+2026-11-26T08:19:49.6145130Z thread 'windows::tests::a_probe_that_answers_late_is_reported_slow_with_its_duration' (18429) panicked at src/windows.rs:2910:24:
+2026-11-26T08:19:49.6146813Z called `Result::unwrap()` on an `Err` value: Os { code: 26, kind: ExecutableFileBusy, message: "Text file busy" }
+2026-11-26T08:19:49.6147442Z 
+2026-11-26T08:19:49.6147448Z 
+2026-11-26T08:19:49.6147578Z failures:
+2026-11-26T08:19:49.6148101Z     windows::tests::a_probe_that_answers_late_is_reported_slow_with_its_duration
+2026-11-26T08:19:49.6148550Z 
+2026-11-26T08:19:49.6148950Z test result: FAILED. 1378 passed; 1 failed; 56 ignored; 0 measured; 0 filtered out; finished in 18.61s
+2026-11-26T08:19:49.6149492Z 
+2026-11-26T08:19:49.6298134Z [1m[91merror[0m: test failed, to rerun pass `--lib`

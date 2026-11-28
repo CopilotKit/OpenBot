@@ -138,3 +138,38 @@ running_here() {
   done
   [ "$found" = true ]
 }
+
+# Remove the containers an earlier start made for `migrate` and `worker`, and print each name
+# removed.
+#
+# Both ran as Compose services until the server took the work over: it applies its migrations when
+# it starts and does the scheduled work itself. docker-compose.yml says so on one top-level line,
+# `x-openbot-scheduled-work: server`, and nothing in this checkout starts either service (the file
+# still defines both for one release, for an OpenBot Desktop app from the release before). So a
+# container of either is one an earlier start left, where an old routine worker would go on sweeping
+# beside the server.
+#
+# Only this checkout's Compose project, by the labels Compose itself put on the container, and only
+# these two services, so no other project's container can match. A docker-compose.yml without that
+# line is an earlier release's, which uses whichever of the two it defines: those are left alone.
+# `docker rm` without `-v`: no volume is touched.
+remove_retired_services() {
+  local file project service ids
+  file="${ROOT:-.}/docker-compose.yml"
+  [ -f "$file" ] || return 0
+  project="$(docker compose config 2>/dev/null | sed -n 's/^name: *//p' | head -1 | tr -d "\"'\r" || true)"
+  [ -n "$project" ] || return 0
+  for service in migrate worker; do
+    if ! grep -qE '^x-openbot-scheduled-work: server[[:space:]]*(#.*)?$' "$file" \
+       && grep -qE "^  $service:" "$file"; then
+      continue
+    fi
+    ids="$(docker ps -aq \
+      --filter "label=com.docker.compose.project=$project" \
+      --filter "label=com.docker.compose.service=$service" 2>/dev/null | tr -d '\r' || true)"
+    [ -n "$ids" ] || continue
+    # shellcheck disable=SC2086
+    docker rm -f $ids >/dev/null 2>&1 || continue
+    printf '%s\n' "$service"
+  done
+}

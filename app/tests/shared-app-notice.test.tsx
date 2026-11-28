@@ -13,6 +13,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SharedAppNotice } from "../src/components/plugins/shared-app-notice";
+import { ME_PATH, meResponse } from "./accounts-api";
+import { APPS_SETTING_PATH, appsSettingResponse } from "./admin-settings-api";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -23,18 +25,35 @@ let role: "user" | "admin" = "user";
 let apps: unknown[] = [];
 let pending: unknown[] = [];
 const posted: unknown[] = [];
+/**
+ * The organization's apps switch. Locked down unless a test opens it: the notice and its Request
+ * approval are what locked down still has.
+ */
+let lockedDown = true;
+/** Whether the shared apps were read at all. */
+let sharedReads = 0;
 beforeEach(() => {
   posted.length = 0;
+  lockedDown = true;
+  sharedReads = 0;
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(path);
-      if (url === "/api/me")
-        return Response.json({
+      if (url === APPS_SETTING_PATH) return appsSettingResponse(lockedDown);
+      if (url === ME_PATH)
+        return meResponse({
           user: { id: "me", email: "me@example.test", role },
         });
-      if (url.startsWith("/api/approvals/shared-use/bot/"))
+      if (
+        /^\/api\/v2\/organizations\/default\/bots\/[^/]+\/shared-use$/.test(url)
+      ) {
+        sharedReads += 1;
         return Response.json({ apps, pending });
-      if (url === "/api/approvals/shared-use" && init?.method === "POST") {
+      }
+      if (
+        url === "/api/v2/organizations/default/shared-use-requests" &&
+        init?.method === "POST"
+      ) {
         posted.push(JSON.parse(String(init.body)));
         return Response.json({ id: "r1", created: true });
       }
@@ -73,7 +92,24 @@ describe("SharedAppNotice", () => {
     expect(view.container.textContent).toBe("");
   });
 
-  test("an owner is told calls will be refused and can ask, once", async () => {
+  test("apps open: says nothing and asks for nothing, to an owner or an admin", async () => {
+    lockedDown = false;
+    apps = [gh(false)];
+    pending = [];
+    for (const who of ["user", "admin"] as const) {
+      role = who;
+      const view = draw();
+      // Once the switch has answered, and well after: nothing to say, nothing read for it.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(view.container.textContent).toBe("");
+      expect(view.queryByRole("button")).toBeNull();
+      cleanup();
+    }
+    expect(sharedReads).toBe(0);
+    expect(posted).toEqual([]);
+  });
+
+  test("apps locked down: an owner is told calls will be refused and can ask, once", async () => {
     role = "user";
     apps = [gh(false)];
     pending = [];
@@ -92,7 +128,7 @@ describe("SharedAppNotice", () => {
     ]);
   });
 
-  test("a request already waiting is shown instead of a button", async () => {
+  test("apps locked down: a request already waiting is shown instead of a button", async () => {
     role = "user";
     apps = [gh(false)];
     pending = [{ serverId: "gh", id: "r0" }];
@@ -105,7 +141,7 @@ describe("SharedAppNotice", () => {
     expect(view.queryByRole("button")).toBeNull();
   });
 
-  test("an admin is told saving approves it", async () => {
+  test("apps locked down: an admin is told saving approves it", async () => {
     role = "admin";
     apps = [gh(true)];
     pending = [];

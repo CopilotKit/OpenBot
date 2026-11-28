@@ -251,7 +251,8 @@ mod stop_ipc {
         let compose = fixture.compose_barrier();
 
         // The command Settings > This computer invokes.
-        tauri::async_runtime::block_on(desktop_page::stop(fixture.app.handle().clone()));
+        tauri::async_runtime::block_on(desktop_page::stop(fixture.app.handle().clone()))
+            .expect("OpenBot on this computer stops as it did");
         await_compose(&compose).write_all(&[0]).unwrap();
         wait_until(|| fixture.window.url().unwrap().as_str() == setup);
 
@@ -539,6 +540,53 @@ mod stop_ipc {
         );
     }
 
+    /// EC2 Mac: OpenBot updated its installation at Start, and later its engine machine stopped
+    /// under the open window. Setup came back but never started OpenBot again: the update's own
+    /// stop had marked the session as stopped by the person, which only their Stop may do.
+    #[test]
+    fn an_update_stop_keeps_automatic_start_and_a_person_stop_ends_it() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::an_update_stop_keeps_automatic_start_and_a_person_stop_ends_it",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let configured = || {
+            already_configured(
+                fixture.app.handle().clone(),
+                fixture.root.to_string_lossy().into_owned(),
+            )
+        };
+        assert!(configured().auto_start);
+
+        // The update's stop, as `upgrade` and an app update run it.
+        let compose = fixture.compose_barrier();
+        let handle = fixture.app.handle().clone();
+        let root = fixture.root.clone();
+        let update = std::thread::spawn(move || stop_for_update(&handle, &root));
+        await_compose(&compose).write_all(&[0]).unwrap();
+        update.join().unwrap().unwrap();
+        assert!(
+            configured().auto_start,
+            "an update's stop is not the person stopping OpenBot"
+        );
+
+        // The person's Stop, on what the update started again.
+        *fixture.app.state::<Shell>().containers.lock().unwrap() = Some(ContainerDeployment {
+            root: fixture.root.clone(),
+            address: engine::Address::new(engine::Engine::Docker, None),
+        });
+        let setup = "tauri://localhost/update-then-stop";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        stop_from_menu(fixture.app.handle().clone(), AskedFrom::Menu);
+        await_compose(&compose).write_all(&[0]).unwrap();
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+        assert!(
+            !configured().auto_start,
+            "the person's Stop still holds OpenBot stopped"
+        );
+    }
+
     /// Settings' Change on the AI model row: OpenBot stops, the window goes to setup, and setup
     /// is told once to open at its AI screen. A Stop that failed tells it nothing: OpenBot may
     /// still be running, and setup shows the failure with Start, as after any failed Stop.
@@ -566,6 +614,99 @@ mod stop_ipc {
             !take_ai_connection_change(fixture.app.handle().clone()),
             "a later visit to setup opens at Start"
         );
+    }
+
+    /// After Stop from the Status window, its App row offered no Start. Its Start now runs the
+    /// setup page's own Start OpenBot, once: said to a setup page already there, and kept for one
+    /// still loading. A main window showing anything else is sent to setup, whose page takes it.
+    #[test]
+    fn start_from_the_status_window_asks_the_setup_page_to_start_once() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::start_from_the_status_window_asks_the_setup_page_to_start_once",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let setup = "tauri://localhost/status-start";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let compose = fixture.compose_barrier();
+        let (heard, told) = mpsc::channel();
+        fixture.window.listen(START_ASKED_EVENT, move |_| {
+            let _ = heard.send(());
+        });
+
+        // The Status window's Stop (`stop_openbot_from_status`).
+        stop_from_menu(fixture.app.handle().clone(), AskedFrom::StatusWindow);
+        await_compose(&compose).write_all(&[0]).unwrap();
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+        assert!(
+            !take_start_asked(fixture.app.handle().clone()),
+            "Stop asks for no Start"
+        );
+
+        start_openbot_from_status(fixture.app.handle().clone()).unwrap();
+        told.recv_timeout(DEADLINE)
+            .expect("the setup page already there is told");
+        assert_eq!(fixture.window.url().unwrap().as_str(), setup);
+        assert!(take_start_asked(fixture.app.handle().clone()));
+        assert!(
+            !take_start_asked(fixture.app.handle().clone()),
+            "one Start per ask"
+        );
+
+        // Showing OpenBot's own page: sent to setup, and the ask kept for its page to take on load.
+        fixture
+            .window
+            .navigate("http://127.0.0.1:3010/".parse().unwrap())
+            .unwrap();
+        start_openbot_from_status(fixture.app.handle().clone()).unwrap();
+        assert_eq!(fixture.window.url().unwrap().as_str(), setup);
+        assert!(take_start_asked(fixture.app.handle().clone()));
+    }
+
+    /// Seen on a Mac and on Windows: after the App row's Start brought everything up, the open
+    /// Status window's services row still said Stopped, with Start, until Refresh. A Start and a
+    /// Stop that finish, whichever way, tell the Status window to read again, and not before.
+    #[test]
+    fn the_status_window_reads_again_when_a_start_or_a_stop_finishes() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::the_status_window_reads_again_when_a_start_or_a_stop_finishes",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let status = tauri::WebviewWindowBuilder::new(&fixture.app, "status", Default::default())
+            .build()
+            .unwrap();
+        let (heard, told) = mpsc::channel();
+        status.listen(STATUS_REFRESH_EVENT, move |_| {
+            let _ = heard.send(());
+        });
+
+        // A Start that ends at once: the fixture's OpenBot, in another folder, still runs.
+        let elsewhere = temp_root("status-refresh-elsewhere");
+        let started = tauri::async_runtime::block_on(start_stack_now(
+            fixture.app.handle().clone(),
+            elsewhere.to_string_lossy().into_owned(),
+            "http://127.0.0.1:1".into(),
+            "ws://127.0.0.1:2".into(),
+            compatible_choice(None, None),
+            None,
+        ));
+        assert!(started.is_err(), "{started:?}");
+        told.recv_timeout(DEADLINE)
+            .expect("told once the Start ended");
+
+        let compose = fixture.compose_barrier();
+        stop_from_menu(fixture.app.handle().clone(), AskedFrom::StatusWindow);
+        let mut stopping = await_compose(&compose);
+        assert!(
+            told.recv_timeout(Duration::from_millis(300)).is_err(),
+            "not told while the Stop runs"
+        );
+        stopping.write_all(&[0]).unwrap();
+        told.recv_timeout(DEADLINE)
+            .expect("told once the Stop ended");
     }
 
     #[test]

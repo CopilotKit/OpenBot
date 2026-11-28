@@ -12,7 +12,7 @@ COPY agent-antigravity/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY agent-antigravity/src ./src
-COPY shared/model_providers.py shared/model-providers.json /shared/
+COPY shared/model_providers.py shared/model-providers.json shared/run_model_key.py /shared/
 
 ENV PORT=4214
 EXPOSE 4214

@@ -6,8 +6,18 @@ import {
 } from "@/lib/agents/default-agent";
 import type { AgentProfile } from "@/lib/agents/queries";
 
-function agent(id: string, name = id): AgentProfile {
+/**
+ * A Bot as the API lists it. `packageBotId` is which of the Bots OpenBot starts with it is: the
+ * Bot's own id in the first organization, the package's id on another organization's copy (whose
+ * own id is generated), and null for a Bot somebody made.
+ */
+function agent(
+  id: string,
+  name = id,
+  packageBotId: string | null = id === PICKED_HARNESS_AGENT_ID ? id : null,
+): AgentProfile {
   return {
+    packageBotId,
     assignedToMe: false,
     runsOnOpenBotModel: false,
     keyFromOpenBot: false,
@@ -46,6 +56,25 @@ describe("default agent selection", () => {
         agent(PICKED_HARNESS_AGENT_ID),
       ]),
     ).toBe(PICKED_HARNESS_AGENT_ID);
+  });
+
+  test("prefers a new organization's copy of the picked harness, whose id is generated", () => {
+    const roster = [
+      agent("bot_4f1c2a", "General Assistant", "general-assistant"),
+      agent("bot_9c2e7d", "LangGraph", PICKED_HARNESS_AGENT_ID),
+      agent("bot_made", "Somebody's Bot"),
+    ];
+
+    expect(defaultAgentProfile(roster)?.id).toBe("bot_9c2e7d");
+    expect(defaultAgentId(roster)).toBe("bot_9c2e7d");
+  });
+
+  test("a Bot somebody made is not the picked harness, whatever its id", () => {
+    const made = agent(PICKED_HARNESS_AGENT_ID, "Somebody's Bot", null);
+
+    expect(
+      defaultAgentId([agent("bot_4f1c2a", "General Assistant"), made]),
+    ).toBe("bot_4f1c2a");
   });
 
   test("keeps the route-specific fallback when there is no picked harness", () => {
