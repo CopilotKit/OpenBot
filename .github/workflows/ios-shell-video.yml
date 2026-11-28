@@ -25,6 +25,7 @@ on:
           - both
           - demo
           - real
+          - swipe
         default: both
       real_google_sign_in:
         description: Real backend - sign in with Google in the web view first (sends one prompt to the account's phone)
@@ -176,15 +177,22 @@ jobs:
         timeout-minutes: 10
         env:
           TEST_RUNNER_OPENBOT_SHELL_VIDEO_MODE: "1"
+          WHICH: ${{ inputs.which }}
         run: |
           for _ in $(seq 1 300); do [ -f "$RUNNER_TEMP/simulator.ready" ] && break; sleep 1; done
           [ -f "$RUNNER_TEMP/simulator.ready" ] || { cat "$RUNNER_TEMP/boot.log"; exit 1; }
+          # which=swipe: only the slide back (its own test), no warm-up, a short clip.
+          test_id=OpenBotShellUITests/DemoTourUITests/testDemoTour
+          if [ "$WHICH" = "swipe" ]; then test_id=OpenBotShellUITests/ShellFlowUITests/testSwipeBackSlidesToTheList; fi
+          echo "MIN_SECONDS=$([ "$WHICH" = "swipe" ] && echo 3 || echo 30)" >> "$GITHUB_ENV"
           echo "$(date +%s) warm-up" >> "$RUNNER_TEMP/timing"
+          if [ "$WHICH" != "swipe" ]; then
           # One unrecorded pass first: a fresh simulator's first sign-in took over a minute.
           xcodebuild test-without-building -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration Debug \
             -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath DerivedData-Debug \
             -only-testing:OpenBotShellUITests/DemoTourUITests/testWarmUp CODE_SIGNING_ALLOWED=NO > xcodebuild-warm-up.log 2>&1 \
             || grep -E "error:|Test Case" xcodebuild-warm-up.log || true
+          fi
           echo "$(date +%s) record" >> "$RUNNER_TEMP/timing"
           started="$(python3 -c 'import time; print(time.time())')"
           echo "STARTED=$started" >> "$GITHUB_ENV"
@@ -194,7 +202,7 @@ jobs:
           set +e
           xcodebuild test-without-building -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration Debug \
             -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath DerivedData-Debug \
-            -only-testing:OpenBotShellUITests/DemoTourUITests/testDemoTour CODE_SIGNING_ALLOWED=NO > xcodebuild-demo.log 2>&1
+            -only-testing:"$test_id" CODE_SIGNING_ALLOWED=NO > xcodebuild-demo.log 2>&1
           status=$?
           # SIGINT and wait, so the recorder writes a playable file.
           kill -INT "$recorder"
@@ -209,7 +217,7 @@ jobs:
           [ -f artifacts/video/demo-tour.mp4 ] || exit 0
           python3 ios-shell/ci/trim_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log "$STARTED" || true
           ls -la artifacts/video
-          python3 ios-shell/ci/check_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log 30
+          python3 ios-shell/ci/check_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log "${MIN_SECONDS:-30}"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
@@ -232,7 +240,7 @@ jobs:
 
   real:
     name: Record the real-backend journey (private)
-    if: github.repository == 'CopilotKit/OpenBot' && inputs.which != 'demo'
+    if: github.repository == 'CopilotKit/OpenBot' && inputs.which != 'demo' && inputs.which != 'swipe'
     runs-on: macos-latest
     timeout-minutes: 13
     permissions:

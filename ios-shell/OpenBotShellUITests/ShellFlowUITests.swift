@@ -802,10 +802,15 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertTrue(chatsList(app).waitForExistence(timeout: 15))
         XCTAssertTrue(openConversation(app, "Quarterly forecast"))
         XCTAssertTrue(waitForState(app, "back=page", timeout: 5), "\(debugState(app))")
+        sleep(1)
+        // The video workflow's which=swipe recording keeps this part.
+        note("video-mark start \(Date().timeIntervalSince1970)")
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.45))
         start.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.47)),
                     withVelocity: .slow, thenHoldForDuration: 0)
         XCTAssertTrue(chatsList(app).waitForExistence(timeout: 10), "the slow swipe did not land on the Chats list: \(debugState(app))")
+        sleep(2)
+        note("video-mark end \(Date().timeIntervalSince1970)")
         XCTAssertTrue(tab(app, .conversations).isSelected)
         sleep(1)
         screenshot("after-slide")
