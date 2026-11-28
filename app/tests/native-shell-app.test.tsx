@@ -26,7 +26,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { NativeSignedOut } from "@/components/auth/native-signed-out";
 import { ShellAccountMenu } from "@/components/layout/native-shell-account";
 import { PageShell } from "@/components/layout/page-shell";
@@ -451,6 +451,155 @@ describe("what the shell is told", () => {
     const { view } = renderApp("/");
     await view.findByRole("heading", { name: "Home" });
     expect(heard).toEqual([]);
+  });
+});
+
+describe("when the shell hears ready", () => {
+  /** Something a test settles by hand: a route's data, or a page's own. */
+  function later() {
+    let settle = () => {};
+    const promise = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    return { promise, settle };
+  }
+
+  /**
+   * A small app with the shell's reports at its root: `/` waits on `data` before it draws, showing
+   * a skeleton meanwhile, then draws `page`; `/next` draws at once; `/sign` is the shell's quiet page.
+   */
+  function renderReady(
+    path: string,
+    { data, page }: { data?: Promise<void>; page?: () => ReactNode } = {},
+  ) {
+    const rootRoute = createRootRoute({
+      component: () => (
+        <Reports>
+          <Outlet />
+        </Reports>
+      ),
+    });
+    const routes = [
+      createRoute({
+        path: "/",
+        getParentRoute: () => rootRoute,
+        loader: () => data,
+        pendingMs: 0,
+        pendingComponent: () => <div data-slot="skeleton" />,
+        component: page ?? (() => <h1>Drawn</h1>),
+      }),
+      createRoute({
+        path: "/next",
+        getParentRoute: () => rootRoute,
+        component: () => <h1>Next</h1>,
+      }),
+      createRoute({
+        path: "/sign",
+        getParentRoute: () => rootRoute,
+        component: NativeSignedOut,
+      }),
+    ];
+    const router = createRouter({
+      routeTree: rootRoute.addChildren(routes),
+      history: createMemoryHistory({ initialEntries: [path] }),
+    });
+    const view = render(<RouterProvider router={router as never} />);
+    return { view, router };
+  }
+
+  const readies = (heard: unknown[]) =>
+    heard.filter((message) => (message as { type: string }).type === "ready");
+
+  test("not while the first page is still loading; once it has drawn, ready, then its route", async () => {
+    inShell(true);
+    const heard = listen();
+    const data = later();
+    const { view } = renderReady("/", { data: data.promise });
+    await settleReactWork();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    // The skeleton is up; nothing a person can read, and no route reported ahead of ready.
+    expect(view.queryByText("Drawn")).toBeNull();
+    expect(heard).toEqual([]);
+    await act(async () => data.settle());
+    await view.findByText("Drawn");
+    await waitFor(() =>
+      expect(heard).toEqual([
+        { type: "ready" },
+        { type: "route", path: "/", tab: "home", signedIn: false },
+      ]),
+    );
+  });
+
+  test("a page whose own data is still loading is not drawn until its words are", async () => {
+    inShell(true);
+    const heard = listen();
+    const own = later();
+    function Page() {
+      const [loaded, setLoaded] = useState(false);
+      useEffect(() => {
+        void own.promise.then(() => setLoaded(true));
+      }, []);
+      return loaded ? (
+        <p>Three conversations</p>
+      ) : (
+        <span className="sr-only">Loading</span>
+      );
+    }
+    const { view } = renderReady("/", { page: Page });
+    await waitFor(() => expect(view.getByText("Loading")).toBeTruthy());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(heard).toEqual([]);
+    await act(async () => own.settle());
+    await view.findByText("Three conversations");
+    await waitFor(() => expect(heard[0]).toEqual({ type: "ready" }));
+    expect(heard[1]).toEqual({
+      type: "route",
+      path: "/",
+      tab: "home",
+      signedIn: false,
+    });
+  });
+
+  test("once only, however many pages follow", async () => {
+    inShell(true);
+    const heard = listen();
+    const { view, router } = renderReady("/");
+    await view.findByText("Drawn");
+    await act(() => router.navigate({ to: "/next" as never }));
+    await view.findByText("Next");
+    await act(() => router.navigate({ to: "/" }));
+    await view.findByText("Drawn");
+    await waitFor(() => expect(heard.length).toBe(4));
+    expect(readies(heard)).toHaveLength(1);
+    expect(heard[0]).toEqual({ type: "ready" });
+  });
+
+  test("signed out: the quiet page counts as drawn, and signed-out follows ready", async () => {
+    inShell(true);
+    const heard = listen();
+    const { view } = renderReady("/sign");
+    await waitFor(() =>
+      expect(
+        view.container.querySelector('[data-slot="native-signed-out"]'),
+      ).not.toBeNull(),
+    );
+    await waitFor(() =>
+      expect(heard).toEqual([
+        { type: "ready" },
+        { type: "signed-out" },
+        { type: "route", path: "/sign", tab: null, signedIn: false },
+      ]),
+    );
+  });
+
+  test("a page that never draws still hands the screen over, after the fallback", async () => {
+    inShell(true);
+    forgetReadyForTests(60);
+    const heard = listen();
+    renderReady("/", { data: new Promise<void>(() => {}) });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(heard).toEqual([]);
+    await waitFor(() => expect(heard).toEqual([{ type: "ready" }]));
   });
 });
 

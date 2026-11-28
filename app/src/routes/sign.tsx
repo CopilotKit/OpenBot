@@ -17,7 +17,12 @@ import {
   signInWith,
   signInWithEmailDomain,
 } from "@/lib/auth/client";
-import { resumeUrlFor, verifierPathFor } from "@/lib/auth/resume";
+import {
+  type ShellReturnSearch,
+  shellHandoffPathFor,
+  signInReturnUrlFor,
+  verifierPathFor,
+} from "@/lib/auth/resume";
 import { appConfig } from "@/lib/generated/application-config";
 import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import { nativeShell } from "@/lib/native-shell/shell";
@@ -49,12 +54,21 @@ export const Route = createFileRoute("/sign")({
    * The key is omitted rather than set to undefined, for the reason the connected-accounts screen
    * gives for `?connected=`: present-but-undefined makes `search` a required prop on every Link to
    * this route, which is a lot of ripple for a parameter only the verifier sets.
+   *
+   * `shell_challenge`, `shell_platform` and `shell_callback` are what the server hands a phone app's
+   * sign-in sheet landing here (`shellHandoffPathFor`): values too, checked before any is used.
    */
   validateSearch: (
     search: Record<string, unknown>,
-  ): { flow_id?: string; "native-sign-in"?: string } => ({
+  ): {
+    flow_id?: string;
+    "native-sign-in"?: string;
+  } & ShellReturnSearch => ({
     ...searchTextEntry("flow_id", search.flow_id),
     ...searchTextEntry("native-sign-in", search["native-sign-in"]),
+    ...searchTextEntry("shell_challenge", search.shell_challenge),
+    ...searchTextEntry("shell_platform", search.shell_platform),
+    ...searchTextEntry("shell_callback", search.shell_callback),
   }),
   beforeLoad: async ({ context, search }) => {
     // Somebody signed in to no organization signs in like anybody: signing in again is how they come back once added.
@@ -76,9 +90,11 @@ export const Route = createFileRoute("/sign")({
        * the verifier was ever made. `reloadDocument` makes this a document navigation, which is
        * the only kind that leaves the app and therefore the only kind that arrives.
        */
-      const verifier = verifierPathFor(search.flow_id);
-      throw verifier
-        ? redirect({ href: verifier, reloadDocument: true })
+      // A phone app's sign-in sheet goes on to the hand-off, the same way and for the same reason.
+      const onward =
+        shellHandoffPathFor(search) ?? verifierPathFor(search.flow_id);
+      throw onward
+        ? redirect({ href: onward, reloadDocument: true })
         : redirect({ to: "/" });
     }
     // The phone app's native shell signs in on its own screen: nothing of this one is drawn.
@@ -107,7 +123,7 @@ function SignRoute() {
 }
 
 function SignScreen() {
-  const { flow_id: flowId } = Route.useSearch();
+  const search = Route.useSearch();
   // Which provider is being opened, rather than whether one is: with three buttons, a single
   // boolean would put "Opening…" on all of them.
   const [opening, setOpening] = useState<AuthProviderId | "sso" | null>(null);
@@ -133,7 +149,7 @@ function SignScreen() {
       await signInWithEmailDomain(
         email,
         undefined,
-        resumeUrlFor(window.location.origin, flowId),
+        signInReturnUrlFor(window.location.origin, search),
       );
     } catch (caughtError) {
       setError(
@@ -154,7 +170,7 @@ function SignScreen() {
       await signInWith(
         provider,
         undefined,
-        resumeUrlFor(window.location.origin, flowId),
+        signInReturnUrlFor(window.location.origin, search),
       );
     } catch (caughtError) {
       setError(
@@ -248,7 +264,7 @@ function SignScreen() {
            * OpenBot keeps the ways in it was set up with, below.
            */}
           {hosted ? (
-            <CloudSignIn flowId={flowId} />
+            <CloudSignIn flowId={search.flow_id} />
           ) : (
             <>
               {options?.ssoRequired ? (
