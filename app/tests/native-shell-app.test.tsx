@@ -355,6 +355,13 @@ describe("the Conversations page", () => {
       view.getByRole("textbox", { name: "Search conversations" }),
     ).toBeTruthy();
     expect(newConversationLinks(view.container)).toEqual(["/channel/new"]);
+    expect(view.container.querySelectorAll('[data-slot="mobile-chat-row"]')).toHaveLength(3);
+    const search = view.getByRole("textbox", { name: "Search conversations" });
+    fireEvent.change(search, { target: { value: "q" } });
+    fireEvent.click(view.getByRole("button", { name: "Clear search" }));
+    expect((search as HTMLInputElement).value).toBe("");
+    expect(document.activeElement).toBe(search);
+    await view.findByText("Trip to Lisbon");
   });
 
   test("while it loads, nothing: no empty state, no error", async () => {
