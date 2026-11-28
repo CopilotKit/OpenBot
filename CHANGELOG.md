@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **A plan sign-in that ends says what ended it.** A ChatGPT or Claude plan sign-in in OpenBot
+  Desktop that ended without finishing said one sentence for every way it could end: "That sign-in
+  did not finish. Start it again and approve the request in your browser." A sign-in that took too
+  long, one whose port another app took (the Codex CLI asks for port 1455 back), and one this
+  computer could not listen for each say so now, and the Desktop's log says which one it was.
+
 ## 1.2.2
 
 **Before upgrading.**

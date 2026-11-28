@@ -364,3 +364,35 @@ fn a_new_registration_without_an_issued_client_is_incomplete() {
     assert_eq!(result.unwrap_err(), INCOMPLETE);
     assert!(exchanges.is_empty());
 }
+
+/**
+A sign-in nobody came back for says it took too long.
+
+Before, every way the wait ended said the same thing: "That sign-in did not finish. Start it again
+and approve the request in your browser." That is the wrong sentence for a browser that never came
+back, for another app that took the port, and for a computer that could not listen. Each ending has
+its own sentence now, the same ones the page's own sign-in says.
+
+The wait is a moment here, so the test does not spend the quarter of an hour a person is given.
+*/
+#[test]
+fn a_sign_in_nobody_came_back_for_says_it_took_too_long() {
+    let _slot = slot();
+    let endpoints = Endpoints {
+        authorize: "https://auth.example.test/api/accounts/authorize".into(),
+        token: "http://127.0.0.1:9/token".into(),
+        jwks: "http://127.0.0.1:9/jwks".into(),
+        issuer: "https://auth.example.test".into(),
+    };
+    let signing = SignIn::start_with(
+        &endpoints,
+        "urn:uuid:11111111-1111-4111-8111-111111111111".into(),
+        None,
+        Duration::from_millis(100),
+    )
+    .unwrap();
+    assert_eq!(
+        signing.finish().unwrap_err(),
+        crate::loopback_redirect::TOOK_TOO_LONG
+    );
+}

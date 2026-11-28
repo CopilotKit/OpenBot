@@ -54,6 +54,33 @@ pub enum Ended {
     Failed(String),
 }
 
+/// What a sign-in that was stopped is said.
+pub const STOPPED: &str = "The sign-in was stopped. Start it again.";
+/// What a sign-in nobody came back for is said.
+pub const TOOK_TOO_LONG: &str = "The sign-in took too long. Start it again.";
+/// What a sign-in another app took the port from is said.
+pub const PORT_WANTED: &str = "Another app on this computer took over the sign-in. Start it again.";
+/// What a sign-in this computer could not listen for is said.
+pub const COULDNT_LISTEN: &str =
+    "OpenBot couldn't wait for the sign-in on this computer. Try again.";
+
+/**
+What each way a wait ended is said.
+
+ONE WORDING FOR ONE THING. A page's sign-in (`sign_in_redirect`), a Claude plan's own
+(`claude_sign_in`) and a ChatGPT plan's own (`chatgpt_sign_in`) all wait for the same redirect and
+end the same ways, so they say the same thing about each ending. A sign-in that ended says which
+ending it was, rather than one sentence for all four.
+*/
+pub fn said_for(ended: &Ended) -> &'static str {
+    match ended {
+        Ended::Cancelled => STOPPED,
+        Ended::TimedOut => TOOK_TOO_LONG,
+        Ended::PortWanted => PORT_WANTED,
+        Ended::Failed(_) => COULDNT_LISTEN,
+    }
+}
+
 /// Why a fixed port couldn't be listened on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BindError {
@@ -499,5 +526,27 @@ pub(crate) mod tests {
             .err();
         assert_eq!(ended, Some(Ended::Cancelled));
         assert!(began.elapsed() < Duration::from_secs(3));
+    }
+
+    /// Each way a wait ends is said for what it was: one wording for one ending, so a sign-in that
+    /// ended says which ending it was and not one sentence for all four.
+    #[test]
+    fn each_way_a_wait_ends_is_said_for_what_it_was() {
+        assert_eq!(said_for(&Ended::Cancelled), STOPPED);
+        assert_eq!(said_for(&Ended::TimedOut), TOOK_TOO_LONG);
+        assert_eq!(said_for(&Ended::PortWanted), PORT_WANTED);
+        assert_eq!(said_for(&Ended::Failed("no answer".into())), COULDNT_LISTEN);
+        // No two endings say the same thing.
+        let said = [
+            said_for(&Ended::Cancelled),
+            said_for(&Ended::TimedOut),
+            said_for(&Ended::PortWanted),
+            said_for(&Ended::Failed("".into())),
+        ];
+        for (index, one) in said.iter().enumerate() {
+            for other in said.iter().skip(index + 1) {
+                assert_ne!(one, other);
+            }
+        }
     }
 }

@@ -33,7 +33,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
-use crate::loopback_redirect::{BindError, Ended, Listener, Outcome};
+use crate::loopback_redirect::{BindError, Listener, Outcome};
 
 pub const ISSUER: &str = "https://auth.openai.com";
 pub const AUTHORIZE_URL: &str = "https://auth.openai.com/api/accounts/authorize";
@@ -62,7 +62,6 @@ const FAILED_LINES: &[&str] = &["Go back to OpenBot and sign in again."];
 const NOT_ALLOWED: &str = "ChatGPT didn't allow OpenBot to use your plan. Sign in again and allow it, or use an OpenAI API key.";
 const DIDNT_FINISH: &str =
     "That sign-in did not finish. Start it again and approve the request in your browser.";
-const STOPPED: &str = "The sign-in was stopped. Start it again.";
 const NO_LONGER_RUNNING: &str = "That sign-in is no longer running. Start it again.";
 const LOST: &str =
     "Could not reach ChatGPT to finish signing in. Check your connection and sign in again.";
@@ -163,6 +162,8 @@ pub struct SignIn {
     endpoints: Endpoints,
     listener: Mutex<Option<Listener>>,
     cancelled: AtomicBool,
+    /// How long the person has to approve in the browser.
+    patience: Duration,
 }
 
 impl SignIn {
@@ -171,6 +172,17 @@ impl SignIn {
         endpoints: &Endpoints,
         host_id: String,
         returning: Option<Registration>,
+    ) -> Result<Self, String> {
+        Self::start_with(endpoints, host_id, returning, PATIENCE_FOR_THE_PERSON)
+    }
+
+    /// The same sign-in, given how long the browser has to come back. A test gives it a moment
+    /// instead of the quarter of an hour a person is given.
+    fn start_with(
+        endpoints: &Endpoints,
+        host_id: String,
+        returning: Option<Registration>,
+        patience: Duration,
     ) -> Result<Self, String> {
         // A redirect OpenBot's page asked Desktop to catch on 1455 (`sign_in_redirect`) gives way
         // to this newer sign-in, as it gives way to any.
@@ -212,6 +224,7 @@ impl SignIn {
             endpoints: endpoints.clone(),
             listener: Mutex::new(Some(listener)),
             cancelled: AtomicBool::new(false),
+            patience,
         })
     }
 
@@ -232,18 +245,21 @@ impl SignIn {
             .take()
             .ok_or_else(|| NO_LONGER_RUNNING.to_string())?;
         let (outcome, query, reply) = listener
-            .wait_with_query(&self.state, PATIENCE_FOR_THE_PERSON, &|| {
+            .wait_with_query(&self.state, self.patience, &|| {
                 self.cancelled.load(Ordering::SeqCst)
             })
-            .map_err(|ended| match ended {
-                Ended::Cancelled => STOPPED.to_string(),
-                Ended::TimedOut | Ended::PortWanted | Ended::Failed(_) => DIDNT_FINISH.to_string(),
+            .map_err(|ended| {
+                log::warn!("[chatgpt-sign-in] the sign-in ended before it finished ({ended:?})");
+                crate::loopback_redirect::said_for(&ended).to_string()
             })?;
         let result = match outcome {
             Outcome::Error { error, .. } if error == "access_denied" => {
                 Err(NOT_ALLOWED.to_string())
             }
-            Outcome::Error { .. } => Err(DIDNT_FINISH.to_string()),
+            Outcome::Error { error, .. } => {
+                log::warn!("[chatgpt-sign-in] ChatGPT's page ended the sign-in ({error})");
+                Err(DIDNT_FINISH.to_string())
+            }
             Outcome::Code { code, .. } => self
                 .client_id_from(&query)
                 .and_then(|client_id| self.exchange(&code, &client_id)),
