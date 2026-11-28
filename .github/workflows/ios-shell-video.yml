@@ -67,7 +67,7 @@ jobs:
           nohup bash -c 'xcrun simctl boot "$1" || true; xcrun simctl bootstatus "$1" -b \
             && xcrun simctl spawn "$1" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true; \
             xcrun simctl spawn "$1" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true; \
-            touch "$2"' boot "$udid" "$RUNNER_TEMP/simulator.ready" > "$RUNNER_TEMP/boot.log" 2>&1 &
+            sleep 15; touch "$2"' boot "$udid" "$RUNNER_TEMP/simulator.ready" > "$RUNNER_TEMP/boot.log" 2>&1 &
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -103,7 +103,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: app/dist
-          key: ios-shell-video-web-${{ hashFiles('app/**', 'shared/**', 'tokens/**', 'bun.lock', 'package.json', '.env.example') }}
+          key: ios-shell-video-web-${{ hashFiles('app/src/**', 'app/public/**', 'app/index.html', 'app/package.json', 'app/vite.config.*', 'app/tsconfig*.json', 'shared/**', 'tokens/**', 'bun.lock', 'package.json', '.env.example') }}
 
       - name: Install, build the web app if needed, start mock stack A
         timeout-minutes: 15
@@ -220,7 +220,7 @@ jobs:
           nohup bash -c 'xcrun simctl boot "$1" || true; xcrun simctl bootstatus "$1" -b \
             && xcrun simctl spawn "$1" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true; \
             xcrun simctl spawn "$1" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true; \
-            touch "$2"' boot "$udid" "$RUNNER_TEMP/simulator.ready" > "$RUNNER_TEMP/boot.log" 2>&1 &
+            sleep 15; touch "$2"' boot "$udid" "$RUNNER_TEMP/simulator.ready" > "$RUNNER_TEMP/boot.log" 2>&1 &
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

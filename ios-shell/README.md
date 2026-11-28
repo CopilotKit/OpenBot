@@ -174,6 +174,17 @@ cut to its test and also as a 600-px copy. Started by hand with `real_google_sig
 recording is a Release build signing in with Google in the web view (one prompt to the account's
 phone per run).
 
+Where the video workflow's time goes (each job has a 13-minute limit; the two jobs run side by side):
+
+| Step | Warm cache | Cold (sources changed) |
+| --- | --- | --- |
+| Boot the simulator (in the background, during the rest) | about 20 s | about 20 s |
+| Generate the Xcode project (cached XcodeGen binary) | about 35 s | about 35 s |
+| Build the app and its UI tests (cached DerivedData) | about 45 s | 110 to 150 s |
+| Web app (demo job; cached on its sources) | about 14 s | about 4 min |
+| Record (demo tour / real journey) | about 2 min | about 2 min |
+| Cut and make the 600-px copy | about 25 s | about 25 s |
+
 The production tests never fail for network reasons. `testProductionSignedIn` and
 `testProductionGoogleSignIn` use a throwaway account and run only when the repository secrets
 `OPENBOT_SHELL_TEST_SESSION`, or `OPENBOT_SHELL_GOOGLE_EMAIL`, `OPENBOT_SHELL_GOOGLE_PASSWORD` and

@@ -37,14 +37,16 @@ final class DemoTourUITests: ShellTestCase {
         signIn.tap()
         // Whichever comes first: the consent alert (then the sheet), or the sheet.
         let consent = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Continue"]
-        let link = app.webViews.links["Sign in as test person"]
-        if let first = firstExisting([consent, link], timeout: 20), first == consent {
+        let service = XCUIApplication(bundleIdentifier: "com.apple.SafariViewService")
+        let links = [app.webViews.links["Sign in as test person"], app.links["Sign in as test person"],
+                     service.webViews.links["Sign in as test person"], service.links["Sign in as test person"]]
+        if let first = firstExisting([consent] + links, timeout: 20), first == consent {
             pause(1.5)
             consent.tap()
         } else {
             note("demo: no consent alert this time")
         }
-        if link.waitForExistence(timeout: 15) {
+        if let link = firstExisting(links, timeout: 20) {
             pause(1.2)
             link.tap()
         } else {

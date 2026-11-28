@@ -312,6 +312,8 @@ class RealBackendTestCase: ShellTestCase {
         note("reply: longest new text by 3 s step \(lengths); grew while shown (streaming) \(grew); after \(Int(Date().timeIntervalSince(started))) s")
         hold(3)
         screenshot("j4-reply")
+        // Dismissed by dragging the page down, as a person does.
+        app.webViews.firstMatch.swipeDown()
         dismissKeyboardIfUp(app, tapping: webText(app, RealBackendTestCase.prompt))
         XCTAssertTrue(tab(app, .bots).waitForExistence(timeout: 5), "the tab bar did not come back after the reply")
         note("after sending: \(debugState(app))")
@@ -333,6 +335,13 @@ class RealBackendTestCase: ShellTestCase {
         hold(6)
         screenshot("j7-conversations-tab")
         note("conversations tab: \(debugState(app)); web app's sidebar button \(webElement(app, label: "Show sidebar").exists)")
+        // The video keeps launch, Home, the message and its reply, Conversations and Bots; the
+        // drawer, the background and the relaunch stay in the test suite.
+        if videoMode {
+            tab(app, .home).tap()
+            hold(2)
+            return
+        }
         if webElement(app, label: "Show sidebar").exists {
             webElement(app, label: "Show sidebar").tap()
             hold(2)
