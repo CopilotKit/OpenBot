@@ -70,7 +70,7 @@ export const Channel = memo(function Channel({
    * `sidebar`: a rounded row in a panel. `page`: a full-width row of a card of rows (`PageRows`), as
    * on the Conversations page, which squares it off and divides it from the next.
    */
-  layout?: "sidebar" | "page";
+  layout?: "sidebar" | "page" | "mobile";
   /** Names the row's link for tests, as under its Bot in the Bots panel. Draws nothing. */
   "data-slot"?: string;
 }) {
@@ -111,7 +111,7 @@ export const Channel = memo(function Channel({
                 : "/channel/$channelId"
             }
             params={{ channelId }}
-            data-slot={slot}
+            data-slot={layout === "mobile" ? "mobile-chat-row" : slot}
             type="button"
             className={cn(
               "flex flex-row gap-2 items-center w-full hover:bg-foreground/5 [content-visibility:auto]",
@@ -137,6 +137,7 @@ export const Channel = memo(function Channel({
               pinned={pinned}
               revealing={revealed.typing}
               view={view}
+              mobile={layout === "mobile"}
               avatar={avatar}
             />
           </Link>

@@ -24,6 +24,7 @@ export function ChannelItemContent({
   revealing = false,
   view = "detailed",
   avatar = true,
+  mobile = false,
 }: {
   participantIds: string[];
   name: string;
@@ -38,6 +39,7 @@ export function ChannelItemContent({
   view?: ConversationView;
   /** False where the row sits under its Bot already (the Bots panel), so the orb is not said twice. */
   avatar?: boolean;
+  mobile?: boolean;
 }) {
   const unreadDot = unread ? (
     <span
@@ -67,6 +69,44 @@ export function ChannelItemContent({
   const caret = revealing ? (
     <span className="ml-0.5 inline-block h-3 w-px translate-y-px bg-foreground/70 align-middle" />
   ) : null;
+
+  if (mobile) {
+    const agentFirst = view === "detailed" && emphasis === "agent";
+    const primary = agentFirst ? name : displayedTitle;
+    const secondary = agentFirst ? displayedTitle : name;
+    return (
+      <>
+        <ChannelAvatar
+          participantIds={participantIds}
+          size={32}
+          typing={busy}
+        />
+        <div className="mobile-chat-body">
+          <div className="mobile-chat-copy">
+            <span
+              className={
+                unread ? "mobile-chat-title font-semibold" : "mobile-chat-title"
+              }
+            >
+              {primary}
+            </span>
+            {secondary && secondary !== primary && (
+              <span className="mobile-chat-subtitle">{secondary}</span>
+            )}
+          </div>
+          <div className="mobile-chat-meta">
+            {time}
+            {(unread || pinned) && (
+              <span className="flex items-center gap-1.5">
+                {unreadDot}
+                {pin}
+              </span>
+            )}
+          </div>
+        </div>
+      </>
+    );
+  }
 
   if (view === "compact") {
     return (

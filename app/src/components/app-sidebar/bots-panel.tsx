@@ -2,7 +2,6 @@ import {
   IconChevronDown,
   IconMessagePlus,
   IconPlus,
-  IconSearch,
 } from "@tabler/icons-react";
 import {
   useInfiniteQuery,
@@ -28,11 +27,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group";
+import { PanelSearch } from "./panel-search";
 import { SidebarContent } from "@/components/ui/sidebar";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
@@ -159,6 +154,7 @@ function BotConversations({
     <>
       {/* A link drawn as Show more is, so it opens in a new tab like the rows under it. */}
       <Link
+        data-slot="start-bot-chat"
         aria-label={`New conversation with ${botName}`}
         className={cn(
           buttonVariants({ size: "sm", variant: "ghost" }),
@@ -167,6 +163,7 @@ function BotConversations({
         search={{ agent: botId }}
         to="/channel/new"
       >
+        <IconMessagePlus className="mobile-compose-icon" aria-hidden="true" />
         New conversation
       </Link>
       {/* Pinned first, as the Conversations panel draws them: a live patch reorders by time alone. */}
@@ -214,11 +211,13 @@ function BotConversations({
  * Bot offers a new conversation with it, as a conversation's row offers its own actions.
  */
 function BotRow({
+  mobile,
   bot,
   waiting,
   expanded,
   onToggle,
 }: {
+  mobile: boolean;
   bot: AgentProfile;
   /** What waits on the person from this Bot, in words; empty when nothing does. */
   waiting: string;
@@ -240,7 +239,7 @@ function BotRow({
               params={{ agentId: bot.id }}
               to="/bots/$agentId"
             >
-              <BotOrb name={bot.name} seed={bot.avatarSeed} size={24} />
+              <BotOrb name={bot.name} seed={bot.avatarSeed} size={mobile ? 32 : 24} />
               <span className="min-w-0 flex-1 truncate">{bot.name}</span>
               {waiting ? (
                 <span
@@ -279,7 +278,7 @@ function BotRow({
         </button>
       </div>
       {expanded ? (
-        <div className="ml-[21px] border-sidebar-border border-l pl-1.5">
+        <div data-slot="bot-threads" className="ml-[21px] border-sidebar-border border-l pl-1.5">
           <BotConversations botId={bot.id} botName={bot.name} />
         </div>
       ) : null}
@@ -337,6 +336,9 @@ export function BotsPanel({
     });
   }, []);
   const held = heldReads.values().next().value;
+  const searchField = (
+    <PanelSearch label="Search Bots" placeholder="Search Bots…" onChange={setSearch} value={search} mobile={standalone} />
+  );
 
   return (
     <SectionPanel
@@ -356,21 +358,12 @@ export function BotsPanel({
       className="group-data-[collapsible=icon]:hidden"
       hidden={hidden}
       standalone={standalone}
+      search={searchField}
       title="Bots"
     >
       <SidebarContent ref={scrollRoot} className="scroll-fade-b px-2 pb-2">
-        <InputGroup className="h-9 rounded-lg bg-background text-sm">
-          <InputGroupInput
-            aria-label="Search Bots"
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search Bots…"
-            value={search}
-          />
-          <InputGroupAddon>
-            <IconSearch />
-          </InputGroupAddon>
-        </InputGroup>
-        <div className="h-2 shrink-0" />
+        {!standalone && searchField}
+        {!standalone && <div className="h-2 shrink-0" />}
         {bots.isPending ? (
           <p
             role="status"
@@ -427,6 +420,7 @@ export function BotsPanel({
             <ul className="flex flex-col gap-px">
               {shown.map((bot) => (
                 <BotRow
+                  mobile={standalone}
                   bot={bot}
                   expanded={isExpanded(bot.id)}
                   key={bot.id}
