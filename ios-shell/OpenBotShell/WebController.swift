@@ -64,7 +64,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
             configuration.userContentController.add(diagnostics, name: Diagnostics.handlerName)
         }
 
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = ShellWebView(frame: .zero, configuration: configuration)
         // Swipe from the edge goes back and forward, as in Safari.
         webView.allowsBackForwardNavigationGestures = true
         // The shell lays the web view out between the status bar and the tab bar, so the page needs
@@ -78,7 +78,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         webView.underPageBackgroundColor = .systemBackground
         // UI tests find the web view by this identifier.
         webView.accessibilityIdentifier = "openbot-webview"
-        // No form-assistant bar above the keyboard (KeyboardAccessory.swift), so the keyboard goes
+        // No form-assistant bar above the keyboard (ShellWebView.swift), so the keyboard goes
         // away by dragging the page down.
         webView.scrollView.keyboardDismissMode = .interactive
         // A page too short to scroll (Home) still takes the drag that dismisses the keyboard.
@@ -108,7 +108,6 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
 
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        hideKeyboardAccessory(when: "init")
         // Also sees the page's own route changes, which no navigation delegate call reports.
         urlObservation = webView.observe(\.url, options: [.new]) { [weak self] webView, _ in
             let url = webView.url
@@ -429,7 +428,6 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         disarmWatchdog()
-        hideKeyboardAccessory(when: "commit")
         // WebKit commits about:blank in place of a load it refuses without an error (a restricted
         // port, seen in CI): that is a failed load.
         if webView.url?.absoluteString == "about:blank", blankDone == nil,
@@ -471,7 +469,6 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         diagnostics.log("content-process-terminated", [:])
-        hideKeyboardAccessory(when: "process-terminated")
         delegate?.webControllerContentProcessRestarted(self)
         if webView.url == nil {
             load(lastRequestedURL ?? config.baseURL)
@@ -587,16 +584,6 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     }
 
     // MARK: - Helpers
-
-    private var lastAccessoryResult = ""
-
-    private func hideKeyboardAccessory(when: String) {
-        let result = KeyboardAccessory.hide(in: webView)
-        if result != lastAccessoryResult {
-            lastAccessoryResult = result
-            diagnostics.log("keyboard-accessory", ["result": result, "when": when])
-        }
-    }
 
     private func presentSafari(_ url: URL) {
         guard let presenter = topViewController() else { return }

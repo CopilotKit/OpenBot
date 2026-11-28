@@ -20,6 +20,19 @@ final class ShellUITests: ShellTestCase {
         return Int(text[numberRange])
     }
 
+    func testWebFormUsesKeyboardWithoutAccessoryControls() {
+        let app = launch(base: ShellTestCase.probe + "/form.html", moment: "form", plain: true)
+        let field = app.webViews.textFields["First field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20))
+        focusComposerForTyping(field, in: app)
+        field.typeText("Example")
+        XCTAssertEqual(field.value as? String, "Example")
+        for label in ["Previous", "Next", "Done"] {
+            XCTAssertFalse(app.buttons[label].exists, "Unexpected form accessory control: \(label)")
+        }
+        screenshot("form-keyboard")
+    }
+
     func testProbeSite() throws {
         let app = launch(base: ShellTestCase.probe, moment: "probe", plain: true)
         let web = app.webViews.firstMatch
