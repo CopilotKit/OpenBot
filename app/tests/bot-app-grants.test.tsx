@@ -19,9 +19,7 @@ import { readOnlyRefs } from "@/components/manage/plugin-bot-page";
 /** A minimal but complete `PluginTool`, overridable per case. */
 function tool(overrides: Partial<PluginTool> & { name: string }): PluginTool {
   return {
-    serverId: "slack",
     description: "Does something.",
-    inputSchema: {},
     ref: `slack/${overrides.name}`,
     effect: "read",
     destructive: false,

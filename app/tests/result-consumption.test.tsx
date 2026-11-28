@@ -68,6 +68,10 @@ let requests: {
   messageId: string;
   surface: string;
 }[] = [];
+/** How each event left: its Idempotency-Key, and whether it outlives the page. */
+let sent: { key: string | null; keepalive: boolean | undefined }[] = [];
+/** The API's address for a product event (recordProductEvent). */
+const PRODUCT_EVENTS = "/api/v2/organizations/default/product-events";
 let status = 204;
 let requestResponse: (() => Promise<Response>) | undefined;
 let sequence = 0;
@@ -79,16 +83,27 @@ beforeAll(() => {
 });
 beforeEach(() => {
   requests = [];
+  sent = [];
   status = 204;
   requestResponse = undefined;
   visibility("visible");
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/telemetry/product-events") {
+      if (String(input) === PRODUCT_EVENTS) {
+        expect(init?.method).toBe("POST");
         requests.push(JSON.parse(String(init?.body)));
+        sent.push({
+          key: new Headers(init?.headers).get("idempotency-key"),
+          keepalive: init?.keepalive,
+        });
         return requestResponse
           ? requestResponse()
-          : new Response(null, { status });
+          : status === 204
+            ? new Response(null, { status })
+            : Response.json(
+                { title: "Unavailable", status, detail: "Try later." },
+                { status },
+              );
       }
       return Response.json({
         version: "fixture",
@@ -187,6 +202,22 @@ test("a rendered channel answer records only after it intersects the visible doc
   expect(requests).toEqual([
     { kind: "result_viewed", threadId, messageId: id, surface: "web" },
   ]);
+});
+
+test("each event goes through the API with its own Idempotency-Key and leaves even as the page closes", async () => {
+  const { view, element } = channel();
+  intersect();
+  await flush();
+  view.unmount();
+  render(element());
+  intersect();
+  await flush();
+  expect(sent).toHaveLength(2);
+  for (const each of sent) {
+    expect(each.keepalive).toBe(true);
+    expect(each.key).toMatch(/^[0-9a-f]{32}$/);
+  }
+  expect(sent[0]?.key).not.toBe(sent[1]?.key);
 });
 
 test("a background delivery records no view until the person returns to the visible answer", async () => {

@@ -1,5 +1,8 @@
-import { Streamdown } from "streamdown";
-import { markdownComponents, markdownPlugins } from "@/lib/markdown";
+import {
+  BotMarkdown,
+  markdownComponents,
+  markdownPlugins,
+} from "@/lib/markdown";
 
 /**
  * Markdown and code a Bot draws in an interface, drawn the way its reply draws them.
@@ -31,7 +34,7 @@ function ReplyMarkdown({
 }) {
   return (
     <div className="a2ui-markdown openbot-markdown">
-      <Streamdown
+      <BotMarkdown
         components={markdownComponents}
         // As the transcript does for a message still arriving: half a list or an unclosed bold
         // marker is closed for the duration, rather than drawn as literal markers.
@@ -39,7 +42,7 @@ function ReplyMarkdown({
         plugins={markdownPlugins}
       >
         {children}
-      </Streamdown>
+      </BotMarkdown>
     </div>
   );
 }

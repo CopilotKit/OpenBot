@@ -13,8 +13,12 @@ name: Downloads sync
 # every six hours in case anything drifted or that start failed, and by hand. Each run compares
 # checksums and uploads only what differs, so a run with nothing new changes nothing.
 #
+# Last, on a run for the Latest release, it removes the installers of every older release from
+# releases/<tag>/ (scripts/release-older-installers.sh), so a fresh install never starts from one.
+#
 # It signs in to AWS as `openbot-release-downloads`, which trusts this workflow on main and nothing
-# else, and may only write the bucket and invalidate the distribution named below.
+# else, and may only write the bucket, delete under releases/, and invalidate the distribution
+# named below.
 on:
   workflow_dispatch:
     inputs:
@@ -22,6 +26,11 @@ on:
         description: Mirror only releases/<tag>/ and the images of this release, such as v0.3.0 or a candidate such as v1.0.0-rc.1. Empty mirrors the Latest release, latest/ included, and the images of every prerelease newer than it from the last 30 days.
         type: string
         default: ""
+        required: false
+      rollout:
+        description: With a stable tag, also put its signed installers and feed under rollout/<tag>/, for a staged rollout. latest/ is left alone.
+        type: boolean
+        default: false
         required: false
   schedule:
     - cron: "17 */6 * * *"
@@ -47,6 +56,7 @@ jobs:
       DOWNLOADS_BUCKET: copilotkit-openbot-downloads
       DOWNLOADS_DISTRIBUTION_ID: EQ4EH8L79LPGX
       DOWNLOADS_TAG: ${{ inputs.tag }}
+      DOWNLOADS_ROLLOUT: ${{ inputs.rollout }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -80,3 +90,11 @@ jobs:
       # release whose images are not there.
       - run: bun scripts/downloads-images.ts
       - run: scripts/downloads-sync.sh
+      # The installers of every release older than the Latest one, which a fresh install must not
+      # start from; everything else under releases/<tag>/ stays, and each removed path is
+      # invalidated (scripts/release-older-installers.sh, docs/releasing.md "Older installers").
+      # On every run for the Latest release, scheduled or dispatched with no tag, so it follows
+      # each release that becomes Latest; never on a run for one tag.
+      - name: Remove the installers of releases older than Latest
+        if: ${{ !inputs.tag }}
+        run: scripts/release-older-installers.sh bucket

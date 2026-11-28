@@ -42,10 +42,8 @@ export type Tone = "neutral" | "positive" | "caution" | "negative";
 
 const TONES: Record<Tone, string> = {
   neutral: "bg-foreground/5 text-foreground/70",
-  positive:
-    "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 dark:bg-emerald-500/15",
-  caution:
-    "bg-amber-500/10 text-amber-700 dark:text-amber-400 dark:bg-amber-500/15",
+  positive: "bg-success/10 text-success",
+  caution: "bg-warning/10 text-warning",
   negative: "bg-red-500/10 text-red-700 dark:text-red-400 dark:bg-red-500/15",
 };
 

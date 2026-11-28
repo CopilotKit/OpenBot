@@ -19,10 +19,10 @@ import {
 import {
   joinedLearningContainer,
   type RecorderMe,
-  recorderPaths,
 } from "@openbot/shared/recorder-api";
 import type { PageResponse, RecorderState } from "../protocol/messages";
-import { OpenBotError, openbotJson } from "../shared/openbot-client";
+import { getRecorderIdentity } from "../shared/generated/recorder";
+import { OpenBotError, organizationOf } from "../shared/openbot-client";
 import { normaliseOpenBotOrigin } from "../shared/origin";
 import { allowsOpenBot, readPolicy } from "../shared/policy";
 import { narrationLanguage } from "../shared/speech-language";
@@ -92,7 +92,7 @@ const isTime = (value: unknown): value is number =>
 /** The launcher's connection, read as the contract types it: anything else is refused, whatever sent it. */
 function connectionFrom(value: unknown): LauncherConnection | null {
   if (!isRecord(value)) return null;
-  const { openbotUrl, token, connectionId, user } = value;
+  const { openbotUrl, token, connectionId, user, organizationId } = value;
   if (
     !isText(openbotUrl, 2000) ||
     !isText(token, 200) ||
@@ -101,7 +101,8 @@ function connectionFrom(value: unknown): LauncherConnection | null {
     !isRecord(user) ||
     !isText(user.id, 200) ||
     typeof user.name !== "string" ||
-    typeof user.email !== "string"
+    typeof user.email !== "string" ||
+    (organizationId !== undefined && !isText(organizationId, 200))
   )
     return null;
   return {
@@ -109,6 +110,7 @@ function connectionFrom(value: unknown): LauncherConnection | null {
     token,
     connectionId,
     user: { id: user.id, name: user.name, email: user.email },
+    ...(organizationId ? { organizationId } : {}),
   };
 }
 
@@ -286,13 +288,10 @@ export function createLauncher(
     | { kind: "unknown" }
   > {
     try {
-      const value = await openbotJson<RecorderMe>(
-        connection,
-        recorderPaths.me,
-        {
-          signal: AbortSignal.timeout(ME_WAIT_MS),
-        },
-      );
+      const value = await getRecorderIdentity(organizationOf(connection), {
+        target: connection,
+        signal: AbortSignal.timeout(ME_WAIT_MS),
+      });
       return { kind: "ok", value };
     } catch (error) {
       if (error instanceof OpenBotError && error.signedOut)
@@ -346,6 +345,9 @@ export function createLauncher(
           via: "openbot-browser",
           connectedAt: deps.now(),
           narration: narration as Narration,
+          ...(connection.organizationId
+            ? { organizationId: connection.organizationId }
+            : {}),
         };
         const current = await currentConnection();
         if (sameConnection(current, record)) return { ok: true };

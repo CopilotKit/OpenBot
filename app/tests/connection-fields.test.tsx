@@ -4,7 +4,6 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConnectionFields } from "@/components/plugins/connection-fields";
 import type { BrokerField } from "@/lib/plugins/mutations";
-import { BROKER_FIELD_KEYS } from "../../server/src/plugins/broker";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -206,25 +205,20 @@ test("a box named __proto__ nobody touched takes the default the app publishes n
 });
 
 /**
- * Every key the SERVER publishes on one of these fields, READ OFF THE SERVER'S OWN DECLARATION.
+ * Every key the SERVER publishes on one of these fields, as its `BrokerField` declares them today.
  *
- * `BROKER_FIELD_KEYS` in `server/src/plugins/broker.ts` is pinned to `BrokerField` in both
- * directions — `satisfies` holds the list inside the shape and a `Decides<…>` witness holds the
- * shape inside the list — so this import is the server's key set and not a reading of it.
- *
- * IT WAS A HAND COPY FOR TWO ROUNDS AND THAT IS WHY IT IS NOT ONE NOW. The copy was defended as
- * `SERVER_FIELD_SCHEMES` in `brokered-account-row.test.tsx` is defended, and the defence does not
- * carry: that roster earns its copy by deliberately holding a scheme the screen has NEVER heard of,
- * which is a disagreement only a copy can state. This one stated no disagreement. It was a literal
- * compared against `EVERY_KEY`, a second literal in this same file, so a key added to the real
- * `BrokerField` at the server passed both sides of a test whose own prose claimed to count the
- * server's declaration against the browser's.
- *
- * IMPORTING IT COSTS THIS FILE NOTHING AT RUNTIME. `broker.ts` imports nothing — not the vendor's
- * package, not a type from elsewhere in the tree — which is a property that module's own header
- * declares and keeps, so crossing the seam here pulls in one file of names.
+ * Written out, because the server runs from the published OpenBot images and has no source here to
+ * import. A key the server adds later reaches the browser unnoticed by this list, so a change to
+ * `BrokerField` is a change to this list too.
  */
-const SERVER_BROKER_FIELD_KEYS = BROKER_FIELD_KEYS;
+const SERVER_BROKER_FIELD_KEYS = [
+  "name",
+  "label",
+  "help",
+  "required",
+  "secret",
+  "default",
+] as const;
 
 /**
  * One field carrying a value for every key on that roster, as an app publishing the lot would.
@@ -234,8 +228,7 @@ const SERVER_BROKER_FIELD_KEYS = BROKER_FIELD_KEYS;
  * `bun test` does not typecheck, which the sibling file records at its own `accountState` — so the
  * bite is the pair of counts at the end of the test: the keys of this object against the server's
  * roster, and that roster against the list of things the form is observed to DO with a key. Both
- * counts run against {@link SERVER_BROKER_FIELD_KEYS}, which is the server's own value and not a
- * copy of it, so neither is satisfied by this file agreeing with itself.
+ * counts run against {@link SERVER_BROKER_FIELD_KEYS}, the server's roster.
  */
 const EVERY_KEY: Required<BrokerField> = {
   name: "firecrawl_api_key",

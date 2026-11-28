@@ -17,8 +17,19 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, within } from "@testing-library/react";
 import type * as React from "react";
+import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
+import { IDENTITY_PROVIDERS_PATH, PEOPLE_PATH } from "./accounts-api";
+import {
+  COMPUTER_ACTIONS_PATH,
+  isOverviewRead,
+  MODEL_USAGE_PATH,
+  SETTINGS_PATH,
+} from "./admin-settings-api";
+import { answerBotsList } from "./bots-api";
+import { MODEL_CATALOGUE_PATH } from "./models-api";
+import { CHECK_IN_USAGE_PATH } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
 
@@ -33,6 +44,11 @@ import { vendoredMarkFor } from "./vendored-marks";
 mock.module("@/lib/marks", () => ({ markFor: vendoredMarkFor }));
 
 const { Route: PeopleRoute } = await import("@/routes/_authed/admin/people");
+// Admin's Teams: the pages everybody opens at /teams, drawn inside Admin.
+const { Route: TeamsRoute } = await import("@/routes/_authed/admin/teams");
+const { Route: NewTeamRoute } = await import(
+  "@/routes/_authed/admin/teams_.new"
+);
 const { Route: IdentityProvidersRoute } = await import(
   "@/routes/_authed/admin/identity-providers"
 );
@@ -57,6 +73,7 @@ const { Route: LearningRoute } = await import(
 const { Route: ComputersRoute } = await import(
   "@/routes/_authed/admin/computers"
 );
+const { Route: AdminRoute } = await import("@/routes/_authed/admin/index");
 const { CheckInsPage } = await import("@/routes/_authed/admin/proactive");
 const { ProvidersPage } = await import("@/routes/_authed/admin/providers");
 
@@ -80,10 +97,10 @@ let asked: string[] = [];
 /** What the personal edition's server answers. Everything else is a 404, as the edition gate's. */
 function servePersonal() {
   asked = [];
-  global.fetch = (async (input: RequestInfo | URL) => {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input), "http://localhost/").pathname;
     asked.push(path);
-    if (path === "/api/models/available")
+    if (path === MODEL_CATALOGUE_PATH)
       return Response.json({
         provider: "openai",
         source: "openai",
@@ -95,7 +112,7 @@ function servePersonal() {
           { id: "gpt-4o", label: "GPT-4o", vendor: "openai" },
         ],
       });
-    if (path === "/api/admin/enterprise/models/usage")
+    if (path === MODEL_USAGE_PATH)
       return Response.json({
         days: 30,
         summary: [
@@ -110,15 +127,15 @@ function servePersonal() {
         ],
         recent: [],
       });
-    if (path === "/api/admin/proactive")
+    if (path === CHECK_IN_USAGE_PATH)
       return Response.json({
         days: 7,
         dailyRuns: 24,
         bots: [],
         pings: { sent: 0, itemsPerPing: null },
       });
-    if (path === "/api/agents")
-      return Response.json({ agents: [], total: 0, hasMore: false });
+    const bots = answerBotsList(path, init, { visible: [] });
+    if (bots) return bots;
     return Response.json({ error: "not served" }, { status: 404 });
   }) as unknown as typeof fetch;
 }
@@ -156,11 +173,13 @@ const component = (route: { options: { component?: unknown } }) =>
 
 test.each([
   ["People", PeopleRoute, "Here, you're the only person, and the admin."],
+  ["Teams", TeamsRoute, "Here, you're the only person."],
+  ["New team", NewTeamRoute, undefined],
   ["Identity providers", IdentityProvidersRoute, "Here, nobody signs in."],
   ["Permissions", PermissionsRoute, undefined],
   ["Describe who can do what", PermissionsDescribeRoute, undefined],
   ["Approvals", ApprovalsRoute, "Set your own in Settings → Approvals."],
-  ["Describe team rules", ApprovalsDescribeRoute, "Set your own in"],
+  ["Describe organization rules", ApprovalsDescribeRoute, "Set your own in"],
   ["Guidance for auto-review", GuidanceRoute, "Set your own in"],
   [
     "Automatic learning",
@@ -187,7 +206,18 @@ test.each([
     ).toBeTruthy();
     // Nothing it would have shown was asked for.
     await settleReactWork();
-    expect(asked.filter((path) => path.startsWith("/api/admin"))).toEqual([]);
+    expect(
+      asked.filter(
+        (path) =>
+          path.startsWith("/api/admin") ||
+          isOverviewRead(path) ||
+          path.startsWith(COMPUTER_ACTIONS_PATH) ||
+          path.startsWith(PEOPLE_PATH) ||
+          path.endsWith("/teams") ||
+          path.endsWith("/members") ||
+          path.startsWith(IDENTITY_PROVIDERS_PATH),
+      ),
+    ).toEqual([]);
   },
 );
 
@@ -207,18 +237,19 @@ test("Approvals and Automatic learning link to where the person sets their own",
   ).toBe("/skills");
 });
 
-test("Providers shows who serves the models and what the Bots ran on, without the team's settings", async () => {
+test("AI providers shows who serves the models and what the Bots ran on, without the team's settings", async () => {
   const view = await draw(ProvidersPage);
   expect(await view.findByText("OpenAI")).toBeTruthy();
   expect(
-    await view.findByText("Default gpt-5.6-terra · 2 models listed"),
+    await view.findByText("Default GPT-5.6 Terra · 2 models listed"),
   ).toBeTruthy();
   expect(await view.findByText("Every listed model")).toBeTruthy();
-  expect(await view.findByText("openai/gpt-5.6-terra")).toBeTruthy();
+  // Usage names the model as the provider lists it, not by its id.
+  expect(await view.findByText("GPT-5.6 Terra")).toBeTruthy();
   expect(view.getByText(/3 runs by 1 person/)).toBeTruthy();
   expect(view.queryByRole("alert")).toBeNull();
   expect(view.queryByText(FOR_A_TEAM)).toBeNull();
-  expect(asked).not.toContain("/api/admin/enterprise");
+  expect(asked.filter(isOverviewRead)).toEqual([]);
 });
 
 test("Routines shows how check-ins went, and the check-in switch is for a team", async () => {
@@ -232,7 +263,7 @@ test("Routines shows how check-ins went, and the check-in switch is for a team",
   expect(within(checkIns).getByText(FOR_A_TEAM)).toBeTruthy();
   expect(within(checkIns).queryByRole("switch")).toBeNull();
   expect(view.queryByRole("alert")).toBeNull();
-  expect(asked).not.toContain("/api/admin/enterprise");
+  expect(asked.filter(isOverviewRead)).toEqual([]);
 });
 
 test("Computers keeps the idle and network settings in place, for a team", async () => {
@@ -243,7 +274,7 @@ test("Computers keeps the idle and network settings in place, for a team", async
     ).closest("section") as HTMLElement;
     expect(within(section).getByText(FOR_A_TEAM)).toBeTruthy();
   }
-  expect(asked).not.toContain("/api/admin/enterprise");
+  expect(asked.filter(isOverviewRead)).toEqual([]);
 });
 
 test("in the team edition the same pages are the team's, and ask for what they show", async () => {
@@ -252,5 +283,33 @@ test("in the team edition the same pages are the team's, and ask for what they s
   await view.findByRole("heading", { level: 1, name: "People" });
   await settleReactWork();
   expect(view.queryByText(FOR_A_TEAM)).toBeNull();
-  expect(asked.some((path) => path.startsWith("/api/admin/people"))).toBe(true);
+  expect(asked.some((path) => path.startsWith(PEOPLE_PATH))).toBe(true);
 });
+
+/*
+ * The personal edition's one person is its admin, and its server keeps no organization settings: it
+ * answers them 404. Admin's overview and Computers asked for them anyway, for the notice about
+ * shared computers, and the personal edition's Admin journey failed on the 404s. That notice is for
+ * a team's OpenBot, where every person's Bots can share one computer; here the computer is the
+ * person's own.
+ */
+// Computers is titled Computer here: one person's one computer.
+test.each([
+  ["Admin", AdminRoute],
+  ["Computer", ComputersRoute],
+])(
+  "%s asks the one person's server for no settings it has not got",
+  async (title, route) => {
+    queryClient.setQueryData(authKeys.currentUser(), {
+      id: "dev-local-user",
+      email: "dev@openbot.local",
+      name: "Dana",
+      role: "admin",
+    } as never);
+    const view = await draw(component(route));
+    await view.findByRole("heading", { level: 1, name: title });
+    await settleReactWork();
+    expect(asked).not.toContain(SETTINGS_PATH);
+    expect(view.queryByText("Everyone's Bots share one computer.")).toBeNull();
+  },
+);

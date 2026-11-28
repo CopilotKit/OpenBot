@@ -41,6 +41,7 @@ import {
   reviewerGuidanceQueryOptions,
 } from "@/lib/reviewer-guidance/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 export const Route = createFileRoute("/_authed/admin/approvals_/guidance")({
   component: ReviewerGuidancePageInEveryEdition,
@@ -101,7 +102,7 @@ function ReviewerGuidancePage() {
     >
       {saved.isPending ? null : saved.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {saved.error.message}
+          {failureSaid(saved.error)}
         </p>
       ) : (
         <form
@@ -165,7 +166,7 @@ function ReviewerGuidancePage() {
                 </div>
                 {check.error ? (
                   <p className="text-destructive text-sm" role="alert">
-                    {check.error.message}
+                    {failureSaid(check.error)}
                   </p>
                 ) : null}
               </Field>
@@ -194,7 +195,7 @@ function ReviewerGuidancePage() {
             </FieldGroup>
             {save.error ? (
               <p className="mt-5 text-destructive text-sm" role="alert">
-                {save.error.message}
+                {failureSaid(save.error)}
               </p>
             ) : null}
           </PageCard>
@@ -228,7 +229,7 @@ function ReviewerGuidancePage() {
           </DialogHeader>
           {remove.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {remove.error.message}
+              {failureSaid(remove.error)}
             </p>
           ) : null}
           <DialogFooter>

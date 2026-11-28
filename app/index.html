@@ -4,17 +4,48 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OpenBot</title>
+    <!-- OpenBot's orb, the icon OpenBot Desktop ships: in a tab, on a phone's home screen and as an installed app. The files are in public/ (scripts/web-icons.ts). -->
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <!-- Sets the theme before the first paint. Must stay inline and classic: `defer` or `type="module"` runs too late. -->
     <script>
       // localStorage throws in some privacy modes; a theme is not worth taking the app down for.
+      // The theme and the skin each in a try of their own, so neither costs the other.
       try {
-        const dark = window.localStorage.getItem("openbot-theme") === "dark";
+        // A "light" or "dark" saved by the Theme setting is the person's own choice. Nothing saved
+        // follows the system (lib/theme.ts), and the app's theme provider keeps following it once
+        // the app is up. What earlier releases saved under "openbot-theme" was never a choice.
+        const theme = window.localStorage.getItem("openbot-theme-choice");
+        const dark =
+          theme === "dark" ||
+          (theme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.classList.toggle("dark", dark);
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        // For OpenBot Desktop, whose window follows the system unless the person chose.
+        document.documentElement.dataset.themeChoice =
+          theme === "light" || theme === "dark" ? theme : "system";
+      } catch {}
+      try {
         const saved = window.localStorage.getItem("openbot-skin");
         // A skin saved under the id it was renamed from (shared/user-preferences.ts RENAMED_SKIN_IDS).
         const skin = saved === "openmuse" ? "openfuse" : saved;
         if (skin && skin !== "openbot") document.documentElement.dataset.skin = skin;
+      } catch {}
+      try {
+        // Opened by OpenBot Desktop's setup, which faded out to the window's ground and marked the
+        // address once (lib/desktop/from-setup.ts): the first paint fades up from that ground. The
+        // mark comes off the address at once, so a reload or a copied link never fades. Not with
+        // reduced motion.
+        if (window.location.hash === "#from-setup") {
+          window.history.replaceState(
+            window.history.state,
+            "",
+            window.location.pathname + window.location.search,
+          );
+          if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+            document.documentElement.dataset.fromSetup = "";
+        }
       } catch {}
     </script>
   </head>

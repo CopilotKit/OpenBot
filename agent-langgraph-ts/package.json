@@ -1,0 +1,27 @@
+{
+  "name": "agent-langgraph-ts",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --import ./src/json-modules.ts --test --test-concurrency=1 test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ag-ui/client": "1.0.5",
+    "@ag-ui/core": "1.0.5",
+    "@ag-ui/encoder": "1.0.5",
+    "@langchain/anthropic": "1.6.5",
+    "@langchain/core": "1.4.1",
+    "@langchain/google": "0.2.15",
+    "@langchain/langgraph": "1.7.5",
+    "@langchain/openai": "1.8.4"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  }
+}

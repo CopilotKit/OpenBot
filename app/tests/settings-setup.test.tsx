@@ -22,6 +22,12 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as SetupRoute } from "@/routes/_authed/settings/setup";
+import { ME_PATH, meResponse } from "./accounts-api";
+import {
+  CHECK_SETUP_PATH,
+  DEPLOYMENT_PATH,
+  SETUP_CHECKLIST_PATH,
+} from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -60,10 +66,12 @@ const CHECKLIST = {
 const originalFetch = globalThis.fetch;
 let role: "admin" | "user";
 let localEvaluation: boolean;
+/** Whether the deployment says it is a hosted OpenBot (`hostedSignIn`). */
+let hostedSignIn: boolean;
 let rechecked: number;
 /** Every path asked for, to say what a member's sidebar never reads. */
 let requested: string[];
-/** What `GET /api/setup` answers. */
+/** What the API's `setup-checklist` answers. */
 let checklist: { audience: string; rows: unknown[] };
 const defaults = queryClient.getDefaultOptions();
 
@@ -75,6 +83,7 @@ beforeEach(() => {
   });
   role = "admin";
   localEvaluation = false;
+  hostedSignIn = false;
   rechecked = 0;
   requested = [];
   checklist = CHECKLIST;
@@ -82,8 +91,8 @@ beforeEach(() => {
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       requested.push(path);
-      if (path === "/api/me")
-        return Response.json({
+      if (path === ME_PATH)
+        return meResponse({
           user: {
             id: "person-1",
             email: "maya@example.com",
@@ -92,13 +101,13 @@ beforeEach(() => {
             role,
           },
         });
-      if (path === "/api/capabilities")
-        return Response.json({ localEvaluation });
-      if (path === "/api/setup/check" && init?.method === "POST") {
+      if (path === DEPLOYMENT_PATH)
+        return Response.json({ localEvaluation, hostedSignIn });
+      if (path === CHECK_SETUP_PATH && init?.method === "POST") {
         rechecked += 1;
-        return Response.json({ checklist: CHECKLIST });
+        return Response.json(CHECKLIST);
       }
-      if (path === "/api/setup") return Response.json({ checklist });
+      if (path === SETUP_CHECKLIST_PATH) return Response.json(checklist);
       return Response.json({});
     },
     { preconnect: originalFetch.preconnect },
@@ -185,6 +194,34 @@ test("an admin reopens the setup checklist in Settings, and can check again", as
 
   fireEvent.click(view.getByRole("button", { name: "Check again" }));
   await waitFor(() => expect(rechecked).toBe(1));
+});
+
+/*
+ * Found on a hosted OpenBot: Setup told an organization admin "After you change a setting and restart
+ * OpenBot, check again here". OpenBot by CopilotKit runs it, and nobody in an organization restarts it.
+ */
+test("on a hosted OpenBot, Setup sends an admin to the pages its rows link to, not to a restart", async () => {
+  hostedSignIn = true;
+  const view = open("/settings/setup");
+
+  await view.findByRole("heading", { name: "Setup" });
+  expect(
+    await view.findByText(
+      "See what's ready and what still needs setting up. Fix what you can on the page a row links to, then check again here. OpenBot by CopilotKit looks after the rest.",
+    ),
+  ).toBeTruthy();
+  expect(document.body.textContent).not.toContain("restart OpenBot, check");
+});
+
+test("on a company's own OpenBot, Setup still says to restart and check again", async () => {
+  const view = open("/settings/setup");
+
+  await view.findByRole("list", { name: "Setup" });
+  expect(
+    view.getByText(
+      "See what's ready and what still needs setting up. After you change a setting and restart OpenBot, check again here.",
+    ),
+  ).toBeTruthy();
 });
 
 test("a fix's page opens straight from Settings", async () => {
@@ -293,7 +330,7 @@ test("the sidebar never offers Setup to a member", async () => {
   await waitFor(() => expect(queryClient.isFetching()).toBe(0));
   expect(view.queryByRole("link", { name: /^Setup/ })).toBeNull();
   // Nor is the checklist asked for: there is nothing in it a member could fix.
-  expect(requested).not.toContain("/api/setup");
+  expect(requested).not.toContain(SETUP_CHECKLIST_PATH);
   expect(view.container.querySelector('[data-sidebar="menu-badge"]')).toBe(
     null,
   );

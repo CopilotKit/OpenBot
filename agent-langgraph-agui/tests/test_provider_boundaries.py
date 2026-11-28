@@ -12,7 +12,6 @@ from threading import Thread
 
 import httpx2
 import pytest
-from anthropic import Anthropic
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -344,8 +343,13 @@ async def test_anthropic_selection_reaches_anthropic_boundary_without_openai_key
         headers.get("x-api-key") == "sk-ant-openbot-ci"
         or headers.get("authorization") == "Bearer sk-ant-openbot-ci"
     )
-    with Anthropic(api_key="sk-ant-openbot-ci") as sdk:
-        assert headers["anthropic-version"] == sdk.default_headers["anthropic-version"]
+    # What Anthropic needs is a version it serves, and a request valid under that version, not the
+    # SDK's default: langchain-anthropic 1.7.11 sends 2023-06-01 on purpose where the SDK defaults
+    # to 2026-10-21. Both are current (platform.claude.com/docs/en/api/versioning), and every model
+    # answers on either. 2026-10-21 refuses temperature, top_p and top_k with a 400, so the harness
+    # sends none of them, and the request is valid whichever version the client picks.
+    assert headers["anthropic-version"] in {"2023-06-01", "2026-10-21"}
+    assert not {"temperature", "top_p", "top_k"} & captured[0]["body"].keys()
     assert captured[0]["body"]["model"] == request_model
     assert captured[0]["body"]["messages"] == [
         {"role": "user", "content": "Say hello."}
@@ -499,8 +503,8 @@ async def test_openai_keeps_a_skill_turn_beside_the_message_it_was_picked_for(
         ("google", ""),
         ("google_genai", None),
         ("google_genai", ""),
-        ("google", "gemini-2.5-flash"),
-        ("openai", "google_genai:gemini-2.5-flash"),
+        ("google", "gemini-3.8-flash"),
+        ("openai", "google_genai:gemini-3.8-flash"),
     ],
 )
 async def test_google_provider_reaches_google_genai_boundary(
@@ -521,7 +525,7 @@ async def test_google_provider_reaches_google_genai_boundary(
     assert result["messages"][0].content == "google loopback proof"
     assert captured == [
         {
-            "path": "/v1beta/models/gemini-2.5-flash:generateContent",
+            "path": "/v1beta/models/gemini-3.8-flash:generateContent",
             "x_goog_api_key_present": True,
             "body": {
                 "contents": [
@@ -530,10 +534,9 @@ async def test_google_provider_reaches_google_genai_boundary(
                         "role": "user",
                     }
                 ],
-                "generationConfig": {
-                    "candidateCount": 1,
-                    "temperature": 0.7,
-                },
+                # No temperature: langchain-google-genai leaves it unset for Gemini 3 and later, as
+                # Google advises, where it sends its own 0.7 to earlier models.
+                "generationConfig": {"candidateCount": 1},
                 "safetySettings": [],
             },
         }

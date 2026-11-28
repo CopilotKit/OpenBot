@@ -4,6 +4,8 @@ import {
   DECLINED_BY_PERSON,
   declinedByPerson,
   doneByPerson,
+  NOT_RUN_UNANSWERED,
+  OUTCOME_UNKNOWN,
   outcomeForPerson,
 } from "@openbot/shared/approval-outcomes";
 import type { DecisionToolName } from "@openbot/shared/decision-tools";
@@ -16,6 +18,7 @@ import {
 } from "@/lib/approvals";
 import type { ToolOutcome } from "./call";
 import { followView, latestView } from "./panel-view";
+import { fileSize, sentFileOf } from "./sent-file";
 
 /**
  * What a Bot has been doing on its computer: the pages it opened and acted on, the commands it ran,
@@ -62,7 +65,13 @@ export type ComputerActivity = {
    * when: the time the page read it would be a guess drawn as a fact.
    */
   at?: number;
-  kind: "command" | "read_file" | "write_file" | "list_files" | "browser";
+  kind:
+    | "command"
+    | "read_file"
+    | "write_file"
+    | "list_files"
+    | "send_file"
+    | "browser";
   /**
    * For a browser step, which one it was (`computer_navigate`, `computer_click` and so on). The pane
    * names it as the transcript does (`ownToolLabel` in `shared/tool-name.ts`).
@@ -74,7 +83,10 @@ export type ComputerActivity = {
   output: string;
   /** Present for a command. Non-zero is drawn as a failure. */
   exitCode?: number;
-  /** A browser step the computer could not carry out: the page would not load, the element was gone. */
+  /**
+   * A step the computer did not carry out: a page that would not load, an element that was gone, a
+   * file that was not saved (its computer was held for a person, say).
+   */
   failed?: boolean;
   /** A boundary refused it, or it was not carried out. Drawn differently from a command that ran and failed. */
   refused?: boolean;
@@ -445,12 +457,13 @@ export function activityFor(computerId: string): ComputerActivity[] {
   return byComputer.get(computerId) ?? NONE;
 }
 
-/** The four calls that act on the computer behind the screen, and what the pane calls each. */
+/** The calls that act on the computer behind the screen, and what the pane calls each. */
 const KINDS: Record<string, ComputerActivity["kind"]> = {
   computer_run_command: "command",
   computer_read_file: "read_file",
   computer_write_file: "write_file",
   computer_list_files: "list_files",
+  computer_send_file: "send_file",
 };
 
 /**
@@ -560,6 +573,15 @@ export function browserDetails(
   };
 }
 
+/**
+ * Whether a step's answer says it was started and cut off before it answered, so nobody knows
+ * whether it happened: the server's own words for it, or the approval gate's.
+ */
+function cutOff(text: string): boolean {
+  const said = text.trim();
+  return said === OUTCOME_UNKNOWN || said.startsWith("Outcome unknown:");
+}
+
 /** CopilotKit's stand-in for a frontend tool's answer that has not been given yet. */
 const FORWARDED_TO_CLIENT = "Forwarded to client";
 
@@ -594,11 +616,47 @@ export function readOutcome(content: unknown): ToolOutcome | null {
   if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
     const outcome = parsed as Record<string, unknown>;
     if (outcome.waiting === true) return null;
+    /*
+     * A STEP THE RUN ENDED UNDER. When a run ends with a step still open (the person's Stop, a
+     * server that restarted, a stream cut short), the runtime closes the step with an answer of its
+     * own, `{ status: "stopped" | "error", reason, message }`, which has no `ok`. Found in an
+     * end-to-end run with the server restarted part way through a save: read as a computer's answer,
+     * it drew "Saved a file" for a file that was never written.
+     */
+    if (
+      outcome.ok === undefined &&
+      (outcome.status === "stopped" || outcome.status === "error") &&
+      typeof outcome.message === "string"
+    )
+      return { ...outcome, ok: false, reason: outcome.message };
+    /*
+     * A STEP CUT OFF INSIDE THE SERVER'S OWN RUN, as the server answers it there: `{ ok: false,
+     * error: "Outcome unknown: ..." }`. Read as the sentence on its own is (below): not run, and
+     * said to the person in their words, never as a failure with nothing to say.
+     */
+    const said =
+      typeof outcome.error === "string"
+        ? outcome.error
+        : typeof outcome.reason === "string"
+          ? outcome.reason
+          : "";
+    if (outcome.ok === false && cutOff(said))
+      return { ...outcome, ok: false, outcomeUnknown: true, reason: said };
     return { ...outcome, ok: outcome.ok !== false };
   }
   if (doneByPerson(text)) return { ok: true, doneByPerson: true, reason: text };
   if (declinedByPerson(text))
     return { ok: false, refused: true, declined: true, reason: text };
+  /*
+   * A step that never ran because nothing took it before the Bot went on: nothing turned it away.
+   * Read as a refusal, a command a sleeping phone never ran was drawn "Blocked", in red.
+   */
+  if (text === NOT_RUN_UNANSWERED) return { ok: false, reason: text };
+  /*
+   * Nor one whose run was cut off before it answered, so nobody knows whether it happened, and which
+   * was not run again: the server says so of a step it ran itself. Nothing turned it away either.
+   */
+  if (cutOff(text)) return { ok: false, outcomeUnknown: true, reason: text };
   return text.startsWith("Error:")
     ? { ok: false, reason: text.slice("Error:".length).trim() }
     : { ok: false, refused: true, reason: text };
@@ -830,6 +888,18 @@ export function detailsOf(
       ...(typeof result.exitCode === "number"
         ? { exitCode: result.exitCode }
         : {}),
+      /*
+       * Not run: the pane must not say "Exit 0" about a command the computer never ran. A command
+       * that ran has an exit code; an answer with none that did not work (the gate refused the step,
+       * the computer could not be reached) is a command that did not run. It read as "Ran … Exit 0"
+       * beside a card saying "Didn't run", and that was taken for the command having run.
+       */
+      ...(result.ok === false &&
+      typeof result.exitCode !== "number" &&
+      result.refused !== true &&
+      result.doneByPerson !== true
+        ? { failed: true }
+        : {}),
       ...notTheBot,
       ...(result.truncated === true ? { truncated: true } : {}),
       ...(result.timedOut === true ? { timedOut: true } : {}),
@@ -849,8 +919,31 @@ export function detailsOf(
           : typeof result.bytes === "number"
             ? `${result.bytes} bytes${args.append === true ? ", appended" : ""}`
             : "",
+      // Not saved: the line must not say "Saved" about a file the computer never wrote.
+      ...(result.ok === false &&
+      result.refused !== true &&
+      result.doneByPerson !== true
+        ? { failed: true }
+        : {}),
       ...notTheBot,
     };
+  if (kind === "send_file") {
+    const sent = sentFileOf(result);
+    return {
+      kind,
+      subject: path,
+      output: sent
+        ? `${sent.name}, ${fileSize(sent.sizeBytes)}`
+        : outputOf(result),
+      // Not sent: the line must not say "Sent" about a file nobody received.
+      ...(result.ok === false &&
+      result.refused !== true &&
+      result.doneByPerson !== true
+        ? { failed: true }
+        : {}),
+      ...notTheBot,
+    };
+  }
   return {
     kind,
     subject: kind === "list_files" ? path || "the workspace" : path,

@@ -6,9 +6,10 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import type {
-  ComputerControlState,
-  HandoffStatus,
+import {
+  type ComputerControlState,
+  type HandoffStatus,
+  PASSKEY_REASON,
 } from "@openbot/shared/computer-control";
 import { releaseControl, takeControl } from "../src/lib/computers/control";
 import {
@@ -76,8 +77,8 @@ test("exact request completion takes a fresh snapshot before returning", async (
     snapshotId: 42,
   });
   expect(requests.map((r) => r.path)).toEqual([
-    "/api/computers/bot-1/control?requestId=request-1",
-    "/api/computers/bot-1/snapshot",
+    "/api/v2/organizations/default/computers/bot-1/control?requestId=request-1",
+    "/api/v2/organizations/default/computers/bot-1/snapshot",
   ]);
 });
 
@@ -152,6 +153,34 @@ test("navigation challenge joins existing request and preserves challenge metada
   expect(requests.some((r) => r.path.endsWith("/control/request"))).toBe(false);
 });
 
+test("a page asking for a passkey is waited on like any check, and the Bot is told why", async () => {
+  const challenge = {
+    kind: "passkey",
+    reason: PASSKEY_REASON,
+    requestId: "request-1",
+  };
+  serve((path) =>
+    path.endsWith("/navigate")
+      ? { url: "https://accounts.google.com/v3/signin/challenge/pk", challenge }
+      : path.endsWith("/snapshot")
+        ? {
+            snapshotId: 13,
+            url: "https://accounts.google.com/v3/signin/challenge/pwd",
+          }
+        : state("completed"),
+  );
+  const result = await runNavigation(
+    "bot-1",
+    "https://accounts.google.com",
+    "tool-1",
+  );
+  // The handoff was awaited (the snapshot after it is the page as the person left it), and the reason went with it.
+  expect(result).toMatchObject({ ok: true, challenge, snapshotId: 13 });
+  expect(
+    String(result.challenge && (result.challenge as { reason: string }).reason),
+  ).toContain("Try another way");
+});
+
 test("help uses the original tool call as its idempotency key", async () => {
   serve((path) =>
     path.endsWith("/snapshot") ? { snapshotId: 12 } : state("completed"),
@@ -171,11 +200,17 @@ test("manual takeover first creates a request and take/release name that ID", as
   await releaseControl("bot-1", "request-1");
   expect(requests.map((r) => [r.path, r.body])).toEqual([
     [
-      "/api/computers/bot-1/control/request",
+      "/api/v2/organizations/default/computers/bot-1/control/request",
       // A person's own take, said so, so its reason is never shown back to them as the Bot's.
       { reason: "I want to take control of the browser.", source: "manual" },
     ],
-    ["/api/computers/bot-1/control/take", { requestId: "request-1" }],
-    ["/api/computers/bot-1/control/release", { requestId: "request-1" }],
+    [
+      "/api/v2/organizations/default/computers/bot-1/control/take",
+      { requestId: "request-1" },
+    ],
+    [
+      "/api/v2/organizations/default/computers/bot-1/control/release",
+      { requestId: "request-1" },
+    ],
   ]);
 });

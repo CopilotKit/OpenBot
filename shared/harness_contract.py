@@ -106,12 +106,99 @@ def anthropic_environment(base: str, model: str = "claude-sonnet-5-5") -> dict[s
     }
 
 
+# OpenBot's model gateway, as a harness it runs reaches it: the deployment's gateway token in the
+# environment, and the token the server minted for one run, in its organization, on the run.
+DEPLOYMENT_KEY = "contract-deployment-gateway-token"
+RUN_KEY = "obgw_contract-run-token"
+
+
+def gateway_environment(wire: str):
+    """An environment function, like `openai_environment`, for the gateway's `wire` at `base`."""
+
+    def environment(base: str, model: str = "contract-model") -> dict[str, str]:
+        gateway = f"{base}/api/model-provider"
+        if wire == "anthropic":
+            return {
+                "BOT_PROVIDER": "anthropic",
+                "BOT_MODEL": "claude-sonnet-5-5",
+                "ANTHROPIC_API_KEY": DEPLOYMENT_KEY,
+                "ANTHROPIC_BASE_URL": f"{gateway}/anthropic",
+                "OPENAI_API_KEY": "",
+                "OPENAI_BASE_URL": "",
+            }
+        return {
+            "BOT_PROVIDER": "",
+            "BOT_MODEL": model,
+            "OPENAI_API_KEY": DEPLOYMENT_KEY,
+            "OPENAI_BASE_URL": f"{gateway}/v1",
+            "ANTHROPIC_API_KEY": "",
+        }
+
+    environment.__name__ = f"gateway_{wire}_environment"
+    return environment
+
+
+def with_run_key(body: dict, wire: str) -> dict:
+    """`body` as the server sends a harness it runs: with the run's own gateway token."""
+    return {
+        **body,
+        "forwardedProps": {
+            **(body.get("forwardedProps") or {}),
+            "openbotModelRoute": {"via": wire, "token": RUN_KEY},
+            "openbotOrganization": "contract-organization",
+        },
+    }
+
+
+def check_run_keys(keys: list[str], ran_with_token: int, bodies: list[dict]) -> None:
+    """The first `ran_with_token` model requests carried the run's token, the rest the environment's.
+
+    And neither the token nor the organization reached the model in a request body.
+    """
+    assert ran_with_token > 0, "the run with a token never reached the model"
+    assert set(keys[:ran_with_token]) == {RUN_KEY}, keys
+    assert keys[ran_with_token:] and set(keys[ran_with_token:]) == {DEPLOYMENT_KEY}, keys
+    text = json.dumps(bodies)
+    assert RUN_KEY not in text and "contract-organization" not in text
+
+
+def check_gateway_keys(app_for, wire: str, *, path: str = "/", token: str = "contract-token") -> None:
+    """A harness calls the gateway with its run's token, and with the environment's key without one.
+
+    `app_for(environment)` sets `environment` (a dict) for the harness and answers its app on a
+    fresh import. Two runs on one process, as the server sends them: the first with a token, the
+    second without.
+    """
+    from fastapi.testclient import TestClient
+
+    keys: list[str] = []
+    with fake_provider(keys) as (base, bodies):
+        with TestClient(app_for(gateway_environment(wire)(base))) as client:
+            # What a framework asks at start (a model listing) is no run's, and keeps its key.
+            started = len(keys)
+            ran_with_token = 0
+            runs = (
+                with_run_key(conversation(), wire),
+                conversation(thread_id="contract-thread-2", run_id="contract-run-2"),
+            )
+            for body in runs:
+                response = client.post(path, json=body, headers={"x-openbot-agent-token": token})
+                assert response.status_code == 200, response.text
+                types = [e["type"] for e in run_events(response.text)]
+                assert "RUN_FINISHED" in types, response.text
+                if not ran_with_token:
+                    ran_with_token = len(keys) - started
+    check_run_keys(keys[started:], ran_with_token, bodies)
+
+
 @contextmanager
-def fake_provider() -> Iterator[tuple[str, list[dict]]]:
+def fake_provider(keys: list[str] | None = None) -> Iterator[tuple[str, list[dict]]]:
     """An OpenAI- and Anthropic-compatible model on localhost that answers "ok" and records bodies.
 
     Yields `(base_url, bodies)`: every request body in arrival order. Serves Chat Completions,
     Responses and Messages, streamed and not, since which one a framework uses is its own choice.
+    Given `keys`, also writes down the key each request presented, as OpenAI's SDK sends it
+    (`Authorization: Bearer`) or Anthropic's (`x-api-key`).
     """
     import uvicorn
     from fastapi import FastAPI, Request
@@ -119,6 +206,18 @@ def fake_provider() -> Iterator[tuple[str, list[dict]]]:
 
     bodies: list[dict] = []
     app = FastAPI()
+
+    if keys is not None:
+
+        @app.middleware("http")
+        async def presented(request: Request, call_next):
+            bearer = request.headers.get("authorization", "")
+            keys.append(
+                bearer[len("Bearer ") :]
+                if bearer.startswith("Bearer ")
+                else request.headers.get("x-api-key", "")
+            )
+            return await call_next(request)
 
     def sse(lines):
         async def stream():
@@ -236,7 +335,18 @@ def fake_provider() -> Iterator[tuple[str, list[dict]]]:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    async def served(scope, receive, send):
+        # Also at OpenBot's model gateway addresses (`gateway_environment`), as the gateway serves
+        # each wire: `/api/model-provider/v1/...` and `/api/model-provider/anthropic/v1/...`.
+        path = scope.get("path", "")
+        for prefix in ("/api/model-provider/anthropic", "/api/model-provider"):
+            if path.startswith(prefix + "/"):
+                scope = {key: value for key, value in scope.items() if key != "raw_path"}
+                scope["path"] = path[len(prefix) :]
+                break
+        await app(scope, receive, send)
+
+    server = uvicorn.Server(uvicorn.Config(served, host="127.0.0.1", port=port, log_level="error"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     deadline = time.monotonic() + 10

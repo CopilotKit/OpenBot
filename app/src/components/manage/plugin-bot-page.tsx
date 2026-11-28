@@ -39,19 +39,25 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { appsQueryOptions, catalogueQueryOptions } from "@/lib/apps/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   grantPlugin,
   invalidatePlugins,
   setPluginGrantMutationOptions,
 } from "@/lib/plugins/mutations";
+import type { PluginTool } from "@/lib/plugins/queries";
 import {
-  type PluginTool,
-  pluginsPageQueryOptions,
-} from "@/lib/plugins/queries";
-import {
+  approvalNamesNobody,
   botSharedAppsQueryOptions,
   type SharedUseApproval,
   sharedUseKeys,
@@ -105,15 +111,19 @@ export function PluginBotPage({
   const alwaysOn = key === ALWAYS_ON_APP;
   const paths = useManagePaths();
   const queryClient = useQueryClient();
-  const plugins = useQuery(pluginsPageQueryOptions());
-  const agents = useQuery(agentListQueryOptions());
+  const plugins = useQuery(appsQueryOptions());
+  const catalogue = useQuery(catalogueQueryOptions());
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const scope = useBotListScope();
+  const agents = useQuery(agentListQueryOptions(false, scope));
   /*
    * The ones this person has hidden. A hidden Bot is still a Bot, and still holds whatever it was
    * granted; the connector page links here for it (see `grantRoster`), and this page must not then
    * say there is no such Bot.
    */
-  const hiddenAgents = useQuery(agentListQueryOptions(true));
-  const [error, setError] = useState<string | null>(null);
+  const hiddenAgents = useQuery(agentListQueryOptions(true, scope));
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [error, setError] = useState<Failure | null>(null);
   /** What the list is narrowed to, over action names. Never over what is switched on. */
   const [search, setSearch] = useState("");
   /**
@@ -130,10 +140,10 @@ export function PluginBotPage({
 
   const setGrant = useMutation({
     ...setPluginGrantMutationOptions(queryClient),
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
   });
 
-  const server = plugins.data?.servers.find((row) => row.id === key);
+  const server = plugins.data?.find((row) => row.id === key);
   /*
    * Shared only once the server itself says so. `exposure` is fetched for exactly that case — it is
    * this Bot's whole shared-apps picture, and here it is read for one app's current approval, so a
@@ -158,7 +168,7 @@ export function PluginBotPage({
   });
   const [grantingShared, setGrantingShared] = useState(false);
   const appTitle =
-    plugins.data?.catalogue.find((item) => item.key === key)?.title ??
+    catalogue.data?.find((item) => item.key === key)?.title ??
     server?.title ??
     key;
   const bot =
@@ -189,7 +199,7 @@ export function PluginBotPage({
         setGranting({ done, total: refs.length });
       }
     } catch (thrown) {
-      setError((thrown as Error).message);
+      setError(failureOf(thrown, String(thrown)));
     } finally {
       await invalidatePlugins(queryClient);
       setGranting(null);
@@ -237,7 +247,10 @@ export function PluginBotPage({
         title={paths.pluginsLabel}
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load apps. Reload the page.
+          {loadFailure(
+            plugins.error,
+            "Couldn't load apps. Try again in a moment.",
+          )}
         </p>
       </PageShell>
     );
@@ -334,7 +347,7 @@ export function PluginBotPage({
       });
       setPendingGrant(null);
     } catch (thrown) {
-      setError((thrown as Error).message);
+      setError(failureOf(thrown, String(thrown)));
     } finally {
       setGrantingShared(false);
     }
@@ -359,7 +372,7 @@ export function PluginBotPage({
                * claim of safety — so an absence stays an absence here rather than becoming a green
                * word that says more than anybody knows.
                *
-               * The destructive colour rather than the amber this app's tool list gives writes: the
+               * The destructive colour rather than the warning colour this app's tool list gives writes: the
                * heading over these rows already says they change things, and the one thing left to
                * say about this row is that what it changes does not come back.
                */}
@@ -433,7 +446,7 @@ export function PluginBotPage({
     >
       {error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
 
@@ -444,7 +457,7 @@ export function PluginBotPage({
           {toolsListError(server.lastError, {
             title: server.title,
             personal: false,
-          }) ?? "Refresh its tools to check again."}
+          })?.text ?? "Refresh its tools to check again."}
         </PageEmpty>
       ) : (
         <>
@@ -567,7 +580,7 @@ export function PluginBotPage({
                   Let {botName} use the shared {appTitle} account?
                 </DialogTitle>
               </DialogHeader>
-              <DialogBody className="mt-4">
+              <DialogBody className="mt-4 overflow-y-auto">
                 <SharedApprovalFields onChange={setApproval} value={approval} />
               </DialogBody>
               {/*
@@ -577,7 +590,7 @@ export function PluginBotPage({
                */}
               {error ? (
                 <p className="mt-4 text-destructive text-sm" role="alert">
-                  {error}
+                  {failureSaid(error)}
                 </p>
               ) : null}
               <DialogFooter className="mt-4">
@@ -589,7 +602,7 @@ export function PluginBotPage({
                   Cancel
                 </Button>
                 <Button
-                  disabled={grantingShared}
+                  disabled={grantingShared || approvalNamesNobody(approval)}
                   onClick={() => void confirmSharedGrant()}
                   size="sm"
                 >

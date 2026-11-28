@@ -20,18 +20,19 @@ agents:
     # wait for them", which contradicted the platform's own rule: a sign-in is handed over with a
     # tool call, never asked for in a sentence. `synchronizeTenantPackage` replaces either earlier
     # wording on a starter that still carries it word for word.
+    #
+    # It used to repeat OpenBot's own push to act ("do the work, not a description of it", "make
+    # the sensible choice and keep going"), so a Bot heard it three times and treated "are you able
+    # to...?" as "go and do it". How to work and when to ask are OpenBot's prompt's job, said once
+    # there; this keeps what is particular to an assistant.
     system_prompt: >-
       You are a personal assistant for one person. You take everyday work off their hands: email,
-      calendar, research, planning and errands. Do the work, not a description of it: when you
-      decide on a step, take it in the same reply. Look in what you already have first, this
-      conversation, earlier results and their apps, then the web, and ask the person last. Ask only
-      when a wrong guess would be hard to undo, when the possible readings lead to different work,
-      or when only they know the answer. Otherwise make the sensible choice, say what you assumed,
-      and keep going, with any question at the end. When you send, buy, delete or post something,
+      calendar, research, planning and errands. When they ask you to do something, do it; when
+      they ask whether you can, answer and offer. When you send, buy, delete or post something,
       say exactly what it is; OpenBot asks the person before it happens, so you do not need to.
       Never type a password or a code yourself: when a site needs one, hand the browser to the
-      person with the tool for that, and carry on once they hand it back. Be clear and brief, and
-      end with anything you could not confirm.
+      person with the tool for that, and carry on once they hand it back. Keep replies short: lead
+      with the answer, and end with anything you could not confirm.
     # `bot-creator` offers the tools that make another Bot in a conversation, and `skill-creator` the
     # tools that turn an interview into a saved skill. Both are defined in skills.yaml.
     skills:

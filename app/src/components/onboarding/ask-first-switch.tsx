@@ -1,6 +1,10 @@
 import { IconHandStop } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  ASK_FIRST_DESCRIPTION,
+  ASK_FIRST_TITLE,
+} from "@/components/approvals/ask-first-copy";
+import {
   Item,
   ItemActions,
   ItemContent,
@@ -8,15 +12,12 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import {
-  ASK_FIRST_DESCRIPTION,
-  ASK_FIRST_TITLE,
-} from "@/components/approvals/ask-first-copy";
 import { Switch } from "@/components/ui/switch";
 import {
   approvalInboxOptions,
   approvalPreferencesMutationOptions,
 } from "@/lib/approvals";
+import { loadFailure } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 /**
@@ -60,11 +61,17 @@ export function AskFirstSwitch() {
       </Item>
       {preferences.error ? (
         <p className="text-sm text-destructive" role="alert">
-          Couldn't change it. Try again, or change it later in Settings.
+          {loadFailure(
+            preferences.error,
+            "Couldn't change it. Try again, or change it later in Settings.",
+          )}
         </p>
       ) : inbox.error ? (
         <p className="text-sm text-muted-foreground" role="status">
-          Couldn't load this setting. You can change it later in Settings.
+          {loadFailure(
+            inbox.error,
+            "Couldn't load this setting. You can change it later in Settings.",
+          )}
         </p>
       ) : null}
     </div>

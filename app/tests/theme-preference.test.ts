@@ -1,32 +1,80 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
-  applyDarkTheme,
-  parseStoredDarkTheme,
+  applyTheme,
+  LEGACY_THEME_STORAGE_KEY,
+  parseStoredTheme,
+  resolveDarkTheme,
   THEME_STORAGE_KEY,
 } from "../src/lib/theme";
 
+function recorded() {
+  const calls: Array<[string, ...Array<string | boolean>]> = [];
+  return {
+    calls,
+    effects: {
+      setStoredValue: (key: string, value: string) =>
+        calls.push(["set", key, value]),
+      removeStoredValue: (key: string) => calls.push(["remove", key]),
+      toggleRootClass: (name: string, force: boolean) =>
+        calls.push(["class", name, force]),
+      setRootColorScheme: (scheme: string) => calls.push(["scheme", scheme]),
+      setRootChoice: (choice: string) => calls.push(["choice", choice]),
+    },
+  };
+}
+
 describe("theme preference", () => {
-  test("only the stored dark value enables dark theme", () => {
-    expect(parseStoredDarkTheme("dark")).toBe(true);
-    expect(parseStoredDarkTheme("light")).toBe(false);
-    expect(parseStoredDarkTheme(null)).toBe(false);
+  test("nothing saved follows the system; a saved light or dark is the person's own", () => {
+    expect(parseStoredTheme(null)).toBe("system");
+    expect(parseStoredTheme("system")).toBe("system");
+    expect(parseStoredTheme("something else")).toBe("system");
+    expect(parseStoredTheme("dark")).toBe("dark");
+    expect(parseStoredTheme("light")).toBe("light");
   });
 
-  test("persists and applies the selected theme", () => {
-    const writes: Array<[string, string]> = [];
-    const toggles: Array<[string, boolean]> = [];
-    const schemes: Array<string> = [];
+  test("the system decides only for somebody who follows it", () => {
+    expect(resolveDarkTheme("system", true)).toBe(true);
+    expect(resolveDarkTheme("system", false)).toBe(false);
+    expect(resolveDarkTheme("light", true)).toBe(false);
+    expect(resolveDarkTheme("dark", false)).toBe(true);
+  });
 
-    applyDarkTheme(true, {
-      setStoredValue: (key, value) => writes.push([key, value]),
-      toggleRootClass: (name, force) => toggles.push([name, force]),
-      setRootColorScheme: (scheme) => schemes.push(scheme),
-    });
+  test("an explicit choice is saved and applied over the system's", () => {
+    const { calls, effects } = recorded();
+    applyTheme("dark", false, effects);
+    expect(calls).toEqual([
+      ["remove", LEGACY_THEME_STORAGE_KEY],
+      ["set", THEME_STORAGE_KEY, "dark"],
+      ["class", "dark", true],
+      ["scheme", "dark"],
+      ["choice", "dark"],
+    ]);
+  });
 
-    expect(writes).toEqual([[THEME_STORAGE_KEY, "dark"]]);
-    expect(toggles).toEqual([["dark", true]]);
-    expect(schemes).toEqual(["dark"]);
+  test("following the system saves nothing and applies the system's", () => {
+    const { calls, effects } = recorded();
+    applyTheme("system", true, effects);
+    expect(calls).toEqual([
+      ["remove", LEGACY_THEME_STORAGE_KEY],
+      ["remove", THEME_STORAGE_KEY],
+      ["class", "dark", true],
+      ["scheme", "dark"],
+      ["choice", "system"],
+    ]);
+  });
+});
+
+describe("what earlier releases saved", () => {
+  // They saved a light or dark on every visit, so the app must not read it as a choice.
+  test("the choice is kept under a key of its own, which the page reads before paint", () => {
+    expect(THEME_STORAGE_KEY).not.toBe(LEGACY_THEME_STORAGE_KEY);
+    const html = readFileSync(
+      new URL("../index.html", import.meta.url),
+      "utf8",
+    );
+    expect(html).toContain(`getItem("${THEME_STORAGE_KEY}")`);
+    expect(html).not.toContain(`getItem("${LEGACY_THEME_STORAGE_KEY}")`);
   });
 });
 

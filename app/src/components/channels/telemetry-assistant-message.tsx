@@ -3,7 +3,7 @@ import {
   type CopilotChatAssistantMessageProps,
   useCopilotChatConfiguration,
 } from "@copilotkit/react-core/v2";
-import { type ComponentProps, createContext, useContext } from "react";
+import { type ComponentProps, createContext, useContext, useMemo } from "react";
 import {
   type ResultReference,
   recordResultAction,
@@ -85,3 +85,56 @@ export const TelemetryAssistantMessage = Object.assign(
   ResultAssistantMessage,
   CopilotChatAssistantMessage,
 );
+
+/**
+ * The toolbar under a finished reply in a conversation, whose transcript draws the reply's words
+ * itself. Built from the SDK's own toolbar and Copy button, laid out as the SDK lays them out under
+ * a reply, so a conversation shows the same buttons, in the same look, as the Bot chat page (a test
+ * holds the two to the same markup): Copy puts `text` on the clipboard and records the copy as
+ * `result_copied` for `messageId`, the row the toolbar sits under.
+ *
+ * NOT THE WHOLE `CopilotChatAssistantMessage` WITH ONLY ITS TOOLBAR KEPT. That wraps what it draws
+ * in an element carrying `data-message-id`, the attribute the transcript reads its rows by, so every
+ * reply would have counted as two rows.
+ */
+export function ReplyToolbar({
+  messageId,
+  text,
+  threadId,
+}: {
+  messageId: string;
+  text: string;
+  threadId?: string;
+}) {
+  // The transcript only draws this once the reply has finished.
+  const result = useMemo(
+    () => ({
+      reference: threadId ? { threadId, messageId } : undefined,
+      settled: true,
+    }),
+    [threadId, messageId],
+  );
+  return (
+    <ResultContext.Provider value={result}>
+      {/* The SDK's styles apply inside `data-copilotkit`, as they do around its own messages. */}
+      <div data-copilotkit="" style={{ display: "contents" }}>
+        <CopilotChatAssistantMessage.Toolbar>
+          <div className="cpk:flex cpk:w-full cpk:items-center cpk:gap-1">
+            <ResultCopyButton onClick={() => copyText(text)} />
+          </div>
+        </CopilotChatAssistantMessage.Toolbar>
+      </div>
+    </ResultContext.Provider>
+  );
+}
+
+/** Whether `text` reached the clipboard, as the SDK's own Copy reports it. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (error) {
+    console.error("Failed to copy to clipboard:", error);
+    return false;
+  }
+}

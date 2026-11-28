@@ -1,4 +1,4 @@
-import type { ComposioApp } from "./queries";
+import type { DirectoryApp } from "@/lib/apps/queries";
 
 /**
  * What a directory row says about an app before anybody presses Add.
@@ -25,7 +25,7 @@ import type { ComposioApp } from "./queries";
  * Phrased as what it will feel like, not as a percentage.
  */
 export function coverageWarning(
-  app: Pick<ComposioApp, "actionCount" | "classifiedCount">,
+  app: Pick<DirectoryApp, "actionCount" | "classifiedCount">,
 ): string | null {
   if (app.classifiedCount === null) return null;
   if (app.actionCount > 0 && app.classifiedCount === 0) {
@@ -56,7 +56,7 @@ export function coverageWarning(
  */
 export function consentBreadth(
   app: Pick<
-    ComposioApp,
+    DirectoryApp,
     "actionCount" | "permissionCount" | "scopedActionCount"
   >,
 ): string | null {
@@ -95,31 +95,22 @@ export function consentBreadth(
  * the sign-in apps first puts the ones anybody can connect at the top of every search, and each
  * key app's row says so (see {@link keyNeededLine}).
  */
-export function matchingApps(apps: ComposioApp[]): ComposioApp[] {
+export function matchingApps(apps: DirectoryApp[]): DirectoryApp[] {
   return [...apps].sort(
     (left, right) =>
       Number(needsKey(left)) - Number(needsKey(right)) ||
-      left.name.localeCompare(right.name),
+      left.title.localeCompare(right.title),
   );
 }
 
-/** The schemes whose secret a person types, which is the whole of what a key app means here. */
-const FIELD_SCHEMES = [
-  "API_KEY",
-  "BASIC",
-  "BEARER_TOKEN",
-  "BASIC_WITH_JWT",
-  "S2S_OAUTH2",
-];
-
-/** Whether an added app's recorded scheme is one a person types a key for. */
-export function schemeNeedsKey(authScheme: string | null): boolean {
-  return authScheme !== null && FIELD_SCHEMES.includes(authScheme);
+/** Whether an added app is one a person connects by typing a key (listApps' `connectsWith`). */
+export function appNeedsKey(app: { connectsWith: string | null }): boolean {
+  return app.connectsWith === "key";
 }
 
 /** Whether connecting this app means typing a key from it rather than signing in. */
-export function needsKey(app: Pick<ComposioApp, "connection">): boolean {
-  return app.connection.kind === "fields";
+export function needsKey(app: Pick<DirectoryApp, "connectsWith">): boolean {
+  return app.connectsWith === "key";
 }
 
 /**
@@ -127,9 +118,9 @@ export function needsKey(app: Pick<ComposioApp, "connection">): boolean {
  * Null for an app you sign in to, or one that needs nothing.
  */
 export function keyNeededLine(
-  app: Pick<ComposioApp, "connection" | "name">,
+  app: Pick<DirectoryApp, "connectsWith" | "title">,
 ): string | null {
-  return needsKey(app) ? `Needs a key from ${app.name}` : null;
+  return needsKey(app) ? `Needs a key from ${app.title}` : null;
 }
 
 /**

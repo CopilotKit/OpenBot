@@ -16,10 +16,16 @@ afterEach(() => {
 
 type SeenRequest = { url: string; init: RequestInit | undefined };
 
+/** A person's folder access at the API's address, which answers for the person asking as `me`. */
+const HOST_ACCESS = "/api/v2/organizations/default/people/me/host-access";
+
 function capturingFetch(body: unknown = {}) {
   const seen: SeenRequest[] = [];
   globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
     seen.push({ url: String(url), init });
+    // Taking a folder away and stopping answer with no body, as the API does.
+    if (init?.method === "DELETE" || String(url).endsWith("/stop"))
+      return new Response(null, { status: 204 });
     return new Response(JSON.stringify(body), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -54,7 +60,7 @@ test("host access status has its own stable query key", async () => {
     grants: [],
     pending: [],
   });
-  expect(seen[0]?.url).toBe("/api/host-access");
+  expect(seen[0]?.url).toBe(HOST_ACCESS);
 });
 
 test("requesting a host folder sends only the Bot id", async () => {
@@ -73,7 +79,11 @@ test("requesting a host folder sends only the Bot id", async () => {
     undefined as never,
   );
 
-  expect(seen[0]?.url).toBe("/api/host-access/grants");
+  expect(seen[0]?.url).toBe(`${HOST_ACCESS}/grants`);
+  // A write names itself once, so a retry of it is not a second folder chooser.
+  expect(
+    new Headers(seen[0]?.init?.headers).get("idempotency-key"),
+  ).toBeTruthy();
   expect(seen[0]?.init?.method).toBe("POST");
   expect(JSON.parse(String(seen[0]?.init?.body))).toEqual({
     botId: "research",
@@ -95,8 +105,8 @@ test("revoking and stopping host access use their dedicated endpoints", async ()
   await stop.mutationFn?.(undefined, mutationContext(queryClient));
 
   expect(seen.map((request) => [request.url, request.init?.method])).toEqual([
-    ["/api/host-access/grants/grant%2Fwith%2Fslash", "DELETE"],
-    ["/api/host-access/stop", "POST"],
+    [`${HOST_ACCESS}/grants/grant%2Fwith%2Fslash`, "DELETE"],
+    [`${HOST_ACCESS}/stop`, "POST"],
   ]);
 });
 

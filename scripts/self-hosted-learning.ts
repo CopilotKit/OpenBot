@@ -2,7 +2,7 @@ import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import { chromium } from "playwright-core";
-import type { RunCli } from "../server/src/learning/ensure-container";
+import type { RunCli } from "./copilotkit-cli";
 import { runLocalIntelligenceCli } from "./local-intelligence-cli";
 
 export type SetupProject = { id: string; name: string };

@@ -381,7 +381,7 @@ test("calls to OpenBot itself are ignored, by the steps and by the agent events 
   });
   request(7, {
     id: "3",
-    url: `${OPENBOT}/api/recorder/connect-codes`,
+    url: `${OPENBOT}/api/v2/organizations/default/people/me/recorder-connect-codes`,
     method: "POST",
     postData: "{}",
     body: '{"code":"obc_live_connect_code"}',
@@ -871,12 +871,17 @@ test("a page-level event for a call to OpenBot itself is dropped, like the debug
   });
   await capture.recordPageEvent(
     7,
-    pageEvent(`${OPENBOT}/api/recorder/connect-codes`),
+    pageEvent(
+      `${OPENBOT}/api/v2/organizations/default/people/me/recorder-connect-codes`,
+    ),
   );
   // A call that a redirect landed on OpenBot.
   await capture.recordPageEvent(
     7,
-    pageEvent("https://crm.example.test/go", `${OPENBOT}/api/recorder/me`),
+    pageEvent(
+      "https://crm.example.test/go",
+      `${OPENBOT}/api/v2/organizations/default/recorder/me`,
+    ),
   );
   await capture.recordPageEvent(7, pageEvent("https://crm.example.test/api"));
   expect(calls.map((call) => call.url)).toEqual([

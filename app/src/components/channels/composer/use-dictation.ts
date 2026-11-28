@@ -1,7 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { LiveDictation, liveDictationSource } from "@/lib/dictation/live";
+import {
+  dictationLanguages,
+  LiveDictation,
+  liveDictationSource,
+} from "@/lib/dictation/live";
 import {
   recordingSupported,
   startRecording,
@@ -50,8 +54,10 @@ export function useDictation(
     () =>
       new LiveDictation({
         source: () => source,
-        language: () =>
-          (typeof navigator !== "undefined" && navigator.language) || "en-US",
+        languages: () =>
+          typeof navigator === "undefined"
+            ? dictationLanguages(undefined)
+            : dictationLanguages(navigator.language, navigator.languages ?? []),
         onStart: () => handlersRef.current.onLiveStart(),
         onText: (text) => handlersRef.current.onLiveText(text),
       }),

@@ -3,10 +3,12 @@ import {
   IconAlertTriangle,
   IconBolt,
   IconDeviceDesktop,
+  IconDeviceDesktopOff,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
+import { SharedComputersNotice } from "@/components/admin/shared-computers-notice";
 import {
   ClearBrowserDialog,
   useClearBrowserData,
@@ -36,8 +38,10 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { useBotNames } from "@/lib/agents/bot-names";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { clearBrowserMutationOptions } from "@/lib/browser/mutations";
 import {
   type HostAccessPendingOperation,
@@ -51,9 +55,18 @@ import { setComputerStateMutationOptions } from "@/lib/computers/mutations";
 import {
   type ComputerProfile,
   computerFleetQueryOptions,
+  workspaceSnapshotsQueryOptions,
 } from "@/lib/computers/queries";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  deploymentCapabilitiesQueryOptions,
+  useNoBotComputers,
+} from "@/lib/deployment/queries";
+import { FailureNotice, isHeld } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
+import {
+  RestoreComputerDialog,
+  WorkspaceSnapshotsSection,
+} from "./workspace-snapshots-section";
 
 /** One row's identity: the computer, and on a shared computer the Bot's seat on it. */
 function rowId(computer: ComputerProfile): string {
@@ -125,6 +138,8 @@ export function ComputersPage({
   /** Updating restarts a running computer mid-task, so it is confirmed too. */
   const update = useConfirmation();
   const confirmingUpdate = update.about;
+  /** An admin looking at another person's computer's saved copies. */
+  const restoreOther = useConfirmation();
   const queryClient = useQueryClient();
   const nameFor = useBotNames();
   /*
@@ -135,13 +150,39 @@ export function ComputersPage({
   const clearing = useClearBrowserData(clearOwnBrowser);
 
   // Every computer is an admin's to list. On one Bot's page a person who isn't an admin has only folders.
-  const admin = useQuery(currentUserQueryOptions()).data?.role === "admin";
+  const admin = isOrganizationAdmin(
+    useQuery(currentUserQueryOptions()).data?.role,
+  );
+  /*
+   * An OpenBot with no computers for Bots has no list to read: the server refuses it, and "Couldn't
+   * load the computers. Reload the page." sent a person to retry what can never work. So the list
+   * waits until the deployment has said whether there are computers, and is not asked for where
+   * there are none.
+   */
+  const noComputers = useNoBotComputers();
   const fleet = useQuery({
     ...computerFleetQueryOptions(),
-    enabled: agentId === undefined || admin,
+    enabled: (agentId === undefined || admin) && noComputers === false,
   });
+  /*
+   * The copies of the computer this Bot runs on for the person reading: its own section draws them,
+   * and its answer names that computer, so an admin's Restore is offered only on the others' rows.
+   */
+  const ownCopies = useQuery({
+    ...workspaceSnapshotsQueryOptions(agentId ?? ""),
+    enabled: agentId !== undefined && noComputers === false,
+  });
+  const restorable = (computer: ComputerProfile): boolean =>
+    agentId !== undefined &&
+    admin &&
+    ownCopies.data?.available === true &&
+    computer.computer !== ownCopies.data.computer &&
+    !isOwnBrowser(computer);
   const hostAccess = useQuery(hostAccessQueryOptions());
-  const agents = useQuery(agentListQueryOptions());
+  const hosted =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const agents = useQuery(agentListQueryOptions(false, useBotListScope()));
   const setState = useMutation(setComputerStateMutationOptions(queryClient));
   const requestGrant = useMutation(
     requestHostFolderGrantMutationOptions(queryClient),
@@ -162,18 +203,20 @@ export function ComputersPage({
    * A list that could not be read. A refused stop, reset or update is said beside the buttons
    * instead, because the top of this page is a long scroll away from them.
    */
-  const problem = fleet.error
-    ? "Couldn't load the computers. Reload the page."
-    : null;
-  const hostProblem = hostAccess.error
-    ? hostAccess.error.message
-    : requestGrant.error
-      ? requestGrant.error.message
-      : revokeGrant.error
-        ? revokeGrant.error.message
-        : stopHostAccess.error
-          ? stopHostAccess.error.message
-          : null;
+  const problem = fleet.error;
+  // OpenBot holding off for now: said calmly, and not as a list that failed (lib/load-failure.tsx).
+  const held = isHeld(fleet.error);
+  /*
+   * What the folders section couldn't read: whether the desktop app is there, and the Bots to list.
+   * Without both, "No Bots yet" and "The desktop app is offline" would be guesses, so the section
+   * says why it can't list them instead. A hold already said at the top of the page isn't said again.
+   */
+  const hostUnread = hostAccess.error ?? (agentId ? null : agents.error);
+  const hostProblem =
+    requestGrant.error ??
+    revokeGrant.error ??
+    stopHostAccess.error ??
+    (held && isHeld(hostUnread) ? null : hostUnread);
 
   const run = (
     computer: ComputerProfile,
@@ -218,6 +261,17 @@ export function ComputersPage({
     return computer.botId ? nameFor(computer.botId) : computer.computer;
   };
 
+  /** Whose computer a row is, for the dialog that lists its saved copies. */
+  const ownerOf = (computer: ComputerProfile): string => {
+    if (computer.kind === "bot")
+      return computer.botId
+        ? `${nameFor(computer.botId)}'s computer`
+        : "This Bot's computer";
+    const person =
+      computer.person?.name ?? computer.person?.email ?? computer.personId;
+    return person ? `${person}'s computer` : "A person's computer";
+  };
+
   /** What a row carries, said once before its state. */
   const scopeOf = (computer: ComputerProfile): string => {
     if (isOwnBrowser(computer)) return "Their own browser for Teach a Bot";
@@ -249,25 +303,15 @@ export function ComputersPage({
 
   const body = (
     <>
-      {problem ? (
-        <p
-          className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
-          role="alert"
-        >
-          {problem}
-        </p>
-      ) : null}
+      <FailureNotice
+        className="mt-4"
+        error={problem}
+        own="Couldn't load the computers. Try again in a moment."
+      />
 
       {personal || agentId ? null : isolation === "shared" ? (
-        <p className="mt-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
-          <span className="font-medium">
-            Every person's Bots run on one computer.
-          </span>{" "}
-          Each person keeps their own browser profile and folder for each Bot,
-          so logins aren't shared. A command one Bot runs can still read
-          another's files. Set <code>COMPUTER_SUPERVISOR_URL</code> to give each
-          person a computer of their own.
-        </p>
+        // The server's own word on whether this is a shared install (one person's isn't).
+        <SharedComputersNotice className="mt-4" />
       ) : isolation === "per-person" ? (
         <p className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm">
           Each person has their own computer, and every Bot they use runs on it,
@@ -278,8 +322,12 @@ export function ComputersPage({
         </p>
       ) : null}
 
-      {/* On one Bot's page, folders only where they exist: inside OpenBot Desktop. */}
-      {agentId && hostAccess.data?.desktop === false ? null : (
+      {/*
+        On one Bot's page, folders only where they exist: inside OpenBot Desktop. On a hosted OpenBot never: only the
+        OpenBot that OpenBot Desktop runs on the person's own computer can be given a folder there, so a hosted one
+        never can, and "Needs OpenBot Desktop" would send them to something that can't help.
+      */}
+      {(agentId || hosted) && hostAccess.data?.desktop === false ? null : (
         <HostFoldersSection
           connected={hostAccess.data?.connected ?? false}
           desktop={hostAccess.data?.desktop !== false}
@@ -295,6 +343,7 @@ export function ComputersPage({
           pending={hostAccess.data?.pending ?? []}
           personal={personal}
           problem={hostProblem}
+          unread={Boolean(hostUnread)}
           requestingBotId={
             requestGrant.isPending
               ? (requestGrant.variables?.botId ?? null)
@@ -318,18 +367,19 @@ export function ComputersPage({
                 : "Its computer"
               : personal
                 ? "Your Bots' browsers"
-                : "Computers in this deployment"
+                : "Computers in this organization"
           }
         >
-          {setState.error ? (
-            <p
-              className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
-              role="alert"
+          <FailureNotice className="mb-3" error={setState.error} />
+          {noComputers ? (
+            <PageEmpty
+              icon={IconDeviceDesktopOff}
+              title="No computers for Bots"
             >
-              {setState.error.message}
-            </p>
-          ) : null}
-          {computers === null && problem ? (
+              Bots can't browse or run commands on this OpenBot. Set up
+              computers for Bots, and they show up here.
+            </PageEmpty>
+          ) : computers === null && problem && !held ? (
             <PageEmpty
               icon={IconAlertTriangle}
               title="Couldn't load the list"
@@ -348,7 +398,12 @@ export function ComputersPage({
               {computers.map((computer, index) => (
                 <StaggerItem index={index} key={rowId(computer)}>
                   <Item size="sm">
-                    <ItemContent>
+                    {/*
+                     * Up to three buttons sit beside the words. Held to a width a name can be read in,
+                     * so on a narrow window the buttons wrap under the words on every row alike,
+                     * instead of squeezing the name to one word a line.
+                     */}
+                    <ItemContent className="min-w-56">
                       <ItemTitle title={computer.computer}>
                         {titleOf(computer)}
                       </ItemTitle>
@@ -368,6 +423,15 @@ export function ComputersPage({
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>
+                      {restorable(computer) ? (
+                        <Button
+                          onClick={() => restoreOther.ask(computer)}
+                          size="sm"
+                          variant="outline"
+                        >
+                          Restore…
+                        </Button>
+                      ) : null}
                       {computer.updateAvailable ? (
                         <Button
                           disabled={busy === rowId(computer)}
@@ -417,6 +481,18 @@ export function ComputersPage({
           )}
         </PageSection>
       )}
+
+      {agentId && restoreOther.about ? (
+        <RestoreComputerDialog
+          botId={agentId}
+          computer={restoreOther.about.computer}
+          name={ownerOf(restoreOther.about)}
+          onOpenChange={(open) => {
+            if (!open) restoreOther.close();
+          }}
+          open={restoreOther.open}
+        />
+      ) : null}
 
       {/*
        * A DIALOG RATHER THAN AN INLINE CONFIRM. Resetting signs a Bot out of everything it has ever
@@ -518,7 +594,8 @@ export function ComputersPage({
         </DialogContent>
       </Dialog>
 
-      {agentId && !admin ? null : personal ? (
+      {/* What Stop, Reset and Update do, which is about computers: not said where there are none. */}
+      {(agentId && !admin) || noComputers ? null : personal ? (
         <p className="mt-4 text-muted-foreground text-sm">
           <strong>Stop browser</strong> closes a browser and keeps its sign-ins.
           It starts again the next time it's needed. <strong>Reset</strong>{" "}
@@ -549,6 +626,13 @@ export function ComputersPage({
           .
         </p>
       )}
+      {/* Below the words about the list's buttons, which are about the list above them. */}
+      {agentId ? (
+        <WorkspaceSnapshotsSection
+          botId={agentId}
+          enabled={noComputers === false}
+        />
+      ) : null}
       {children}
     </>
   );
@@ -584,7 +668,10 @@ type HostFoldersSectionProps = {
    * edition the desktop's owner may be somebody else, so a waiting request names them instead.
    */
   personal: boolean;
-  problem: string | null;
+  /** A refused press, or a read the section couldn't make: said in a box over the section. */
+  problem: unknown;
+  /** The desktop app's state or the Bots couldn't be read, so neither is guessed at. */
+  unread: boolean;
   requestingBotId: string | null;
   revokingGrantId: string | null;
   stopping: boolean;
@@ -603,6 +690,7 @@ function HostFoldersSection({
   pending,
   personal,
   problem,
+  unread,
   requestingBotId,
   revokingGrantId,
   stopping,
@@ -622,23 +710,16 @@ function HostFoldersSection({
       description="Choose folders a Bot can read on this computer. The desktop app asks before each edit or command. Access ends when you stop OpenBot."
       title="Folders on this computer"
     >
-      {problem ? (
-        <p
-          className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
-          role="alert"
-        >
-          {problem}
-        </p>
-      ) : null}
+      <FailureNotice className="mb-3" error={problem} />
 
-      {desktop && !connected && !loading ? (
-        <p className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+      {desktop && !connected && !loading && !unread ? (
+        <p className="mb-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
           The desktop app is offline. Open it to approve folders or run
           commands.
         </p>
       ) : null}
 
-      {loading ? null : !desktop ? (
+      {loading || unread ? null : !desktop ? (
         <PageEmpty icon={IconDeviceDesktop} title="Needs OpenBot Desktop">
           This OpenBot isn't running in the desktop app. Use OpenBot Desktop to
           let Bots read folders on this computer.
@@ -757,7 +838,7 @@ function FolderGrantList({
       ))}
       {botPending.map((request) => (
         <div
-          className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
+          className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm"
           key={request.operationId}
         >
           {pendingSentence(request, personal)}

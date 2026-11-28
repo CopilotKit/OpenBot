@@ -116,6 +116,14 @@ def test_a_routine_starts_claude_code_with_openbots_working_rules(sdk):
     assert "take it in the same reply instead of saying you will" in system_prompt
     assert "Nobody is watching this run" in system_prompt
     assert "What I could not confirm" in system_prompt
+    # A finished job's report: a sentence or two, one more for what to check, shown by example.
+    # Claude Sonnet 5.5 here wrote 166 to 252 words for a three-app job, as it did on OpenBot's own
+    # runner, where GPT-5.6 Terra took 45 to 84.
+    assert "Add a sentence only for what the person must check" in system_prompt
+    assert "a whole report is: 'I saved this week's 4 invoices" in system_prompt
+    assert "then anything you could not confirm, a sentence each" not in system_prompt
+    # The claims rule is kept, and an inference is still called unconfirmed.
+    assert "call anything you could not check unconfirmed; an inference, however likely, is still unconfirmed." in system_prompt
     # Told OpenBot asks before what it gives the Bot, so the Bot does not ask a second time.
     assert "When you use the apps and tools OpenBot gives you, OpenBot asks" in system_prompt
     # The server's instructions are the whole prompt, first: Claude Code's own is not added.

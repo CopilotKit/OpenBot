@@ -1,41 +1,17 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-} from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, waitFor } from "@testing-library/react";
-import { WaitingForYou } from "@/components/approvals/waiting";
-import type { ApprovalInboxData } from "@/lib/approvals";
+import { describe, expect, test } from "bun:test";
 import {
   columnFor,
   conversationPath,
   isSkinScreen,
   tabForPath,
 } from "@/skins/openduet/places";
-import { waitingCount } from "@/skins/openduet/tasks-model";
-import { settleReactWork } from "./settle-react-work";
 
 /*
  * The rules OpenDuet's frame runs on. Which paths are tabs decides whether a screen has a tab bar
- * or a back disc; which column a path gets decides whether a page keeps OpenBot's width; and the
- * Tasks badge has to count exactly the rows OpenBot's own Needs input list draws.
+ * or a back disc, and which column a path gets decides whether a page keeps OpenBot's width. The
+ * Tasks badge is OpenBot's own count (`useWaitingCount`), held to the Bots badge in
+ * skins-openduet-frame.test.tsx.
  */
-
-beforeAll(() => GlobalRegistrator.register());
-afterEach(cleanup);
-const originalFetch = global.fetch;
-afterEach(() => {
-  global.fetch = originalFetch;
-});
-afterAll(async () => {
-  await settleReactWork();
-  GlobalRegistrator.unregister();
-});
 
 describe("which tab a path is", () => {
   test("every conversation OpenBot draws is Chat", () => {
@@ -108,73 +84,4 @@ describe("how wide the column is", () => {
     ])
       expect(columnFor(path)).toBe("page");
   });
-});
-
-const request = (
-  id: string,
-  status: string,
-): ApprovalInboxData["requests"][number] => ({
-  id,
-  status,
-  createdAt: "2026-10-27T10:00:00.000Z",
-  action: {
-    botId: "b-1",
-    toolRef: "computer_run_command",
-    effect: "write",
-    scope: "workspace",
-    threadId: "t-1",
-    args: { command: "echo hello" },
-    target: null,
-  },
-});
-
-/*
- * Found in review: Tasks drew approvals with its own copy of OpenBot's list. It now draws OpenBot's
- * `WaitingForYou`, and the only thing the skin still works out is the badge's number. This renders
- * OpenBot's list against the same inbox and holds the two to the same count, so a change to what
- * the list shows fails here rather than leaving a badge that disagrees with the screen.
- */
-test("the Tasks badge counts exactly what OpenBot's Needs input list draws", async () => {
-  const inbox: ApprovalInboxData = {
-    enabled: true,
-    requests: [
-      request("waiting", "pending"),
-      request("allowed", "allowed"),
-      request("denied", "denied"),
-    ],
-    rules: [],
-    teamRules: [],
-    questions: [
-      {
-        id: "q-1",
-        botId: "b-1",
-        threadId: "t-1",
-        question: "Which kiln?",
-        createdAt: "2026-10-27T10:00:00.000Z",
-      },
-    ],
-  };
-  global.fetch = (async (input: RequestInfo | URL) => {
-    const path = String(input).split("?")[0];
-    if (path === "/api/approvals") return Response.json(inbox);
-    if (path === "/api/agents")
-      return Response.json({ agents: [{ id: "b-1", name: "Ops Bot" }] });
-    return Response.json({ error: "not served" }, { status: 404 });
-  }) as typeof fetch;
-  const view = render(
-    <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
-      <WaitingForYou />
-    </QueryClientProvider>,
-  );
-  await waitFor(() =>
-    expect(view.container.querySelectorAll('[data-slot="item"]').length).toBe(
-      waitingCount(inbox),
-    ),
-  );
-  expect(waitingCount(inbox)).toBe(2);
-  expect(waitingCount(undefined)).toBe(0);
 });

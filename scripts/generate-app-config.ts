@@ -1,19 +1,74 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, resolve } from "node:path";
-import {
-  createApplicationConfiguration,
-  loadTenantPackage,
-} from "../server/src/tenant-package";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { parse } from "yaml";
+
+/**
+ * What the browser is told about this deployment at build time: the brand, and nothing else.
+ *
+ * Read from the tenant package's `brand.yaml` alone. The rest of the package (its Bots, channels,
+ * model and skills) is the back end's to load and check when it starts, and the app is built
+ * without the back end's code, so this reads the two fields it needs by the same rules the back end
+ * reads them: `${NAME}` and `${NAME:-fallback}` resolved from the environment, and `tenant.id` and
+ * `tenant.product_name` required as non-empty text.
+ */
 
 const projectRoot = resolve(import.meta.dir, "..");
 const configuredTenantPackageDirectory = process.env.TENANT_PACKAGE_DIR;
+// Relative to the server's working directory, as the back end resolves it (`/app/server` in its
+// image, `server/` in a checkout), so one `.env` line names the same package for both.
 const tenantPackageDirectory = configuredTenantPackageDirectory
   ? isAbsolute(configuredTenantPackageDirectory)
     ? configuredTenantPackageDirectory
     : resolve(projectRoot, "server", configuredTenantPackageDirectory)
   : resolve(projectRoot, "examples/fintech");
-const tenantPackage = await loadTenantPackage(tenantPackageDirectory);
-const applicationConfiguration = createApplicationConfiguration(tenantPackage);
+
+function expandEnvironment(value: string, filename: string): string {
+  return value.replace(
+    /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g,
+    (_, name: string, fallback: string | undefined) => {
+      const resolved = process.env[name];
+      if (resolved !== undefined && resolved !== "") return resolved;
+      if (fallback !== undefined) return fallback;
+      throw new Error(
+        `${filename} refers to \${${name}}, which is not set in this environment.`,
+      );
+    },
+  );
+}
+
+function record(value: unknown, name: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${name} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requiredString(value: unknown, name: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${name} must be a non-empty string`);
+  }
+  return value;
+}
+
+const brandText = expandEnvironment(
+  await readFile(join(tenantPackageDirectory, "brand.yaml"), "utf8"),
+  "brand.yaml",
+);
+let brand: Record<string, unknown>;
+try {
+  brand = record(parse(brandText), "brand.yaml");
+} catch (error) {
+  throw new Error(
+    `brand.yaml is invalid: ${error instanceof Error ? error.message : "unknown error"}`,
+  );
+}
+const tenant = record(brand.tenant, "brand.tenant");
+const applicationConfiguration = {
+  brand: {
+    tenantId: requiredString(tenant.id, "tenant.id"),
+    productName: requiredString(tenant.product_name, "tenant.product_name"),
+  },
+};
 const outputPath = resolve(
   projectRoot,
   "app/src/lib/generated/application-config.ts",

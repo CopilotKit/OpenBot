@@ -4,6 +4,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ReachingYou } from "@/components/delivery/reaching-you";
+import { answerBotsList } from "./bots-api";
+import { CONVERSATIONS_PATH, conversationPage } from "./conversations-api";
+import {
+  CONFIRM_PHONE_PATH,
+  LINK_CHAT_PATH,
+  notificationsResponse,
+  VERIFY_PHONE_PATH,
+} from "./notifications-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** A Bot's Reaching you page: where this Bot's conversations continue outside OpenBot. */
@@ -35,7 +43,7 @@ const channel = (id: string, name: string, agentIds: string[]) => ({
 
 const binding = (id: string, agentId: string, address: string) => ({
   id,
-  transport: "slack",
+  transport: "slack" as const,
   channelId: `channel-${agentId}`,
   agentId,
   address,
@@ -45,48 +53,48 @@ const binding = (id: string, agentId: string, address: string) => ({
 const writes: { request: string; body: unknown }[] = [];
 function serving(sms = false) {
   writes.length = 0;
+  const today = {
+    bindings: [
+      binding("b1", "expenses", "finance-bot-dm"),
+      binding("b2", "knowledge", "docs-bot-dm"),
+    ],
+    available: { slack: true, teams: false, sms, push: false },
+  };
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
-    if (method !== "GET") {
-      writes.push({
-        request: `${method} ${url}`,
-        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
-      });
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+    if (method !== "GET") writes.push({ request: `${method} ${url}`, body });
+    if (method === "POST" && url === LINK_CHAT_PATH)
       return Response.json({
         platform: "slack",
         code: "abc",
         command: "link abc",
-        expiresInMinutes: 10,
-        challengeId: "challenge-1",
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
       });
-    }
-    if (url.startsWith("/api/delivery")) {
+    if (method === "POST" && url === VERIFY_PHONE_PATH)
       return Response.json({
-        bindings: [
-          binding("b1", "expenses", "finance-bot-dm"),
-          binding("b2", "knowledge", "docs-bot-dm"),
-        ],
-        devices: [],
-        deliveries: [],
-        available: { slack: true, teams: false, sms, push: false },
+        verificationId: "challenge-1",
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
       });
-    }
-    if (url.startsWith("/api/channels")) {
-      return Response.json({
-        channels: [
+    const answered = notificationsResponse(method, url, today, body);
+    if (answered) return answered;
+    if (url.split("?")[0] === CONVERSATIONS_PATH) {
+      return Response.json(
+        conversationPage([
           channel("channel-expenses", "Finance desk", ["expenses"]),
           channel("channel-knowledge", "Docs desk", ["knowledge"]),
-        ],
-        nextCursor: null,
-      });
+        ]),
+      );
     }
-    return Response.json({
-      agents: [
-        { id: "expenses", name: "Expenses" },
-        { id: "knowledge", name: "Knowledge" },
-      ],
-    });
+    return (
+      answerBotsList(input, init, {
+        visible: [
+          { id: "expenses", name: "Expenses" },
+          { id: "knowledge", name: "Knowledge" },
+        ],
+      }) ?? Response.json({})
+    );
   }) as unknown as typeof fetch;
 }
 
@@ -141,11 +149,11 @@ test("linking Slack needs only a conversation, and warns that it moves the accou
   await user.click(view.getByRole("button", { name: "Link Slack" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      request: "POST /api/delivery/opentag/start",
+      request: `POST ${LINK_CHAT_PATH}`,
       body: {
-        channelId: "channel-expenses",
-        agentId: "expenses",
         platform: "slack",
+        conversationId: "channel-expenses",
+        botId: "expenses",
       },
     }),
   );
@@ -170,9 +178,7 @@ test("closing the dialog keeps the link code, so reopening the row shows it agai
     view.getByRole("combobox", { name: /^Conversation/ }).textContent,
   ).toContain("Finance desk");
   expect(
-    writes.filter(
-      (write) => write.request === "POST /api/delivery/opentag/start",
-    ),
+    writes.filter((write) => write.request === `POST ${LINK_CHAT_PATH}`),
   ).toHaveLength(1);
 });
 
@@ -219,11 +225,11 @@ test("a phone is verified for the chosen conversation, then asks for its code", 
   );
   await waitFor(() =>
     expect(writes).toContainEqual({
-      request: "POST /api/delivery/sms/start",
+      request: `POST ${VERIFY_PHONE_PATH}`,
       body: {
-        channelId: "channel-expenses",
-        agentId: "expenses",
         phone: "+15551234567",
+        conversationId: "channel-expenses",
+        botId: "expenses",
       },
     }),
   );
@@ -231,8 +237,8 @@ test("a phone is verified for the chosen conversation, then asks for its code", 
   await user.click(view.getByRole("button", { name: "Confirm phone" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      request: "POST /api/delivery/sms/confirm",
-      body: { challengeId: "challenge-1", code: "123456" },
+      request: `POST ${CONFIRM_PHONE_PATH}`,
+      body: { verificationId: "challenge-1", code: "123456" },
     }),
   );
 });

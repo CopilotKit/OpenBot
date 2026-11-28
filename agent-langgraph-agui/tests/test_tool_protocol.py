@@ -113,7 +113,25 @@ def boundary(monkeypatch):
                 [captured["force_call"]] if captured["force_call"] else names
             )
             offered = {t["function"]["name"] for t in body.get("tools", [])}
-            if messages[-1]["role"] == "tool":
+            done = sum(1 for m in messages if m["role"] == "tool")
+            if captured.get("steps") and done < captured["steps"]:
+                # A long task: one more call after each result, until it has taken its steps.
+                delta = {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": f"call-step-{done}",
+                            "type": "function",
+                            "function": {
+                                "name": names[0],
+                                "arguments": json.dumps({"value": f"step {done}"}),
+                            },
+                        }
+                    ],
+                }
+                finish = "tool_calls"
+            elif messages[-1]["role"] == "tool":
                 content = "Observed tool result: " + (
                     " | ".join(m["content"] for m in messages if m["role"] == "tool")
                     if captured.get("all_results")
@@ -346,6 +364,148 @@ async def test_a_provider_out_of_credit_is_told_as_that_never_as_sign_in_again(
     assert said in message
 
 
+# OpenBot's sign-in proxy answering for Google, as it passes on Google's own refusals: Google's
+# words (captured with a free-tier Gemini sign-in on 2026-11-17), and the kind of refusal as `type`.
+GEMINI_SIGN_IN_QUOTA = (
+    429,
+    {
+        "error": {
+            "message": "You exceeded your current quota, please check your plan and billing "
+            "details. For more information on this error, head to: "
+            "https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head "
+            "to: https://ai.dev/rate-limit. Quota exceeded for metric… Please retry in "
+            "9h10m18.213644379s.",
+            "type": "rate_limit",
+            "code": "RESOURCE_EXHAUSTED",
+            "param": None,
+        }
+    },
+)
+GEMINI_SIGN_IN_BUSY = (
+    503,
+    {
+        "error": {
+            "message": "This model is currently experiencing high demand. Spikes in demand are "
+            "usually temporary. Please try again later.",
+            "type": "server_error",
+            "code": "UNAVAILABLE",
+            "param": None,
+        }
+    },
+)
+GEMINI_SIGN_IN_RETIRED = (
+    404,
+    {
+        "error": {
+            "message": "This model models/gemini-2.5-flash is no longer available to new users. "
+            "Please update your code to use models/gemini-3.8-flash for the latest features and "
+            "improvements. We recommend you to use the Interactions API "
+            "(https://aistudio.google.com/docs/get-started).",
+            "type": "model_not_found",
+            "code": "NOT_FOUND",
+            "param": None,
+        }
+    },
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "refusal,category",
+    [
+        (GEMINI_SIGN_IN_QUOTA, "rate_limit"),
+        (GEMINI_SIGN_IN_BUSY, "server_error"),
+        (GEMINI_SIGN_IN_RETIRED, "model_not_found"),
+    ],
+)
+async def test_a_sign_in_refusal_keeps_google_words_and_the_kind_it_names(
+    boundary, refusal, category
+):
+    """Found on OpenBot Desktop signed in with Gemini: "ping" got no answer anybody could read.
+
+    The run ends with Google's own words and the kind the sign-in proxy named, as `errorCategory`,
+    for the server to say. Google's free-tier quota is a limit that resets, never out of credit,
+    however much its words mention billing.
+    """
+    boundary["model_refusal"] = refusal
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR", "every run ends with a terminal event"
+    status, body = refusal
+    assert events[-1]["code"] == "OPENBOT_MODEL_REFUSED"
+    assert events[-1]["message"] == f"Error code: {status} - {body['error']['message']}"
+    assert events[-1]["metadata"] == {"errorCategory": category}
+
+
+@pytest.mark.asyncio
+async def test_a_provider_type_that_is_not_a_category_sends_none(boundary):
+    boundary["model_refusal"] = OPENAI_TOO_MANY_TOOLS
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["code"] == "OPENBOT_MODEL_REFUSED"
+    assert not events[-1].get("metadata")
+
+
+def closed_port():
+    """A loopback port with nothing listening on it."""
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+@pytest.mark.asyncio
+async def test_a_model_address_with_nothing_listening_is_told_as_unreachable(
+    boundary, monkeypatch
+):
+    """Seen on OpenBot Desktop: an OpenAI-compatible base URL at host.docker.internal:48123 with
+    nothing listening. The harness log said `openai.APIConnectionError` ("All connection attempts
+    failed") and the person read only "The Bot stopped before it finished answering. Try again.",
+    which says nothing about the model or where to change it."""
+    port = closed_port()
+    monkeypatch.setenv("OPENAI_BASE_URL", f"http://synthetic-user:synthetic-secret@127.0.0.1:{port}/v1")
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR", "every run ends with a terminal event"
+    # Coded, so the server says it with the step that fits its edition.
+    assert events[-1]["code"] == "OPENBOT_MODEL_UNREACHABLE"
+    assert events[-1]["message"] == (
+        f"OpenBot couldn't reach the AI model at 127.0.0.1:{port}. "
+        "Check that it's running and the address is right."
+    )
+    # The address is host and port only: never the credentials or the path a URL can carry.
+    assert "synthetic-secret" not in json.dumps(events)
+    assert not boundary["model"], "nothing answered, so nothing was asked"
+
+
+@pytest.mark.asyncio
+async def test_a_model_host_that_does_not_exist_is_told_the_same_way(boundary, monkeypatch):
+    # `.invalid` never resolves (RFC 2606), so this is a DNS failure and never leaves the machine.
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://openbot-model.invalid:48123/v1")
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR"
+    assert events[-1]["code"] == "OPENBOT_MODEL_UNREACHABLE"
+    assert events[-1]["message"] == (
+        "OpenBot couldn't reach the AI model at openbot-model.invalid:48123. "
+        "Check that it's running and the address is right."
+    )
+
+
+def test_a_model_that_never_answers_in_time_is_unreachable_too():
+    """A timeout is the third way an address can't be reached, and is told the same way."""
+    import openai
+
+    from src.tool_runtime import model_address, model_unreachable
+
+    request = httpx.Request("POST", "http://10.0.0.7:8080/v1/chat/completions")
+    timeout = openai.APITimeoutError(request=request)
+    assert model_unreachable(timeout)
+    assert model_address(timeout) == "10.0.0.7:8080"
+    # A provider that answered, with whatever status, is not unreachable: it said something.
+    refusal = openai.APIStatusError(
+        "Error code: 503", response=httpx.Response(503, request=request), body=None
+    )
+    assert not model_unreachable(refusal)
+
+
 def test_the_provider_is_named_by_who_serves_the_model(monkeypatch):
     from src.tool_runtime import provider_name
 
@@ -517,6 +677,22 @@ async def test_deployment_tool_executes_only_via_signed_callback_and_continues(
 
 
 @pytest.mark.asyncio
+async def test_a_turn_of_many_deployment_tool_steps_runs_to_its_answer(boundary):
+    """No count ends a turn. The deployment's tools are answered here, so a long task is many steps
+    in one run, and LangGraph's 25 graph steps ended it at its twelfth call with an error."""
+    boundary["steps"] = 30
+    events = await run_protocol(
+        run_input(["granted_lookup"], deployment=["granted_lookup"])
+    )
+    assert len(boundary["callback"]) == 30
+    assert len(boundary["model"]) == 31
+    assert any(
+        m.get("role") == "assistant" and "Observed tool result" in (m.get("content") or "")
+        for m in snapshot(events)
+    ), "the turn ends in the model's answer"
+
+
+@pytest.mark.asyncio
 async def test_mixed_surface_and_deployment_turn_yields_without_executing_either(
     boundary,
 ):
@@ -577,9 +753,9 @@ async def test_http_refusal_is_not_reported_as_tool_success(boundary):
 async def test_http_refusal_tells_the_model_the_deployments_reason(
     boundary, status, reply, expected
 ):
-    # `/api/agent-tools/call` answers a callback it will not run with the reason under `error`. The
-    # TypeScript LangGraph Bot passes that reason on (`agent-langgraph/src/tool-answer.ts`); without
-    # it the model knows only a status code, and cannot tell the person why or repair its call.
+    # `/api/agent-tools/call` answers a callback it will not run with the reason under `error`, and
+    # the harness passes that reason on: without it the model knows only a status code, and cannot
+    # tell the person why or repair its call.
     boundary["callback_status"] = status
     boundary["callback_body"] = reply
     await run_protocol(run_input(["granted_lookup"], deployment=["granted_lookup"]))
@@ -661,15 +837,19 @@ async def test_concurrent_requests_keep_tool_ownership_and_assertions_separate(
 
 
 @pytest.mark.asyncio
-async def test_undeclared_model_tool_is_refused_without_callback(boundary):
+async def test_undeclared_model_tool_is_handed_back_without_callback(boundary):
+    """A call to a tool this run was not offered is never run here, and never ends the run in an
+    error: it is handed back for the caller to answer, as a call the surface owns is."""
     boundary["force_call"] = "undeclared_tool"
     events = await run_protocol(
         run_input(["granted_lookup"], deployment=["granted_lookup", "undeclared_tool"]),
         allow_error=True,
     )
-    assert any(
-        e["type"] == "RUN_ERROR" and "not offered" in e["message"] for e in events
-    )
+    assert not any(e["type"] == "RUN_ERROR" for e in events)
+    assert events[-1]["type"] == "RUN_FINISHED"
+    assert [
+        e["toolCallName"] for e in events if e["type"] == "TOOL_CALL_START"
+    ] == ["undeclared_tool"]
     assert boundary["callback"] == []
 
 

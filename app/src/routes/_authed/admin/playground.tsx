@@ -16,15 +16,22 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  deleteSandboxedMutationOptions,
-  publishSandboxedMutationOptions,
-  type SandboxedDraftInput,
-  saveSandboxedDraftMutationOptions,
-} from "@/lib/sandboxed/mutations";
+  deletePlaygroundComponentMutationOptions,
+  type PlaygroundDraftInput,
+  publishPlaygroundMutationOptions,
+  savePlaygroundDraftMutationOptions,
+} from "@/lib/components/mutations";
 import {
-  type SandboxedRecord,
-  sandboxedListQueryOptions,
-} from "@/lib/sandboxed/queries";
+  type PlaygroundRecord,
+  playgroundListQueryOptions,
+} from "@/lib/components/queries";
+import {
+  type Failure,
+  failureSaid,
+  isHeld,
+  loadFailure,
+} from "@/lib/load-failure";
+import { cn } from "@/lib/utils";
 
 /**
  * Browser-authored components are edited as drafts, previewed in the production sandbox renderer,
@@ -52,7 +59,7 @@ type JsonObjectResult =
   | { ok: false; message: string };
 
 type PlaygroundValidation =
-  | { ok: true; input: SandboxedDraftInput }
+  | { ok: true; input: PlaygroundDraftInput }
   | {
       ok: false;
       fields: { argumentSchema?: string; sampleArguments?: string };
@@ -118,9 +125,11 @@ export function validatePlaygroundDraft(draft: Draft): PlaygroundValidation {
 function PlaygroundPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const queryClient = useQueryClient();
-  const { data: components } = useQuery(sandboxedListQueryOptions());
+  const saved = useQuery(playgroundListQueryOptions());
+  const components = saved.data;
   const [draft, setDraft] = useState<Draft>(STARTER);
-  const [error, setError] = useState<string | null>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [error, setError] = useState<Failure | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const set = (field: keyof Draft) => (value: string) => {
@@ -133,31 +142,32 @@ function PlaygroundPage() {
   const sample = validation.ok ? validation.input.sampleArguments : null;
 
   /* Every write here reports into the same banner, so they share one failure handler. */
-  const report = { onError: (thrown: Error) => setError(thrown.message) };
+  const report = { onError: (thrown: Error) => setError(thrown) };
   const saveDraft = useMutation({
-    ...saveSandboxedDraftMutationOptions(queryClient),
+    ...savePlaygroundDraftMutationOptions(queryClient),
     ...report,
   });
   const publishDraft = useMutation({
-    ...publishSandboxedMutationOptions(queryClient),
+    ...publishPlaygroundMutationOptions(queryClient),
     ...report,
   });
   const removeComponent = useMutation({
-    ...deleteSandboxedMutationOptions(queryClient),
+    ...deletePlaygroundComponentMutationOptions(queryClient),
     ...report,
   });
   const busy =
     saveDraft.isPending || publishDraft.isPending || removeComponent.isPending;
   const canWrite = Boolean(draft.slug && draft.title) && validation.ok && !busy;
 
-  const input = (): SandboxedDraftInput | null => {
+  const input = (): PlaygroundDraftInput | null => {
     const current = validatePlaygroundDraft(draft);
     if (!current.ok) {
       setNotice(null);
-      setError(
-        Object.values(current.fields)[0] ??
+      setError({
+        message:
+          Object.values(current.fields)[0] ??
           "Fix the JSON fields before saving.",
-      );
+      });
       return null;
     }
     return current.input;
@@ -179,7 +189,7 @@ function PlaygroundPage() {
     publishDraft.mutate(payload, { onSuccess: () => setNotice("Published.") });
   };
 
-  const load = (component: SandboxedRecord) =>
+  const load = (component: PlaygroundRecord) =>
     setDraft({
       slug: component.name.replace(/^custom_/, ""),
       title: component.title,
@@ -238,15 +248,21 @@ function PlaygroundPage() {
 
       {error ? (
         <div
-          className="border-border border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
+          className={cn(
+            "border-border border-b px-6 py-2 text-sm",
+            // OpenBot holding off is news, not a failure: no red band (lib/load-failure.tsx).
+            isHeld(error)
+              ? "bg-muted/40 text-muted-foreground"
+              : "bg-destructive/10 text-destructive",
+          )}
           role="alert"
         >
-          {error}
+          {failureSaid(error)}
         </div>
       ) : null}
       {notice ? (
         <div
-          className="border-border border-b bg-emerald-50 px-6 py-2 text-emerald-700 text-sm"
+          className="border-border border-b bg-success/10 px-6 py-2 text-success text-sm"
           role="status"
         >
           {notice}
@@ -334,7 +350,15 @@ function PlaygroundPage() {
             <div className="border-border border-b px-4 py-2 font-medium text-sm">
               Saved here
             </div>
-            {(components ?? []).length === 0 ? (
+            {/* "Nothing saved yet" only once the list has said so: a list that couldn't be read says why. */}
+            {saved.isPending ? null : saved.error ? (
+              <p className="px-4 py-3 text-destructive text-sm" role="alert">
+                {loadFailure(
+                  saved.error,
+                  "Couldn't load the saved components. Try again in a moment.",
+                )}
+              </p>
+            ) : (components ?? []).length === 0 ? (
               <p className="px-4 py-3 text-muted-foreground text-sm">
                 Nothing saved yet. Save a draft to see it here.
               </p>
@@ -400,7 +424,7 @@ function PlaygroundPage() {
           <DialogHeader>
             <DialogTitle>Delete {deleting}?</DialogTitle>
             <DialogDescription>
-              It's removed from this deployment, and no Bot can draw it. You
+              It's removed from this organization, and no Bot can draw it. You
               can't undo this.
             </DialogDescription>
           </DialogHeader>
