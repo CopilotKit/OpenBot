@@ -17,7 +17,14 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act, cleanup, render, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { NativeSignedOut } from "@/components/auth/native-signed-out";
@@ -445,6 +452,92 @@ describe("signed out in the shell", () => {
     expect(signsInNatively({ "native-sign-in": "web" })).toBe(false);
     inShell(false);
     expect(signsInNatively({})).toBe(false);
+  });
+});
+
+describe("the keyboard in the shell", () => {
+  /** A field outside the pages, so it is still there after a move and only the shell can blur it. */
+  function focusedField() {
+    const field = document.createElement("input");
+    field.type = "text";
+    document.body.append(field);
+    field.focus();
+    expect(document.activeElement).toBe(field);
+    return field;
+  }
+
+  test("moving to another page puts the keyboard away; a change of search alone does not", async () => {
+    inShell(true);
+    serve([]);
+    const { view, router } = renderApp("/");
+    await view.findByRole("heading", { name: "Home" });
+    const field = focusedField();
+    try {
+      await act(() =>
+        router.navigate({ to: "/", search: { q: "x" } as never }),
+      );
+      expect(document.activeElement).toBe(field);
+      await act(() => router.navigate({ to: "/bots" }));
+      await view.findByRole("heading", { name: "Bots" });
+      expect(document.activeElement).not.toBe(field);
+    } finally {
+      field.remove();
+    }
+  });
+
+  test("opening the Account menu takes the focus off a field", async () => {
+    inShell(true);
+    serve([]);
+    const { view } = renderApp("/");
+    await view.findByRole("heading", { name: "Home" });
+    const field = focusedField();
+    try {
+      // A click alone, which moves no focus itself: what moves it is the menu opening.
+      fireEvent.click(view.getByRole("button", { name: "Account" }));
+      await within(document.body).findByRole("menuitem", { name: "Settings" });
+      await waitFor(() => expect(document.activeElement).not.toBe(field));
+    } finally {
+      field.remove();
+    }
+  });
+
+  test("a tap on a part of the page that does nothing puts the keyboard away; a tap on a button keeps it", async () => {
+    inShell(true);
+    serve([]);
+    const { view } = renderApp("/");
+    const heading = await view.findByRole("heading", { name: "Home" });
+    const field = focusedField();
+    const tap = (target: Element) => {
+      fireEvent.pointerDown(target, { clientX: 20, clientY: 20 });
+      fireEvent.pointerUp(target, { clientX: 22, clientY: 21 });
+    };
+    try {
+      tap(view.getByRole("button", { name: "Account" }));
+      expect(document.activeElement).toBe(field);
+      // A drag that scrolls is cancelled by the browser, not a tap.
+      fireEvent.pointerDown(heading, { clientX: 20, clientY: 20 });
+      fireEvent.pointerCancel(heading);
+      fireEvent.pointerUp(heading, { clientX: 20, clientY: 200 });
+      expect(document.activeElement).toBe(field);
+      tap(heading);
+      expect(document.activeElement).not.toBe(field);
+    } finally {
+      field.remove();
+    }
+  });
+
+  test("outside the shell the page leaves the keyboard alone", async () => {
+    serve([]);
+    const { view } = renderApp("/");
+    const heading = await view.findByRole("heading", { name: "Home" });
+    const field = focusedField();
+    try {
+      fireEvent.pointerDown(heading, { clientX: 20, clientY: 20 });
+      fireEvent.pointerUp(heading, { clientX: 20, clientY: 20 });
+      expect(document.activeElement).toBe(field);
+    } finally {
+      field.remove();
+    }
   });
 });
 
