@@ -826,8 +826,6 @@ test("the first screen offers OpenBot (Self-Contained), then OpenBot for Busines
   expect(
     view.getByRole("heading", { name: "What this computer needs" }),
   ).toBeTruthy();
-  // Beside Install, before this screen goes on to Account. Account opens the browser
-  // the moment it appears, so the sign-in has to be said here.
   expect(
     [...view.container.querySelectorAll(".lede")].map((p) => p.textContent),
   ).toEqual([
@@ -1877,7 +1875,6 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     expect(page.textContent).toContain(
       "Setup takes 1 to 10 minutes, depending on your internet speed.",
     );
-    // Beside Install, before this screen goes on to Account, which opens the browser.
     expect(page.textContent).toContain(
       "Next, your browser opens so you can sign in and get a free license key.",
     );

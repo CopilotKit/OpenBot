@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **OpenBot Desktop's Self-Contained install says the browser opens next.** Beside Install, the
+  first screen now says your browser opens so you can sign in and get a free license key. The
+  Account step still opens the browser as soon as it appears.
+
 - **Unbiased AI is no longer an AI provider choice.** OpenBot Desktop's setup, Settings and Admin
   AI providers, Connect another AI, and the conversation and Bot model pickers no longer offer it,
   and OpenBot Desktop's Sign in with Unbiased AI is gone. Settings saved for it and the model shown
