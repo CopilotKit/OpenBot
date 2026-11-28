@@ -198,7 +198,22 @@ final class ShellController: NSObject, WebControllerDelegate {
     /// complete and the body has something in it, checking a few times.
     private func checkPageDrawn(attempt: Int = 0) {
         guard model.pageLoading else { return }
-        let script = "document.readyState === 'complete' && !!document.body && document.body.innerText.trim().length > 0"
+        // Drawn: the document is complete and at least three pieces of text are really on screen
+        // (screen-reader-only text measures 1 px and does not count).
+        let script = """
+        (function () {
+          if (document.readyState !== 'complete' || !document.body) return false;
+          var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          var seen = 0, node, range = document.createRange();
+          while ((node = walker.nextNode()) && seen < 3) {
+            if (!node.textContent.trim()) continue;
+            range.selectNodeContents(node);
+            var r = range.getBoundingClientRect();
+            if (r.width > 4 && r.height > 4 && r.bottom > 0 && r.top < innerHeight) seen++;
+          }
+          return seen >= 3;
+        })()
+        """
         web.webView.evaluateJavaScript(script) { [weak self] result, _ in
             guard let self = self else { return }
             if (result as? Bool) == true {
