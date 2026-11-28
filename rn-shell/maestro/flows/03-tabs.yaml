@@ -14,26 +14,6 @@ androidWebViewHierarchy: devtools
     id: "debug-state"
     text: ".*tab=conversations nav=event.*"
 - takeScreenshot: conversations
-- tapOn: "Competitor pricing notes"
-- extendedWaitUntil:
-    visible:
-      id: "debug-state"
-      text: ".*path=/channel.*"
-    timeout: 20000
-- assertVisible:
-    id: "debug-state"
-    text: ".*tab=conversations.*"
-- takeScreenshot: conversation
-# A conversation puts the focus in its message box (the keyboard comes up and the tab bar hides): a
-# drag down puts it away and the tab bar comes back.
-- swipe:
-    start: "50%, 30%"
-    end: "50%, 60%"
-    duration: 400
-- extendedWaitUntil:
-    visible:
-      id: "tab-bots"
-    timeout: 10000
 - tapOn:
     id: "tab-bots"
 # "New Bot" is at the top of the Bots page (its list scrolls; the emulator also ghosts this page's

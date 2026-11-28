@@ -76,7 +76,7 @@ export type Effect =
   | { type: "timer"; name: TimerName; ms: number }
   | { type: "cancelTimer"; name: TimerName }
   | { type: "checkSession"; reason: SessionCheckReason }
-  | { type: "clearSiteData" }
+  | { type: "clearSiteData"; then?: "continue" }
   | { type: "flushCookies" }
   | { type: "dismissKeyboard" }
   | { type: "inject"; script: string }
@@ -139,13 +139,17 @@ export type Event =
   | { type: "fileDownload"; url: string }
   | { type: "openBrowser"; url: string }
   | { type: "openExternal"; url: string }
-  | { type: "blocked"; reason: string; url: string };
+  | { type: "blocked"; reason: string; url: string }
+  /** The site's cookies and data are gone (after a clearSiteData that asked to continue). */
+  | { type: "siteDataCleared" };
 
 export type Pending = {
   pair: PkcePair;
   mode: HandoffMode;
   to: string;
   renewal: boolean;
+  /** The sheet's address, to open it again (Android, when the Custom Tab went behind the app). */
+  url: string;
 };
 
 export type State = {
@@ -189,6 +193,10 @@ export type State = {
   callbackArrived: boolean;
   /** The main-frame navigation in flight failed: its error page's commit and finish are not a page of ours. */
   navFailed: boolean;
+  /** What waits for the site's data to be cleared before it loads (enter, or the web sign-in). */
+  afterClear: WebSource | null;
+  /** A renewal's enter is loading: the outgoing page's signed-out and /sign say nothing. */
+  renewalEntering: boolean;
   /** The page's background colour (#rrggbb) and whether it draws dark: the strips around the web view follow it. */
   pageColor: string | null;
   pageDark: boolean | null;
@@ -254,6 +262,8 @@ export function initialState(): State {
     lastNavigation: "none",
     callbackArrived: false,
     navFailed: false,
+    afterClear: null,
+    renewalEntering: false,
     pageColor: null,
     pageDark: null,
   };
@@ -295,9 +305,17 @@ export function showsTabBar(s: State): boolean {
 export function showsWebSignInBar(s: State): boolean {
   return s.phase === "signedOut" && s.signIn === "webFallback";
 }
-export function signInBusy(s: State): boolean {
+export function signInBusy(
+  s: State,
+  platform: "ios" | "android" = "ios",
+): boolean {
+  if (s.phase !== "signedOut") return false;
+  // Android: the Custom Tab may sit behind the app (another app's callback brought it forward), so
+  // Sign in stays pressable and opens the same hand-off again.
   return (
-    s.phase === "signedOut" && (s.signIn === "probing" || s.signIn === "sheet")
+    s.signIn === "probing" ||
+    (s.signIn === "sheet" && platform === "ios") ||
+    s.afterClear !== null
   );
 }
 
@@ -490,6 +508,8 @@ function finishSignIn(config: Config, step: Step, at: number) {
     message: null,
     pending: null,
     renewing: false,
+    renewalEntering: false,
+    afterClear: null,
   });
   clearLoadFailure(step);
   fx(step, { type: "flushCookies" });
@@ -502,7 +522,7 @@ function failSignIn(step: Step, message: string) {
   const s = step.state;
   cancel(step, "enter");
   if (s.renewing) {
-    set(step, { renewing: false, pending: null });
+    set(step, { renewing: false, pending: null, renewalEntering: false });
     return;
   }
   if (s.phase !== "signedOut" || s.signIn !== "entering") return;
@@ -512,6 +532,7 @@ function failSignIn(step: Step, message: string) {
     message,
     pending: null,
     source: null,
+    afterClear: null,
     pageLoading: false,
   });
 }
@@ -558,37 +579,55 @@ function presentSheet(
   let path = handoffPath(pair.challenge, config.platform, callbackName(mode));
   if (config.handoffAuto) path += "&auto=1";
   const url = renewal ? renewalUrl(config.origin, path) : baseUrl(config, path);
-  set(step, { pending: { pair, mode, to, renewal }, callbackArrived: false });
+  set(step, {
+    pending: { pair, mode, to, renewal, url },
+    callbackArrived: false,
+  });
   if (!renewal) set(step, { signIn: "sheet" });
   log(step, "sheet", { renewal, callback: callbackName(mode) });
   fx(step, { type: "openSheet", url, mode });
 }
 
 function startWebSignIn(config: Config, step: Step, at: number) {
-  set(step, { signIn: "webFallback" });
-  load(config, step, baseUrl(config, "/sign?native-sign-in=web"), at);
+  // Cleared first too: /sign would otherwise see a previous person's session and go on as them.
+  set(step, {
+    signIn: "webFallback",
+    afterClear: { uri: baseUrl(config, "/sign?native-sign-in=web") },
+    source: null,
+  });
+  startCovering(step, at);
+  fx(step, { type: "clearSiteData", then: "continue" });
 }
 
 function enter(config: Config, step: Step, ticket: string, at: number) {
   const pending = step.state.pending;
   if (!pending) return;
   const to = pending.to;
-  if (!pending.renewal) set(step, { signIn: "entering" });
-  set(step, { pending: null, callbackArrived: true });
+  // The pending sign-in (its verifier) stays until enter succeeds or the person cancels: a callback
+  // with a well-formed but fake ticket must not use it up.
+  set(step, { callbackArrived: true });
   cancel(step, "sheetClosed");
   timer(step, "enter", TIMING.enterMs);
   log(step, "enter", { to, renewal: pending.renewal });
   // The one request with the header the server requires (login CSRF). Never logged, never kept as a
   // page to reload: a retry or a restart loads `to` (lastOwnUrl is set from it, not from this).
-  load(
-    config,
-    step,
-    enterUrl(config.origin, ticket, pending.pair.verifier, to),
-    at,
-    { "OpenBot-Shell": config.platform },
-  );
-  if (isReloadableOwnUrl(baseUrl(config, to), config.origin))
-    set(step, { lastOwnUrl: baseUrl(config, to) });
+  const source: WebSource = {
+    uri: enterUrl(config.origin, ticket, pending.pair.verifier, to),
+    headers: { "OpenBot-Shell": config.platform },
+  };
+  if (pending.renewal) {
+    set(step, { renewalEntering: true });
+    load(config, step, source.uri, at, source.headers);
+    if (isReloadableOwnUrl(baseUrl(config, to), config.origin))
+      set(step, { lastOwnUrl: baseUrl(config, to) });
+    return;
+  }
+  // From the signed-out state a session the web view may still hold (somebody else's) is cleared
+  // first, and enter loads only once that has finished: the server refuses enter over another
+  // person's live session, and the web app would otherwise carry on as that person.
+  set(step, { signIn: "entering", afterClear: source, source: null });
+  startCovering(step, at);
+  fx(step, { type: "clearSiteData", then: "continue" });
 }
 
 function onOffOriginFailure(
@@ -674,6 +713,21 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
     }
 
     case "signInPressed": {
+      if (
+        s.phase === "signedOut" &&
+        s.signIn === "sheet" &&
+        s.pending &&
+        config.platform === "android"
+      ) {
+        log(step, "sheet-reopened");
+        set(step, { callbackArrived: false });
+        fx(step, {
+          type: "openSheet",
+          url: s.pending.url,
+          mode: s.pending.mode,
+        });
+        return;
+      }
       if (s.phase !== "signedOut" || s.signIn !== "idle" || showsLock(s))
         return;
       set(step, { signIn: "probing", message: null });
@@ -866,6 +920,24 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
         // A web app without the bridge (production today) says nothing; its /sign sends a signed-in
         // person on to "/". Still on /sign after 2.5 s, or no session cookie: the session ended.
         timer(step, "signConfirm", TIMING.signConfirmMs);
+      } else if (s.phase === "signedOut" && s.signIn === "entering" && onSign) {
+        // enter refused (/sign?native-sign-in=failed): a failed attempt, whatever cookie is there.
+        if (config.platform === "android" && s.pending && !s.pending.renewal) {
+          // The ticket may have been another app's fake: the Custom Tab may still be open, so the
+          // pending sign-in (its verifier) stays and Sign in opens the same hand-off again.
+          cancel(step, "enter");
+          log(step, "enter-refused-still-pending");
+          set(step, {
+            signIn: "sheet",
+            source: null,
+            afterClear: null,
+            pageLoading: false,
+            message: MESSAGES.notFinished,
+            callbackArrived: false,
+          });
+        } else {
+          failSignIn(step, MESSAGES.notFinished);
+        }
       } else if (
         s.phase === "signedOut" &&
         s.signIn === "entering" &&
@@ -1041,6 +1113,8 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
         else load(config, step, url, at);
       } else if (/^https?:/i.test(url) && tapped) {
         fx(step, { type: "openBrowser", url });
+      } else if (tapped && /^(mailto|tel|sms):/i.test(url)) {
+        fx(step, { type: "openExternal", url });
       } else {
         log(step, "window-open-dropped", { url, tapped });
       }
@@ -1048,9 +1122,10 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
     }
 
     case "fileDownload": {
-      // Never in place of the page: the system share sheet takes the address.
-      if (/^https?:/i.test(event.url))
+      // Never in place of the page, and only the app's own files: the share sheet takes the address.
+      if (isOwnOrigin(event.url, config.origin))
         fx(step, { type: "share", url: event.url });
+      else log(step, "download-refused", { url: event.url });
       return;
     }
 
@@ -1061,6 +1136,24 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
     case "openExternal":
       fx(step, { type: "openExternal", url: event.url });
       return;
+
+    case "siteDataCleared": {
+      const next = s.afterClear;
+      if (!next) return;
+      set(step, { afterClear: null });
+      if (
+        s.phase !== "signedOut" ||
+        (s.signIn !== "entering" && s.signIn !== "webFallback")
+      )
+        return;
+      load(config, step, next.uri, at, next.headers);
+      if (s.signIn === "entering" && s.pending) {
+        const to = baseUrl(config, s.pending.to);
+        if (isReloadableOwnUrl(to, config.origin))
+          set(step, { lastOwnUrl: to });
+      }
+      return;
+    }
 
     case "blocked":
       log(step, "navigation-blocked", { reason: event.reason, url: event.url });
@@ -1096,9 +1189,19 @@ function handleBridge(
             (s.signIn === "entering" || s.signIn === "webFallback")
           )
             finishSignIn(config, step, at);
-          else if (s.renewing) set(step, { renewing: false });
+          else if (s.renewing && (!s.renewalEntering || s.committed)) {
+            // The page the renewal's enter led to says signed in: the renewal is done. (A route from
+            // the outgoing page, before the new document committed, does not count.)
+            cancel(step, "enter");
+            set(step, {
+              renewing: false,
+              renewalEntering: false,
+              pending: null,
+            });
+          }
         }
       } else if (isSignPath(message.path)) {
+        if (s.renewalEntering) return;
         if (s.phase === "signedIn")
           timer(step, "signConfirm", TIMING.signConfirmMs);
         else if (s.signIn === "entering")
@@ -1107,6 +1210,12 @@ function handleBridge(
       return;
     }
     case "signed-out": {
+      // During a renewal's enter the server ends the old session while the outgoing page may still
+      // have requests in flight: its signed-out is not the person's.
+      if (s.renewalEntering) {
+        log(step, "signed-out-ignored", { reason: "renewal-entering" });
+        return;
+      }
       if (s.phase === "signedIn") sessionEnded(step, "signed-out");
       else if (s.signIn === "entering") failSignIn(step, MESSAGES.notFinished);
       return;

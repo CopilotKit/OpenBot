@@ -350,7 +350,9 @@ function Shell() {
               webviewDebuggingEnabled={
                 process.env.EXPO_PUBLIC_OPENBOT_TEST_BUILD === "1"
               }
-              mediaCapturePermissionGrantType="grantIfSameHostElsePrompt"
+              // No microphone or camera in the shell yet: refused for every origin (react-native-webview can
+              // only tell "same host", not scheme, host and port).
+              mediaCapturePermissionGrantType="deny"
               geolocationEnabled={false}
               pullToRefreshEnabled={false}
               androidLayerType={hooks.softwareLayer ? "software" : "none"}
@@ -377,7 +379,7 @@ function Shell() {
         <FirstScreen
           colors={systemColors}
           launching={state.phase === "launching"}
-          busy={signInBusy(state)}
+          busy={signInBusy(state, PLATFORM)}
           message={state.message}
           onSignIn={() => dispatch({ type: "signInPressed" })}
           onLayout={() => void SplashScreen.hideAsync().catch(() => undefined)}

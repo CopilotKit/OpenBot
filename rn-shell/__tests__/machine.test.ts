@@ -106,6 +106,11 @@ describe("sign-in through the system sheet", () => {
       state,
     ));
     expect(state.signIn).toBe("entering");
+    // Nothing loads until the site's data (somebody else's session, perhaps) is cleared.
+    expect(state.source).toBeNull();
+    expect(effects).toContainEqual({ type: "clearSiteData", then: "continue" });
+    expect(showsSkeleton(state)).toBe(true);
+    ({ state, effects } = run([{ type: "siteDataCleared" }], state));
     expect(state.source).toEqual({
       uri: `https://my.open.bot/api/auth/shell/enter?ticket=${T}&verifier=${pair.verifier}&to=%2F`,
       headers: { "OpenBot-Shell": "ios" },
@@ -260,8 +265,12 @@ describe("sign-in through the system sheet", () => {
       signedOut(),
     ).state;
     expect(web.signIn).toBe("webFallback");
-    expect(web.source?.uri).toBe("https://my.open.bot/sign?native-sign-in=web");
-    expect(web.source?.headers).toBeUndefined();
+    expect(web.source).toBeNull();
+    const webLoaded = run([{ type: "siteDataCleared" }], web).state;
+    expect(webLoaded.source?.uri).toBe(
+      "https://my.open.bot/sign?native-sign-in=web",
+    );
+    expect(webLoaded.source?.headers).toBeUndefined();
   });
 
   test("web sign-in finishes on the cookie, with a new web view (no history back to /sign)", () => {
@@ -869,5 +878,227 @@ describe("navigation policy", () => {
       url: "https://my.open.bot/export.csv",
     });
     expect(state.source?.uri).toBe("https://my.open.bot/");
+  });
+});
+
+describe("the senior review's second pass", () => {
+  const sheet = (): State =>
+    run(
+      [
+        { type: "signInPressed" },
+        { type: "configAnswered", mode: scheme, pair },
+      ],
+      signedOut(),
+    ).state;
+
+  test("enter loads only after the site's data is cleared", () => {
+    let state = run(
+      [
+        {
+          type: "sheetResult",
+          result: "success",
+          url: `openbotshell://signed-in?ticket=${T}`,
+        },
+      ],
+      sheet(),
+    ).state;
+    expect(state.source).toBeNull();
+    expect(webMounted(state)).toBe(false);
+    // A URL change from anything before the clear cannot finish the sign-in on an old cookie.
+    state = run([{ type: "siteDataCleared" }], state).state;
+    expect(state.source?.headers).toEqual({ "OpenBot-Shell": "ios" });
+  });
+
+  test("enter that lands on /sign?native-sign-in=failed fails, even with a cookie there", () => {
+    let { state, effects } = run(
+      [
+        {
+          type: "sheetResult",
+          result: "success",
+          url: `openbotshell://signed-in?ticket=${T}`,
+        },
+        { type: "siteDataCleared" },
+        {
+          type: "urlChanged",
+          url: "https://my.open.bot/sign?native-sign-in=failed",
+          canGoBack: false,
+        },
+      ],
+      sheet(),
+    );
+    expect(state.phase).toBe("signedOut");
+    expect(state.signIn).toBe("idle");
+    expect(state.message).toBe(MESSAGES.notFinished);
+    expect(effects.some((e) => e.type === "checkSession")).toBe(false);
+    ({ state } = run(
+      [{ type: "sessionChecked", reason: "entering-url", present: true }],
+      state,
+    ));
+    expect(state.phase).toBe("signedOut");
+  });
+
+  test("a renewal ignores the outgoing page's signed-out and /sign while its enter loads", () => {
+    const url =
+      "https://my.open.bot/api/auth/hosted/sign-in?returnTo=https%3A%2F%2Fmy.open.bot%2Fbots";
+    let state = run([{ type: "interceptRenewal", url }], signedIn()).state;
+    state = run(
+      [
+        {
+          type: "renewalConfigAnswered",
+          mode: scheme,
+          pair,
+          to: "/bots",
+          intercepted: url,
+        },
+        {
+          type: "sheetResult",
+          result: "success",
+          url: `openbotshell://signed-in?ticket=${T}`,
+        },
+      ],
+      state,
+    ).state;
+    expect(state.renewalEntering).toBe(true);
+    const outgoing = run(
+      [
+        {
+          type: "page",
+          message: { kind: "bridge", message: { type: "signed-out" } },
+        },
+        {
+          type: "page",
+          message: {
+            kind: "bridge",
+            message: {
+              type: "route",
+              path: "/sign",
+              tab: null,
+              signedIn: false,
+            },
+          },
+        },
+        {
+          type: "urlChanged",
+          url: "https://my.open.bot/sign",
+          canGoBack: false,
+        },
+        { type: "timer", name: "signConfirm" },
+      ],
+      state,
+    );
+    expect(outgoing.state.phase).toBe("signedIn");
+    expect(outgoing.effects.some((e) => e.type === "clearSiteData")).toBe(
+      false,
+    );
+    // The new page's own route ends the renewal; after that, signed-out counts again.
+    const done = run(
+      [
+        { type: "page", message: { kind: "doc", late: false } },
+        {
+          type: "page",
+          message: {
+            kind: "bridge",
+            message: {
+              type: "route",
+              path: "/bots",
+              tab: "bots",
+              signedIn: true,
+            },
+          },
+        },
+      ],
+      outgoing.state,
+    ).state;
+    expect(done.renewing).toBe(false);
+    expect(done.renewalEntering).toBe(false);
+    expect(
+      run(
+        [
+          {
+            type: "page",
+            message: { kind: "bridge", message: { type: "signed-out" } },
+          },
+        ],
+        done,
+      ).state.phase,
+    ).toBe("signedOut");
+  });
+
+  test("a fake but well-formed ticket does not use up the pending sign-in (Android)", () => {
+    const android: Config = { ...config, platform: "android" };
+    let state = signedOut();
+    for (const event of [
+      { type: "signInPressed" },
+      { type: "configAnswered", mode: scheme, pair },
+      {
+        type: "callbackUrl",
+        url: `openbotshell://signed-in?ticket=${"F".repeat(43)}`,
+      },
+      { type: "siteDataCleared" },
+    ] as Event[])
+      state = reduce(android, state, event, 2_000).state;
+    expect(state.pending?.pair.verifier).toBe(pair.verifier);
+    // The server refuses the fake ticket: back to waiting, verifier kept, Sign in re-opens the tab.
+    state = reduce(
+      android,
+      state,
+      {
+        type: "urlChanged",
+        url: "https://my.open.bot/sign?native-sign-in=failed",
+        canGoBack: false,
+      },
+      2_100,
+    ).state;
+    expect(state.signIn).toBe("sheet");
+    expect(state.pending?.pair.verifier).toBe(pair.verifier);
+    expect(webMounted(state)).toBe(false);
+    const reopened = reduce(android, state, { type: "signInPressed" }, 2_200);
+    expect(reopened.effects.some((e) => e.type === "openSheet")).toBe(true);
+    // The real ticket still signs in.
+    state = reduce(
+      android,
+      reopened.state,
+      { type: "callbackUrl", url: `openbotshell://signed-in?ticket=${T}` },
+      2_300,
+    ).state;
+    expect(state.signIn).toBe("entering");
+  });
+
+  test("downloads only from the app's own origin; schemes from a new window after a tap", () => {
+    const state = run(
+      [[{ type: "page", message: { kind: "tap" } }, 9_900]],
+      signedIn(),
+    ).state;
+    expect(
+      reduce(
+        config,
+        state,
+        { type: "fileDownload", url: "https://evil.example/x.exe" },
+        10_000,
+      ).effects.some((e) => e.type === "share"),
+    ).toBe(false);
+    expect(
+      reduce(
+        config,
+        state,
+        { type: "fileDownload", url: "https://my.open.bot:8443/x.csv" },
+        10_000,
+      ).effects.some((e) => e.type === "share"),
+    ).toBe(false);
+    expect(
+      reduce(config, state, { type: "openWindow", url: "mailto:a@b.c" }, 10_000)
+        .effects,
+    ).toContainEqual({
+      type: "openExternal",
+      url: "mailto:a@b.c",
+    });
+    expect(
+      reduce(
+        config,
+        state,
+        { type: "openWindow", url: "intent://x#Intent;end" },
+        10_000,
+      ).effects.some((e) => e.type === "openExternal"),
+    ).toBe(false);
   });
 });

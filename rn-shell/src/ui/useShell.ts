@@ -222,7 +222,11 @@ export function useShell(webRef: RefObject<WebView | null>) {
         case "clearSiteData":
           ShellNative.clearSiteData(BASE_URL)
             .then((count) => diag("site-data-cleared", { cookies: count }))
-            .catch(() => diag("site-data-clear-failed"));
+            .catch(() => diag("site-data-clear-failed"))
+            .finally(() => {
+              if (effect.then === "continue")
+                dispatch({ type: "siteDataCleared" });
+            });
           return;
         case "flushCookies":
           try {

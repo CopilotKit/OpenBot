@@ -134,6 +134,31 @@ def launch_with_session(platform):
     return None
 
 
+def stop_maestro():
+    """A flow killed at its deadline leaves Maestro's driver half-alive: stop it before the next flow."""
+    sh(["pkill", "-f", "maestro.cli.AppKt"])
+    sh(["pkill", "-f", "dev.mobile.maestro"])
+    time.sleep(2)
+
+
+def run_one(args, flow_dir, timeout):
+    try:
+        result = subprocess.run(args, cwd=flow_dir, capture_output=True, text=True, timeout=timeout)
+        (flow_dir / "maestro.log").write_text(result.stdout + "\n" + result.stderr)
+        if result.returncode == 0:
+            return "passed", ""
+        lines = [line for line in (result.stdout + result.stderr).splitlines() if line.strip()]
+        failing = [line for line in lines if "FAILED" in line or "Assertion" in line or "not found" in line.lower() or "error" in line.lower()]
+        return "failed", (failing or lines or ["maestro failed"])[-1][:300]
+    except subprocess.TimeoutExpired as expired:
+        out = expired.stdout or b""
+        err = expired.stderr or b""
+        text = (out.decode() if isinstance(out, bytes) else out) + "\n" + (err.decode() if isinstance(err, bytes) else err)
+        (flow_dir / "maestro.log").write_text(text)
+        stop_maestro()
+        return "failed", f"timed out after {timeout} s"
+
+
 def collect(flow_dir, shots_dir, name):
     shots = []
     for png in sorted(flow_dir.rglob("*.png")):
@@ -162,7 +187,6 @@ def run(platform, suite, artifacts, private, only, shard=0):
         shots_dir.mkdir(parents=True, exist_ok=True)
         print(f"== {name}", flush=True)
         started = time.time()
-        status, reason = "passed", ""
         if before == "kill-web-process":
             kill_web_process(platform)
         elif before == "launch-with-session":
@@ -175,20 +199,16 @@ def run(platform, suite, artifacts, private, only, shard=0):
                 "--test-output-dir", str(flow_dir), "--debug-output", str(flow_dir / "debug")]
         for key, value in ENV.items():
             args += ["-e", f"{key}={value}"]
-        try:
-            result = subprocess.run(args, cwd=flow_dir, capture_output=True, text=True, timeout=timeout)
-            (flow_dir / "maestro.log").write_text(result.stdout + "\n" + result.stderr)
-            if result.returncode != 0:
-                status = "failed"
-                lines = [line for line in (result.stdout + result.stderr).splitlines() if line.strip()]
-                failing = [line for line in lines if "FAILED" in line or "Assertion" in line or "not found" in line.lower() or "error" in line.lower()]
-                reason = (failing or lines or ["maestro failed"])[-1][:300]
-        except subprocess.TimeoutExpired as expired:
-            status, reason = "failed", f"timed out after {timeout} s"
-            out = expired.stdout or b""
-            err = expired.stderr or b""
-            text = (out.decode() if isinstance(out, bytes) else out) + "\n" + (err.decode() if isinstance(err, bytes) else err)
-            (flow_dir / "maestro.log").write_text(text)
+        attempts = 0
+        while True:
+            attempts += 1
+            status, reason = run_one(args, flow_dir, timeout)
+            log_text = (flow_dir / "maestro.log").read_text() if (flow_dir / "maestro.log").exists() else ""
+            # Maestro's own driver dying (after a killed run) is not the app's failure: once more.
+            if status == "failed" and attempts == 1 and re.search(r"DeviceServerDied|StatusRuntimeException: UNAVAILABLE|XCTestDriver.*(unreachable|failed)", log_text):
+                print("  Maestro's driver died; running the flow again", flush=True)
+                continue
+            break
         if status == "failed":
             device_screenshot(platform, flow_dir / "failure.png")
             tree = hierarchy(flow_dir)
