@@ -15,23 +15,22 @@
     // First visit: no persistent cookie, no localStorage value. This page then sets both, so the
     // next visit, after the app is killed and relaunched, should say "returning visitor: yes".
     // ?reset=1 clears both first.
-    (async function () {
-      var key = 'openbot-probe-persist';
+    (async () => {
+      const key = 'openbot-probe-persist';
       try {
         if (new URLSearchParams(location.search).has('reset')) {
           localStorage.removeItem(key);
           await fetch('/api/persist/clear', { method: 'POST', cache: 'no-store' });
         }
-        var hadStorage = localStorage.getItem(key) === 'yes';
-        var check = JSON.parse(await (await fetch('/api/persist/check', { cache: 'no-store' })).text());
-        document.getElementById('visitor').textContent = 'returning visitor: ' + (hadStorage && check.cookie ? 'yes' : 'no');
-        document.getElementById('detail').textContent = 'details: localStorage value ' + (hadStorage ? 'present' : 'absent') +
-          ', persistent cookie ' + (check.cookie ? 'present' : 'absent');
+        const hadStorage = localStorage.getItem(key) === 'yes';
+        const check = JSON.parse(await (await fetch('/api/persist/check', { cache: 'no-store' })).text());
+        document.getElementById('visitor').textContent = `returning visitor: ${hadStorage && check.cookie ? 'yes' : 'no'}`;
+        document.getElementById('detail').textContent = `details: localStorage value ${hadStorage ? 'present' : 'absent'}, persistent cookie ${check.cookie ? 'present' : 'absent'}`;
         localStorage.setItem(key, 'yes');
         await fetch('/api/persist/set', { method: 'POST', cache: 'no-store' });
         document.getElementById('saved').textContent = 'state saved';
       } catch (e) {
-        document.getElementById('visitor').textContent = 'returning visitor: error ' + e;
+        document.getElementById('visitor').textContent = `returning visitor: error ${e}`;
       }
     })();
   </script>
