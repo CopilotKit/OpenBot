@@ -67,6 +67,14 @@ class ShellTestCase: XCTestCase {
         return app
     }
 
+    /// Leaves the app as a person does (Home, then a moment) before killing it: WebKit writes cookies
+    /// to disk lazily, and a kill seconds after signing in can lose the new session cookie.
+    func leaveAndTerminate(_ app: XCUIApplication) {
+        XCUIDevice.shared.press(.home)
+        sleep(3)
+        app.terminate()
+    }
+
     /// Puts the software keyboard away if it is up (a conversation focuses its message box when it
     /// opens): taps `neutral`, then swipes the page down.
     func dismissKeyboardIfUp(_ app: XCUIApplication, tapping neutral: XCUIElement? = nil) {

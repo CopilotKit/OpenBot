@@ -137,6 +137,10 @@ final class HardeningUITests: ShellTestCase {
             XCTAssertEqual(web.frame.width, window.width, accuracy: 1, "the web view does not fill the turned iPad")
         } else {
             XCTAssertLessThan(window.width, window.height, "the phone app turned to landscape")
+            // XCUITest's taps follow the device's orientation, not the portrait-held app's: turn back
+            // before tapping.
+            XCUIDevice.shared.orientation = .portrait
+            sleep(2)
         }
         tab(app, .conversations).tap()
         XCTAssertTrue(webText(app, "Competitor pricing notes").waitForExistence(timeout: 15), "the tabs stopped routing after turning")

@@ -166,7 +166,7 @@ jobs:
         if: matrix.shard != 'real'
         run: |
           # A: signed out unless the mock's cookie is sent, with the sign-in hand-off.
-          MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun app/workbench/mock-server.ts > artifacts/mock-a.log 2>&1 &
+          MOCK_REPLY=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun app/workbench/mock-server.ts > artifacts/mock-a.log 2>&1 &
           APP_PORT=3010 SERVER_PORT=3001 nohup bun app/serve.ts > artifacts/app-a.log 2>&1 &
           # B: the same without the hand-off.
           MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3002 nohup bun app/workbench/mock-server.ts > artifacts/mock-b.log 2>&1 &

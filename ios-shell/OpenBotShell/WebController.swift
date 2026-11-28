@@ -418,8 +418,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         let origin = message.frameInfo.securityOrigin
-        let fromOwnOrigin = origin.host.lowercased() == config.baseHost
-            && origin.protocol.lowercased() == (config.baseURL.scheme ?? "").lowercased()
+        let fromOwnOrigin = isOwnOrigin(origin)
         guard message.frameInfo.isMainFrame, fromOwnOrigin, let body = message.body as? [String: Any] else {
             diagnostics.log("bridge-rejected", ["mainFrame": message.frameInfo.isMainFrame, "host": origin.host])
             return
@@ -751,9 +750,17 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
 
     /// A JavaScript dialog's frame is on the web app's own origin (other sites' dialogs are dropped).
     private func isOwnOrigin(_ frame: WKFrameInfo) -> Bool {
-        let origin = frame.securityOrigin
-        return origin.host.lowercased() == config.baseHost
-            && origin.protocol.lowercased() == (config.baseURL.scheme ?? "").lowercased()
+        isOwnOrigin(frame.securityOrigin)
+    }
+
+    /// Scheme, host and port, as an origin is compared (another port on the same host is another
+    /// site: the probe's two origins differ only by port).
+    private func isOwnOrigin(_ origin: WKSecurityOrigin) -> Bool {
+        let scheme = origin.protocol.lowercased()
+        guard scheme == (config.baseURL.scheme ?? "").lowercased(), origin.host.lowercased() == config.baseHost else { return false }
+        let defaultPort = scheme == "https" ? 443 : 80
+        let port = origin.port == 0 ? defaultPort : origin.port
+        return port == (config.baseURL.port ?? defaultPort)
     }
 
     /// Schemes handed to the system, only from a tap in the main frame.

@@ -108,7 +108,7 @@ final class ShellFlowUITests: ShellTestCase {
 
         // The session cookie survives a relaunch: straight to the tabs.
         sleep(5)
-        app.terminate()
+        leaveAndTerminate(app)
         app = launch(base: ShellTestCase.mockA, moment: "relaunch", reset: false)
         XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 20), "a relaunch did not go straight to the tabs")
         XCTAssertFalse(app.buttons["sign-in-button"].exists, "a relaunch showed the sign-in screen")
@@ -218,7 +218,7 @@ final class ShellFlowUITests: ShellTestCase {
 
         // Dark mode: the page follows the system, and the chrome follows the page.
         sleep(3)
-        app.terminate()
+        leaveAndTerminate(app)
         let dark = launch(base: ShellTestCase.mockA, moment: "dark", reset: false, extra: ["OPENBOT_SHELL_FORCE_DARK": "1"])
         XCTAssertTrue(tab(dark, .home).waitForExistence(timeout: 20), "no tabs in dark mode")
         XCTAssertTrue(webText(dark, "Start a conversation").waitForExistence(timeout: 20))
@@ -518,7 +518,7 @@ final class ShellFlowUITests: ShellTestCase {
         var app = launchSignedIn(moment: "sign-in")
         XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
         sleep(3)
-        app.terminate()
+        leaveAndTerminate(app)
         for (moment, dark) in [("light", false), ("dark", true)] {
             var extra = ["OPENBOT_SHELL_DELAY_FIRST_LOAD_SECONDS": "3"]
             if dark { extra["OPENBOT_SHELL_FORCE_DARK"] = "1" }
