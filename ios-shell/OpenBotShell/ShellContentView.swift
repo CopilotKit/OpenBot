@@ -3,7 +3,7 @@ import UIKit
 import WebKit
 
 /// The signed-in layout, in UIKit so the frames are exact: the web view on top, the native tab bar
-/// (a real UITabBar: Conversations, Home, Bots) under it. The web view ends where the tab bar's
+/// (a real UITabBar: Chats, Home, Bots) under it. The web view ends where the tab bar's
 /// frame starts, so nothing of the page sits under the bar; while the bar is hidden (keyboard,
 /// sign-in) the web view takes the whole height. The bar's own background is clear: the page's
 /// colour, painted behind everything by ShellView, shows through it.
@@ -58,6 +58,9 @@ final class ShellContentView: UIView, UITabBarDelegate {
         webView.removeFromSuperview()
         addSubview(webView)
 
+        // UIKit measures unselected titles when the items are installed, before our first layout.
+        // The actual container takes over sizing on layout, including for multitasking and rotation.
+        tabBar.frame.size = CGSize(width: max(webView.bounds.width, UIScreen.main.bounds.width), height: 49)
         tabBar.items = ShellTab.allCases.enumerated().map { index, tab in
             let item = UITabBarItem(
                 title: tab.title,
@@ -71,6 +74,10 @@ final class ShellContentView: UIView, UITabBarDelegate {
         let appearance = UITabBarAppearance()
         appearance.configureWithTransparentBackground()
         appearance.shadowColor = .clear
+        for layout in [appearance.stackedLayoutAppearance, appearance.inlineLayoutAppearance, appearance.compactInlineLayoutAppearance] {
+            layout.normal.titleTextAttributes = [.foregroundColor: UIColor.secondaryLabel]
+            layout.selected.titleTextAttributes = [.foregroundColor: UIColor.label]
+        }
         tabBar.standardAppearance = appearance
         tabBar.scrollEdgeAppearance = appearance
         tabBar.tintColor = .label
@@ -129,7 +136,9 @@ final class ShellContentView: UIView, UITabBarDelegate {
             let fitted = tabBar.sizeThatFits(CGSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)).height
             barHeight = max(fitted, 49 + bottomInset)
         }
-        tabBar.frame = CGRect(x: 0, y: bounds.height - barHeight, width: bounds.width, height: barHeight)
+        if showBar && bounds.width > 0 {
+            tabBar.frame = CGRect(x: 0, y: bounds.height - barHeight, width: bounds.width, height: barHeight)
+        }
         let webBottom: CGFloat
         if keyboardOverlap > 0 {
             webBottom = bounds.height - keyboardOverlap

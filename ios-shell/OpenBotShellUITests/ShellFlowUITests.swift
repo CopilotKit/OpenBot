@@ -164,6 +164,7 @@ final class ShellFlowUITests: ShellTestCase {
         assertNoWebNavigation(app, "home")
         XCTAssertTrue(accountButton(app).waitForExistence(timeout: 10), "no Account button on Home")
 
+        XCTAssertEqual(tab(app, .conversations).label, "Chats")
         tab(app, .conversations).tap()
         for title in ["Competitor pricing notes", "Quarterly forecast", "Trip to Lisbon"] {
             XCTAssertTrue(webText(app, title).waitForExistence(timeout: 20), "Conversations does not list '\(title)'")
@@ -188,12 +189,7 @@ final class ShellFlowUITests: ShellTestCase {
         ], timeout: 25)
         XCTAssertNotNil(transcript, "the conversation did not open")
         sleep(1)
-        if app.keyboards.firstMatch.exists {
-            // Finding for the web app: in the shell a conversation focuses its message box on open,
-            // which raises the keyboard (and so hides the tab bar).
-            screenshot("3a-conversation-opened-with-keyboard")
-            note("opening a conversation raised the keyboard (the message box took focus)")
-        }
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "opening a saved conversation covered the transcript with the keyboard")
         dismissKeyboardIfUp(app, tapping: transcript)
         XCTAssertTrue(tab(app, .conversations).waitForExistence(timeout: 5), "no tab bar in the conversation")
         XCTAssertTrue(tab(app, .conversations).isSelected, "opening a conversation moved the tab selection")
@@ -215,9 +211,18 @@ final class ShellFlowUITests: ShellTestCase {
         }
         XCTAssertTrue(tab(app, .bots).isSelected)
         sleep(1)
+        XCTAssertTrue(app.webViews.buttons["Hide Research Bot's conversations"].waitForExistence(timeout: 10))
+        XCTAssertTrue(webText(app, "Competitor pricing notes").exists)
         screenshot("4-bots")
         assertNoWebNavigation(app, "bots")
         XCTAssertTrue(accountButton(app).exists, "no Account button on Bots")
+
+        webText(app, "Competitor pricing notes").tap()
+        let backToBots = app.webViews.buttons["Back to Bots"].firstMatch
+        XCTAssertTrue(backToBots.waitForExistence(timeout: 10), "the conversation has no visible way back to Bots")
+        XCTAssertTrue(waitForState(app, "tab=bots", timeout: 5))
+        backToBots.tap()
+        XCTAssertTrue(app.webViews.buttons["Hide Research Bot's conversations"].waitForExistence(timeout: 10))
 
         tab(app, .home).tap()
         XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 20), "Home did not come back")

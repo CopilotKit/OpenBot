@@ -34,7 +34,7 @@ enum ShellTab: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .conversations: return "Conversations"
+        case .conversations: return "Chats"
         case .home: return "Home"
         case .bots: return "Bots"
         }

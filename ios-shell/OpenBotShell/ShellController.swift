@@ -135,12 +135,20 @@ final class ShellController: NSObject, WebControllerDelegate {
     /// Start WebKit locally before asking for its saved cookies. On a cold launch a read made
     /// before the web process is ready can time out, delaying the sign-in screen by five seconds.
     private func decideLaunchState() {
-        web.loadBlank { [weak self] in
-            guard let self else { return }
-            SessionCookies.present(in: self.cookieStore, host: self.config.baseHost) { [weak self] present, timedOut in
-                guard let self else { return }
-                self.diagnostics.log("session-cookie", ["present": present, "timedOut": timedOut])
-                if present { self.launchSignedIn() } else { self.model.phase = .signedOut }
+        web.loadBlank { [weak self] in self?.readLaunchSession() }
+    }
+
+    private func readLaunchSession(retryOnTimeout: Bool = true) {
+        SessionCookies.present(in: cookieStore, host: config.baseHost) { [weak self] present, timedOut in
+            guard let self, self.model.phase == .launching else { return }
+            self.diagnostics.log("session-cookie", ["present": present, "timedOut": timedOut])
+            if timedOut && retryOnTimeout {
+                // A slow first WebKit read says nothing about whether the session expired.
+                self.readLaunchSession(retryOnTimeout: false)
+            } else if present {
+                self.launchSignedIn()
+            } else {
+                self.model.phase = .signedOut
             }
         }
     }

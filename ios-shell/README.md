@@ -1,5 +1,7 @@
 # iOS web view shell (experiment)
 
+The bottom tabs are Chats, Home and Bots. Chats opens a full-width table with conversation titles, bot names, unread markers and times. Bots groups conversations beneath expandable bot rows. Both screens keep search above the scrolling list. Opening a saved conversation leaves the transcript visible. Its leading Back button restores the originating tab, search and scroll position, including while typing.
+
 A small native iOS app around one `WKWebView` showing the OpenBot web app (https://my.open.bot by
 default). It is an experiment, not a product. The Expo app in `mobile/` is unchanged.
 
@@ -23,7 +25,7 @@ What is native:
   sets the session cookie there. While
   signed in, the hosted sign-in's renewal (`/api/auth/hosted/sign-in`) runs in the sheet the same
   way when the server has the hand-off.
-- **The tab bar.** A UIKit `UITabBar` under the web view: Conversations, Home, Bots. A tap asks the
+- **The tab bar.** A UIKit `UITabBar` under the web view: Chats, Home, Bots. A tap asks the
   page to navigate with the `openbot:open` event, and loads the page if nobody handled it. The page's
   `route` messages select the tab. The bar hides while the keyboard is up. The web view sits between
   the status bar and the tab bar; the strips around it take the page's background colour and its
@@ -148,43 +150,22 @@ the probe and the http mocks need, is added to the built Info.plist by a Debug-o
 The flow tests run against the real built web app over `app/workbench/mock-server.ts`:
 
 ```sh
-bun install --frozen-lockfile && cp .env.example .env && (cd app && bun run build)
+bun install --frozen-lockfile
+[ -f .env ] || cp .env.example .env
+(cd app && bun run build)
 MOCK_SIGNED_OUT=1 SERVER_PORT=3001 bun app/workbench/mock-server.ts &
 APP_PORT=3010 SERVER_PORT=3001 bun app/serve.ts &                      # A: with the hand-off
 MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3002 bun app/workbench/mock-server.ts &
 APP_PORT=3011 SERVER_PORT=3002 bun app/serve.ts &                      # B: without it
+APP_PORT=3013 SERVER_PORT=3001 bun ios-shell/Probe/without-bridge.ts & # Older web page
 ```
 
 ## CI
 
-`.github/workflows/ios-shell.yml` runs on pushes to `ios-webview-shell` that touch this folder,
-and by hand. It builds the web app, starts both mock stacks and the probe, boots an iPhone
-simulator, builds once (`build-for-testing`) and runs the UI tests (`test-without-building`). It
-uploads `ios-shell-shots-<run id>` (every screenshot as a small JPEG named `<test>--<moment>.jpg`,
-the text attachments, `SUMMARY.md`, `diagnostics.jsonl`), `ios-shell-<run id>` (everything else)
-and `ios-shell-video-<run id>`: a screen recording of `DemoTourUITests/testDemoTour`, a paced tour
-of the app against mock stack A, run on its own after the main suite.
+Run `.github/workflows/ios-shell.yml` for UI tests and `.github/workflows/ios-shell-video.yml` for recordings. Both support manual dispatch on the branch being tested. The test workflow builds Debug and Release, runs the appropriate suites on an iPhone simulator, and publishes per-test outcomes. The public screenshots artifact contains only local workbench scenes.
 
-Recordings come from `.github/workflows/ios-shell-video.yml` ("iOS shell video", about 10
-minutes): on every push it records the demo tour (public artifact `ios-shell-video-<run id>`) and
-the real-backend journey on the session cookie (private `ios-shell-video-private-<run id>`), each
-cut to its test and also as a 600-px copy. Started by hand with `real_google_sign_in`, the real
-recording is a Release build signing in with Google in the web view (one prompt to the account's
-phone per run).
+For a workbench video, choose `which=demo`. Linux builds the web app and the mock server. In parallel the Mac boots a simulator, fetches the workbench from that run, and restores the native test products or compiles them. The download is checked against the artifact’s SHA-256 digest. XCTest signals when it is ready to launch the app, and recording starts before the first tap. Capture stops when the tour ends. A successful tour produces its original-size and 600-pixel-wide recordings in `ios-shell-video-<run id>`. The workflow checks the video track’s actual duration.
 
-Where the video workflow's time goes (each job has a 13-minute limit; the two jobs run side by side):
+The Mac recording job has a 13-minute timeout. In run 46136710671 it took 10 min 39 s with cached native products, including 5 min 32 s for the recording step and 50 s to export the two sizes. The workflow took 12 min 9 s from dispatch. A prior cold compile took 5 min 1 s. The same tour test passed locally in 98 s. [Hosted recording run](https://github.com/CopilotKit/OpenBot/actions/runs/46136710671)
 
-| Step | Warm cache | Cold (sources changed) |
-| --- | --- | --- |
-| Boot the simulator (in the background, during the rest) | about 20 s | about 20 s |
-| Generate the Xcode project (cached XcodeGen binary) | about 35 s | about 35 s |
-| Build the app and its UI tests (cached DerivedData) | about 45 s | 110 to 150 s |
-| Web app (demo job; cached on its sources) | about 14 s | about 4 min |
-| Record (demo tour / real journey) | about 2 min | about 2 min |
-| Cut and make the 600-px copy | about 25 s | about 25 s |
-
-The production tests never fail for network reasons. `testProductionSignedIn` and
-`testProductionGoogleSignIn` use a throwaway account and run only when the repository secrets
-`OPENBOT_SHELL_TEST_SESSION`, or `OPENBOT_SHELL_GOOGLE_EMAIL`, `OPENBOT_SHELL_GOOGLE_PASSWORD` and
-`OPENBOT_SHELL_GOOGLE_TOTP_SECRET`, are set. Their screenshots, diagnostics and log lines go only to
-`ios-shell-private-<run id>` (`ci/collect_shots.py`). Real-account screenshots and recordings upload only in private repositories. On a public repository, run the journey locally to retain that evidence.
+For the production journey, `which=real` uses the existing session-cookie secret by default. A fresh Google sign-in requires manual dispatch with `real_google_sign_in=true` and prompts the account owner. The session-cookie input is `OPENBOT_SHELL_TEST_SESSION`. The fresh Release journey uses `OPENBOT_SHELL_GOOGLE_EMAIL`, `OPENBOT_SHELL_GOOGLE_PASSWORD` and `OPENBOT_SHELL_GOOGLE_TOTP_SECRET`. Account screenshots and recordings upload only when the repository is private. Run locally to retain private evidence when working in a public repository.
