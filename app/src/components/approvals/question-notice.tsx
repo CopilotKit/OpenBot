@@ -23,6 +23,8 @@ import {
   approvalInboxOptions,
   dismissPersonQuestionMutationOptions,
 } from "@/lib/approvals";
+import { type Failure, failureSaid } from "@/lib/load-failure";
+import { ANSWER_PREFIX } from "@/lib/question-answer";
 import { queryClient } from "@/query-client";
 
 export type WaitingQuestion = ApprovalInboxData["questions"][number];
@@ -71,11 +73,9 @@ export function askedSinceLastMessage(messages: readonly Message[]): boolean {
 }
 
 /**
- * The id the server stores an answer under, and the message it is stored as: see
- * `person-response-sweep.ts` and `questionResponseMessage` in server/src/approvals/questions.ts.
+ * The message an answer is stored as, under the id the server stores it under (`ANSWER_PREFIX`).
  * Drawn here under the same id, so the stored copy read back later replaces this one.
  */
-const ANSWER_PREFIX = "person-response:";
 const ANSWER_LEAD = "In response to your question: ";
 
 export function answerMessage(
@@ -139,12 +139,14 @@ export function partsAnswer(parts: readonly QuestionPart[], form: FormData) {
 function QuestionParts({
   parts,
   onAnswered,
+  disabled,
 }: {
   parts: readonly QuestionPart[];
   onAnswered: (answer: string) => Promise<void>;
+  disabled: boolean;
 }) {
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Failure | null>(null);
   const several = parts.length > 1;
   return (
     <Questionnaire
@@ -156,10 +158,11 @@ function QuestionParts({
       }))}
       onSubmit={(event) => {
         event.preventDefault();
+        if (disabled) return;
         setSending(true);
         setError(null);
         onAnswered(partsAnswer(parts, new FormData(event.currentTarget)))
-          .catch((failure: Error) => setError(failure.message))
+          .catch((failure: Error) => setError(failure))
           .finally(() => setSending(false));
       }}
       shortcuts="numbers"
@@ -205,13 +208,13 @@ function QuestionParts({
           <QuestionnaireProgress className="col-start-2 row-start-1 justify-self-end" />
         ) : null}
         <QuestionnaireNext size="sm">Next</QuestionnaireNext>
-        <QuestionnaireSubmit disabled={sending} size="sm">
+        <QuestionnaireSubmit disabled={sending || disabled} size="sm">
           {sending ? "Sending…" : several ? "Send answers" : "Send answer"}
         </QuestionnaireSubmit>
       </QuestionnaireActions>
       {error ? (
         <p className="text-destructive text-sm" role="alert">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
     </Questionnaire>
@@ -232,11 +235,14 @@ export function QuestionNotice({
   botName,
   avatarSeed,
   onAnswered,
+  disabled = false,
 }: {
   question: WaitingQuestion;
   botName: string;
   avatarSeed: string;
   onAnswered: (answer: string) => Promise<void>;
+  /** Drawn, but not yet answerable or dismissable here: the conversation is still being joined. */
+  disabled?: boolean;
 }) {
   const dismiss = useMutation(
     dismissPersonQuestionMutationOptions(queryClient),
@@ -261,17 +267,27 @@ export function QuestionNotice({
             {question.why}
           </p>
         ) : null}
-        {parts ? <QuestionParts onAnswered={onAnswered} parts={parts} /> : null}
+        {parts ? (
+          <QuestionParts
+            disabled={disabled}
+            onAnswered={onAnswered}
+            parts={parts}
+          />
+        ) : null}
         {dismiss.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {dismiss.error.message}
+            {failureSaid(dismiss.error)}
           </p>
         ) : null}
       </div>
+      {/*
+       * Not while `disabled` either: dismissing moves on whatever waits on the question, and its
+       * re-read of every query lands mid-join, under the stored copy drawn while the join replays.
+       */}
       <Button
         aria-label="Dismiss question"
         className="-mt-1 -mr-1"
-        disabled={dismiss.isPending}
+        disabled={dismiss.isPending || disabled}
         onClick={() => dismiss.mutate({ id: question.id })}
         size="icon-sm"
         title="Dismiss without answering"

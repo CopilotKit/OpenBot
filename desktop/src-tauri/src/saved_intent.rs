@@ -144,6 +144,41 @@ impl SavedIntent {
     }
 }
 
+/**
+Record a connection the person changed inside OpenBot, for Desktop's next Start: the connection it
+starts with, and the plan or sign-in kept on this computer for it. The keys of every other
+connection stay where they are, as the saved keys they still are.
+
+A key typed in the app is kept by OpenBot itself, never here, so an API key or address chosen there
+records no key category: Start then carries on with the connection OpenBot keeps
+(`crate::ai_connection::Settled`).
+*/
+pub fn record_settled(root: &Path, intent: ModelIntent) -> Result<(), Problem> {
+    let mut record = SavedIntent::read(root);
+    record.model = Some(intent);
+    match intent {
+        ModelIntent::ClaudePlan if crate::vault::stored(root, "CLAUDE_CODE_OAUTH_TOKEN") => {
+            record.categories.insert(Category::ClaudePlan);
+        }
+        ModelIntent::ChatGptPlan if crate::env::saved_chatgpt_plan_store(root) => {
+            record.categories.insert(Category::ChatGptPlan);
+        }
+        ModelIntent::GoogleOauth => {
+            record.categories.insert(Category::GoogleOauth);
+        }
+        ModelIntent::XaiOauth => {
+            record.categories.insert(Category::XaiOauth);
+        }
+        _ => {}
+    }
+    record.write(root).map_err(|error| {
+        Problem::with(
+            "OpenBot couldn't record the new AI connection for its next start.",
+            error.to_string(),
+        )
+    })
+}
+
 // The runtime OPENAI_API_KEY slot is shared with first-party OpenAI. Keep the endpoint binding
 // and its key together, so a later partially persisted provider change cannot relabel that key.
 pub const COMPATIBLE_CREDENTIAL: &str = "OPENAI_COMPATIBLE_CREDENTIAL";
@@ -288,7 +323,8 @@ mod tests {
         for failure in ["first-store", "later-store", "plan-file", "metadata"] {
             let (root, secrets, legacy) = fixture(failure);
             let credential = ModelCredential::ChatGptPlan {
-                store: "{\"refresh_token\":\"synthetic-plan\"}".into(),
+                // A Sign in with ChatGPT credential record (`crate::chatgpt_sign_in`).
+                store: r#"{"client_id":"oaiapp_synthetic","access_token":"synthetic-access","refresh_token":"synthetic-plan","scopes":["chatgpt.tokens.use.direct"]}"#.into(),
             };
             if failure == "plan-file" {
                 std::fs::write(root.join(".langchain"), "synthetic blocker").unwrap();

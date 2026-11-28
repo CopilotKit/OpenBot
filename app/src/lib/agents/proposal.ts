@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { PluginSkill } from "@/lib/plugins/queries";
+import type { Skill } from "@/lib/skills/queries";
 import { type AgentFormValues, agentFormSchema } from "./form";
 import type { AgentProfile } from "./queries";
 
@@ -15,8 +15,8 @@ import type { AgentProfile } from "./queries";
  * and a person making one are then held to one rule, with no second parser to drift from the
  * server's.
  *
- * Nothing here decides whether the coworker may be created. That stays the server's: `POST
- * /api/agents` already answers who may, records `bot.created`, and refuses in its own words.
+ * Nothing here decides whether the coworker may be created. That stays the server's: the API's
+ * `createBot` already answers who may, records `bot.created`, and refuses in its own words.
  */
 
 /**
@@ -130,7 +130,7 @@ export const proposedBotSchema = z.object({
   roleDescription: z
     .string()
     .describe(
-      "The coworker's standing instructions, written as directions to it in the imperative, up to 1000 characters. Say what it does, what it must not conclude, and what it says when the evidence is thin. This text is given to a model on every turn in every channel, so write the rules that should always hold rather than a description of the coworker in the third person. Do not address the person talking to it.",
+      "The coworker's standing instructions, written as directions to it in the imperative, up to 5000 characters. Say what it does, what it must not conclude, and what it says when the evidence is thin. This text is given to a model on every turn in every channel, so write the rules that should always hold rather than a description of the coworker in the third person. Do not address the person talking to it.",
     ),
   skills: z
     .array(z.string())
@@ -269,9 +269,7 @@ export function describeBot(agent: AgentProfile): string {
  * The instructions are left out for the same reason `list_bots` leaves out role descriptions, and
  * because nothing here is being edited: this list exists to pick from.
  */
-export function describeGrantableSkills(
-  skills: readonly PluginSkill[],
-): string {
+export function describeGrantableSkills(skills: readonly Skill[]): string {
   if (skills.length === 0) {
     return "No skills exist here yet, so a coworker made now runs on its instructions alone. That is ordinary — most coworkers do.";
   }

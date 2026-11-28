@@ -263,7 +263,8 @@ function conversationRoutes(path: string) {
 }
 
 test.each([
-  ["a conversation with one Bot", "/channel/c-1", "Channel"],
+  // Every request fails here, so the conversation is named once it could not be loaded.
+  ["a conversation with one Bot", "/channel/c-1", "Conversation"],
   ["a group conversation", "/group/g-1", "Group"],
   ["a new conversation", "/channel/new", "To:"],
 ])("%s has its conversation header", async (_name, path, heading) => {
@@ -275,7 +276,7 @@ test.each([
   expect(
     view.container.querySelectorAll('[data-slot="conversation-header"]'),
   ).toHaveLength(1);
-  expect(header.textContent).toContain(heading);
+  await waitFor(() => expect(header.textContent).toContain(heading));
 });
 
 test("no app-level hook reuses a name the ui primitives give themselves", async () => {

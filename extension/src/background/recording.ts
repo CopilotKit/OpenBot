@@ -11,9 +11,7 @@
 import {
   type LearningSpaceState,
   RECORDER_AUTHORITY_UNAVAILABLE,
-  type RecorderLearningResponse,
   type RecorderMe,
-  recorderPaths,
   TRAJECTORY_GATE_REFUSALS,
 } from "@openbot/shared/recorder-api";
 import {
@@ -38,13 +36,22 @@ import type {
   StreamSession,
 } from "../protocol/messages";
 import { IDLE_STATE, parseOffscreenSignedOut } from "../protocol/messages";
+import {
+  getRecorderIdentity,
+  getRecorderLearning,
+} from "../shared/generated/recorder";
 import { hasHostPermission } from "../shared/host-access";
 import {
   KEPT_FOR_PERSON_DAYS,
   KEPT_FOR_PERSON_MS,
   RECORDER_ACTION_NOTICE_AT,
 } from "../shared/limits";
-import { OpenBotError, openbotJson } from "../shared/openbot-client";
+import {
+  COMPANY_SIGN_IN_REQUIRED,
+  OpenBotError,
+  organizationOf,
+  updateRequiredSentence,
+} from "../shared/openbot-client";
 import { isRecordablePage } from "../shared/origin";
 import {
   allowsOpenBot,
@@ -269,6 +276,8 @@ const SENTENCES = {
   keptReplaced: "This browser was connected to another OpenBot or person.",
   authorityUnavailable: TRAJECTORY_GATE_REFUSALS.authorityUnavailable.message,
   forbidden: "OpenBot does not let you record. Ask whoever runs it.",
+  // The Recorder's own words for SSO_REQUIRED, never the answer's: the popup offers the way in beside it.
+  companySignIn: COMPANY_SIGN_IN_REQUIRED,
 } as const;
 
 type SignedOutReason = "revoked" | "removed" | "organization";
@@ -554,6 +563,8 @@ type Live = {
   openbotUrl: string;
   token: string;
   userId: string;
+  /** The organization of the connection it records with (`organizationOf`). */
+  organizationId?: string;
 };
 
 type StopMode =
@@ -571,6 +582,9 @@ const signedOutReason = (error: unknown): SignedOutReason | null =>
  * text in its answer, which the popup would show in the Recorder's own voice. */
 const sentenceFor = (error: unknown, fallback: string): string => {
   if (!(error instanceof OpenBotError)) return fallback;
+  const update = updateRequiredSentence(error);
+  if (update) return update;
+  if (error.companySignInRequired) return SENTENCES.companySignIn;
   if (error.body?.code === RECORDER_AUTHORITY_UNAVAILABLE)
     return SENTENCES.authorityUnavailable;
   return error.status === 403 ? SENTENCES.forbidden : fallback;
@@ -584,12 +598,27 @@ function report(what: string): (error: unknown) => void {
   return (error) => console.error(`Recorder: ${what} failed`, error);
 }
 
-function liveFrom(record: DrainRecord, token: string): Live {
+/** The organization a connection records into, by name: OpenBot's latest answer about it, else what its grant said. */
+export function organizationNameOf(
+  me: RecorderMe | null,
+  connection: ConnectionRecord,
+): { organizationName?: string } {
+  const name = me?.organization?.name ?? connection.organizationName;
+  return name ? { organizationName: name } : {};
+}
+
+function liveFrom(
+  record: DrainRecord,
+  connection: Pick<ConnectionRecord, "token" | "organizationId">,
+): Live {
   return {
     recordingId: record.recordingId,
     openbotUrl: record.openbotUrl,
-    token,
+    token: connection.token,
     userId: record.userId,
+    ...(connection.organizationId
+      ? { organizationId: connection.organizationId }
+      : {}),
   };
 }
 
@@ -696,6 +725,7 @@ export function installRecording(
           openbotUrl: live.openbotUrl,
           token: live.token,
           userId: live.userId,
+          organizationId: live.organizationId,
         };
       const connection = await currentConnection();
       return connection
@@ -703,6 +733,7 @@ export function installRecording(
             openbotUrl: connection.openbotUrl,
             token: connection.token,
             userId: connection.user.id,
+            organizationId: connection.organizationId,
           }
         : null;
     },
@@ -822,7 +853,7 @@ export function installRecording(
     if (narration) external = { language: narration.language, before: "" };
     const connection = await currentConnection();
     if (!record || !connection || !ownedBy(record, connection)) return;
-    live = liveFrom(record, connection.token);
+    live = liveFrom(record, connection);
     openSteps(live.recordingId, takeRestored(live.recordingId));
   })();
   ready.catch(report("loading the recorder state"));
@@ -1711,6 +1742,9 @@ export function installRecording(
         openbotUrl: connection.openbotUrl,
         token: connection.token,
         userId: connection.user.id,
+        ...(connection.organizationId
+          ? { organizationId: connection.organizationId }
+          : {}),
       };
       watchConnection();
       external = session.narration
@@ -2045,10 +2079,9 @@ export function installRecording(
     const current = live;
     if (!current || state.phase !== "recording") return;
     try {
-      await openbotJson<RecorderMe>(
-        { openbotUrl: current.openbotUrl, token: current.token },
-        recorderPaths.me,
-      );
+      await getRecorderIdentity(organizationOf(current), {
+        target: { openbotUrl: current.openbotUrl, token: current.token },
+      });
     } catch (error) {
       const reason = signedOutReason(error);
       if (reason)
@@ -2500,10 +2533,10 @@ export function installRecording(
       return null;
     }
     const connection = await currentConnection();
-    const token =
-      connection && ownedBy(record, connection) ? connection.token : "";
+    const owner =
+      connection && ownedBy(record, connection) ? connection : { token: "" };
     await trackStop(
-      endRecording(liveFrom(record, token), { kind: "person" }, stopping),
+      endRecording(liveFrom(record, owner), { kind: "person" }, stopping),
     );
     return record.recordingId;
   }
@@ -2553,7 +2586,7 @@ export function installRecording(
       return;
     }
     await trackStop(
-      endRecording(liveFrom(record, ""), {
+      endRecording(liveFrom(record, { token: "" }), {
         kind: "signed-out",
         reason: await waitingReason(),
         forgot: true,
@@ -2616,7 +2649,9 @@ export function installRecording(
     )
       return cached.value;
     try {
-      const value = await openbotJson<RecorderMe>(connection, recorderPaths.me);
+      const value = await getRecorderIdentity(organizationOf(connection), {
+        target: connection,
+      });
       await writeSession("me", { value, fetchedAt: deps.now() });
       return value;
     } catch (error) {
@@ -2658,6 +2693,7 @@ export function installRecording(
             openbotUrl: connection.openbotUrl,
             user: { name: connection.user.name, email: connection.user.email },
             via: connection.via,
+            ...organizationNameOf(me, connection),
           }
         : null,
       me: connection ? me : null,
@@ -2676,10 +2712,9 @@ export function installRecording(
     const connection = await currentConnection();
     if (!connection) return { ok: false, error: SENTENCES.noConnection };
     try {
-      const answer = await openbotJson<RecorderLearningResponse>(
-        connection,
-        recorderPaths.learning,
-      );
+      const answer = await getRecorderLearning(organizationOf(connection), {
+        target: connection,
+      });
       learningSpace = answer.learning;
       await writeSession("learning", {
         value: answer.learning,

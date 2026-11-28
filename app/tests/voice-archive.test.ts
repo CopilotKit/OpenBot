@@ -8,6 +8,7 @@ import {
   withVoiceChats,
 } from "../src/lib/voice/archive";
 import { queryClient } from "../src/query-client";
+import { conversationPath, problem } from "./conversations-api";
 
 afterEach(() => {
   mock.restore();
@@ -35,6 +36,14 @@ const call = (
   summaryStatus: "ready",
   transcript: [{ id: "user", role: "user", text: "Let's record tomorrow." }],
 });
+
+/** Where a conversation's saved calls are listed and saved: the API's address for them. */
+const SESSIONS = conversationPath("channel-1", "/voice-sessions");
+
+/** A saved call as the API answers it: its conversation is `conversationId`. */
+function answered({ channelId, ...rest }: VoiceSessionRecord) {
+  return { ...rest, conversationId: channelId };
+}
 
 test("call cards keep chronological order around delegated messages and missing anchors", () => {
   const messages = [
@@ -65,10 +74,14 @@ test("history loading follows pagination and preserves failed-summary transcript
     urls.push(String(input));
     return Response.json(
       urls.length === 1
-        ? { sessions: [call("one")], nextCursor: "next page" }
+        ? { sessions: [answered(call("one"))], nextCursor: "next page" }
         : {
             sessions: [
-              { ...call("two"), summary: null, summaryStatus: "failed" },
+              {
+                ...answered(call("two")),
+                summary: null,
+                summaryStatus: "failed",
+              },
             ],
             nextCursor: null,
           },
@@ -76,21 +89,28 @@ test("history loading follows pagination and preserves failed-summary transcript
   });
   const records = await loadVoiceArchive("channel-1");
   expect(records).toHaveLength(2);
-  expect(urls[1]).toContain("cursor=next+page");
+  expect(urls).toEqual([
+    `${SESSIONS}?limit=50`,
+    `${SESSIONS}?limit=50&cursor=next+page`,
+  ]);
   expect(voiceArchiveContext(records)).toContain(
     "user: Let's record tomorrow.",
   );
 });
 
 test("a busy summary response retains the server's durable transcript instead of marking it unsaved", async () => {
-  mockFetch(async () =>
-    Response.json(
-      {
-        session: { ...call("busy"), summary: null, summaryStatus: "failed" },
-        error: "Summary service busy",
-      },
-      { status: 429 },
-    ),
+  // Saved, with its summary still to come: the API answers 200 and says so in `notice`.
+  mockFetch(async (input, init) =>
+    init?.method === "POST" && String(input) === SESSIONS
+      ? Response.json({
+          session: {
+            ...answered(call("busy")),
+            summary: null,
+            summaryStatus: "failed",
+          },
+          notice: "Summary service busy",
+        })
+      : problem(404, "Not found."),
   );
   saveVoiceSession(voiceSessionInput(call("busy")));
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -113,7 +133,7 @@ test("a save answered by a page that is not JSON reads as a failed save, not a p
     ["empty", () => new Response(null, { status: 204 })],
   ] as const) {
     mockFetch(async (_input, init) =>
-      init?.method
+      init?.method === "POST"
         ? response()
         : Response.json({ sessions: [], nextCursor: null }),
     );
@@ -131,13 +151,18 @@ test("a save answered by a page that is not JSON reads as a failed save, not a p
 
 test("save failure remains retryable with the same session id and original transcript", async () => {
   const sent: unknown[] = [];
+  const keys: (string | null)[] = [];
   let fail = true;
-  mockFetch(async (_input, init) => {
-    if (!init?.method) return Response.json({ sessions: [], nextCursor: null });
+  mockFetch(async (input, init) => {
+    if (String(input).split("?")[0] !== SESSIONS)
+      return problem(404, "Not found.");
+    if (init?.method !== "POST")
+      return Response.json({ sessions: [], nextCursor: null });
     sent.push(JSON.parse(String(init.body)));
+    keys.push(new Headers(init.headers).get("Idempotency-Key"));
     return fail
-      ? Response.json({ error: "Database unavailable" }, { status: 503 })
-      : Response.json({ session: call("retry") });
+      ? problem(503, "Database unavailable")
+      : Response.json({ session: answered(call("retry")) });
   });
   const input = voiceSessionInput(call("retry"));
   saveVoiceSession(input);
@@ -147,7 +172,10 @@ test("save failure remains retryable with the same session id and original trans
   saveVoiceSession(input);
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect((await loadVoiceArchive("channel-1"))[0]?.saveState).toBeUndefined();
-  expect(sent).toEqual([input, input]);
+  // The conversation is in the address; the call itself is the body, the same both times.
+  const { channelId: _conversation, ...body } = input;
+  expect(sent).toEqual([body, body]);
+  expect(keys.every(Boolean)).toBe(true);
 });
 
 test("earlier calls' context is cut between characters", () => {

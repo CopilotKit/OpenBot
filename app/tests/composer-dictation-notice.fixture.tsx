@@ -55,7 +55,7 @@ function Home() {
         <div className="mt-8 w-full flex flex-col items-center">
           {params.get("chips") === "1" ? (
             <StarterSuggestions
-              agentId="personal-assistant"
+              bot={{ packageBotId: "personal-assistant" }}
               onSelect={() => {}}
             />
           ) : null}

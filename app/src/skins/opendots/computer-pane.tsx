@@ -2,6 +2,7 @@ import { IconDeviceDesktop, IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
+import { useDeletedHere } from "@/components/routines/routine-detail-missing";
 import {
   Select,
   SelectContent,
@@ -9,8 +10,31 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { deleteAgentMutationKey } from "@/lib/agents/mutations";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { IconAction } from "./sidebar";
+
+/**
+ * One Bot's computer, drawn until the Bot is deleted from this browser.
+ *
+ * The pane stays on a Bot for a moment after it is deleted from its page: the list of Bots is still
+ * being read again, which is what moves the pane on. Its computer is polled all the while (who has
+ * control, its screen), and a poll in that moment asks about a Bot that is gone and is answered 404.
+ * So from the moment a delete of this Bot is on its way, its computer is not drawn, and so not read.
+ * A delete that fails leaves the Bot, and its computer is drawn again.
+ *
+ * Mounted once per Bot (the pane keys it), because whether a Bot was deleted is worked out again
+ * only when a delete changes, not when the Bot asked about does.
+ */
+function BotComputer({ botId, name }: { botId: string; name: string }) {
+  const deleted = useDeletedHere<string>(
+    deleteAgentMutationKey,
+    (id) => id === botId,
+  );
+  if (deleted) return null;
+  return <ComputerViewPanel agentId={botId} name={name} />;
+}
 
 /**
  * OpenDots' right pane, showing OpenBot's own computer for one Bot.
@@ -52,7 +76,18 @@ export function ComputerPane({
           <IconX className="size-4" />
         </IconAction>
       </div>
-      {agents.isPending ? null : !bot ? (
+      {agents.isPending ? null : agents.data === undefined ? (
+        // A roster that failed to load is said, never drawn as having no Bot.
+        <p
+          className="px-[18px] py-3.5 text-[13px] text-(--opendots-error-ink)"
+          role="alert"
+        >
+          {loadFailure(
+            agents.error,
+            "Couldn't load your Bots. Try again in a moment.",
+          )}
+        </p>
+      ) : !bot ? (
         <p className="px-[18px] py-3.5 text-[13px] text-(--opendots-muted)">
           Create a Bot to give it a computer.
         </p>
@@ -85,7 +120,7 @@ export function ComputerPane({
             </div>
           ) : null}
           {/* Keyed so switching Bots tears down one screen stream before opening the next. */}
-          <ComputerViewPanel agentId={bot.id} key={bot.id} name={bot.name} />
+          <BotComputer botId={bot.id} key={bot.id} name={bot.name} />
         </div>
       )}
     </aside>

@@ -4,7 +4,8 @@ import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import { api } from "./api";
+import { ApiError, ME, ORGANIZATION_ID, organizationsHeld } from "./api";
+import { deleteDevice, registerDevice } from "./api/generated/devices/devices";
 
 const key = "openbot-device-id";
 export async function registerPush() {
@@ -39,16 +40,31 @@ export async function registerPush() {
     id = Crypto.randomUUID();
     await SecureStore.setItemAsync(key, id);
   }
-  await api("/api/delivery/devices", {
-    method: "POST",
-    body: { id, token, projectId, platform: Platform.OS },
+  // Registered under the id this install made, every time the app starts: a token Expo has changed
+  // replaces the old one rather than adding a second phone.
+  await registerDevice(ORGANIZATION_ID, ME, id, {
+    token,
+    projectId,
+    platform: Platform.OS,
   });
   return id;
 }
+/**
+ * Stop push notifications to this phone, from every organization the person is in: a device is registered in each
+ * organization it gets notifications from, so signing out removes it from each.
+ */
 export async function unregisterPush() {
   const id = await SecureStore.getItemAsync(key);
-  if (id)
-    await api(`/api/delivery/devices/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    });
+  if (!id) return;
+  // None, for somebody in no organization any more: there is nothing to take the phone off, and they can still sign out.
+  for (const organization of await organizationsHeld()) {
+    try {
+      await deleteDevice(organization.id, ME, id);
+    } catch (error) {
+      // Removed already, or never registered there: by another sign-out, or by OpenBot once Expo said the phone
+      // stopped taking them.
+      if (error instanceof ApiError && error.status === 404) continue;
+      throw error;
+    }
+  }
 }

@@ -1,12 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { relativeTime } from "@/lib/relative-time";
-import {
-  type RoutineRecord,
-  type RoutineRunRecord,
-  routineRunsQueryOptions,
-} from "@/lib/routines/queries";
+import type { RoutineRecord, RoutineRunRecord } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
+import { useRoutineRuns } from "./use-routine-runs";
+import { failureSaid } from "@/lib/load-failure";
 
 /*
  * What a routine has done, where a person sees a routine: its own row on the Routines list, and each
@@ -53,15 +50,15 @@ function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
   if (lastRun.status === "skipped") {
     return {
       text: `Skipped ${when}`,
-      className: "text-amber-600 dark:text-amber-500",
-      dot: "bg-amber-500",
+      className: "text-warning",
+      dot: "bg-warning",
     };
   }
   if (lastRun.status === "succeeded") {
     return {
       text: `Ran ${when}`,
       className: "text-muted-foreground",
-      dot: "bg-emerald-500",
+      dot: "bg-success",
     };
   }
   // An outcome this DTO doesn't recognise degrades to a neutral label rather than an invented
@@ -121,7 +118,7 @@ const RUN_STATUS: Record<
     dot: "animate-pulse bg-muted-foreground",
     className: "",
   },
-  succeeded: { text: "Succeeded", dot: "bg-emerald-500", className: "" },
+  succeeded: { text: "Succeeded", dot: "bg-success", className: "" },
   failed: {
     text: "Failed",
     dot: "bg-destructive",
@@ -129,21 +126,28 @@ const RUN_STATUS: Record<
   },
   skipped: {
     text: "Skipped",
-    dot: "bg-amber-500",
-    className: "text-amber-600 dark:text-amber-500",
+    dot: "bg-warning",
+    className: "text-warning",
   },
   waiting: { text: "Waiting for you", dot: "bg-sky-500", className: "" },
 };
 
+/** How a run's status reads on its row. Nothing for one a newer server sends that this app doesn't know. */
+export function runStatusOf(status: string) {
+  const known: Partial<Record<string, (typeof RUN_STATUS)["running"]>> =
+    RUN_STATUS;
+  return known[status] ?? null;
+}
+
 /** Every firing of one routine, newest first, each linking to the thread it ran in. */
 export function RoutineRuns({ routine }: { routine: RoutineRecord }) {
-  const runs = useQuery(routineRunsQueryOptions(routine.id));
+  const runs = useRoutineRuns(routine.id);
   // Pending renders nothing: "No runs yet." would otherwise flash for the fetch.
   if (runs.isPending) return null;
   if (runs.error)
     return (
       <p className="text-destructive text-xs" role="alert">
-        {runs.error.message}
+        {failureSaid(runs.error)}
       </p>
     );
   if (!runs.data?.length)
@@ -151,21 +155,23 @@ export function RoutineRuns({ routine }: { routine: RoutineRecord }) {
   return (
     <ul className="flex w-full flex-col gap-1.5">
       {runs.data.map((run) => {
-        const status = RUN_STATUS[run.status] ?? RUN_STATUS.skipped;
+        const status = runStatusOf(run.status);
         return (
           <li
             className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"
             key={run.id}
           >
-            <span
-              className={cn(
-                "inline-flex items-center gap-1.5",
-                status.className,
-              )}
-            >
-              <span className={cn("size-1.5 rounded-full", status.dot)} />
-              {status.text}
-            </span>
+            {status ? (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5",
+                  status.className,
+                )}
+              >
+                <span className={cn("size-1.5 rounded-full", status.dot)} />
+                {status.text}
+              </span>
+            ) : null}
             <span className="text-muted-foreground">
               {run.source === "run_now"
                 ? "Run now"
@@ -174,10 +180,10 @@ export function RoutineRuns({ routine }: { routine: RoutineRecord }) {
                   : "Scheduled"}{" "}
               · {relativeTime(run.startedAt)}
             </span>
-            {routine.channel.gone ? null : (
+            {routine.conversation.gone ? null : (
               <Link
                 className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                params={{ channelId: routine.channel.id }}
+                params={{ channelId: routine.conversation.id }}
                 to="/channel/$channelId"
               >
                 Open conversation

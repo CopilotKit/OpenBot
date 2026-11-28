@@ -2,12 +2,12 @@ import { useFrontendTool, useHumanInTheLoop } from "@copilotkit/react-core/v2";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { ProposedSkillCard } from "@/components/skills/proposed-skill";
+import { appsQueryOptions } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { type OfferRule, useOfferedTo } from "@/lib/copilot/bot-offer";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { saveSkillMutationOptions } from "@/lib/plugins/mutations";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
 import type { SkillFormValues } from "@/lib/skills/form";
+import { saveSkillMutationOptions } from "@/lib/skills/mutations";
 import {
   describeSkill,
   describeSkills,
@@ -17,6 +17,7 @@ import {
   proposedSkillSchema,
   SKILL_CREATOR_SLUG,
 } from "@/lib/skills/proposal";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 import { queryClient } from "@/query-client";
 
 /**
@@ -28,7 +29,7 @@ import { queryClient } from "@/query-client";
  * already exists and which tools it may name, and one write that suspends the run on a card.
  *
  * WHY THE BROWSER AND NOT THE SERVER. A skill is written as a person, not as a Bot: the slug goes
- * under their name, and whether they may take it is a question about them. `POST /api/plugins/skills`
+ * under their name, and whether they may take it is a question about them. `replaceSkill`
  * already answers exactly that — their own skills, an administrator's for the deployment, a refusal
  * naming the slug otherwise — and a tool that rides the signed-in session inherits every bit of it
  * unchanged, including the audit row. A server-side tool would have to carry an actor into a run that
@@ -59,17 +60,17 @@ export function SkillTools() {
   useOfferedTo(OFFERED);
 
   /*
-   * The Plugins payload carries two of the three reads: every skill scoped to whoever is asking, and
-   * every connected server's tools. It is the same query the Skills page runs, so a person who has
-   * opened that page pays nothing for this — and it is fetched only when a tool is called, so a Bot
-   * that cannot author skills, which is most of them, never asks.
+   * Two reads: every skill scoped to whoever is asking, which is the query the Skills page runs, and
+   * every app's tools, from the apps list (`listApps`). A person who has opened those pages pays
+   * nothing for them, and they are fetched only when a tool is called, so a Bot that cannot author
+   * skills, which is most of them, never asks.
    *
    * FETCHED AT THE MOMENT THEY ARE CALLED, never read off a render. The SDK registers a tool once,
    * when its name or `available` changes, and keeps that handler, so one closing over this render
    * read the skills as they were when the grant arrived: before they had loaded. `list_skills` then
    * answered "No skills exist here yet" while skills existed. See `lib/agents/answers.ts`.
    */
-  const page = () => queryClient.ensureQueryData(pluginsPageQueryOptions());
+  const skills = () => queryClient.ensureQueryData(skillListQueryOptions());
 
   useFrontendTool({
     name: "list_skills",
@@ -77,11 +78,11 @@ export function SkillTools() {
       "The skills that already exist in this deployment, one line each, with whose each one is. Read this before writing a skill: a slug is an identity, so reusing one replaces that skill, and a slug that is not the person's own cannot be replaced at all.",
     parameters: z.object({}),
     handler: async () => {
-      const [{ skills }, me] = await Promise.all([
-        page(),
+      const [all, me] = await Promise.all([
+        skills(),
         queryClient.ensureQueryData(currentUserQueryOptions()),
       ]);
-      return describeSkills(skills, me?.id);
+      return describeSkills(all, me?.id);
     },
   });
 
@@ -98,8 +99,9 @@ export function SkillTools() {
     }),
     handler: async ({ slug }) => {
       const wanted = String(slug).replace(/^\//, "");
-      const { skills } = await page();
-      const skill = skills.find((candidate) => candidate.slug === wanted);
+      const skill = (await skills()).find(
+        (candidate) => candidate.slug === wanted,
+      );
       if (!skill) {
         return `There is no skill called ${wanted} that this person can see. Call list_skills for the ones there are.`;
       }
@@ -112,7 +114,8 @@ export function SkillTools() {
     description:
       "The `serverId/toolName` refs a skill here can declare, grouped by connector. Declaring a tool grants nothing — the offer a run gets is always the intersection of what the skill names with what the Bot was granted — so a skill may name tools for a connector this Bot does not hold yet.",
     parameters: z.object({}),
-    handler: async () => describeToolRefs((await page()).servers),
+    handler: async () =>
+      describeToolRefs(await queryClient.ensureQueryData(appsQueryOptions())),
   });
 
   useHumanInTheLoop({
@@ -140,14 +143,14 @@ function ProposedSkillRender(props: {
   respond?: (result: unknown) => Promise<void>;
   result?: string;
 }) {
-  const { data: page } = useQuery(pluginsPageQueryOptions());
+  const { data: skills } = useQuery(skillListQueryOptions());
   const { data: me } = useQuery(currentUserQueryOptions());
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const saveSkill = useMutation(saveSkillMutationOptions(queryClient));
   const slug = props.args.slug;
   const existing = slug
-    ? page?.skills.find((candidate) => candidate.slug === slug)
+    ? skills?.find((candidate) => candidate.slug === slug)
     : undefined;
   return (
     <ProposedSkillCard

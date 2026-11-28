@@ -97,7 +97,9 @@ async function attached(driving: boolean) {
 
 test("it connects to the Bot's terminal and draws what the shell prints", async () => {
   const { view, socket } = await attached(false);
-  expect(socket.url).toEndWith("/api/computers/notes-bot/terminal");
+  expect(socket.url).toEndWith(
+    "/api/v2/organizations/default/computers/notes-bot/terminal",
+  );
   expect(socket.binaryType).toBe("arraybuffer");
   await waitFor(() =>
     expect(drawn(view.container)).toContain("hello from the bot"),

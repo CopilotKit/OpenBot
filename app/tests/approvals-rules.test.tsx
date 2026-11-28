@@ -32,6 +32,20 @@ import {
 } from "@/components/channels/tool-activity";
 import { TeamBotConsents } from "@/components/settings/team-bot-consents";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { ME_PATH, meResponse } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  approvalInboxResponse,
+  approvalWriteResponse,
+  problemResponse,
+} from "./approvals-api";
+import {
+  answerBotsList,
+  CLEAR_TEAM_BOT_CONSENTS_PATH,
+  noContent,
+  type SentRequest,
+  sentRequest,
+} from "./bots-api";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -115,19 +129,29 @@ beforeEach(() => {
           method: init.method,
           body: init.body ? JSON.parse(String(init.body)) : undefined,
         });
-        if (url === "/api/approvals/rules" && refuseRule) {
+        if (
+          url === "/api/v2/organizations/default/people/me/approval-rules" &&
+          refuseRule
+        ) {
           const error = refuseRule;
           refuseRule = null;
-          return Response.json({ error }, { status: 400 });
+          return problemResponse(400, error);
         }
-        return Response.json({ ok: true });
+        return approvalWriteResponse(url, init) ?? Response.json({ ok: true });
       }
-      if (url === "/api/approvals")
-        return Response.json({ ...inbox, ...inboxOverride });
-      if (url.startsWith("/api/agents"))
-        return Response.json({ agents: [{ id: "shopper-bot", name: "Shop" }] });
-      if (url === "/api/me")
-        return Response.json({
+      {
+        const approvals = approvalInboxResponse(url, {
+          ...inbox,
+          ...inboxOverride,
+        });
+        if (approvals) return approvals;
+      }
+      const bots = answerBotsList(path, init, {
+        visible: [{ id: "shopper-bot", name: "Shop" }],
+      });
+      if (bots) return bots;
+      if (url === ME_PATH)
+        return meResponse({
           user: { id: "me", email: "me@example.test", role },
         });
       return new Response(null, { status: 404 });
@@ -159,9 +183,9 @@ function draw(
   );
 }
 
-test("team rules are locked for members, enforced auto-review is shown as required, and the host cap is named", async () => {
+test("organization rules are locked for members, enforced auto-review is shown as required, and the host cap is named", async () => {
   const view = draw(<ApprovalSettings />);
-  await view.findByText("Ask before taking action (team rule)");
+  await view.findByText("Ask before taking action (organization rule)");
   const mine = view.getByRole("combobox", {
     name: "Behaviour for Any action on Gmail",
   });
@@ -173,7 +197,8 @@ test("team rules are locked for members, enforced auto-review is shown as requir
   expect(
     view.getByText(/An admin limits this to "Ask every time"/),
   ).toBeTruthy();
-  expect(view.queryByText("Team settings")).toBeNull();
+  expect(view.getByText(/Organization rules are locked/)).toBeTruthy();
+  expect(view.queryByText("Organization settings")).toBeNull();
 });
 
 test("a member changes a saved rule in place", async () => {
@@ -188,7 +213,7 @@ test("a member changes a saved rule in place", async () => {
   );
   await waitFor(() =>
     expect(sent).toContainEqual({
-      path: "/api/approvals/rules/mine",
+      path: "/api/v2/organizations/default/people/me/approval-rules/mine",
       method: "PATCH",
       body: { behaviour: "hand_off" },
     }),
@@ -216,7 +241,7 @@ test("a member adds a rule with one of the four behaviours", async () => {
   await user.click(view.getByRole("button", { name: "Save rule" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
-      path: "/api/approvals/rules",
+      path: "/api/v2/organizations/default/people/me/approval-rules",
       method: "POST",
       body: {
         botId: "*",
@@ -255,7 +280,11 @@ test("a rule that is not saved keeps the dialog open, with what was typed and wh
   await user.click(within(dialog).getByRole("button", { name: "Save rule" }));
   await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
   expect(
-    sent.filter((request) => request.path === "/api/approvals/rules"),
+    sent.filter(
+      (request) =>
+        request.path ===
+        "/api/v2/organizations/default/people/me/approval-rules",
+    ),
   ).toHaveLength(2);
 });
 
@@ -314,7 +343,7 @@ test("the personal edition's one person is not pointed at an Admin it does not h
   const served = global.fetch;
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) =>
-      String(path) === "/api/capabilities"
+      String(path) === DEPLOYMENT_PATH
         ? Response.json({ edition: "personal" })
         : served(path, init),
     { preconnect: originalFetch.preconnect },
@@ -397,7 +426,7 @@ test("a pending change is drawn in the conversation where the action was, and de
   fireEvent.click(view.getByRole("button", { name: "I did it myself" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
-      path: "/api/approvals/request-1/decision",
+      path: "/api/v2/organizations/default/people/me/approvals/request-1/decide",
       method: "POST",
       body: { decision: "handled" },
     }),
@@ -477,7 +506,7 @@ test("personal approvals keep the person's controls without team-only explanatio
     "personal",
   );
   await view.findByText("Rules for every Bot");
-  expect(view.queryByText(/Team rules are locked/)).toBeNull();
+  expect(view.queryByText(/Organization rules are locked/)).toBeNull();
   expect(view.queryByText("Shared Bots")).toBeNull();
   expect(view.getByRole("switch", { name: "Extra vigilant" })).toBeTruthy();
   expect(view.getByRole("switch", { name: "Auto-review" })).toBeTruthy();
@@ -486,6 +515,34 @@ test("team approvals still show the shared Bot account controls", async () => {
   const view = draw(<TeamBotConsents />);
   expect(await view.findByText("Shared Bots")).toBeTruthy();
   expect(view.getByRole("button", { name: "Reset" })).toBeTruthy();
+});
+
+test("Reset forgets every answer the person gave shared Bots, as the API's own write for them", async () => {
+  const cleared: SentRequest[] = [];
+  const served = global.fetch;
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const request = sentRequest(path, init);
+      if (request.path !== CLEAR_TEAM_BOT_CONSENTS_PATH)
+        return served(path, init);
+      cleared.push(request);
+      return noContent();
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = draw(<TeamBotConsents />);
+  fireEvent.click(await view.findByRole("button", { name: "Reset" }));
+  expect(
+    await view.findByText("Reset. Each shared Bot will ask again."),
+  ).toBeTruthy();
+  expect(cleared).toEqual([
+    {
+      method: "POST",
+      path: CLEAR_TEAM_BOT_CONSENTS_PATH,
+      key: expect.stringMatching(/^[0-9a-f]{32}$/),
+      body: undefined,
+    },
+  ]);
 });
 
 /*

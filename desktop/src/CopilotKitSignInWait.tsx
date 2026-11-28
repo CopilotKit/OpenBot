@@ -22,6 +22,7 @@ export function CopilotKitSignInWait({
   attempt,
   waiting,
   before = waiting,
+  waitingStatus,
   onPage,
   onCancel,
 }: {
@@ -29,6 +30,8 @@ export function CopilotKitSignInWait({
   attempt: string;
   /** What is said while it waits. */
   waiting: string;
+  /** When supplied, promote the browser instruction to a heading above this waiting status. */
+  waitingStatus?: string;
   /**
    * What is said until the CLI has opened a page. It checks for a sign-in it already has first, and
    * opens nothing when it finds one.
@@ -38,7 +41,16 @@ export function CopilotKitSignInWait({
   onPage?: () => void;
   onCancel: () => void;
 }) {
-  const [page, setPage] = useState<CopilotKitSignInPage | null>(null);
+  /*
+   * Kept with the sign-in that printed it. A Try again is a new sign-in with a new code: the code
+   * before it has timed out or been stopped, and approving it says it expired. So only this
+   * sign-in's own page is shown, and an earlier sign-in's answer that lands late is dropped.
+   */
+  const [shown, setShown] = useState<{
+    attempt: string;
+    page: CopilotKitSignInPage;
+  } | null>(null);
+  const page = shown?.attempt === attempt ? shown.page : null;
   const onPageNow = useRef(onPage);
   onPageNow.current = onPage;
 
@@ -50,7 +62,7 @@ export function CopilotKitSignInWait({
         .then(
           (found) => {
             if (current && found) {
-              setPage(found);
+              setShown({ attempt, page: found });
               onPageNow.current?.();
             }
           },
@@ -68,12 +80,13 @@ export function CopilotKitSignInWait({
   }, [attempt]);
 
   return (
-    <>
-      <StatusLine>{page ? waiting : before}</StatusLine>
+    <div className="sign-in-wait">
+      {page && waitingStatus && <h3>{waiting}</h3>}
+      <StatusLine>{page ? (waitingStatus ?? waiting) : before}</StatusLine>
       {page && (
         <>
-          <p className="footnote">
-            Check that the page shows this code:{" "}
+          <p className="footnote sign-in-code-row">
+            <span>Check that the page shows this code:</span>
             <strong className="sign-in-code">{page.userCode}</strong>
           </p>
           <p className="fallback">
@@ -91,6 +104,6 @@ export function CopilotKitSignInWait({
           Cancel
         </button>
       </div>
-    </>
+    </div>
   );
 }

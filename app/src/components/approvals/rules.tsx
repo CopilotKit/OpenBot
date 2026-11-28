@@ -46,6 +46,7 @@ import {
   type HostFolderGrant,
   hostAccessQueryOptions,
 } from "@/lib/computers/host-access";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The tool pattern the rule form shows as its example. It has to match real tool names, which start
@@ -106,7 +107,7 @@ export function LabelSelect<T extends string>({
 const TEAM_BEHAVIOUR_LABELS = Object.fromEntries(
   Object.entries(BEHAVIOUR_LABELS).map(([key, label]) => [
     key,
-    `${label} (team rule)`,
+    `${label} (organization rule)`,
   ]),
 ) as Record<RuleBehaviour, string>;
 
@@ -350,7 +351,7 @@ export function RuleForm({
             </form>
             {save.error ? (
               <p className="mt-4 text-destructive text-sm" role="alert">
-                {save.error.message}
+                {failureSaid(save.error)}
               </p>
             ) : null}
           </DialogBody>

@@ -22,6 +22,16 @@ import {
   channelKeys,
 } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { approvalInboxResponse } from "./approvals-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
+import {
+  answerBotAttention,
+  answerBotsList,
+  attentionOf,
+  botPath,
+} from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * The Bot asked the person a question in their conversation ("Which city?"), and they answered it
@@ -209,39 +219,29 @@ beforeAll(() => {
       );
       const request = () =>
         input instanceof Request ? input : new Request(url, init);
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
-      if (url.pathname === `/api/plugins/for/${BOT}`)
-        return NativeResponse.json({ skills: [], tools: [] });
-      if (url.pathname === `/api/agents/${BOT}`)
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
+      if (url.pathname === botGrantsPath(BOT)) return botGrantsResponse();
+      if (url.pathname === botPath(BOT))
         return NativeResponse.json({
-          agent: { id: BOT, visibility: "public", canManage: true },
+          bot: { id: BOT, visibility: "public", canManage: true },
         });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
-      if (url.pathname === "/api/bots/attention")
-        return NativeResponse.json({
-          lastPingId: null,
-          bots: [
-            {
-              agentId: BOT,
-              name: channel.name,
-              questions: open ? 1 : 0,
-              approvals: 0,
-              handoffs: 0,
-              unread: 0,
-              paused: false,
-              notify: "none",
-              items: 0,
-              tasks: { needsInput: 0, ready: 0, failed: 0 },
-            },
-          ],
-        });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
+      const waiting = answerBotAttention(url, init, {
+        bots: [
+          attentionOf(BOT, channel.name, {
+            questions: open ? 1 : 0,
+            notify: "none",
+          }),
+        ],
+      });
+      if (waiting) return waiting;
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       // The question the Bot is waiting on, in this conversation, until it is answered.
-      if (url.pathname === "/api/approvals")
-        return NativeResponse.json({
+      {
+        const approvals = approvalInboxResponse(url.pathname, {
           enabled: true,
           requests: [],
           rules: [],
@@ -260,19 +260,23 @@ beforeAll(() => {
               ]
             : [],
         });
+        if (approvals) return approvals;
+      }
       /*
        * As the server answers it: a question the person's own turn asked, answered in its
        * conversation, is closed and left to that conversation to run. Anything else is queued.
        */
-      if (url.pathname === "/api/approvals/questions/q-1/respond") {
+      if (
+        url.pathname ===
+        "/api/v2/organizations/default/people/me/questions/q-1/respond"
+      ) {
         const body = (await request().json()) as { inConversation?: boolean };
         answers.push(body);
         open = false;
-        return NativeResponse.json(
-          body.inConversation === true
-            ? { id: "q-1", continueHere: true }
-            : { id: "q-1", queued: true },
-        );
+        return NativeResponse.json({
+          id: "q-1",
+          continueHere: body.inConversation === true,
+        });
       }
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
@@ -293,9 +297,17 @@ beforeAll(() => {
         finishRun?.();
         return NativeResponse.json({ stopped: true });
       }
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (/\/threads\/[^/]+\/messages$/.test(url.pathname))
         return NativeResponse.json({ messages: history });
@@ -408,6 +420,36 @@ test("the Bot's work on an answer streams in the conversation, and Stop stops it
     ).toBeNull(),
   );
   expect(runs).toHaveLength(1);
+});
+
+/*
+ * The answer carries on the turn the Bot asked in; it is not a new prompt. Counted as one, a
+ * conversation of one question drew the turn rail's two marks in the margin, which read as a stray
+ * dash left of the transcript.
+ */
+test("answering the Bot's question keeps the conversation at one turn, with no rail beside it", async () => {
+  const view = conversation();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await view.findByRole("region", {
+    name: `${channel.name} is waiting on your answer`,
+  });
+  await view.findByText("Find weekend plans");
+
+  await user.type(
+    await view.findByRole("textbox", { name: "Message" }),
+    "Chicago",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(runs).toHaveLength(1));
+  await view.findByText(WORKING);
+  expect(view.getByText("Chicago")).toBeTruthy();
+  finishRun?.();
+  await waitFor(() =>
+    expect(view.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+
+  expect(view.container.querySelector('[data-slot="rail-mark"]')).toBeNull();
+  expect(view.queryByRole("navigation", { name: "Turns" })).toBeNull();
 });
 
 /*

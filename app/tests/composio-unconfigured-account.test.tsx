@@ -18,13 +18,22 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
 import { serversListedFor } from "@/lib/plugins/listed";
-import {
-  type PluginConnections,
-  type PluginServer,
-  type PluginsPage,
-  pluginKeys,
-} from "@/lib/plugins/queries";
+import { type PluginConnections, pluginKeys } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
+import { ME_PATH, meResponse } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  type AppsFixture,
+  appBody,
+  seedAppReads,
+  type TodayServer,
+} from "./apps-api";
+import { connectionPage, MY_CONNECTIONS_PATH } from "./connections-api";
+import {
+  MEMBERS_PATH,
+  membersResponse,
+  organizationMember,
+} from "./organizations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -62,7 +71,7 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-function server(overrides: Partial<PluginServer> & { id: string }) {
+function server(overrides: Partial<TodayServer> & { id: string }) {
   return {
     title: "App",
     summary: "",
@@ -72,31 +81,34 @@ function server(overrides: Partial<PluginServer> & { id: string }) {
     authScheme: "OAUTH2",
     tools: [],
     ...overrides,
-  } as PluginServer;
+  } satisfies TodayServer;
 }
 
 const gmail = server({ id: "composio-gmail", title: "Gmail" });
 const drive = server({
   id: "google-drive",
   title: "Google Drive",
-  provenance: "catalogue",
+  provenance: "first-party",
+  url: "https://drivemcp.googleapis.com/mcp/v1",
   vendor: "Google",
-} as Partial<PluginServer> & { id: string });
+});
 
-test("lists no Composio app when the deployment has no Composio key", () => {
+test("lists no app from the directory when the directory isn't set up", () => {
   expect(
     serversListedFor({
-      servers: [gmail, drive],
-      composioConfigured: false,
+      servers: [gmail, drive].map(appBody),
+      directoryAvailable: false,
+      directoryProvider: "composio",
     }).map((row) => row.id),
   ).toEqual(["google-drive"]);
 });
 
-test("lists Composio apps as before once the key is set", () => {
+test("lists apps from the directory as before once it is set up", () => {
   expect(
     serversListedFor({
-      servers: [gmail, drive],
-      composioConfigured: true,
+      servers: [gmail, drive].map(appBody),
+      directoryAvailable: true,
+      directoryProvider: "composio",
     }).map((row) => row.id),
   ).toEqual(["composio-gmail", "google-drive"]);
 });
@@ -121,18 +133,17 @@ function renderAccount(composioConfigured: boolean) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  const page: PluginsPage = {
+  const page: AppsFixture = {
     catalogue: [],
     servers: [gmail],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured,
     // Composio's answer: its auth config fixes one state for a whole toolkit.
     authorizesPerAction: false,
   };
-  const connections: PluginConnections = { connections: [], redirectUri: null };
-  client.setQueryData(pluginKeys.page(), page);
+  const connections: PluginConnections = { connections: [] };
+  seedAppReads(client, page);
   client.setQueryData(pluginKeys.connections(), connections);
 
   const rootRoute = createRootRoute({ component: Outlet });
@@ -192,4 +203,48 @@ test("with the key set, the app's page offers the account as before", async () =
   const view = renderAccount(true);
   expect(await view.findByText("Your account")).toBeTruthy();
   expect(view.queryByText(/isn't set up yet/)).toBeNull();
+});
+
+/** The team edition, the person signed in with `role`, and the organization's members. */
+function answering(role: "owner" | "admin" | "member") {
+  const asked: string[] = [];
+  global.fetch = Object.assign(
+    async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const path = url.split("?")[0];
+      asked.push(path ?? url);
+      if (path === DEPLOYMENT_PATH) return Response.json({ edition: "team" });
+      if (path === ME_PATH)
+        return meResponse({ user: { id: "usr_me", role, name: "Me" } });
+      if (path === MEMBERS_PATH)
+        return membersResponse(url, [
+          organizationMember("Sam Lee", "sam@northwind.test", "member"),
+          organizationMember("Ines Duarte", "ines@northwind.test", "admin"),
+          organizationMember("Priya Raman", "priya@northwind.test", "owner"),
+        ]);
+      if (path?.startsWith(MY_CONNECTIONS_PATH)) return connectionPage([]);
+      return new Response(null, { status: 404 });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  return asked;
+}
+
+test("a member is told who can turn it on: the owner, then the admins", async () => {
+  answering("member");
+  const view = renderAccount(false);
+  expect(
+    await view.findByText(
+      "An admin has to turn on Gmail before anyone can connect it: Priya Raman (priya@northwind.test) or Ines Duarte (ines@northwind.test).",
+    ),
+  ).toBeTruthy();
+});
+
+test("an admin reading the same page is given no list of admins to ask", async () => {
+  const asked = answering("admin");
+  const view = renderAccount(false);
+  await view.findByText(/An admin has to turn on Gmail/);
+  await settleReactWork();
+  expect(view.queryByText(/northwind\.test/)).toBeNull();
+  expect(asked).not.toContain(MEMBERS_PATH);
 });

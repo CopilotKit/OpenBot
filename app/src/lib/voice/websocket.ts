@@ -1,3 +1,5 @@
+import { startVoiceCall } from "@/lib/api/generated/voice/voice";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { decodePcm, encodePcm } from "./pcm";
 import type { ConnectVoice, VoiceEvent } from "./types";
 
@@ -117,23 +119,13 @@ export const connectWebSocket: ConnectVoice = async ({
     output = context.createMediaStreamDestination();
     onOutput(output.stream);
 
-    const response = await fetch("/api/voice/calls", {
-      method: "POST",
-      credentials: "include",
-      signal,
-      headers: { "Content-Type": "application/json", "x-openbot-voice": "1" },
-      body: JSON.stringify({ channelId }),
-    });
-    const body: unknown = await response.json();
-    if (!response.ok)
-      throw new Error(
-        body &&
-          typeof body === "object" &&
-          "error" in body &&
-          typeof body.error === "string"
-          ? body.error
-          : "Could not start the voice call.",
-      );
+    const body: unknown = await startVoiceCall(
+      organizationId(),
+      channelId,
+      {},
+      { "Idempotency-Key": idempotencyKey() },
+      { fallback: "Could not start the voice call.", signal },
+    );
     if (
       !body ||
       typeof body !== "object" ||

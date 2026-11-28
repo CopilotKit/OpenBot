@@ -19,6 +19,18 @@ import { listenPort } from "@openbot/shared/listen-port";
 import { appListenHosts } from "@openbot/shared/this-machine";
 import { file, type ServerWebSocket } from "bun";
 
+/**
+ * The API's addresses that wait on a provider, and so need longer than the default before an idle
+ * connection is closed: dictation, starting a voice call, and saving one.
+ */
+const ORGANIZATION = "/api/v2/organizations/[^/]+";
+const TRANSCRIPTIONS = new RegExp(`^${ORGANIZATION}/transcriptions$`);
+const VOICE_CALLS = new RegExp(
+  `^${ORGANIZATION}/conversations/[^/]+/voice-calls$`,
+);
+const VOICE_SESSIONS = new RegExp(
+  `^${ORGANIZATION}/conversations/[^/]+/voice-sessions$`,
+);
 const DIST = join(import.meta.dir, "dist");
 const appPort = listenPort(process.env.APP_PORT, 3010);
 if (!appPort.ok) {
@@ -60,6 +72,22 @@ export function fileFor(pathname: string): string | null {
 /** Whether the app's router should answer instead of the file system. */
 export function isClientRoute(pathname: string): boolean {
   return !pathname.startsWith("/assets/") && !pathname.includes(".");
+}
+
+/** The service worker's script (public/sw.js), at the root so its scope is the whole app. */
+export const SERVICE_WORKER_PATH = "/sw.js";
+
+/**
+ * The headers a file is served with beyond the type its extension names: the service worker's
+ * script as JavaScript and never answered from a cache without asking, so a new release's worker
+ * replaces the old one at once. Every other file, none.
+ */
+export function servedHeaders(pathname: string): HeadersInit | undefined {
+  if (pathname !== SERVICE_WORKER_PATH) return undefined;
+  return {
+    "content-type": "text/javascript; charset=utf-8",
+    "cache-control": "no-cache",
+  };
 }
 
 /** Whether this is a call for the server rather than the app. */
@@ -226,11 +254,12 @@ if (import.meta.main) {
       },
       async fetch(request, server) {
         const url = new URL(request.url);
-        if (url.pathname === "/api/audio/transcriptions") {
-          server.timeout(request, DICTATION_HTTP_IDLE_SECONDS);
-        }
-        if (url.pathname === "/api/voice/calls") server.timeout(request, 30);
-        if (url.pathname === "/api/voice/sessions") server.timeout(request, 30);
+        // The API's addresses for dictation and voice, which wait on a provider.
+        const dictation = TRANSCRIPTIONS.test(url.pathname);
+        const voiceCall = VOICE_CALLS.test(url.pathname);
+        if (dictation) server.timeout(request, DICTATION_HTTP_IDLE_SECONDS);
+        if (voiceCall || VOICE_SESSIONS.test(url.pathname))
+          server.timeout(request, 30);
 
         if (isApiCall(url.pathname)) {
           const target = SERVER + url.pathname + url.search;
@@ -265,10 +294,7 @@ if (import.meta.main) {
             headers: request.headers,
             body: request.body,
             redirect: "manual",
-            ...(url.pathname === "/api/audio/transcriptions" ||
-            url.pathname === "/api/voice/calls"
-              ? { signal: request.signal }
-              : {}),
+            ...(dictation || voiceCall ? { signal: request.signal } : {}),
             // @ts-expect-error duplex is required by fetch for a streamed body and is not yet typed.
             duplex: "half",
           });
@@ -278,7 +304,12 @@ if (import.meta.main) {
         if (!wanted) return new Response("not found", { status: 404 });
 
         const found = file(wanted);
-        if (await found.exists()) return new Response(found);
+        if (await found.exists()) {
+          const headers = servedHeaders(url.pathname);
+          return headers
+            ? new Response(found, { headers })
+            : new Response(found);
+        }
         if (isClientRoute(url.pathname)) {
           return new Response(file(join(DIST, "index.html")));
         }

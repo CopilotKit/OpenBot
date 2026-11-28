@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import {
   AttachmentStrip,
   type StagedFile,
@@ -146,4 +146,37 @@ test("a text file over the extraction ceiling warns it may be read truncated", (
   );
 
   expect(getByText(/· may be cut/)).toBeTruthy();
+});
+
+test("a picture the browser cannot draw becomes the file's tile, never an empty box", () => {
+  // Pictures up to 100MB can be attached, and some will not draw in every browser (a phone's memory
+  // limit, a file whose bytes are damaged). The thumbnail must then say what the file is, the way
+  // every other file on the composer does: its name, its kind and its size, and still removable.
+  const removed: string[] = [];
+  const { getByRole, getByText, queryByRole } = render(
+    <AttachmentStrip
+      files={[]}
+      images={[
+        {
+          id: "6",
+          url: "/big-photo.png",
+          alt: "big-photo.png",
+          name: "big-photo.png",
+          mimeType: "image/png",
+          size: 99_553_808,
+          loading: false,
+        },
+      ]}
+      onRemove={(id) => removed.push(id)}
+    />,
+  );
+
+  fireEvent.error(getByRole("img", { name: "big-photo.png" }));
+
+  expect(queryByRole("img")).toBeNull();
+  expect(getByText("big-photo.png")).toBeTruthy();
+  // Sized the way the file tiles beside it are.
+  expect(getByText("PNG image · 94.9MB")).toBeTruthy();
+  fireEvent.click(getByRole("button", { name: "Remove big-photo.png" }));
+  expect(removed).toEqual(["6"]);
 });

@@ -434,6 +434,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     try {
       const streamer = await createStreamer(session, {
         fetchGrant: (trajectoryId) => pass(stream, trajectoryId),
+        openbotUrl: () => stream.target.openbotUrl,
         allowedGatewayUrls: options.allowedGatewayUrls,
         outbox,
         sequencer,

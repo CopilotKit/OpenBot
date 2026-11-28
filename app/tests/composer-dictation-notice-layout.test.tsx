@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, Page } from "playwright-core";
@@ -85,16 +85,22 @@ async function stylesheet(classes: string[]): Promise<string> {
   return compiler.build(classes);
 }
 
-let browser: Browser;
-let script: string;
-
-beforeAll(async () => {
-  if (!asked) return;
-  script = await bundle();
+/**
+ * The page's script and the browser, ready before any test starts. This waits for the bundle to be
+ * built and for Chromium to say it has started (Playwright's own launch timeout bounds that), not
+ * on a hook's clock: a `beforeAll` gets 5 s, and on a cold runner the two can take longer.
+ */
+async function ready(): Promise<{ script: string; browser: Browser }> {
+  const script = await bundle();
   const { chromium } = await import("playwright-core");
   // The CI job installs full Chromium without the headless shell.
-  browser = await chromium.launch({ channel: "chromium" });
-});
+  const browser = await chromium.launch({ channel: "chromium" });
+  return { script, browser };
+}
+
+let browser: Browser;
+let script: string;
+if (asked) ({ script, browser } = await ready());
 
 afterAll(async () => {
   await browser?.close();
@@ -248,4 +254,49 @@ describe.skipIf(!asked)("the microphone's notice", () => {
       await page.close();
     }
   }, 60_000);
+});
+
+describe.skipIf(!asked)("composer text at zoom", () => {
+  for (const layout of ["thread", "home"] as const) {
+    test(`${layout}: drafts wrap and scroll vertically`, async () => {
+      const page = await open(layout, "light");
+      try {
+        await page.evaluate(() => {
+          document.documentElement.style.zoom = "1.25";
+        });
+        const editor = page.getByRole("textbox", { name: "Message" });
+        await editor.fill(
+          `https://example.com/${"long-reference-".repeat(40)}`,
+        );
+        const wrapped = await editor.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            font: style.fontSize,
+            line: style.lineHeight,
+            overflowX: style.overflowX,
+            overflowWidth: element.scrollWidth - element.clientWidth,
+            height: element.scrollHeight,
+          };
+        });
+        expect(wrapped.overflowX).toBe("hidden");
+        expect(wrapped.font).toBe("16px");
+        expect(wrapped.line).toBe("24px");
+        expect(wrapped.overflowWidth).toBeLessThanOrEqual(1);
+        expect(wrapped.height).toBeGreaterThan(48);
+
+        await editor.fill("A line in a long draft.\n".repeat(40));
+        expect(
+          await editor.evaluate((element) => {
+            element.scrollTop = element.scrollHeight;
+            return {
+              overflowY: getComputedStyle(element).overflowY,
+              canScroll: element.scrollTop > 0,
+            };
+          }),
+        ).toEqual({ overflowY: "auto", canScroll: true });
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+  }
 });

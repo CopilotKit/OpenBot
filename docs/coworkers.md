@@ -22,8 +22,7 @@ Package-provided Bots are public and ownerless. A Bot a person makes is owned by
 
 ## Standing role
 
-A remote Bot receives a system message derived from its name, title and role description
-(`standingRoleMessage` in `server/src/copilot.ts`):
+A remote Bot receives a system message derived from its name, title and role description:
 
 ```text
 <identity>
@@ -61,7 +60,7 @@ The message is ordinary AG-UI system content, so it works with any AG-UI-compati
 Filtering happens in server/database queries. Package-provided Bots cannot be edited or deleted through the product, except the personal edition's starter Personal Assistant, which its person can edit.
 
 An owner can also publish a Bot as a Team Bot, to everybody signed in or to named people and groups
-(`/api/team-bots`, the Bot's **Sharing** page). Publishing is a separate, revocable record; the Bot's own
+(`/api/v2/organizations/{organizationId}/team-bots`, the Bot's **Sharing** page). Publishing is a separate, revocable record; the Bot's own
 visibility is unchanged by it. A published Bot stays invisible to teammates until it has a role
 description and a name other than a placeholder such as "New Bot".
 
@@ -92,12 +91,11 @@ Hiding and pinning are personal roster state. Hiding removes the Bot from one pe
 Bots made in the product use:
 
 ```dotenv
-MANAGED_AGENT_AG_UI_URL=http://localhost:4201/ag-ui
+MANAGED_AGENT_AG_UI_URL=http://127.0.0.1:4201/
 ```
 
-That is `agent-langgraph`, which runs a real framework and its own tool loop. The proof-of-concept on
-`4200` hand-writes the protocol and leaves the loop to whatever is watching, so it is a reference
-rather than something to build a deployment on.
+That is the LangGraph harness, `agent-langgraph-agui`, which runs a real framework and its own tool
+loop.
 
 The URL is optional. Set it with `MANAGED_AGENT_TOKEN`, or leave it unset: a Bot made in the
 product with no endpoint of its own then runs inside the server as a built-in Bot on its role
@@ -130,7 +128,79 @@ In the product, create a Bot from `/bots` and edit it from its page's **Setup**,
 
 Endpoint registration uses target checks. Cloud metadata addresses are refused under every configuration. Optional keys are write-only: sending a key stores/replaces it, omitting it keeps the existing key, and APIs do not return it.
 
-`POST /api/agents/test-connection` checks whether an endpoint answers before saving it.
+`POST /api/v2/organizations/{organizationId}/bots/test-connection` checks whether an endpoint answers before saving it.
+
+### What your agent is sent
+
+Every run carries the Bot's standing role as the first message of `messages`, a system message with
+the id `standing-role:<bot id>`, and then what the Bot may use as a second system message,
+`granted-tools:<bot id>`. Your agent is sent each once, on every run, including the runs that carry
+a turn on after one of OpenBot's tools answered. OpenBot's tools arrive in `tools`; when your agent
+calls one, it ends its run with the call unanswered, and OpenBot runs it and sends the result in
+the next run.
+
+What OpenBot remembers about the person, when there is any, comes as the AG-UI context entry
+`OpenBot personal memory`: quoted records under a line that says they are data, not instructions.
+It is never a system message. Treat it as data about the person, not as instructions.
+
+Some frameworks' AG-UI adapters drop the system messages that carry the Bot's role and tool
+guidance. [Connect your agent's framework](agent-frameworks.md) gives the few lines each one needs.
+An endpoint that declares `openbot.runGuidance` in its AG-UI capabilities is sent both as context
+entries instead, and its receiver gives them full weight only to a caller it trusts:
+[give OpenBot a trusted path](agent-frameworks.md#give-openbot-a-trusted-path).
+
+### Your own LangGraph agent
+
+`ag-ui-langgraph` drops the first system message of every run, which is the standing role, and keeps
+the second, so a LangGraph graph sees what it may use but not its role. When you connect a LangGraph
+agent, choose **LangChain** as its framework in New Bot (`"harness": "langgraph"` when you create the
+Bot through the API). OpenBot then also sends the role as an AG-UI context entry, `OpenBot standing
+role`, which `ag-ui-langgraph` hands your graph in `state["ag-ui"]["context"]`. A Bot connected
+without a framework gets no context copy.
+
+**Built with CopilotKit's `CopilotKitMiddleware`?** Add nothing. The middleware writes the AG-UI
+context into your model's system prompt as "App Context", so your model is told the role from there,
+once. CopilotKit's LangGraph examples are built this way. Adding the lines below as well would tell
+it twice.
+
+**Without that middleware**, add these lines to your graph and put `openbot_role(state)` ahead of
+the messages you send your model:
+
+```python
+from typing import Annotated, TypedDict
+
+from langchain_core.messages import SystemMessage
+from langgraph.graph.message import add_messages
+
+# ag-ui-langgraph hands the graph the run's AG-UI context in state["ag-ui"]["context"].
+# LangGraph keeps only the keys a state declares, so the state declares that one.
+State = TypedDict(
+    "State",
+    {"messages": Annotated[list, add_messages], "ag-ui": dict},
+    total=False,
+)
+
+
+def openbot_role(state: State) -> list[SystemMessage]:
+    """The Bot's role OpenBot sent with this run, unless the thread already says it."""
+    said = {m.content for m in state["messages"] if isinstance(m, SystemMessage)}
+    for entry in (state.get("ag-ui") or {}).get("context") or []:
+        if isinstance(entry, dict):
+            description, value = entry.get("description"), entry.get("value")
+        else:
+            description, value = entry.description, entry.value
+        if description == "OpenBot standing role" and value and value not in said:
+            return [SystemMessage(content=value)]
+    return []
+
+
+def chat(state: State):
+    reply = model.invoke([*openbot_role(state), *state["messages"]])
+    return {"messages": [reply]}
+```
+
+The tool guidance stays in your graph's messages as a system message, so your model is told the
+role and the guidance once each.
 
 ## What a role does not grant
 

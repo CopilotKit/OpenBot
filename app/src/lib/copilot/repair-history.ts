@@ -1,5 +1,5 @@
 import type { Message } from "@ag-ui/core";
-import { notRun } from "@openbot/shared/approval-outcomes";
+import { NOT_RUN_UNANSWERED } from "@openbot/shared/approval-outcomes";
 import { newId } from "../new-id";
 import { withoutWaitingPlaceholders } from "./approval-context";
 
@@ -12,9 +12,7 @@ import { withoutWaitingPlaceholders } from "./approval-context";
  * `notRun`). It used to say only "Do not assume it succeeded", and a Bot told that much did nothing
  * with the gap: it neither fetched the thing again nor said in its answer that it was missing.
  */
-export const UNANSWERED = notRun(
-  "no result came back for this call before the conversation moved on.",
-);
+export const UNANSWERED = NOT_RUN_UNANSWERED;
 
 /** A tool result message, which AG-UI models as its own role. */
 type ToolResult = { role: "tool"; toolCallId: string };
@@ -129,6 +127,11 @@ export function repairUnansweredToolCalls(
    * repair branch, which every test avoided by passing its own. Biome said so, as an unused import.
    */
   mintId: () => string = newId,
+  /**
+   * Answers known from somewhere other than the thread, by call id: an approved action whose
+   * conversation could not be carried on keeps its result on the request (`leftAnswers`).
+   */
+  known: ReadonlyMap<string, string> = new Map(),
 ): ReadonlyArray<Message> {
   /*
    * A held step's stand-in is not its answer. Counted as one, it sat right after the call, so the
@@ -188,7 +191,7 @@ export function repairUnansweredToolCalls(
             id: mintId(),
             role: "tool",
             toolCallId: call.id,
-            content: UNANSWERED,
+            content: known.get(call.id) || UNANSWERED,
           } as Message),
       );
       // A duplicated call id may only receive one repair result.

@@ -34,7 +34,7 @@ test("deleting a goal drops its triggers and runs and refetches the other goals"
   fetched.length = 0;
 
   const options = deleteResponsibilityMutationOptions(queryClient);
-  await options.onSuccess?.(new Response(null), "gone", undefined, {
+  await options.onSuccess?.(undefined, "gone", undefined, {
     client: queryClient,
     meta: undefined,
   } as never);

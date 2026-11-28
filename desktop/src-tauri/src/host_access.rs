@@ -23,6 +23,8 @@ use crate::quiet::said as command_said;
 #[cfg(test)]
 const DEFAULT_IMAGE: &str = "openbot-agent-computer:s10-chromium-arm64";
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// How long the folders are held for a server that stopped answering. See `broker_loop`.
+const DEFAULT_SERVER_AWAY_GRACE: Duration = Duration::from_secs(120);
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_OUTPUT_LIMIT: usize = 64 * 1024;
 const DEFAULT_MEMORY: &str = "512m";
@@ -41,6 +43,8 @@ pub struct HostAccessConfig {
     pub image: String,
     pub forbidden_paths: Vec<PathBuf>,
     pub poll_interval: Duration,
+    /// How long the folders are held for a server that stopped answering. See `broker_loop`.
+    pub server_away_grace: Duration,
     pub operation_timeout: Duration,
     pub output_limit: usize,
     pub memory: String,
@@ -63,6 +67,7 @@ impl HostAccessConfig {
             image: image.into(),
             forbidden_paths,
             poll_interval: DEFAULT_POLL_INTERVAL,
+            server_away_grace: DEFAULT_SERVER_AWAY_GRACE,
             operation_timeout: DEFAULT_OPERATION_TIMEOUT,
             output_limit: DEFAULT_OUTPUT_LIMIT,
             memory: DEFAULT_MEMORY.into(),
@@ -83,6 +88,47 @@ struct Inner {
     instance_label: String,
     state: Mutex<State>,
     effect_lock: Mutex<()>,
+    /// Held while a dialog is on screen, so the person is shown one at a time. See `prompt_turn`.
+    prompt_lock: Mutex<()>,
+    /// The deadline the server set for an operation once its dialog was on screen, by operation.
+    /// See `report_prompt_shown`.
+    shown_deadlines: Mutex<HashMap<String, u128>>,
+}
+
+/// What the server said when told a dialog is on screen.
+#[derive(Debug, PartialEq, Eq)]
+enum ShownOutcome {
+    /// It restarted the operation's time, to this deadline (milliseconds since the epoch).
+    Restarted(u64),
+    /// It kept the operation's time: a server without the route, or one no longer waiting.
+    Kept(String),
+    /// It did not answer.
+    NoAnswer(String),
+    /// It answered with something that is not a deadline.
+    Unreadable(String),
+}
+
+/// The Desktop log's line for a dialog going on screen and what the server said.
+fn shown_log_line(operation_id: &str, outcome: &ShownOutcome, now_ms: u128) -> String {
+    let said = match outcome {
+        ShownOutcome::Restarted(expires_at) => format!(
+            "new deadline in {} s",
+            u128::from(*expires_at).saturating_sub(now_ms) / 1000
+        ),
+        ShownOutcome::Kept(status) => format!("it kept its own time ({status})"),
+        ShownOutcome::NoAnswer(error) => format!("no answer ({error})"),
+        ShownOutcome::Unreadable(error) => format!("its answer could not be read ({error})"),
+    };
+    format!(
+        "[host access] operation {operation_id} shown; asked the server to restart its wait: {said}"
+    )
+}
+
+/// The server being told a dialog is on screen, and the deadline it answers. See
+/// `Inner::report_prompt_shown`.
+struct PromptShown {
+    operation_id: String,
+    deadline: Option<JoinHandle<Option<u64>>>,
 }
 
 struct State {
@@ -93,7 +139,9 @@ struct State {
     completed: HashSet<String>,
     canceled_operations: HashSet<String>,
     active_by_operation: HashSet<String>,
-    active_by_bot: HashSet<String>,
+    /// Each Bot's one operation in progress, by its id. A Bot's slot is freed when its operation
+    /// ends, or when the server cancels it while a dialog for it is still on screen.
+    active_by_bot: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -150,6 +198,27 @@ pub trait HostApprovalUi: Send + Sync + 'static {
     fn choose_folder(&self, request: &ChooseFolderPrompt) -> HostAccessResult<ApprovedFolder>;
     fn confirm_write(&self, request: &WritePrompt) -> HostAccessResult<()>;
     fn confirm_command(&self, request: &CommandPrompt) -> HostAccessResult<()>;
+    /// The person allowed an action after OpenBot had stopped waiting for the answer, so it did
+    /// not run. Told so they do not believe it did. Nothing by default.
+    ///
+    /// FOUND ON A MAC: a native dialog cannot be closed from outside, so "Allow this command?" stayed
+    /// on screen after the server gave up on it, still offering Allow once, and Allow did nothing
+    /// anyone could see.
+    fn approval_lapsed(&self, _notice: &LapsedApproval) {}
+}
+
+/// An action the person allowed too late. See `HostApprovalUi::approval_lapsed`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LapsedApproval {
+    pub bot_id: String,
+    pub bot_name: Option<String>,
+    pub action: LapsedAction,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LapsedAction {
+    Command,
+    FileChange,
 }
 
 pub struct DenyAllApprovalUi;
@@ -463,6 +532,8 @@ impl HostAccess {
             approval,
             instance_label: fresh_id("host-instance"),
             effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
             state: Mutex::new(State {
                 stopped: false,
                 thread: None,
@@ -471,7 +542,7 @@ impl HostAccess {
                 completed: HashSet::new(),
                 canceled_operations: HashSet::new(),
                 active_by_operation: HashSet::new(),
-                active_by_bot: HashSet::new(),
+                active_by_bot: HashMap::new(),
             }),
         });
         let thread_inner = inner.clone();
@@ -483,6 +554,22 @@ impl HostAccess {
             })?;
         inner.state.lock().expect("host state poisoned").thread = Some(handle);
         Ok(Self { inner })
+    }
+
+    /// `stop`, with the machine the engine runs in stopped: the containers stopped with it, and an
+    /// engine that cannot answer is asked nothing.
+    pub fn stop_with_machine_stopped(&self) {
+        let _effect = self
+            .inner
+            .effect_lock
+            .lock()
+            .expect("host effect lock poisoned");
+        let mut state = self.inner.state.lock().expect("host state poisoned");
+        state.stopped = true;
+        for grant in state.grants.values_mut() {
+            grant.revoked = true;
+        }
+        state.running.clear();
     }
 
     pub fn stop(&self) -> HostAccessResult<()> {
@@ -528,18 +615,105 @@ impl Drop for HostAccess {
     }
 }
 
+/// Why asking the server failed: it gave no answer at all, or it answered with something else.
+#[derive(Debug)]
+enum ServerFailure {
+    /// Nothing answered: the server is not running, is starting, or did not answer in time.
+    NoAnswer(String),
+    /// It answered, and not as it should: another token, an older server, an unreadable body.
+    Answered(String),
+}
+
+impl std::fmt::Display for ServerFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoAnswer(said) | Self::Answered(said) => f.write_str(said),
+        }
+    }
+}
+
+/**
+Asks the server for the next operation, once a poll interval, until Stop.
+
+FOUND ON A MAC: every restart of the server dropped every folder the person had approved. The Status
+window's Restart makes the server's container again and leaves this broker running, but the server
+keeps grants only in its memory, and this loop revoked every grant here on the first poll nobody
+answered. Settings → Computer then read "No folders approved", and the Bot was told its folder access
+had ended. A restart is not a Stop.
+
+So a server that stops answering has the folders held for it, for `server_away_grace`: work in
+flight is ended (the server that asked for it is gone), and the grants are kept. Once it answers
+again they are handed back to it (`restore_grants`) before anything else is asked of it. A server
+that does not come back within the grace, one that answers with anything but the hand-back (another
+token, a server older than the route), and Stop and Quit, which stop this broker, all still end
+them. A restart the container engine makes alone is held the same way: nothing here can tell it
+from one the Status window asked for, and the host token, which survives both, is what proves the
+server that comes back is this computer's own.
+*/
 fn broker_loop(inner: Arc<Inner>) {
-    let client = match Client::builder().timeout(Duration::from_secs(15)).build() {
+    let client = match Client::builder()
+        .timeout(Duration::from_secs(15))
+        .default_headers(crate::client_version::headers())
+        .build()
+    {
         Ok(client) => client,
         Err(error) => {
             log::error!("[host access] could not create its HTTP client: {error}");
             return;
         }
     };
+    // Since when the folders have been held for a server that stopped answering.
+    let mut holding_since: Option<Instant> = None;
     while !inner.is_stopped() {
+        if let Some(since) = holding_since {
+            match inner.restore_grants(&client) {
+                Ok(restored) => {
+                    log::info!(
+                        "[host access] the server answers again; {restored} folder grant(s) handed back"
+                    );
+                    holding_since = None;
+                }
+                Err(ServerFailure::NoAnswer(error)) => {
+                    if since.elapsed() >= inner.config.server_away_grace {
+                        log::warn!(
+                            "[host access] the server did not come back within {} s, so the folders it held ended: {error}",
+                            inner.config.server_away_grace.as_secs()
+                        );
+                        if let Err(cleanup) = inner.revoke_all_and_stop() {
+                            log::error!(
+                                "[host access] cleanup after a failed poll failed: {cleanup}"
+                            );
+                        }
+                        holding_since = None;
+                    }
+                    thread::sleep(inner.config.poll_interval);
+                    continue;
+                }
+                Err(ServerFailure::Answered(error)) => {
+                    log::warn!(
+                        "[host access] the server came back but did not take the folders back, so they ended: {error}"
+                    );
+                    if let Err(cleanup) = inner.revoke_all_and_stop() {
+                        log::error!("[host access] cleanup after a failed poll failed: {cleanup}");
+                    }
+                    holding_since = None;
+                }
+            }
+        }
         match inner.next_operation(&client) {
             Ok(Some(operation)) => inner.spawn_operation(client.clone(), operation),
             Ok(None) => thread::sleep(inner.config.poll_interval),
+            Err(ServerFailure::NoAnswer(error)) if inner.holds_live_grants() => {
+                log::warn!(
+                    "[host access] the server is not answering; holding this computer's folders for up to {} s while it comes back: {error}",
+                    inner.config.server_away_grace.as_secs()
+                );
+                if let Err(cleanup) = inner.end_work_in_flight() {
+                    log::error!("[host access] cleanup after a failed poll failed: {cleanup}");
+                }
+                holding_since = Some(Instant::now());
+                thread::sleep(inner.config.poll_interval);
+            }
             Err(error) => {
                 log::warn!("[host access] poll failed and revoked local leases: {error}");
                 if let Err(cleanup) = inner.revoke_all_and_stop() {
@@ -557,11 +731,107 @@ impl Inner {
     }
 
     fn revoke_all_and_stop(&self) -> HostAccessResult<()> {
+        self.end_work(true)
+    }
+
+    /// The server that asked for the work in flight is gone: no operation in progress may run, and
+    /// every container is removed. The grants are kept. See `broker_loop`.
+    fn end_work_in_flight(&self) -> HostAccessResult<()> {
+        self.end_work(false)
+    }
+
+    fn holds_live_grants(&self) -> bool {
+        self.state
+            .lock()
+            .expect("host state poisoned")
+            .grants
+            .values()
+            .any(|grant| !grant.revoked)
+    }
+
+    /**
+    Hands the grants still held here back to a server that answers again, and ends here the ones it
+    did not take back (the person ended them there, or a Stop for them is on its way). Answers how
+    many it took. A grant is only ever ended here by this, never made live again. See `broker_loop`.
+    */
+    fn restore_grants(&self, client: &Client) -> Result<usize, ServerFailure> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Held {
+            grant_id: String,
+            bot_id: String,
+            actor_id: String,
+            display_name: String,
+        }
+        #[derive(Deserialize)]
+        struct Restored {
+            restored: Vec<String>,
+        }
+        // Stop must not return while a request can still hand its folders back to the server.
+        // Keep the snapshot and HTTP exchange inside the same effect boundary as Stop. The
+        // broker's client bounds the wait to 15 seconds; the state lock is free during HTTP.
+        let _effect = self.effect_lock.lock().expect("host effect lock poisoned");
+        let held = self
+            .state
+            .lock()
+            .expect("host state poisoned")
+            .grants
+            .values()
+            .filter(|grant| !grant.revoked)
+            .map(|grant| Held {
+                grant_id: grant.id.clone(),
+                bot_id: grant.bot_id.clone(),
+                actor_id: grant.actor_id.clone(),
+                display_name: display_name_for(&grant.root),
+            })
+            .collect::<Vec<_>>();
+        if held.is_empty() {
+            return Ok(0);
+        }
+        let url = endpoint(&self.config.base_url, "/api/host-access/desktop/restore");
+        let response = client
+            .post(url)
+            .bearer_auth(&self.config.token)
+            .json(&serde_json::json!({ "grants": held }))
+            .send()
+            .map_err(|error| {
+                ServerFailure::NoAnswer(format!("Could not hand the folders back: {error}"))
+            })?;
+        if !response.status().is_success() {
+            return Err(ServerFailure::Answered(format!(
+                "Handing the folders back failed with HTTP {}",
+                response.status()
+            )));
+        }
+        let restored = response.json::<Restored>().map_err(|error| {
+            ServerFailure::Answered(format!(
+                "Handing the folders back returned invalid JSON: {error}"
+            ))
+        })?;
+        let taken = restored.restored.into_iter().collect::<HashSet<_>>();
+        let mut state = self.state.lock().expect("host state poisoned");
+        for grant in state.grants.values_mut() {
+            if !taken.contains(&grant.id) {
+                grant.revoked = true;
+            }
+        }
+        Ok(state.grants.values().filter(|grant| !grant.revoked).count())
+    }
+
+    fn end_work(&self, revoke_grants: bool) -> HostAccessResult<()> {
         let _effect = self.effect_lock.lock().expect("host effect lock poisoned");
         let running = {
             let mut state = self.state.lock().expect("host state poisoned");
-            for grant in state.grants.values_mut() {
-                grant.revoked = true;
+            if revoke_grants {
+                for grant in state.grants.values_mut() {
+                    grant.revoked = true;
+                }
+            } else {
+                let in_flight = state.active_by_operation.clone();
+                state.canceled_operations.extend(in_flight.iter().cloned());
+                state
+                    .active_by_bot
+                    .retain(|_, operation_id| !in_flight.contains(operation_id));
             }
             state.running.values().cloned().collect::<Vec<_>>()
         };
@@ -585,23 +855,23 @@ impl Inner {
         }
     }
 
-    fn next_operation(&self, client: &Client) -> HostAccessResult<Option<DesktopOperation>> {
+    fn next_operation(&self, client: &Client) -> Result<Option<DesktopOperation>, ServerFailure> {
         let url = endpoint(&self.config.base_url, "/api/host-access/desktop/next");
         let response = client
             .get(url)
             .bearer_auth(&self.config.token)
             .send()
             .map_err(|error| {
-                HostAccessError::Http(format!("Could not poll host operation: {error}"))
+                ServerFailure::NoAnswer(format!("Could not poll host operation: {error}"))
             })?;
         if !response.status().is_success() {
-            return Err(HostAccessError::Http(format!(
+            return Err(ServerFailure::Answered(format!(
                 "Host operation poll failed with HTTP {}",
                 response.status()
             )));
         }
         let poll = response.json::<DesktopPollResponse>().map_err(|error| {
-            HostAccessError::Http(format!(
+            ServerFailure::Answered(format!(
                 "Host operation poll returned invalid JSON: {error}"
             ))
         })?;
@@ -626,15 +896,25 @@ impl Inner {
             }
             if state.stopped || state.canceled_operations.contains(&operation.operation_id) {
                 Err("Host access is stopped.".to_string())
-            } else if state.active_by_operation.len() >= MAX_ACTIVE_OPERATIONS {
+            } else if state
+                .active_by_operation
+                .iter()
+                .filter(|id| !state.canceled_operations.contains(*id))
+                .count()
+                >= MAX_ACTIVE_OPERATIONS
+            {
+                // One the server cancelled is waiting only on a dialog nobody answered; it does not
+                // count, or four walked-away dialogs would refuse every Bot.
                 Err("Too many host operations are already waiting.".to_string())
-            } else if state.active_by_bot.contains(&operation.bot_id) {
+            } else if state.active_by_bot.contains_key(&operation.bot_id) {
                 Err("That Bot already has a host operation in progress.".to_string())
             } else {
                 state
                     .active_by_operation
                     .insert(operation.operation_id.clone());
-                state.active_by_bot.insert(operation.bot_id.clone());
+                state
+                    .active_by_bot
+                    .insert(operation.bot_id.clone(), operation.operation_id.clone());
                 Ok(())
             }
         };
@@ -654,12 +934,18 @@ impl Inner {
                 inner.handle_and_post(&worker_client, operation);
                 let mut state = inner.state.lock().expect("host state poisoned");
                 state.active_by_operation.remove(&worker_operation_id);
-                state.active_by_bot.remove(&worker_bot_id);
+                // The slot may already be another operation's: this one's was freed when the
+                // server cancelled it.
+                if state.active_by_bot.get(&worker_bot_id) == Some(&worker_operation_id) {
+                    state.active_by_bot.remove(&worker_bot_id);
+                }
             })
         {
             let mut state = self.state.lock().expect("host state poisoned");
             state.active_by_operation.remove(&operation_id);
-            state.active_by_bot.remove(&bot_id);
+            if state.active_by_bot.get(&bot_id) == Some(&operation_id) {
+                state.active_by_bot.remove(&bot_id);
+            }
             drop(state);
             self.post_error(
                 &client,
@@ -690,6 +976,10 @@ impl Inner {
 
     fn handle_and_post(&self, client: &Client, operation: DesktopOperation) {
         let result = self.handle_operation(&operation);
+        self.shown_deadlines
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&operation.operation_id);
         let body = match result {
             Ok(success) => DesktopResult {
                 operation_id: operation.operation_id.clone(),
@@ -750,6 +1040,15 @@ impl Inner {
 
     fn operation_expired(&self, operation: &DesktopOperation) -> bool {
         let now = now_millis();
+        let shown_deadline = self
+            .shown_deadlines
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&operation.operation_id)
+            .copied();
+        if let Some(deadline) = shown_deadline {
+            return deadline <= now;
+        }
         now.saturating_sub(operation.received_at_ms) > MAX_OPERATION_AGE_MS
             || operation
                 .expires_at
@@ -802,13 +1101,25 @@ impl Inner {
     }
 
     fn choose_folder(&self, operation: &DesktopOperation) -> HostAccessResult<OperationSuccess> {
-        let approved = self.approval.choose_folder(&ChooseFolderPrompt {
-            operation_id: operation.operation_id.clone(),
-            bot_id: operation.bot_id.clone(),
-            actor_id: operation.actor_id.clone(),
-            bot_name: operation.bot_name.clone(),
-            writable_requested: operation.writable == Some(true),
-        })?;
+        let approved = {
+            let _turn = self.prompt_turn();
+            self.ensure_operation_fresh(operation)?;
+            if self.operation_was_canceled(&operation.operation_id) {
+                return Err(HostAccessError::Denied(
+                    "Host operation was canceled before the folder was granted.".into(),
+                ));
+            }
+            let shown = self.report_prompt_shown(operation);
+            let picked = self.approval.choose_folder(&ChooseFolderPrompt {
+                operation_id: operation.operation_id.clone(),
+                bot_id: operation.bot_id.clone(),
+                actor_id: operation.actor_id.clone(),
+                bot_name: operation.bot_name.clone(),
+                writable_requested: operation.writable == Some(true),
+            });
+            self.keep_shown_deadline(shown);
+            picked?
+        };
         let root = validate_grant_root(&approved.root, &self.config.forbidden_paths)?;
         self.ensure_operation_fresh(operation)?;
         if self.operation_was_canceled(&operation.operation_id) {
@@ -816,21 +1127,34 @@ impl Inner {
                 "Host operation was canceled before the folder was granted.".into(),
             ));
         }
-        let grant_id = fresh_id("host-grant");
         let display_name = display_name_for(&root);
-        let grant = LocalGrant {
-            id: grant_id.clone(),
-            bot_id: operation.bot_id.clone(),
-            actor_id: operation.actor_id.clone(),
-            bot_name: operation.bot_name.clone(),
-            root,
-            revoked: false,
-        };
-        self.state
-            .lock()
-            .expect("host state poisoned")
+        let mut state = self.state.lock().expect("host state poisoned");
+        // FOUND ON A MAC: choosing a folder the Bot already had made a second grant beside the
+        // first, so Settings listed it twice and the Bot was handed two grants with one name. One
+        // grant per Bot, person and folder: choosing it again makes that grant live again, under the
+        // id the Bot already knows.
+        let existing = state
             .grants
-            .insert(grant_id.clone(), grant);
+            .values()
+            .find(|grant| {
+                grant.bot_id == operation.bot_id
+                    && grant.actor_id == operation.actor_id
+                    && grant.root == root
+            })
+            .map(|grant| grant.id.clone());
+        let grant_id = existing.unwrap_or_else(|| fresh_id("host-grant"));
+        state.grants.insert(
+            grant_id.clone(),
+            LocalGrant {
+                id: grant_id.clone(),
+                bot_id: operation.bot_id.clone(),
+                actor_id: operation.actor_id.clone(),
+                bot_name: operation.bot_name.clone(),
+                root,
+                revoked: false,
+            },
+        );
+        drop(state);
         Ok(OperationSuccess {
             output: None,
             grant: Some(OperationGrant {
@@ -891,16 +1215,23 @@ impl Inner {
             .clone()
             .ok_or_else(|| HostAccessError::Denied("Host write missing content.".into()))?;
         let target = resolve_relative_for_write(&grant.root, relative_path)?;
-        self.approval.confirm_write(&WritePrompt {
-            operation_id: operation.operation_id.clone(),
-            bot_id: operation.bot_id.clone(),
-            bot_name: grant.bot_name.clone(),
-            root: grant.root.clone(),
-            relative_path: relative_path.into(),
-            content: content.clone(),
-            writable: true,
-        })?;
-        self.ensure_operation_still_allowed(operation, &grant)?;
+        {
+            let _turn = self.prompt_turn();
+            self.ensure_operation_still_allowed(operation, &grant)?;
+            let shown = self.report_prompt_shown(operation);
+            let answered = self.approval.confirm_write(&WritePrompt {
+                operation_id: operation.operation_id.clone(),
+                bot_id: operation.bot_id.clone(),
+                bot_name: grant.bot_name.clone(),
+                root: grant.root.clone(),
+                relative_path: relative_path.into(),
+                content: content.clone(),
+                writable: true,
+            });
+            self.keep_shown_deadline(shown);
+            answered?;
+            self.ensure_approved_in_time(operation, &grant, LapsedAction::FileChange)?;
+        }
         let relative = host_relative_for_write(&grant.root, &target)?;
         let target_path = container_path(&relative);
         let backup_name = backup_name_for(&relative);
@@ -945,17 +1276,24 @@ impl Inner {
                 "Commands on this computer are set to never run.".into(),
             ));
         }
-        self.approval.confirm_command(&CommandPrompt {
-            operation_id: operation.operation_id.clone(),
-            bot_id: operation.bot_id.clone(),
-            bot_name: grant.bot_name.clone(),
-            root: grant.root.clone(),
-            working_directory: working_directory.clone(),
-            command: command.into(),
-            writable,
-            command_policy,
-        })?;
-        self.ensure_operation_still_allowed(operation, &grant)?;
+        {
+            let _turn = self.prompt_turn();
+            self.ensure_operation_still_allowed(operation, &grant)?;
+            let shown = self.report_prompt_shown(operation);
+            let answered = self.approval.confirm_command(&CommandPrompt {
+                operation_id: operation.operation_id.clone(),
+                bot_id: operation.bot_id.clone(),
+                bot_name: grant.bot_name.clone(),
+                root: grant.root.clone(),
+                working_directory: working_directory.clone(),
+                command: command.into(),
+                writable,
+                command_policy,
+            });
+            self.keep_shown_deadline(shown);
+            answered?;
+            self.ensure_approved_in_time(operation, &grant, LapsedAction::Command)?;
+        }
         let command_directory = if let Some(directory) = working_directory {
             let relative = host_relative(&grant.root, &directory)?;
             container_path(&relative)
@@ -986,6 +1324,13 @@ impl Inner {
             state
                 .canceled_operations
                 .insert(target_operation_id.clone());
+            // FOUND ON A MAC: the server gave up on a command whose "Allow this command?" was still
+            // on screen, and every folder action that Bot asked for after it failed with "That Bot
+            // already has a host operation in progress." until someone dismissed the dialog. The
+            // cancelled one can no longer run (`ensure_approved_in_time`), so its Bot is free.
+            state
+                .active_by_bot
+                .retain(|_, operation_id| *operation_id != target_operation_id);
             if let Some(grant_id) = operation.grant_id.as_deref() {
                 if let Some(grant) = state.grants.get_mut(grant_id) {
                     if grant.actor_id == operation.actor_id || operation.actor_id == "*" {
@@ -1041,6 +1386,135 @@ impl Inner {
         }
         Ok(grant.clone())
     }
+    /// The person's turn to be shown a dialog. A native dialog cannot be closed from outside, so one
+    /// OpenBot stopped waiting for stays up until the person answers it; a second one shown beside it
+    /// sat exactly on top of it, two identical dialogs nobody could tell apart. Each dialog waits
+    /// for the one before it, the "didn't run" notice included, and an action that is no longer
+    /// wanted by the time its turn comes is never shown (`ensure_operation_still_allowed`).
+    /// Tells the server this operation's dialog is going on screen, beside the dialog rather than
+    /// before it: a server that is slow or gone must not hold the dialog up (Windows takes about two
+    /// seconds to give up on a refused local connection). The answer is kept by
+    /// `keep_shown_deadline` once the person has answered, before the time is checked: the
+    /// person's two minutes start as the dialog shows, not when the request was queued behind
+    /// another. A server older than this answers 404, and one that has given up on the operation
+    /// answers 404 too; either way the operation keeps the time it had.
+    fn report_prompt_shown(&self, operation: &DesktopOperation) -> PromptShown {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Shown {
+            expires_at: u64,
+        }
+        let url = endpoint(&self.config.base_url, "/api/host-access/desktop/shown");
+        let token = self.config.token.clone();
+        let operation_id = operation.operation_id.clone();
+        let worker_operation_id = operation_id.clone();
+        let deadline = thread::Builder::new()
+            .name("openbot-host-shown".into())
+            .spawn(move || {
+                let sent = Client::builder()
+                    .timeout(Duration::from_secs(5))
+                    .default_headers(crate::client_version::headers())
+                    .build()
+                    .and_then(|client| {
+                        client
+                            .post(url)
+                            .bearer_auth(token)
+                            .json(&serde_json::json!({ "operationId": worker_operation_id }))
+                            .send()
+                    });
+                let outcome = match sent {
+                    Ok(response) if response.status().is_success() => {
+                        match response.json::<Shown>() {
+                            Ok(shown) => ShownOutcome::Restarted(shown.expires_at),
+                            Err(error) => ShownOutcome::Unreadable(error.to_string()),
+                        }
+                    }
+                    Ok(response) => ShownOutcome::Kept(response.status().to_string()),
+                    Err(error) => ShownOutcome::NoAnswer(error.to_string()),
+                };
+                let line = shown_log_line(&worker_operation_id, &outcome, now_millis());
+                match outcome {
+                    ShownOutcome::Restarted(expires_at) => {
+                        log::info!("{line}");
+                        Some(expires_at)
+                    }
+                    ShownOutcome::Kept(_) => {
+                        log::info!("{line}");
+                        None
+                    }
+                    ShownOutcome::NoAnswer(_) | ShownOutcome::Unreadable(_) => {
+                        log::warn!("{line}");
+                        None
+                    }
+                }
+            })
+            .ok();
+        PromptShown {
+            operation_id,
+            deadline,
+        }
+    }
+
+    /// Keeps to the deadline the server answered `report_prompt_shown` with, if it answered one.
+    fn keep_shown_deadline(&self, shown: PromptShown) {
+        let Some(deadline) = shown
+            .deadline
+            .and_then(|worker| worker.join().ok().flatten())
+        else {
+            return;
+        };
+        self.shown_deadlines
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(shown.operation_id, u128::from(deadline));
+    }
+
+    fn prompt_turn(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.prompt_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// After the person allowed an action: whether it may still run. When the server stopped
+    /// waiting for the answer first (it expired, or the server cancelled it alone), the person is
+    /// told it did not run, and the server is answered that it expired.
+    fn ensure_approved_in_time(
+        &self,
+        operation: &DesktopOperation,
+        grant: &LocalGrant,
+        action: LapsedAction,
+    ) -> HostAccessResult<()> {
+        let Err(refused) = self.ensure_operation_still_allowed(operation, grant) else {
+            return Ok(());
+        };
+        let lapsed = {
+            let state = self.state.lock().expect("host state poisoned");
+            let grant_still_held = state
+                .grants
+                .get(&grant.id)
+                .is_some_and(|current| !current.revoked);
+            !state.stopped
+                && grant_still_held
+                && (state.canceled_operations.contains(&operation.operation_id)
+                    || self.operation_expired(operation))
+        };
+        if !lapsed {
+            return Err(refused);
+        }
+        log::info!(
+            "[host access] operation {} was allowed after the server stopped waiting; nothing ran",
+            operation.operation_id
+        );
+        self.approval.approval_lapsed(&LapsedApproval {
+            bot_id: operation.bot_id.clone(),
+            bot_name: grant.bot_name.clone(),
+            action,
+        });
+        Err(HostAccessError::Denied(
+            "Host operation approval expired.".into(),
+        ))
+    }
+
     fn ensure_operation_still_allowed(
         &self,
         operation: &DesktopOperation,
@@ -1161,6 +1635,9 @@ impl Inner {
         }
         start.arg(name);
         start.stdout(Stdio::piped()).stderr(Stdio::piped());
+        // Counted from before the engine starts the container, so it is never shorter than the
+        // time the sandbox's `timeout` counted inside it.
+        let started = Instant::now();
         let mut child = start.spawn().map_err(|error| {
             HostAccessError::Runtime(format!("Could not run container engine: {error}"))
         })?;
@@ -1204,6 +1681,7 @@ impl Inner {
             }
             thread::sleep(Duration::from_millis(100));
         }
+        let ran_for = started.elapsed();
         let status = child.wait().map_err(|error| {
             HostAccessError::Runtime(format!("Could not reap host process: {error}"))
         })?;
@@ -1220,6 +1698,7 @@ impl Inner {
             return Ok(Ran {
                 exit_code: 0,
                 oom_killed: false,
+                ran_for,
                 output,
                 truncated,
             });
@@ -1243,6 +1722,7 @@ impl Inner {
             Some(end) if end.engine_error.is_empty() && end.exit_code != 0 => Ok(Ran {
                 exit_code: end.exit_code,
                 oom_killed: end.oom_killed,
+                ran_for,
                 output,
                 truncated,
             }),
@@ -1808,6 +2288,8 @@ fn fresh_container_name(operation_id: &str) -> String {
 struct Ran {
     exit_code: i64,
     oom_killed: bool,
+    /// How long the container ran, from before the engine started it until it ended.
+    ran_for: Duration,
     output: Vec<u8>,
     /// Whether anything was dropped from the start of `output` to keep it under the limit.
     truncated: bool,
@@ -1873,16 +2355,27 @@ fn keep_tail(mut bytes: Vec<u8>, limit: usize) -> (Vec<u8>, bool) {
     (bytes, true)
 }
 
-/// What the sandbox itself stopped, whatever was running in it: too long, or too much memory.
+/**
+What the sandbox itself stopped, whatever was running in it: too long, or too much memory.
+
+The time limit's `timeout` stops a command only once it has run for the limit, so a command that
+ended sooner was not stopped for time, whatever its exit code. Before the limit, the memory limit is
+what kills a command (exit 137, SIGKILL): `timeout` sends its kill only after the limit, and the
+engine's only after the limit too. The engine's own `OOMKilled` is not enough to tell: Docker on
+cgroup v2 left it false for about one in nine commands its memory limit killed, measured, when the
+process killed was the command's and not the container's first, and it stayed false. Those were told
+they had run for more than 30 seconds, after half a second.
+*/
 fn stopped_by_sandbox(ran: &Ran, config: &HostAccessConfig) -> Option<HostAccessError> {
-    if ran.oom_killed {
+    let out_of_time = ran.ran_for >= config.operation_timeout;
+    if ran.oom_killed || (ran.exit_code == KILLED_EXIT && !out_of_time) {
         return Some(HostAccessError::Sandbox(format!(
             "The command used more than the local sandbox's {} of memory, so it was stopped. Work \
              on less at once, for example read a large file in parts.",
             config.memory
         )));
     }
-    if ran.exit_code == TIMEOUT_EXIT || ran.exit_code == KILLED_EXIT {
+    if out_of_time && (ran.exit_code == TIMEOUT_EXIT || ran.exit_code == KILLED_EXIT) {
         return Some(timed_out(config));
     }
     None
@@ -2229,9 +2722,12 @@ mod tests {
         }
     }
 
+    /// Takes the results a test's operations post, for as long as the test holds it: a busy
+    /// computer can take far longer than the operations themselves.
     struct ResultCollector {
         base_url: String,
         bodies: Arc<Mutex<Vec<String>>>,
+        done: Arc<std::sync::atomic::AtomicBool>,
         thread: Option<JoinHandle<()>>,
     }
 
@@ -2242,8 +2738,9 @@ mod tests {
             let base_url = format!("http://{}", listener.local_addr().unwrap());
             let bodies = Arc::new(Mutex::new(Vec::new()));
             let worker_bodies = bodies.clone();
+            let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let worker_done = done.clone();
             let thread = thread::spawn(move || {
-                let deadline = Instant::now() + Duration::from_secs(3);
                 loop {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
@@ -2258,10 +2755,14 @@ mod tests {
                                 .unwrap();
                             let mut reader = BufReader::new(stream.try_clone().unwrap());
                             let mut content_length = 0_usize;
+                            let mut request_line = String::new();
                             loop {
                                 let mut line = String::new();
                                 reader.read_line(&mut line).unwrap();
                                 let trimmed = line.trim_end();
+                                if request_line.is_empty() {
+                                    request_line = trimmed.to_string();
+                                }
                                 if trimmed.is_empty() {
                                     break;
                                 }
@@ -2274,6 +2775,16 @@ mod tests {
                             }
                             let mut body = vec![0_u8; content_length];
                             reader.read_exact(&mut body).unwrap();
+                            // Answered as a server without the route: these tests are about
+                            // results, and `ShownServer` is about this one.
+                            if request_line.contains("/desktop/shown") {
+                                stream
+                                    .write_all(
+                                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\n\r\n{}",
+                                    )
+                                    .unwrap();
+                                continue;
+                            }
                             worker_bodies
                                 .lock()
                                 .unwrap()
@@ -2283,7 +2794,7 @@ mod tests {
                                 .unwrap();
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            if Instant::now() >= deadline {
+                            if worker_done.load(std::sync::atomic::Ordering::SeqCst) {
                                 return;
                             }
                             thread::sleep(Duration::from_millis(10));
@@ -2295,19 +2806,23 @@ mod tests {
             Self {
                 base_url,
                 bodies,
+                done,
                 thread: Some(thread),
             }
         }
 
+        /// Waits for `count` results to have been posted. A minute is only there so that results
+        /// that never come fail the test instead of holding it.
         fn wait_for_posts(&self, count: usize) {
-            let deadline = Instant::now() + Duration::from_secs(2);
-            while Instant::now() < deadline {
-                if self.bodies.lock().unwrap().len() >= count {
-                    return;
-                }
+            let patience = Instant::now() + Duration::from_secs(60);
+            while self.bodies.lock().unwrap().len() < count {
+                assert!(
+                    Instant::now() < patience,
+                    "{count} host results were never posted: {:?}",
+                    self.bodies()
+                );
                 thread::sleep(Duration::from_millis(10));
             }
-            panic!("timed out waiting for {count} host result posts");
         }
 
         fn bodies(&self) -> Vec<String> {
@@ -2317,6 +2832,7 @@ mod tests {
 
     impl Drop for ResultCollector {
         fn drop(&mut self) {
+            self.done.store(true, std::sync::atomic::Ordering::SeqCst);
             if let Some(thread) = self.thread.take() {
                 let _ = thread.join();
             }
@@ -2659,6 +3175,8 @@ mod tests {
             approval: approval.clone(),
             instance_label: "test-instance".into(),
             effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
             state: Mutex::new(State {
                 stopped: false,
                 thread: None,
@@ -2667,7 +3185,7 @@ mod tests {
                 completed: HashSet::new(),
                 canceled_operations: HashSet::new(),
                 active_by_operation: HashSet::new(),
-                active_by_bot: HashSet::new(),
+                active_by_bot: HashMap::new(),
             }),
         });
         fn redelivered_operation() -> DesktopOperation {
@@ -2710,6 +3228,661 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// The person's first "Allow this command?" is left open; every later one is denied.
+    struct LateCommandApprovalUi {
+        asked: AtomicUsize,
+        asked_tx: Mutex<mpsc::Sender<()>>,
+        release_rx: Mutex<mpsc::Receiver<()>>,
+        lapsed: Mutex<Vec<LapsedApproval>>,
+    }
+
+    impl HostApprovalUi for LateCommandApprovalUi {
+        fn choose_folder(&self, _: &ChooseFolderPrompt) -> HostAccessResult<ApprovedFolder> {
+            unreachable!("the grant is made by the test")
+        }
+
+        fn confirm_write(&self, _: &WritePrompt) -> HostAccessResult<()> {
+            unreachable!("only commands are asked about here")
+        }
+
+        fn confirm_command(&self, _: &CommandPrompt) -> HostAccessResult<()> {
+            let first = self.asked.fetch_add(1, Ordering::SeqCst) == 0;
+            self.asked_tx.lock().unwrap().send(()).unwrap();
+            if first {
+                self.release_rx.lock().unwrap().recv().unwrap();
+                return Ok(());
+            }
+            Err(HostAccessError::Denied(
+                "Declined in OpenBot Desktop.".into(),
+            ))
+        }
+
+        fn approval_lapsed(&self, notice: &LapsedApproval) {
+            self.lapsed.lock().unwrap().push(notice.clone());
+        }
+    }
+
+    /*
+     * FOUND ON A MAC: an "Allow this command?" left past the server's two minutes ended the folder
+     * for good, and the dialog stayed up offering an Allow that did nothing. The server now
+     * cancels an operation that ran out its time without naming its grant; this is what the
+     * desktop does with that cancel and with the Allow pressed after it.
+     */
+    #[test]
+    fn a_command_allowed_after_the_server_stopped_waiting_does_not_run_and_the_folder_still_asks() {
+        let (asked_tx, asked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let approval = Arc::new(LateCommandApprovalUi {
+            asked: AtomicUsize::new(0),
+            asked_tx: Mutex::new(asked_tx),
+            release_rx: Mutex::new(release_rx),
+            lapsed: Mutex::new(Vec::new()),
+        });
+        let config = HostAccessConfig::new(
+            "http://127.0.0.1:9",
+            "token",
+            Address::new(Engine::Docker, None),
+            DEFAULT_IMAGE,
+            vec![],
+        );
+        let inner = Arc::new(Inner {
+            config,
+            approval: approval.clone(),
+            instance_label: "test-instance".into(),
+            effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
+            state: Mutex::new(State {
+                stopped: false,
+                thread: None,
+                grants: HashMap::from([(
+                    "grant".into(),
+                    LocalGrant {
+                        id: "grant".into(),
+                        bot_id: "bot-a".into(),
+                        actor_id: "actor".into(),
+                        bot_name: Some("Research Bot".into()),
+                        root: temp_root("host-access-late-allow"),
+                        revoked: false,
+                    },
+                )]),
+                running: HashMap::new(),
+                completed: HashSet::new(),
+                canceled_operations: HashSet::new(),
+                active_by_operation: HashSet::new(),
+                active_by_bot: HashMap::new(),
+            }),
+        });
+        let operation =
+            |id: &str, kind: HostOperationKind, target: Option<&str>| DesktopOperation {
+                operation_id: id.into(),
+                kind,
+                bot_id: "bot-a".into(),
+                actor_id: "actor".into(),
+                bot_name: None,
+                grant_id: matches!(kind, HostOperationKind::RunCommand).then(|| "grant".into()),
+                target_operation_id: target.map(str::to_string),
+                relative_path: None,
+                content: None,
+                command: matches!(kind, HostOperationKind::RunCommand).then(|| "ls -la".into()),
+                writable: Some(false),
+                command_policy: None,
+                expires_at: None,
+                received_at_ms: now_millis(),
+            };
+
+        let worker = inner.clone();
+        let first = operation("op-late", HostOperationKind::RunCommand, None);
+        let answered = thread::spawn(move || worker.handle_operation(&first).map(|_| ()));
+        asked_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+
+        // The server stops waiting and cancels that one operation, naming no grant.
+        inner
+            .handle_operation(&operation(
+                "op-cancel",
+                HostOperationKind::Cancel,
+                Some("op-late"),
+            ))
+            .unwrap();
+        // Then the person presses Allow once on the dialog still on screen.
+        release_tx.send(()).unwrap();
+        let error = answered.join().unwrap().unwrap_err();
+        assert_eq!(
+            public_error_message(&error, &inner.config),
+            "Host operation approval expired."
+        );
+        assert_eq!(
+            *approval.lapsed.lock().unwrap(),
+            vec![LapsedApproval {
+                bot_id: "bot-a".into(),
+                bot_name: Some("Research Bot".into()),
+                action: LapsedAction::Command,
+            }]
+        );
+
+        // The next command on the same folder asks again.
+        let next = inner
+            .handle_operation(&operation("op-next", HostOperationKind::RunCommand, None))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(approval.asked.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            public_error_message(&next, &inner.config),
+            "Declined in OpenBot Desktop."
+        );
+        assert!(!inner.state.lock().unwrap().grants["grant"].revoked);
+    }
+
+    /*
+     * FOUND ON A MAC: with an "Allow this command?" the server had given up on still on screen,
+     * every folder action that Bot asked for next failed with "That Bot already has a host
+     * operation in progress." until someone dismissed the stale dialog. Freed of that, the next
+     * dialog then sat exactly on top of the stale one, two identical dialogs nobody could tell
+     * apart. The next action is taken, and its dialog waits its turn: shown once the stale one is
+     * answered and its "didn't run" notice closed, and never shown at all if it is no longer wanted
+     * by then.
+     */
+    #[test]
+    fn a_dialog_left_on_screen_holds_up_no_bot_and_the_next_dialog_waits_its_turn() {
+        let collector = ResultCollector::start();
+        let (asked_tx, asked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let approval = Arc::new(LateCommandApprovalUi {
+            asked: AtomicUsize::new(0),
+            asked_tx: Mutex::new(asked_tx),
+            release_rx: Mutex::new(release_rx),
+            lapsed: Mutex::new(Vec::new()),
+        });
+        let config = HostAccessConfig::new(
+            collector.base_url.clone(),
+            "token",
+            Address::new(Engine::Docker, None),
+            DEFAULT_IMAGE,
+            vec![],
+        );
+        let grant = |bot: &str| LocalGrant {
+            id: format!("grant-{bot}"),
+            bot_id: bot.into(),
+            actor_id: "actor".into(),
+            bot_name: Some("Research Bot".into()),
+            root: temp_root("host-access-stale-dialog"),
+            revoked: false,
+        };
+        let inner = Arc::new(Inner {
+            config,
+            approval: approval.clone(),
+            instance_label: "test-instance".into(),
+            effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
+            state: Mutex::new(State {
+                stopped: false,
+                thread: None,
+                grants: HashMap::from([
+                    ("grant-bot-a".into(), grant("bot-a")),
+                    ("grant-bot-b".into(), grant("bot-b")),
+                ]),
+                running: HashMap::new(),
+                completed: HashSet::new(),
+                canceled_operations: HashSet::new(),
+                active_by_operation: HashSet::new(),
+                active_by_bot: HashMap::new(),
+            }),
+        });
+        let command = |id: &str, bot: &str| DesktopOperation {
+            operation_id: id.into(),
+            kind: HostOperationKind::RunCommand,
+            bot_id: bot.into(),
+            actor_id: "actor".into(),
+            bot_name: None,
+            grant_id: Some(format!("grant-{bot}")),
+            target_operation_id: None,
+            relative_path: None,
+            content: None,
+            command: Some("ls -la".into()),
+            writable: Some(false),
+            command_policy: None,
+            expires_at: None,
+            received_at_ms: now_millis(),
+        };
+        let cancel = |id: &str, target: &str, bot: &str| DesktopOperation {
+            kind: HostOperationKind::Cancel,
+            grant_id: None,
+            command: None,
+            target_operation_id: Some(target.into()),
+            ..command(id, bot)
+        };
+        let posted = |id: &str| {
+            collector
+                .bodies()
+                .iter()
+                .map(|body| serde_json::from_str::<serde_json::Value>(body).unwrap())
+                .find(|body| body["operationId"] == id)
+        };
+        let client = Client::new();
+
+        inner.spawn_operation(client.clone(), command("op-stale", "bot-a"));
+        asked_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        inner.spawn_operation(client.clone(), cancel("op-c1", "op-stale", "bot-a"));
+
+        // The person is away. The Bot asks again, and another Bot asks for something that is then
+        // given up on too, while the stale dialog is still open.
+        inner.spawn_operation(client.clone(), command("op-next", "bot-a"));
+        inner.spawn_operation(client.clone(), command("op-gone", "bot-b"));
+        thread::sleep(Duration::from_millis(150));
+        inner.spawn_operation(client.clone(), cancel("op-c2", "op-gone", "bot-b"));
+        thread::sleep(Duration::from_millis(150));
+        assert!(
+            posted("op-next").is_none(),
+            "the Bot's next action was turned away: {:?}",
+            posted("op-next")
+        );
+        assert_eq!(
+            approval.asked.load(Ordering::SeqCst),
+            1,
+            "a second dialog was shown on top of the stale one"
+        );
+
+        // The person comes back and presses Allow on the stale dialog: nothing runs, they are told
+        // so, and only then is the next dialog shown. The one given up on meanwhile never is.
+        release_tx.send(()).unwrap();
+        asked_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the waiting dialog was not shown after the stale one was answered");
+        collector.wait_for_posts(5);
+        assert_eq!(approval.lapsed.lock().unwrap().len(), 1);
+        assert_eq!(approval.asked.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            posted("op-stale").unwrap()["error"],
+            "Host operation approval expired."
+        );
+        assert_eq!(
+            posted("op-next").unwrap()["error"],
+            "Declined in OpenBot Desktop."
+        );
+        assert_eq!(posted("op-gone").unwrap()["ok"], false);
+        thread::sleep(Duration::from_millis(50));
+        let state = inner.state.lock().unwrap();
+        assert!(state.active_by_bot.is_empty());
+        assert!(!state.grants["grant-bot-a"].revoked);
+    }
+
+    struct SameFolderApprovalUi {
+        root: PathBuf,
+        asked_to_change: AtomicUsize,
+    }
+
+    impl HostApprovalUi for SameFolderApprovalUi {
+        fn choose_folder(&self, _: &ChooseFolderPrompt) -> HostAccessResult<ApprovedFolder> {
+            Ok(ApprovedFolder {
+                root: self.root.clone(),
+            })
+        }
+
+        fn confirm_write(&self, _: &WritePrompt) -> HostAccessResult<()> {
+            self.asked_to_change.fetch_add(1, Ordering::SeqCst);
+            Err(HostAccessError::Denied(
+                "Declined in OpenBot Desktop.".into(),
+            ))
+        }
+
+        fn confirm_command(&self, request: &CommandPrompt) -> HostAccessResult<()> {
+            assert!(
+                request.writable,
+                "only commands that change files are asked here"
+            );
+            self.asked_to_change.fetch_add(1, Ordering::SeqCst);
+            Err(HostAccessError::Denied(
+                "Declined in OpenBot Desktop.".into(),
+            ))
+        }
+    }
+
+    /*
+     * FOUND ON A MAC: choosing a folder the Bot already had made a second grant beside the first,
+     * so Settings → Computer read "2 read-only folders" and the Bot was handed two grants with one
+     * name.
+     */
+    #[test]
+    fn choosing_a_folder_the_bot_already_has_keeps_one_grant_and_makes_it_live_again() {
+        let root = fs::canonicalize(temp_root("host-access-same-folder")).unwrap();
+        fs::write(root.join("notes.txt"), "hello").unwrap();
+        let approval = Arc::new(SameFolderApprovalUi {
+            root: root.clone(),
+            asked_to_change: AtomicUsize::new(0),
+        });
+        let inner = Inner {
+            config: HostAccessConfig::new(
+                "http://127.0.0.1:9",
+                "token",
+                Address::new(Engine::Docker, None),
+                DEFAULT_IMAGE,
+                vec![],
+            ),
+            approval: approval.clone(),
+            instance_label: "test-instance".into(),
+            effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
+            state: Mutex::new(State {
+                stopped: false,
+                thread: None,
+                grants: HashMap::new(),
+                running: HashMap::new(),
+                completed: HashSet::new(),
+                canceled_operations: HashSet::new(),
+                active_by_operation: HashSet::new(),
+                active_by_bot: HashMap::new(),
+            }),
+        };
+        let choose = |id: &str, bot: &str| DesktopOperation {
+            operation_id: id.into(),
+            kind: HostOperationKind::ChooseFolder,
+            bot_id: bot.into(),
+            actor_id: "actor".into(),
+            bot_name: Some("Research Bot".into()),
+            grant_id: None,
+            target_operation_id: None,
+            relative_path: None,
+            content: None,
+            command: None,
+            writable: Some(false),
+            command_policy: None,
+            expires_at: None,
+            received_at_ms: now_millis(),
+        };
+        let granted = |id: &str, bot: &str| {
+            inner
+                .handle_operation(&choose(id, bot))
+                .unwrap()
+                .grant
+                .unwrap()
+                .grant_id
+        };
+
+        let first = granted("op-1", "bot-a");
+        inner
+            .state
+            .lock()
+            .unwrap()
+            .grants
+            .get_mut(&first)
+            .unwrap()
+            .revoked = true;
+        let again = granted("op-2", "bot-a");
+        assert_eq!(again, first);
+        {
+            let state = inner.state.lock().unwrap();
+            assert_eq!(state.grants.len(), 1);
+            assert!(!state.grants[&first].revoked);
+        }
+        // A grant is read-only whichever time it was chosen: the grant it comes back as carries
+        // nothing over, and every change to the folder still asks the person, each time.
+        let change = |id: &str, kind: HostOperationKind| DesktopOperation {
+            kind,
+            grant_id: Some(first.clone()),
+            relative_path: matches!(kind, HostOperationKind::WriteFile).then(|| "notes.txt".into()),
+            content: matches!(kind, HostOperationKind::WriteFile).then(|| "changed".into()),
+            command: matches!(kind, HostOperationKind::RunCommand).then(|| "rm notes.txt".into()),
+            writable: Some(matches!(kind, HostOperationKind::RunCommand)),
+            command_policy: Some("allow".into()),
+            ..choose(id, "bot-a")
+        };
+        for (id, kind) in [
+            ("op-write", HostOperationKind::WriteFile),
+            ("op-edit", HostOperationKind::RunCommand),
+        ] {
+            let refused = inner.handle_operation(&change(id, kind)).map(|_| ());
+            assert_eq!(
+                public_error_message(&refused.unwrap_err(), &inner.config),
+                "Declined in OpenBot Desktop."
+            );
+        }
+        assert_eq!(approval.asked_to_change.load(Ordering::SeqCst), 2);
+        // Another Bot given the same folder has its own grant.
+        assert_ne!(granted("op-3", "bot-b"), first);
+        assert_eq!(inner.state.lock().unwrap().grants.len(), 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A server that answers `/desktop/shown` with `status` and `body`, and records each request's
+    /// path and body in order.
+    struct ShownServer {
+        base_url: String,
+        seen: Arc<Mutex<Vec<(String, String)>>>,
+    }
+
+    impl ShownServer {
+        fn start(status: u16, body: String) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let worker_seen = seen.clone();
+            thread::spawn(move || {
+                for stream in listener.incoming().take(8) {
+                    let Ok(mut stream) = stream else { return };
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut request_line = String::new();
+                    reader.read_line(&mut request_line).unwrap();
+                    let path = request_line
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap_or_default()
+                        .to_string();
+                    let mut content_length = 0_usize;
+                    loop {
+                        let mut line = String::new();
+                        reader.read_line(&mut line).unwrap();
+                        let trimmed = line.trim_end();
+                        if trimmed.is_empty() {
+                            break;
+                        }
+                        if let Some((name, value)) = trimmed.split_once(':') {
+                            if name.eq_ignore_ascii_case("content-length") {
+                                content_length = value.trim().parse().unwrap();
+                            }
+                        }
+                    }
+                    let mut request_body = vec![0_u8; content_length];
+                    reader.read_exact(&mut request_body).unwrap();
+                    worker_seen
+                        .lock()
+                        .unwrap()
+                        .push((path, String::from_utf8(request_body).unwrap()));
+                    let reason = if status == 200 { "OK" } else { "Not Found" };
+                    let response = format!(
+                        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    stream.write_all(response.as_bytes()).unwrap();
+                }
+            });
+            Self { base_url, seen }
+        }
+    }
+
+    fn shown_inner(base_url: &str, approval: Arc<dyn HostApprovalUi>) -> Inner {
+        Inner {
+            config: HostAccessConfig::new(
+                base_url,
+                "token",
+                Address::new(Engine::Docker, None),
+                DEFAULT_IMAGE,
+                vec![],
+            ),
+            approval,
+            instance_label: "test-instance".into(),
+            effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
+            state: Mutex::new(State {
+                stopped: false,
+                thread: None,
+                grants: HashMap::from([(
+                    "grant".into(),
+                    LocalGrant {
+                        id: "grant".into(),
+                        bot_id: "bot-a".into(),
+                        actor_id: "actor".into(),
+                        bot_name: Some("Research Bot".into()),
+                        root: temp_root("host-access-shown"),
+                        revoked: false,
+                    },
+                )]),
+                running: HashMap::new(),
+                completed: HashSet::new(),
+                canceled_operations: HashSet::new(),
+                active_by_operation: HashSet::new(),
+                active_by_bot: HashMap::new(),
+            }),
+        }
+    }
+
+    fn shown_command(id: &str, expires_at: u64) -> DesktopOperation {
+        DesktopOperation {
+            operation_id: id.into(),
+            kind: HostOperationKind::RunCommand,
+            bot_id: "bot-a".into(),
+            actor_id: "actor".into(),
+            bot_name: None,
+            grant_id: Some("grant".into()),
+            target_operation_id: None,
+            relative_path: None,
+            content: None,
+            command: Some("ls -la".into()),
+            writable: Some(false),
+            command_policy: None,
+            expires_at: Some(expires_at),
+            received_at_ms: now_millis(),
+        }
+    }
+
+    /// Notes when its command dialog went up, then is declined.
+    struct NotesWhenAsked {
+        asked_at: Mutex<Option<Instant>>,
+    }
+
+    impl HostApprovalUi for NotesWhenAsked {
+        fn choose_folder(&self, _: &ChooseFolderPrompt) -> HostAccessResult<ApprovedFolder> {
+            unreachable!("only commands are asked about here")
+        }
+        fn confirm_write(&self, _: &WritePrompt) -> HostAccessResult<()> {
+            unreachable!("only commands are asked about here")
+        }
+        fn confirm_command(&self, _: &CommandPrompt) -> HostAccessResult<()> {
+            *self.asked_at.lock().unwrap() = Some(Instant::now());
+            Err(HostAccessError::Denied(
+                "Declined in OpenBot Desktop.".into(),
+            ))
+        }
+    }
+
+    /*
+     * FOUND ON A MAC: one dialog at a time meant a command asked for while an unanswered dialog was
+     * on screen waited behind it, its two minutes running, and appeared with almost none left. The
+     * server is told as the dialog goes up, so the person's two minutes start then.
+     */
+    #[test]
+    fn the_server_is_told_as_a_dialog_goes_on_screen() {
+        let server = ShownServer::start(404, r#"{"error":"old server"}"#.into());
+        let approval = Arc::new(NotesWhenAsked {
+            asked_at: Mutex::new(None),
+        });
+        let inner = shown_inner(&server.base_url, approval.clone());
+        let deadline = u64::try_from(now_millis()).unwrap() + 60_000;
+
+        let refused = inner
+            .handle_operation(&shown_command("op-shown", deadline))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(
+            public_error_message(&refused, &inner.config),
+            "Declined in OpenBot Desktop."
+        );
+        let told = server.seen.lock().unwrap().clone();
+        assert_eq!(told.len(), 1, "{told:?}");
+        assert_eq!(told[0].0, "/api/host-access/desktop/shown");
+        let body: serde_json::Value = serde_json::from_str(&told[0].1).unwrap();
+        assert_eq!(body["operationId"], "op-shown");
+    }
+
+    /*
+     * FOUND ON WINDOWS CI: telling the server before showing the dialog held the dialog up for as
+     * long as the server took to answer, about two seconds where nothing listens (Windows retries a
+     * refused local connection). A server that never answers must not hold up the person.
+     */
+    #[test]
+    fn a_server_that_does_not_answer_does_not_hold_up_the_dialog() {
+        let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", silent.local_addr().unwrap());
+        let approval = Arc::new(NotesWhenAsked {
+            asked_at: Mutex::new(None),
+        });
+        let inner = shown_inner(&base_url, approval.clone());
+        let deadline = u64::try_from(now_millis()).unwrap() + 60_000;
+
+        let started = Instant::now();
+        let _ = inner.handle_operation(&shown_command("op-silent", deadline));
+        let asked_after = approval.asked_at.lock().unwrap().unwrap() - started;
+        assert!(
+            asked_after < Duration::from_millis(500),
+            "the dialog waited {asked_after:?} for the server"
+        );
+        drop(silent);
+    }
+
+    #[test]
+    fn a_shown_dialog_keeps_to_the_servers_new_deadline_and_an_old_server_changes_nothing() {
+        let soon = || u64::try_from(now_millis()).unwrap() + 50;
+        let later = u64::try_from(now_millis()).unwrap() + 60_000;
+
+        // A server that restarted the time: the operation keeps to the new deadline.
+        let server = ShownServer::start(200, format!(r#"{{"expiresAt":{later}}}"#));
+        let inner = shown_inner(&server.base_url, Arc::new(DenyAllApprovalUi));
+        let operation = shown_command("op-new-time", soon());
+        inner.keep_shown_deadline(inner.report_prompt_shown(&operation));
+        thread::sleep(Duration::from_millis(120));
+        assert!(!inner.operation_expired(&operation));
+
+        // A server without the route, or one that gave up on it: the time it had stands.
+        let server = ShownServer::start(404, r#"{"error":"not waiting"}"#.into());
+        let inner = shown_inner(&server.base_url, Arc::new(DenyAllApprovalUi));
+        let operation = shown_command("op-old-server", soon());
+        inner.keep_shown_deadline(inner.report_prompt_shown(&operation));
+        thread::sleep(Duration::from_millis(120));
+        assert!(inner.operation_expired(&operation));
+
+        // A server nobody answers for: the same, and nothing breaks.
+        let inner = shown_inner("http://127.0.0.1:9", Arc::new(DenyAllApprovalUi));
+        let operation = shown_command("op-no-server", soon());
+        inner.keep_shown_deadline(inner.report_prompt_shown(&operation));
+        thread::sleep(Duration::from_millis(120));
+        assert!(inner.operation_expired(&operation));
+    }
+
+    /// The Desktop log says a dialog went up, and what the server answered, in every case.
+    #[test]
+    fn the_desktop_log_says_what_the_server_answered_when_a_dialog_went_up() {
+        let now = 1_000_000_u128;
+        assert_eq!(
+            shown_log_line("op-1", &ShownOutcome::Restarted(1_120_000), now),
+            "[host access] operation op-1 shown; asked the server to restart its wait: new deadline in 120 s"
+        );
+        assert_eq!(
+            shown_log_line("op-1", &ShownOutcome::Kept("404 Not Found".into()), now),
+            "[host access] operation op-1 shown; asked the server to restart its wait: it kept its own time (404 Not Found)"
+        );
+        assert!(shown_log_line(
+            "op-1",
+            &ShownOutcome::NoAnswer("connection refused".into()),
+            now
+        )
+        .ends_with("asked the server to restart its wait: no answer (connection refused)"));
+    }
+
     #[test]
     fn grant_binding_refuses_wrong_bot_or_actor() {
         let config = HostAccessConfig::new(
@@ -2724,6 +3897,8 @@ mod tests {
             approval: Arc::new(DenyAllApprovalUi),
             instance_label: "test-instance".into(),
             effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
             state: Mutex::new(State {
                 stopped: false,
                 thread: None,
@@ -2742,7 +3917,7 @@ mod tests {
                 completed: HashSet::new(),
                 canceled_operations: HashSet::new(),
                 active_by_operation: HashSet::new(),
-                active_by_bot: HashSet::new(),
+                active_by_bot: HashMap::new(),
             }),
         };
         let operation = DesktopOperation {
@@ -2762,6 +3937,360 @@ mod tests {
             received_at_ms: now_millis(),
         };
         assert!(inner.require_grant(&operation).is_err());
+    }
+
+    /// A server the broker polls that can be taken down and brought back on the same address, as a
+    /// restart does: while down it drops every connection unanswered. Records what it answered.
+    struct RestartingServer {
+        base_url: String,
+        up: Arc<std::sync::atomic::AtomicBool>,
+        /// What it answers a hand-back with.
+        restore_status: Arc<Mutex<u16>>,
+        seen: Arc<Mutex<Vec<(String, String)>>>,
+        dropped: Arc<AtomicUsize>,
+        done: Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<JoinHandle<()>>,
+    }
+
+    impl RestartingServer {
+        fn start() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let up = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let restore_status = Arc::new(Mutex::new(200_u16));
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let dropped = Arc::new(AtomicUsize::new(0));
+            let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let (worker_up, worker_status, worker_seen, worker_dropped, worker_done) = (
+                up.clone(),
+                restore_status.clone(),
+                seen.clone(),
+                dropped.clone(),
+                done.clone(),
+            );
+            let thread = thread::spawn(move || loop {
+                let mut stream = match listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if worker_done.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(_) => return,
+                };
+                if !worker_up.load(Ordering::SeqCst) {
+                    worker_dropped.fetch_add(1, Ordering::SeqCst);
+                    drop(stream);
+                    continue;
+                }
+                // Winsock accept inherits the listener's nonblocking mode.
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request_line = String::new();
+                if reader.read_line(&mut request_line).is_err() {
+                    continue;
+                }
+                let path = request_line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_string();
+                let mut content_length = 0_usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).is_err() {
+                        break;
+                    }
+                    let trimmed = line.trim_end();
+                    if trimmed.is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = trimmed.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            content_length = value.trim().parse().unwrap();
+                        }
+                    }
+                }
+                let mut body = vec![0_u8; content_length];
+                if reader.read_exact(&mut body).is_err() {
+                    continue;
+                }
+                let body = String::from_utf8(body).unwrap();
+                let (status, answer) = if path.ends_with("/desktop/next") {
+                    (200, r#"{"operations":[],"leaseMs":15000}"#.to_string())
+                } else if path.ends_with("/desktop/restore") {
+                    let status = *worker_status.lock().unwrap();
+                    let presented: serde_json::Value = serde_json::from_str(&body).unwrap();
+                    let restored = presented["grants"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|grant| grant["grantId"].clone())
+                        .collect::<Vec<_>>();
+                    (
+                        status,
+                        serde_json::json!({ "restored": restored }).to_string(),
+                    )
+                } else {
+                    (404, "{}".to_string())
+                };
+                worker_seen.lock().unwrap().push((path, body));
+                let response = format!(
+                    "HTTP/1.1 {status} Answer\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                    answer.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            });
+            Self {
+                base_url,
+                up,
+                restore_status,
+                seen,
+                dropped,
+                done,
+                thread: Some(thread),
+            }
+        }
+
+        fn set_up(&self, up: bool) {
+            self.up.store(up, Ordering::SeqCst);
+        }
+
+        fn asked(&self, path: &str) -> usize {
+            self.seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(seen, _)| seen.ends_with(path))
+                .count()
+        }
+
+        fn handed_back(&self) -> Vec<serde_json::Value> {
+            self.seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(path, _)| path.ends_with("/desktop/restore"))
+                .map(|(_, body)| serde_json::from_str(body).unwrap())
+                .collect()
+        }
+    }
+
+    impl Drop for RestartingServer {
+        fn drop(&mut self) {
+            self.done.store(true, Ordering::SeqCst);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    /// Waits for `check`, failing the test after twenty seconds rather than holding it.
+    fn wait_until(what: &str, check: impl Fn() -> bool) {
+        let patience = Instant::now() + Duration::from_secs(20);
+        while !check() {
+            assert!(Instant::now() < patience, "never happened: {what}");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// A broker polling `server`, holding one live grant for `bot-a`, the folders held for
+    /// `grace` when the server stops answering.
+    fn polling_broker(server: &RestartingServer, grace: Duration) -> (HostAccess, PathBuf) {
+        let mut config = HostAccessConfig::new(
+            &server.base_url,
+            "token",
+            Address::new(Engine::Docker, None),
+            DEFAULT_IMAGE,
+            vec![],
+        );
+        config.poll_interval = Duration::from_millis(20);
+        config.server_away_grace = grace;
+        let host = HostAccess::start_with_approval(config, Arc::new(DenyAllApprovalUi)).unwrap();
+        let root = temp_root("host-access-restart");
+        host.inner.state.lock().unwrap().grants.insert(
+            "grant".into(),
+            LocalGrant {
+                id: "grant".into(),
+                bot_id: "bot-a".into(),
+                actor_id: "actor".into(),
+                bot_name: Some("Research Bot".into()),
+                root: root.clone(),
+                revoked: false,
+            },
+        );
+        (host, root)
+    }
+
+    fn grant_is_live(host: &HostAccess) -> bool {
+        host.inner
+            .state
+            .lock()
+            .unwrap()
+            .grants
+            .get("grant")
+            .is_some_and(|grant| !grant.revoked)
+    }
+
+    /// The server going away for a while, as a restart takes it: several polls nobody answers.
+    fn restart(server: &RestartingServer) {
+        server.set_up(false);
+        let dropped = server.dropped.load(Ordering::SeqCst);
+        wait_until("polls went unanswered", || {
+            server.dropped.load(Ordering::SeqCst) >= dropped + 3
+        });
+        server.set_up(true);
+    }
+
+    /*
+     * FOUND ON A MAC: every restart of the server, the Status window's Restart among them, dropped
+     * every folder the person had approved. The first poll nobody answered revoked every grant here,
+     * and the restarted server knew none, so Settings → Computer read "No folders approved" and the
+     * Bot was told its folder access had ended. The grants are now held while the server is away and
+     * handed back once it answers.
+     */
+    #[test]
+    fn a_folder_approved_before_the_server_restarted_is_held_and_handed_back_to_it() {
+        let server = RestartingServer::start();
+        let (host, root) = polling_broker(&server, Duration::from_secs(60));
+        wait_until("the broker polled", || server.asked("/desktop/next") >= 2);
+
+        restart(&server);
+        wait_until("the folders were handed back", || {
+            server.asked("/desktop/restore") >= 1
+        });
+        let polls_after = server.asked("/desktop/next");
+        wait_until("the broker polled again", || {
+            server.asked("/desktop/next") > polls_after
+        });
+
+        assert!(grant_is_live(&host), "the grant ended with the restart");
+        assert_eq!(
+            server.handed_back()[0],
+            serde_json::json!({
+                "grants": [{
+                    "grantId": "grant",
+                    "botId": "bot-a",
+                    "actorId": "actor",
+                    "displayName": display_name_for(&root),
+                }]
+            })
+        );
+        host.stop_with_machine_stopped();
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_server_that_stays_away_or_will_not_take_the_folders_back_ends_them_and_so_does_stop() {
+        // Gone for longer than the grace: the folders end, as they always did.
+        let server = RestartingServer::start();
+        let (host, root) = polling_broker(&server, Duration::from_millis(150));
+        wait_until("the broker polled", || server.asked("/desktop/next") >= 1);
+        server.set_up(false);
+        wait_until("the grant ended", || !grant_is_live(&host));
+        assert_eq!(server.asked("/desktop/restore"), 0);
+        host.stop_with_machine_stopped();
+        let _ = fs::remove_dir_all(root);
+
+        // Back, but refusing the hand-back (another token, or a server without the route).
+        let server = RestartingServer::start();
+        *server.restore_status.lock().unwrap() = 401;
+        let (host, root) = polling_broker(&server, Duration::from_secs(60));
+        wait_until("the broker polled", || server.asked("/desktop/next") >= 1);
+        restart(&server);
+        wait_until("the folders were offered back", || {
+            server.asked("/desktop/restore") >= 1
+        });
+        wait_until("the grant ended", || !grant_is_live(&host));
+        host.stop_with_machine_stopped();
+        let _ = fs::remove_dir_all(root);
+
+        // Stop while the server is away: the folders end, and nothing is handed back after it.
+        let server = RestartingServer::start();
+        let (host, root) = polling_broker(&server, Duration::from_secs(60));
+        wait_until("the broker polled", || server.asked("/desktop/next") >= 1);
+        server.set_up(false);
+        let dropped = server.dropped.load(Ordering::SeqCst);
+        wait_until("polls went unanswered", || {
+            server.dropped.load(Ordering::SeqCst) >= dropped + 2
+        });
+        host.stop_with_machine_stopped();
+        server.set_up(true);
+        thread::sleep(Duration::from_millis(200));
+        assert!(!grant_is_live(&host));
+        assert_eq!(server.asked("/desktop/restore"), 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stop_waits_for_a_folder_hand_back_already_in_flight() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let (arrived_tx, arrived_rx) = mpsc::channel();
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            assert!(line.starts_with("POST /api/host-access/desktop/restore "));
+            let mut length = 0;
+            loop {
+                line.clear();
+                reader.read_line(&mut line).unwrap();
+                if line.trim().is_empty() {
+                    break;
+                }
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        length = value.trim().parse::<usize>().unwrap();
+                    }
+                }
+            }
+            reader.read_exact(&mut vec![0; length]).unwrap();
+            arrived_tx.send(()).unwrap();
+            reply_rx.recv().unwrap();
+            let answer = r#"{"restored":["grant"]}"#;
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}", answer.len()).unwrap();
+        });
+        let inner = Arc::new(shown_inner(&base_url, Arc::new(DenyAllApprovalUi)));
+        let root = inner.state.lock().unwrap().grants["grant"].root.clone();
+        let restoring = inner.clone();
+        let restore = thread::spawn(move || restoring.restore_grants(&Client::new()));
+        arrived_rx.recv_timeout(Duration::from_secs(20)).unwrap();
+        let host = HostAccess { inner };
+        // The request has arrived and its response is held, so this checks the serialization
+        // boundary even if the scheduler delays the Stop thread below.
+        let restore_holds_effect_lock = host.inner.effect_lock.try_lock().is_err();
+        let stopping = host.inner.clone();
+        let (stopped_tx, stopped_rx) = mpsc::channel();
+        let stop = thread::spawn(move || {
+            let host = HostAccess { inner: stopping };
+            host.stop_with_machine_stopped();
+            stopped_tx.send(()).unwrap();
+        });
+        let finished_before_reply = stopped_rx.recv_timeout(Duration::from_millis(100)).is_ok();
+        // Always release and join the workers, including when checking the unfixed race.
+        reply_tx.send(()).unwrap();
+        restore.join().unwrap().unwrap();
+        stop.join().unwrap();
+        server.join().unwrap();
+        assert!(
+            restore_holds_effect_lock,
+            "hand-back bypassed Stop's effect lock"
+        );
+        assert!(
+            !finished_before_reply,
+            "Stop returned while a hand-back was still in flight"
+        );
+        assert!(!grant_is_live(&host));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -2819,6 +4348,53 @@ mod tests {
         let raw = HostAccessError::Denied("Host path /Users/example/.ssh is unavailable".into());
         let said = public_error_message(&raw, &config);
         assert!(!said.contains("/Users/example"));
+    }
+
+    /*
+     * FOUND IN CI, on the live sandbox test: a command its 32m memory limit killed after 0.4 s was
+     * told it had run for more than 30 seconds. Docker on cgroup v2 reports `OOMKilled` false for
+     * some of the commands its memory limit kills (4 of 35 on a measured runner, and false still a
+     * second later), and exit 137 was read as the time limit's kill. The exit codes and timings are
+     * the ones measured there.
+     */
+    #[test]
+    fn a_kill_before_the_time_limit_is_the_memory_limit_and_never_the_time_limit() {
+        let mut config = HostAccessConfig::new(
+            "http://127.0.0.1:3001",
+            "token",
+            Address::new(Engine::Docker, None),
+            DEFAULT_IMAGE,
+            vec![],
+        );
+        config.memory = "32m".into();
+        let said = |exit_code, oom_killed, ran_for| {
+            let ran = Ran {
+                exit_code,
+                oom_killed,
+                ran_for,
+                output: Vec::new(),
+                truncated: false,
+            };
+            stopped_by_sandbox(&ran, &config).map(|stopped| stopped.to_string())
+        };
+        let memory = Some(
+            "The command used more than the local sandbox's 32m of memory, so it was stopped. \
+             Work on less at once, for example read a large file in parts."
+                .to_owned(),
+        );
+        let time = Some(timed_out_sentence(&config));
+        let (soon, late) = (Duration::from_millis(400), config.operation_timeout);
+
+        // Killed by its memory limit, with the flag and without it.
+        assert_eq!(said(137, true, soon), memory);
+        assert_eq!(said(137, false, soon), memory);
+        // Stopped by its time limit: TERM was enough, or it took the KILL after it.
+        assert_eq!(said(124, false, late + Duration::from_secs(1)), time);
+        assert_eq!(said(137, false, late + Duration::from_secs(1)), time);
+        // A 124 of the command's own, before the limit, is its exit code and not the sandbox's.
+        assert_eq!(said(124, false, soon), None);
+        assert_eq!(said(1, false, soon), None);
+        assert_eq!(said(0, false, soon), None);
     }
 }
 
@@ -2910,6 +4486,8 @@ mod live {
                 approval: Arc::new(AllowAll),
                 instance_label: fresh_id("host-live"),
                 effect_lock: Mutex::new(()),
+                prompt_lock: Mutex::new(()),
+                shown_deadlines: Mutex::new(HashMap::new()),
                 state: Mutex::new(State {
                     stopped: false,
                     thread: None,
@@ -2918,7 +4496,7 @@ mod live {
                     completed: HashSet::new(),
                     canceled_operations: HashSet::new(),
                     active_by_operation: HashSet::new(),
-                    active_by_bot: HashSet::new(),
+                    active_by_bot: HashMap::new(),
                 }),
             };
             Self { inner, root }

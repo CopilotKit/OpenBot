@@ -14,11 +14,16 @@ import {
  *
  * The person's pane comes first. It does not open over something they opened (`busy`), it does not
  * reopen what they are already watching, and a run they closed stays closed for the rest of it.
+ *
+ * And a card that waits on the person comes first: where the screen would be a sheet over the
+ * conversation, it does not open itself while a take-over, sign-in or approval card waits there
+ * (`covers`, from `useCardsFirst`).
  */
 export function useAutoWatchScreen({
   botId,
   watching,
   busy,
+  covers,
   open,
   close,
 }: {
@@ -27,6 +32,8 @@ export function useAutoWatchScreen({
   watching: boolean;
   /** The pane is showing something else the person asked for, which auto-open must not take. */
   busy: boolean;
+  /** The screen would open over a card in the conversation that waits on the person. */
+  covers: boolean;
   open: () => void;
   close: () => void;
 }): { dismiss: () => void } {
@@ -42,8 +49,8 @@ export function useAutoWatchScreen({
   const openedFor = useRef<number | null>(null);
 
   // Read inside subscriptions that outlive the render they were made in.
-  const latest = useRef({ watching, busy, open, close });
-  latest.current = { watching, busy, open, close };
+  const latest = useRef({ watching, busy, covers, open, close });
+  latest.current = { watching, busy, covers, open, close };
 
   useEffect(() => {
     if (!botId) return;
@@ -51,8 +58,13 @@ export function useAutoWatchScreen({
       if (activity.botId !== botId) return;
       run.current = activity.epoch;
       if (dismissed.current === activity.epoch) return;
-      const { watching: isWatching, busy: isBusy, open: show } = latest.current;
-      if (isWatching || isBusy) return;
+      const {
+        watching: isWatching,
+        busy: isBusy,
+        covers: isOver,
+        open: show,
+      } = latest.current;
+      if (isWatching || isBusy || isOver) return;
       openedFor.current = activity.announcement;
       show();
     });

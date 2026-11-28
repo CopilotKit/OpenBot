@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback } from "react";
+import { useBotListScope } from "./list-scope";
 import { type AgentProfile, agentListQueryOptions } from "./queries";
 
 /**
@@ -18,8 +19,16 @@ const toNames = (agents: AgentProfile[]): Map<string, string> =>
   new Map(agents.map((agent) => [agent.id, agent.name]));
 
 export function useBotNames(): (botId: string) => string {
-  const shown = useQuery({ ...agentListQueryOptions(), select: toNames });
-  const hidden = useQuery({ ...agentListQueryOptions(true), select: toNames });
+  // Under Admin, every Bot in the organization is named (lib/agents/list-scope.tsx).
+  const scope = useBotListScope();
+  const shown = useQuery({
+    ...agentListQueryOptions(false, scope),
+    select: toNames,
+  });
+  const hidden = useQuery({
+    ...agentListQueryOptions(true, scope),
+    select: toNames,
+  });
   // A hidden list that failed to load is no reason to name nobody; the shown list is the roster.
   const settled =
     shown.data !== undefined && (hidden.data !== undefined || hidden.isError);

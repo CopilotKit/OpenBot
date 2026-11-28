@@ -1,5 +1,13 @@
 import { OFFER_CHECK_IN_TOOL } from "./check-in-offer";
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
+import {
+  DELEGATE_TOOL,
+  FOLLOW_UP_TOOL,
+  LINK_TOOL,
+  REACT_TOOL,
+  STOP_TOOL,
+} from "./orchestration";
+import { RECALL_EARLIER_RESULTS } from "./recall-earlier-results";
 import { RESEARCH_ROLE_LABELS, researchRoleOfTool } from "./research";
 import { SUBAGENT_TOOL } from "./subagent";
 import { lowerFirst, nameInWords } from "./tool-name-words";
@@ -27,7 +35,32 @@ export type ToolName = {
   detail?: string;
 };
 
-export function readToolName(name: string, running = false): ToolName {
+/**
+ * Tool names shortened for the wire, each with the whole name it stands for.
+ *
+ * A provider takes a tool name of at most 64 characters, so a long app action travels cut and ended
+ * with a hash: `mcp__composio-googlesheets__GOOGLESHEETS_UPDATE_DIMENSI_82883606`. Read as it
+ * stands, its step said "Update dimensi 82883606". A hash does not read backwards, so whoever
+ * shortened the names says what they stand for ({@link knowShortenedToolNames}), and a call is
+ * named by the action's whole name: "Update dimension properties".
+ */
+const wholeNames = new Map<string, string>();
+
+/** Learn what shortened tool names stand for. Adds to what is known; a name is never forgotten. */
+export function knowShortenedToolNames(
+  names: Readonly<Record<string, string>>,
+): void {
+  for (const [shortened, whole] of Object.entries(names))
+    if (typeof whole === "string" && whole) wholeNames.set(shortened, whole);
+}
+
+/** The whole name a shortened tool name stands for, or the name itself. */
+export function wholeToolName(name: string): string {
+  return wholeNames.get(name) ?? name;
+}
+
+export function readToolName(given: string, running = false): ToolName {
+  const name = wholeToolName(given);
   const own = ownToolLabel(name, running);
   if (own) return { label: own };
   const parts = name.split("__");
@@ -56,6 +89,14 @@ export function readToolName(name: string, running = false): ToolName {
 
 /** The key of OpenBot's own Routines app (`ALWAYS_ON_APP` on the server). */
 const ROUTINES_APP = "routines";
+
+/**
+ * OpenBot's own apps whose names are not their keys in words: `openbot-settings` would read
+ * "Openbot Settings". Named as the catalogue names them.
+ */
+const OWN_APP_NAMES: Readonly<Record<string, string>> = {
+  "openbot-settings": "OpenBot settings",
+};
 
 /**
  * One app's tool, from its server key and the tool's own name: what `readToolName` reads out of an
@@ -131,7 +172,9 @@ export function appToolName(server: string, tool: string): ToolName {
   const serverWords = wordsOf(server).map(singular);
   const named = containsPhrase(wordsActedOn, serverWords);
   const said = nameInWords(label);
-  return named ? { label: said } : { label: said, detail: server };
+  return named
+    ? { label: said }
+    : { label: said, detail: OWN_APP_NAMES[server] ?? server };
 }
 
 /**
@@ -139,6 +182,8 @@ export function appToolName(server: string, tool: string): ToolName {
  * Drive", and a broker's "composio-airtable" or "arcade-Gmail" as the app alone.
  */
 export function connectorName(server: string): string {
+  const own = OWN_APP_NAMES[server];
+  if (own) return own;
   return wordsOf(brokeredApp(server) ?? server)
     .map((word) => word[0]?.toUpperCase() + word.slice(1))
     .join(" ");
@@ -162,6 +207,8 @@ export function approvalWords(action: {
   target?: unknown;
   /** Which of the person's accounts at the app, where they hold several: "from dana@work.example". */
   account?: string;
+  /** What it would send, which names who a share goes to. */
+  args?: unknown;
 }): {
   action: string;
   place: string;
@@ -181,9 +228,87 @@ export function approvalPhrase(action: {
   target?: unknown;
   /** Which of the person's accounts at the app, where they hold several: "from dana@work.example". */
   account?: string;
+  /** What it would send, which names who a share goes to. */
+  args?: unknown;
 }): string {
   const { action: words, place, joiner } = approvalParts(action);
+  if (joiner === null) return words;
   return joiner ? `${words} ${joiner} ${place}` : `${words} ${place}`;
+}
+
+/** OpenBot's own settings app (`SETTINGS_APP` on the server). */
+const SETTINGS_APP = "openbot-settings";
+
+/**
+ * What a change to OpenBot's settings asks to do, said whole: "change your settings", "change
+ * Scout's settings", "invite someone to your organization". The card's body says what exactly.
+ *
+ * The app's name is never added. Read as any other app's tool, the card said "Update my settings on
+ * OpenBot settings": the tool's own name, written for the model in the Bot's voice, then the app.
+ * Undefined for a tool this doesn't know, which is then named as any app's tool is.
+ */
+function settingsAsk(
+  tool: string,
+  args: unknown,
+  target: unknown,
+): string | undefined {
+  const asked =
+    args && typeof args === "object"
+      ? (args as { action?: unknown }).action
+      : undefined;
+  switch (tool) {
+    case "update_my_settings":
+      return "change your settings";
+    case "update_my_bot": {
+      // The Bot it changes, by the name its preview gives (`change.bot`).
+      const change =
+        target && typeof target === "object"
+          ? (target as { change?: { bot?: { name?: unknown } } }).change
+          : undefined;
+      const name =
+        typeof change?.bot?.name === "string" ? change.bot.name.trim() : "";
+      return name ? `change ${name}'s settings` : "change a Bot's settings";
+    }
+    case "update_bot_apps": {
+      // The Bot and the app, by the names its preview gives (`change.bot`, `change.app`).
+      const change =
+        target && typeof target === "object"
+          ? (
+              target as {
+                change?: { bot?: { name?: unknown }; app?: { name?: unknown } };
+              }
+            ).change
+          : undefined;
+      const bot =
+        typeof change?.bot?.name === "string" ? change.bot.name.trim() : "";
+      const app =
+        typeof change?.app?.name === "string" ? change.app.name.trim() : "";
+      const what = `change what ${bot || "a Bot"} can use`;
+      return app ? `${what} in ${app}` : what;
+    }
+    case "update_organization_settings":
+      return "change your organization's settings";
+    case "manage_people":
+      return (
+        {
+          invite: "invite someone to your organization",
+          change_role: "change someone's role in your organization",
+          remove: "remove someone from your organization",
+        }[String(asked)] ?? "change people in your organization"
+      );
+    case "manage_teams":
+      return (
+        {
+          create: "create a team",
+          rename: "rename a team",
+          move: "move a team",
+          add_member: "add someone to a team",
+          remove_member: "take someone out of a team",
+        }[String(asked)] ?? "change your organization's teams"
+      );
+    default:
+      return undefined;
+  }
 }
 
 function approvalParts(action: {
@@ -191,7 +316,49 @@ function approvalParts(action: {
   scope: string;
   target?: unknown;
   account?: string;
-}): { action: string; place: string; joiner: "on" | "in" | "" } {
+  args?: unknown;
+}): {
+  action: string;
+  place: string;
+  /** Null when the action says where on its own, so nothing is added to it. */
+  joiner: "on" | "in" | "" | null;
+} {
+  // A change to OpenBot's own settings, in its own words: "change your settings".
+  if (action.toolRef.startsWith(`${SETTINGS_APP}/`)) {
+    const ask = settingsAsk(
+      action.toolRef.slice(SETTINGS_APP.length + 1),
+      action.args,
+      action.target,
+    );
+    if (ask)
+      return { action: ask, place: connectorName(SETTINGS_APP), joiner: null };
+  }
+  /*
+   * Sharing something private with other people, by who it goes to: "share private information with
+   * Pipeline Bot". It read "openbot/share private information on handoff:" and a person's id.
+   */
+  if (action.toolRef === PRIVATE_SHARE_TOOL_REF) {
+    const { audience, handOff } = (action.args ?? {}) as {
+      audience?: unknown;
+      handOff?: unknown;
+    };
+    // One card for a hand-off that also shares: "hand this to Pipeline Bot".
+    if (typeof handOff === "string" && handOff.trim())
+      return { action: "hand this to", place: handOff.trim(), joiner: "" };
+    return {
+      action: "share private information with",
+      place:
+        typeof audience === "string" &&
+        audience.trim() &&
+        !audience.includes(":")
+          ? audience.trim()
+          : "other people",
+      joiner: "",
+    };
+  }
+  // Handing work to another Bot, by the Bot it goes to: "ask Pipeline Bot".
+  if (action.toolRef === HANDOFF_TOOL_REF)
+    return { action: "ask", place: action.scope, joiner: "" };
   const slash = action.toolRef.indexOf("/");
   const app = action.toolRef.slice(0, slash);
   if (slash > 0 && app === action.scope) {
@@ -241,7 +408,19 @@ function approvalParts(action: {
 }
 
 /** Handles the model cites and the run carries, which name nothing a person could check. */
-const INTERNAL_ARGS = new Set(["ref", "snapshotId", "toolCallId", "signal"]);
+const INTERNAL_ARGS = new Set([
+  "ref",
+  "snapshotId",
+  "toolCallId",
+  "signal",
+  // A share's fingerprint of what it sends, which the server matches an answer against.
+  "contentDigest",
+]);
+
+/** How OpenBot asks before a Bot shares something private with other people. */
+export const PRIVATE_SHARE_TOOL_REF = "openbot/share_private_information";
+/** How OpenBot asks before a Bot hands work to another Bot. */
+const HANDOFF_TOOL_REF = "bot/message_bot";
 
 /**
  * What an approval would send, as labelled lines for its card: "Text: hello", "To: sam@example.test".
@@ -305,6 +484,12 @@ export function ruleTitle(rule: { toolRef: string; scope: string }): {
     if (tool === "*")
       return { title: `Any action on ${connectorName(app)}`, place: named };
     if (tool.includes("*")) return { title: rule.toolRef, place: false };
+    // A rule for a settings change is titled as its card was: "Change your settings".
+    const ask =
+      app === SETTINGS_APP
+        ? settingsAsk(tool, undefined, undefined)
+        : undefined;
+    if (ask) return { title: upper(ask), place: named };
     const { action, place } = approvalWords({ toolRef: ref, scope: app });
     return { title: `${upper(action)} on ${place}`, place: named };
   }
@@ -419,6 +604,11 @@ type OwnTool = {
    * step did not happen, so its line says what was tried. Without it the line keeps `done`.
    */
   attempted?: string;
+  /**
+   * What a step that did not work says, where `done` would claim it happened: "Didn't draw an
+   * interface". Without it the line says "<done>, didn't work", as a command that ran and failed does.
+   */
+  failed?: string;
   /** The argument naming what the step acted on, said beside its words: a file's path. */
   subject?: "path";
   /**
@@ -481,6 +671,11 @@ const OWN_TOOLS: Record<string, OwnTool> = {
     done: "Looked for a tool",
     answersTheModel: true,
   },
+  [RECALL_EARLIER_RESULTS]: {
+    running: "Rereading an earlier result",
+    done: "Reread an earlier result",
+    answersTheModel: true,
+  },
   // Claude Code's own search over the tools a Claude Agent SDK Bot holds, the same step as the one
   // above (`TOOL_SEARCH` in agent-claude-sdk/src/adapter.py).
   ToolSearch: {
@@ -493,6 +688,17 @@ const OWN_TOOLS: Record<string, OwnTool> = {
   ask_person: { running: "Asking you", done: "Asked you" },
   message_bot: { running: "Asking another Bot", done: "Asked another Bot" },
   [SUBAGENT_TOOL]: { running: "Working on a subtask", done: "Ran a subtask" },
+  [DELEGATE_TOOL]: { running: "Starting a task", done: "Started a task" },
+  [FOLLOW_UP_TOOL]: {
+    running: "Telling a task more",
+    done: "Told a task more",
+  },
+  [STOP_TOOL]: { running: "Stopping a task", done: "Stopped a task" },
+  [REACT_TOOL]: { running: "Reacting", done: "Reacted" },
+  [LINK_TOOL]: {
+    running: "Finding the task thread",
+    done: "Found the task thread",
+  },
   // A voice conversation handing what was said to the Bot behind it.
   ask_agent: { running: "Asking the Bot", done: "Asked the Bot" },
 
@@ -517,7 +723,12 @@ const OWN_TOOLS: Record<string, OwnTool> = {
    * Drawing a generated interface in the conversation. The runtime offers it, not an OpenBot
    * registration, so `built-in-tool-labels.test.ts` cannot find it; its words go here by hand.
    */
-  render_ui: { running: "Drawing an interface", done: "Drew an interface" },
+  render_ui: {
+    running: "Drawing an interface",
+    done: "Drew an interface",
+    attempted: "Draw an interface",
+    failed: "Didn't draw an interface",
+  },
 
   // Making a Bot from a conversation.
   list_bots: {
@@ -636,6 +847,12 @@ const OWN_TOOLS: Record<string, OwnTool> = {
     attempted: "Save a file",
     subject: "path",
   },
+  computer_send_file: {
+    running: "Sending a file",
+    done: "Sent a file",
+    attempted: "Send a file",
+    subject: "path",
+  },
   computer_run_command: {
     running: "Running a command",
     done: "Ran a command",
@@ -702,6 +919,15 @@ export function ownToolLabel(name: string, running = false): string | null {
 export function ownToolAttempt(name: string): string | null {
   const own = Object.hasOwn(OWN_TOOLS, name) ? OWN_TOOLS[name] : undefined;
   return own?.attempted ?? null;
+}
+
+/**
+ * What one of OpenBot's own steps says when it did not work and so did not happen ("Didn't draw an
+ * interface"), or null when it has no words of its own for that.
+ */
+export function ownToolFailedLabel(name: string): string | null {
+  const own = Object.hasOwn(OWN_TOOLS, name) ? OWN_TOOLS[name] : undefined;
+  return own?.failed ?? null;
 }
 
 /**

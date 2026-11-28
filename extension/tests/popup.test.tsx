@@ -10,7 +10,8 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { LearningSpaceState } from "@openbot/shared/recorder-api";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { PASS_HINTS } from "../src/offscreen/grant";
+import { handleConnectionMessage } from "../src/background/connection";
+import { classifyGrantError, PASS_HINTS } from "../src/offscreen/grant";
 import { voiceSentence } from "../src/offscreen/voice";
 import { desktopSentence } from "../src/pages/popup/desktop-sentence";
 import { Popup } from "../src/pages/popup/popup";
@@ -23,6 +24,7 @@ import {
   type PageToBackground,
   type RecorderState,
 } from "../src/protocol/messages";
+import { COMPANY_SIGN_IN_REQUIRED } from "../src/shared/openbot-client";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
 import { fakeSpeech, onDeviceModel } from "./support/fake-speech";
 
@@ -48,7 +50,7 @@ afterEach(() => {
   fake.uninstall();
 });
 
-/** As /api/recorder/learning answers: the person's own space, named except when there is none (unassigned, missing). */
+/** As /api/v2/organizations/default/recorder/learning answers: the person's own space, named except when there is none (unassigned, missing). */
 const learning = (state: LearningSpaceState["state"]): LearningSpaceState => ({
   state,
   containerId: state === "unassigned" || state === "missing" ? null : "c1",
@@ -117,6 +119,14 @@ function setup(
       return { ok: true, learning: options.learning ?? learning("assigned") };
     if (message.type === "page.desktop.available")
       return { ok: true, available: options.desktop ?? false };
+    // The service worker's own answer: it asks OpenBot Desktop's native host (the fake's `native`) and opens the tab.
+    if (message.type === "page.openbot.open")
+      return (
+        (await handleConnectionMessage(message)) ?? {
+          ok: false,
+          error: "Unknown request.",
+        }
+      );
     return { ok: true };
   };
   const view = render(
@@ -158,6 +168,85 @@ test("a policy address adds an Open <host> button that opens its Browsers settin
     expect(fake.opened).toContain(
       "https://openbot.example.test/settings/browsers",
     ),
+  );
+});
+
+/** OpenBot Desktop's own OpenBot, on this computer: a port nothing answers on, so a link the test follows by mistake
+ * reaches nothing. */
+const DESKTOP_OPENBOT = "http://127.0.0.1:9";
+/** The entry address OpenBot Desktop's native host answers for `path` on its own OpenBot. */
+const entryFor = (path: string) =>
+  `${DESKTOP_OPENBOT}/api/install/enter?token=install-token-abc&to=${encodeURIComponent(path)}`;
+/** OpenBot Desktop's native host, answering an entry for its own OpenBot. */
+function desktopAnswersEntries() {
+  fake.native.reply = (message) => {
+    const { type, path } = message as { type: string; path?: string };
+    return type === "entry" && typeof path === "string"
+      ? { ok: true, url: entryFor(path) }
+      : { ok: false, error: "unknown-message" };
+  };
+}
+
+test("the personal edition only admits requests carrying its install's token: with OpenBot Desktop, Open <host> opens its Browsers settings through the entry address", async () => {
+  desktopAnswersEntries();
+  const { findByText } = setup(
+    stateResponse({
+      ...NOT_CONNECTED,
+      policy: { openbotUrl: DESKTOP_OPENBOT, invalid: false },
+    }),
+  );
+  fireEvent.click(await findByText("Open 127.0.0.1:9"));
+  await waitFor(() =>
+    expect(fake.opened).toEqual([entryFor("/settings/browsers")]),
+  );
+  expect(fake.native.sent).toContainEqual({
+    type: "entry",
+    path: "/settings/browsers",
+  });
+});
+
+test("with no OpenBot Desktop to answer, Open <host> opens the plain address", async () => {
+  fake.native.reply = null;
+  const { findByText } = setup(
+    stateResponse({
+      ...NOT_CONNECTED,
+      policy: { openbotUrl: DESKTOP_OPENBOT, invalid: false },
+    }),
+  );
+  fireEvent.click(await findByText("Open 127.0.0.1:9"));
+  await waitFor(() =>
+    expect(fake.opened).toEqual([`${DESKTOP_OPENBOT}/settings/browsers`]),
+  );
+});
+
+test("OpenBot Desktop's entry address is used only for its own OpenBot: a team OpenBot opens as it always did", async () => {
+  desktopAnswersEntries();
+  const team = setup(
+    stateResponse({
+      ...NOT_CONNECTED,
+      policy: { openbotUrl: "https://openbot.example.test", invalid: false },
+    }),
+  );
+  fireEvent.click(await team.findByText("Open openbot.example.test"));
+  await waitFor(() =>
+    expect(fake.opened).toEqual([
+      "https://openbot.example.test/settings/browsers",
+    ]),
+  );
+  // OpenBot Desktop serves only plain http on this computer: an https OpenBot is never its own, so it is not asked.
+  expect(fake.native.sent).toEqual([]);
+  cleanup();
+  fake.opened.length = 0;
+  // Another OpenBot on a loopback port of this computer is not OpenBot Desktop's: its entry address is not used.
+  const other = setup(
+    stateResponse({
+      ...NOT_CONNECTED,
+      policy: { openbotUrl: "http://127.0.0.1:10", invalid: false },
+    }),
+  );
+  fireEvent.click(await other.findByText("Open 127.0.0.1:10"));
+  await waitFor(() =>
+    expect(fake.opened).toEqual(["http://127.0.0.1:10/settings/browsers"]),
   );
 });
 
@@ -1277,6 +1366,39 @@ test("the Teach a Bot link keeps a path prefix on the OpenBot address", async ()
   );
 });
 
+/** Connected through OpenBot Desktop, after a recording was sent. */
+const sentThroughDesktop = () =>
+  stateResponse({
+    state: { ...STOPPED, learning: learning("assigned"), draining: 0 },
+    connection: {
+      openbotUrl: DESKTOP_OPENBOT,
+      user: { name: "Ada Lovelace", email: "ada@example.test" },
+      via: "desktop",
+    },
+  });
+
+test("connected through OpenBot Desktop, See it on Teach a Bot opens it through the entry address", async () => {
+  desktopAnswersEntries();
+  const sent = setup(sentThroughDesktop());
+  fireEvent.click(
+    await sent.findByRole("link", { name: "See it on Teach a Bot" }),
+  );
+  await waitFor(() =>
+    expect(fake.opened).toEqual([entryFor("/browser?recordings=1")]),
+  );
+});
+
+test("with no OpenBot Desktop to answer, See it on Teach a Bot opens the plain address", async () => {
+  fake.native.reply = null;
+  const sent = setup(sentThroughDesktop());
+  fireEvent.click(
+    await sent.findByRole("link", { name: "See it on Teach a Bot" }),
+  );
+  await waitFor(() =>
+    expect(fake.opened).toEqual([`${DESKTOP_OPENBOT}/browser?recordings=1`]),
+  );
+});
+
 test("after stop with Automatic Learning off, the popup says Learning will not see the recording, and that it still went to OpenBot's backend", async () => {
   const { findByText, getByText } = setup(
     stateResponse({
@@ -1510,4 +1632,96 @@ test("signed out, a Start-over drain that is not kept shows only the kept row: n
   expect(queryByText(SENDING)).toBeNull();
   expect(queryByText("Learning capture")).toBeNull();
   expect(queryByText("Sending to OpenBot's backend")).toBeNull();
+});
+
+test("held out until they sign in through their company, the popup says so in the Recorder's words and opens OpenBot, where they link it", async () => {
+  // The re-check: while the organization held the person out (SSO_REQUIRED), the popup never said company sign-in.
+  const view = setup(stateResponse(), {
+    answers: {
+      "page.learning": { ok: false, error: COMPANY_SIGN_IN_REQUIRED },
+    },
+  });
+  expect(await view.findByText(COMPANY_SIGN_IN_REQUIRED)).toBeTruthy();
+  fireEvent.click(
+    view.getByRole("button", { name: "Sign in with your company" }),
+  );
+  await waitFor(() =>
+    expect(view.sent).toContainEqual({
+      type: "page.openbot.open",
+      url: "https://openbot.example.test/",
+    }),
+  );
+});
+
+test("held out while recording, Learning capture says it is paused for company sign-in and points at the way in below, never an unknown answer", async () => {
+  // The phone and Recorder end-to-end run: the capture pass refused with 403 SSO_REQUIRED, and the card said "an answer
+  // the Recorder does not know (403)" above the company sign-in block.
+  const verdict = classifyGrantError(403, {
+    code: "SSO_REQUIRED",
+    message:
+      "This organization requires signing in through your company's identity provider.",
+  });
+  expect(verdict.kind).toBe("hold");
+  const view = setup(
+    recording({
+      capture: {
+        ...CAPTURE,
+        intelligence: "held",
+        intelligenceReason:
+          verdict.kind === "hold" ? verdict.hint : "not a hold",
+      },
+    }),
+    {
+      answers: {
+        "page.learning": { ok: false, error: COMPANY_SIGN_IN_REQUIRED },
+      },
+    },
+  );
+  await view.findByText("Learning capture is paused");
+  expect(
+    view.getByText(
+      "Your organization requires signing in through your company. Use Sign in with your company below, and capture goes on once you have.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(/does not know/)).toBeNull();
+  expect(
+    await view.findByRole("button", { name: "Sign in with your company" }),
+  ).toBeTruthy();
+});
+
+test("any other refusal offers no company sign-in", async () => {
+  const view = setup(stateResponse(), {
+    answers: {
+      "page.learning": {
+        ok: false,
+        error: "OpenBot did not answer. Try again.",
+      },
+    },
+  });
+  await view.findByText("OpenBot did not answer. Try again.");
+  expect(
+    view.queryByRole("button", { name: "Sign in with your company" }),
+  ).toBeNull();
+});
+
+test("connected, the popup says which organization it records into, and only the OpenBot's address when none is named", async () => {
+  const named = setup(
+    stateResponse({
+      connection: {
+        openbotUrl: "https://openbot.example.test",
+        user: { name: "Ada Lovelace", email: "ada@example.test" },
+        via: "web",
+        organizationName: "Harbor Research",
+      },
+    }),
+  );
+  await named.findByText(
+    "Records into Harbor Research on openbot.example.test",
+  );
+  named.unmount();
+
+  const plain = setup(stateResponse());
+  await plain.findByText("Ada Lovelace");
+  expect(plain.queryByText(/Records into/)).toBeNull();
+  await plain.findByText("openbot.example.test");
 });

@@ -12,8 +12,8 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { routinesOf } from "@/components/routines/new-routine-page";
 import { DeleteRow } from "@/components/routines/delete-row";
+import { routinesOf } from "@/components/routines/new-routine-page";
 import {
   RoutineDetailMissing,
   useDeletedHere,
@@ -53,6 +53,7 @@ import {
   type ProactiveSetting,
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import {
@@ -62,6 +63,7 @@ import {
   lastCheckInLine,
   useCheckInsBlocked,
 } from "./proactive-panel";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * A check-in's page at `/routines/check-ins/$checkInId`, reached from its row on a Routines list,
@@ -103,7 +105,7 @@ export function CheckInRoutePage({
     );
   const botName =
     [...(bots.data ?? []), ...(hidden.data ?? [])].find(
-      (bot) => bot.id === setting.agentId,
+      (bot) => bot.id === setting.botId,
     )?.name ?? "A Bot";
   return (
     <CheckInPage
@@ -218,9 +220,11 @@ export function CheckInPage({
             render={
               <button
                 disabled={!setting.enabled || !!blocked || change.isPending}
-                onClick={() =>
-                  change.mutate({ setting, change: { kind: "run" } })
-                }
+                onClick={() => {
+                  // Bots can't run until a card is added: the dialog says why, in place of a run.
+                  if (stopIfNeedsCard()) return;
+                  change.mutate({ setting, change: { kind: "run" } });
+                }}
                 type="button"
               />
             }
@@ -291,7 +295,7 @@ export function CheckInPage({
         </PageRows>
         {change.error && !confirming ? (
           <p className="mt-3 text-destructive text-sm" role="alert">
-            {change.error.message}
+            {failureSaid(change.error)}
           </p>
         ) : null}
       </PageSection>
@@ -307,7 +311,7 @@ export function CheckInPage({
           {change.error ? (
             <DialogBody className="mt-4">
               <p className="text-destructive text-sm" role="alert">
-                {change.error.message}
+                {failureSaid(change.error)}
               </p>
             </DialogBody>
           ) : null}

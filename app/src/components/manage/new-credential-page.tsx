@@ -31,6 +31,7 @@ import {
   type ModelProvider,
   modelKeyQueryOptions,
 } from "@/lib/credentials/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 
 /** Without `items` the trigger draws the raw value, so the type read "model" in lower case. */
@@ -62,7 +63,7 @@ export function NewCredentialPage() {
       description={
         paths.edition === "personal"
           ? "Save a key to your vault. You won’t be able to view it after saving it."
-          : `Save a credential for ${paths.deploymentName}. You won’t be able to view the secret after saving it.`
+          : "Save a credential for this organization. You won’t be able to view the secret after saving it."
       }
       title={paths.edition === "personal" ? "Add key" : "Add credential"}
     >
@@ -108,10 +109,16 @@ function CredentialForm({ modelKey }: { modelKey: ModelKeyName | null }) {
           ? {
               kind: "model",
               provider: value.provider,
-              plaintext: value.plaintext,
+              secret: value.plaintext,
               metadata: {},
             }
-          : { ...value, metadata: {} },
+          : {
+              kind: "connector",
+              provider: value.provider,
+              keyId: value.keyId,
+              secret: value.plaintext,
+              metadata: {},
+            },
       );
       await navigate(paths.credentials());
     },
@@ -341,7 +348,7 @@ function CredentialForm({ modelKey }: { modelKey: ModelKeyName | null }) {
               provider,
               kind === "model" ? modelKey?.keyId : keyId,
             ) ? (
-              <p className="mt-5 text-amber-600 text-sm dark:text-amber-500">
+              <p className="mt-5 text-warning text-sm">
                 This key already has an active credential. Saving replaces it
                 and revokes the old one.
               </p>
@@ -350,7 +357,10 @@ function CredentialForm({ modelKey }: { modelKey: ModelKeyName | null }) {
         </form.Subscribe>
         {createCredential.error ? (
           <p className="mt-5 text-destructive text-sm" role="alert">
-            Couldn't save the credential. Try again.
+            {loadFailure(
+              createCredential.error,
+              "Couldn't save the credential. Try again.",
+            )}
           </p>
         ) : null}
       </PageCard>

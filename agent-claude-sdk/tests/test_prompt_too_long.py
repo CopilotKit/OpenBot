@@ -334,10 +334,16 @@ def test_a_bot_holding_many_apps_is_sent_their_tools_when_it_looks_for_them(app,
     input tokens before the person's question was answered, and 27,932 with Claude Code's tool
     search on. Claude Code loads every MCP tool upfront when `ToolSearch` is left out of `--tools`
     (code.claude.com/docs/en/mcp, "Configure tool search"), and the full harness left it out.
+
+    BEHIND A GATEWAY TOO. This Claude Code searches by default only against Anthropic's own API: at
+    any other `ANTHROPIC_BASE_URL` it loads every tool upfront unless `ENABLE_TOOL_SEARCH` says
+    otherwise (same page, "Tool search through a gateway"). Found live, through a proxy in front
+    of Anthropic's API: every request carried each app tool whole and `ToolSearch` was in none. The
+    Messages API here is at an address of its own, as a gateway's is, and nothing in the
+    environment asks for the search: the harness does.
     """
     _, asked, _ = messages_api
-    # On by default against Anthropic's API; this Claude Code turns it off for any other base URL.
-    monkeypatch.setenv("ENABLE_TOOL_SEARCH", "true")
+    monkeypatch.delenv("ENABLE_TOOL_SEARCH", raising=False)
     tools = [FETCH, *app_tools(127)]
     second = first_question_then_result(app, tools, None, page(20_000))
     assert errors(second) == []
@@ -353,6 +359,26 @@ def test_a_bot_holding_many_apps_is_sent_their_tools_when_it_looks_for_them(app,
     # The Bot looked its tool up, called it, and was answered with the result.
     assert any("tool_reference" in json.dumps(body["messages"]) for body in asked)
     assert any("release notes:" in json.dumps(body["messages"]) for body in asked)
+
+
+def test_a_gateway_that_cannot_pass_the_search_on_is_run_without_it(app, messages_api, monkeypatch):
+    """`ENABLE_TOOL_SEARCH=false` in the container's environment stands: every tool goes upfront.
+
+    Tool search needs the gateway to pass on `defer_loading`, `tool_reference` blocks and the
+    `anthropic-beta` header. Whoever runs one that cannot turns the search off, and the harness
+    leaves their choice alone.
+    """
+    _, asked, _ = messages_api
+    monkeypatch.setenv("ENABLE_TOOL_SEARCH", "false")
+    tools = [FETCH, *app_tools(20)]
+    second = first_question_then_result(app, tools, None, page(2_000))
+    assert errors(second) == []
+    assert said(second) == ANSWER
+    first_request = next(body for body in asked if body.get("tools"))
+    assert not [tool for tool in first_request["tools"] if tool.get("defer_loading")]
+    sent = [tool["name"] for tool in first_request["tools"]]
+    assert len([name for name in sent if "__composio-slack__" in name]) == 20
+    assert not any("tool_reference" in json.dumps(body["messages"]) for body in asked)
 
 
 def test_the_first_question_on_a_claude_5_5_model_is_not_held_to_200k(app, messages_api, monkeypatch):

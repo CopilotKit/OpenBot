@@ -27,6 +27,7 @@ import { Switch } from "@/components/ui/switch";
 import { ruleLabel } from "@/lib/boundaries/rules";
 import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
 import { actionPolicyQueryOptions } from "@/lib/computers/queries";
+import { failureSaid } from "@/lib/load-failure";
 
 export const Route = createFileRoute("/_authed/admin/boundaries")({
   component: BoundariesPage,
@@ -67,7 +68,7 @@ function BoundariesPage() {
         {/* Nothing until the policy is known: a rule list that guesses is worse than a blank. */}
         {stored.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {stored.error.message}
+            {failureSaid(stored.error)}
           </p>
         ) : null}
       </PageShell>
@@ -205,7 +206,7 @@ function BoundariesPage() {
         </PageRows>
         {savePolicy.error ? (
           <p className="mt-3 text-destructive text-sm" role="alert">
-            {savePolicy.error.message}
+            {failureSaid(savePolicy.error)}
           </p>
         ) : null}
       </PageSection>

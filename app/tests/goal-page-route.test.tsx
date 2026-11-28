@@ -19,6 +19,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import { GoalRoutePage } from "@/components/responsibilities/goal-page";
 import type { ResponsibilityRecord } from "@/lib/responsibilities";
 import { queryClient } from "@/query-client";
+import { GOALS_PATH, ROUTINES_PATH } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -28,8 +29,8 @@ import { settleReactWork } from "./settle-react-work";
 
 const goal: ResponsibilityRecord = {
   id: "goal-1",
-  agentId: "bot-1",
-  channelId: "c1",
+  botId: "bot-1",
+  conversationId: "c1",
   threadId: "t1",
   title: "Watch the queue",
   instruction: "Tell me when the queue backs up.",
@@ -40,7 +41,9 @@ const goal: ResponsibilityRecord = {
   subscriptions: [],
   recurring: false,
   endsWhenMet: false,
+  createdAt: "2026-11-10T10:00:00Z",
   updatedAt: "2026-11-10T10:00:00Z",
+  completedAt: null,
 };
 
 /** How the goals read answers right now. */
@@ -57,13 +60,13 @@ beforeEach(() => {
   goals = "ok";
   global.fetch = (async (input: Parameters<typeof fetch>[0]) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname === "/api/responsibilities")
+    if (url.pathname === GOALS_PATH)
       return goals === "fail"
-        ? Response.json({ error: "Server error" }, { status: 500 })
-        : Response.json({ responsibilities: [goal] });
-    if (url.pathname === "/api/routines")
-      return Response.json({ routines: [], sweep: null });
-    return Response.json({ triggers: [], runs: [] });
+        ? Response.json({ detail: "Server error" }, { status: 500 })
+        : Response.json({ goals: [goal], nextCursor: null });
+    if (url.pathname === ROUTINES_PATH)
+      return Response.json({ routines: [], nextCursor: null });
+    return Response.json({ triggers: [], runs: [], nextCursor: null });
   }) as typeof fetch;
 });
 afterEach(() => {

@@ -1,4 +1,9 @@
-import { IconKey, IconLockOff, IconTrash } from "@tabler/icons-react";
+import {
+  IconDeviceDesktopOff,
+  IconKey,
+  IconLockOff,
+  IconTrash,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { PageEmpty, PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -11,6 +16,8 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { useNoBotComputers } from "@/lib/deployment/queries";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { deleteSavedLoginMutationOptions } from "@/lib/passwords/mutations";
 import { savedLoginsQueryOptions } from "@/lib/passwords/queries";
 import { queryClient } from "@/query-client";
@@ -23,23 +30,63 @@ import { queryClient } from "@/query-client";
  */
 export function SavedLogins() {
   const logins = useQuery(savedLoginsQueryOptions());
+  const noComputers = useNoBotComputers();
   const remove = useMutation(deleteSavedLoginMutationOptions(queryClient));
   return (
     <>
       {logins.isPending ? null : logins.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your saved logins. Reload the page.
+          {loadFailure(
+            logins.error,
+            "Couldn't load your saved logins. Try again in a moment.",
+          )}
         </p>
-      ) : !logins.data.passwordManager ? (
-        <PageEmpty icon={IconLockOff} title="Saved logins are off">
-          An admin turned them off. Your logins are kept but won't be offered.
-        </PageEmpty>
+      ) : !logins.data.passwordManager && logins.data.logins.length === 0 ? (
+        /*
+         * Off for one of two reasons, and the list alone can't tell them apart: an OpenBot with no
+         * computers for Bots answers an empty list with the password manager off too. Which one it
+         * is waits for the deployment's answer, so the wrong reason is never on screen.
+         */
+        noComputers === undefined ? null : noComputers ? (
+          <PageEmpty
+            icon={IconDeviceDesktopOff}
+            title="Saved logins aren't available"
+          >
+            Saved logins need a computer for Bots, and this OpenBot has none. An
+            admin can set computers up.
+          </PageEmpty>
+        ) : (
+          <PageEmpty icon={IconLockOff} title="Saved logins are off">
+            An admin turned them off. Your logins are kept but won't be offered.
+          </PageEmpty>
+        )
       ) : logins.data.logins.length === 0 ? (
         <PageEmpty icon={IconKey} title="No saved logins yet">
           Choose Save to Vault when you sign a Bot in to a website.
         </PageEmpty>
       ) : (
         <PageRows>
+          {/*
+           * Turned off with logins already saved: the server still lists them and deleting one is
+           * not behind the switch, so the list stays, with what being off means above it.
+           */}
+          {logins.data.passwordManager ? null : (
+            <>
+              <Item size="sm">
+                <ItemMedia variant="icon">
+                  <IconLockOff />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>Saved logins are off</ItemTitle>
+                  <ItemDescription>
+                    An admin turned them off. These logins won't be offered or
+                    used. You can delete them.
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
+              <Separator />
+            </>
+          )}
           {logins.data.logins.map((login, index) => (
             <div key={login.id}>
               {index > 0 ? <Separator /> : null}
@@ -74,7 +121,7 @@ export function SavedLogins() {
       )}
       {remove.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          {remove.error.message}
+          {failureSaid(remove.error)}
         </p>
       ) : null}
     </>

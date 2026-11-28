@@ -10,6 +10,15 @@ import {
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { BotProfile } from "@/components/bot-profile/profile";
 import type { AgentProfile } from "@/lib/agents/queries";
+import { ME_PATH, meResponse } from "./accounts-api";
+import {
+  botOperationPath,
+  lifecycleOf,
+  lifecycleResponse,
+  pauseResponse,
+  type SentRequest,
+  sentRequest,
+} from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -54,41 +63,45 @@ const BOT: AgentProfile = {
   mine: true,
 };
 
-function serving(paused: boolean, writes: string[] = []) {
+function serving(paused: boolean, writes: SentRequest[] = []) {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (init?.method === "POST" && /\/(pause|resume)$/.test(url)) {
-      writes.push(url.endsWith("/pause") ? "pause" : "resume");
-      return Response.json({
-        lifecycle: {
-          agentId: "expenses",
-          paused: url.endsWith("/pause"),
-          pausedAt: null,
-          notify: "all",
-        },
-      });
+    const sent = sentRequest(input, init);
+    if (sent.path === botOperationPath("expenses", "pause")) {
+      writes.push(sent);
+      return pauseResponse(
+        lifecycleOf("expenses", { paused: true, pausedAt: PAUSED_AT }),
+        1,
+      );
     }
-    if (url.endsWith("/lifecycle")) {
-      return Response.json({
-        lifecycle: {
-          agentId: "expenses",
+    if (sent.path === botOperationPath("expenses", "resume")) {
+      writes.push(sent);
+      return lifecycleResponse(lifecycleOf("expenses"));
+    }
+    if (sent.path === botOperationPath("expenses", "lifecycle")) {
+      return lifecycleResponse(
+        lifecycleOf("expenses", {
           paused,
-          pausedAt: paused ? "2026-10-09T00:00:00.000Z" : null,
-          notify: "all",
-        },
-      });
+          pausedAt: paused ? PAUSED_AT : null,
+        }),
+      );
     }
-    if (url.includes("/shared-use/bot/")) {
+    // A Bot's shared apps, at the API's address.
+    if (
+      /^\/api\/v2\/organizations\/default\/bots\/[^/]+\/shared-use$/.test(url)
+    ) {
       return Response.json({ apps: [], pending: [] });
     }
-    if (url.includes("/api/me")) {
-      return Response.json({
+    if (url.includes(ME_PATH)) {
+      return meResponse({
         user: { id: "me", role: "user", email: "me@example.test", name: "Me" },
       });
     }
     return new Response(null, { status: 404 });
   }) as unknown as typeof fetch;
 }
+
+const PAUSED_AT = "2026-10-09T00:00:00.000Z";
 
 function draw(agent: AgentProfile) {
   const client = new QueryClient({
@@ -132,10 +145,33 @@ test("a paused Bot's Active switch is off, and the row says it is paused", async
 });
 
 test("switching a running Bot off pauses it", async () => {
-  const writes: string[] = [];
+  const writes: SentRequest[] = [];
   serving(false, writes);
   const view = draw(BOT);
   fireEvent.click(await view.findByRole("switch", { name: "Active" }));
   await new Promise((resolve) => setTimeout(resolve, 50));
-  expect(writes).toEqual(["pause"]);
+  expect(writes).toEqual([
+    {
+      method: "POST",
+      path: botOperationPath("expenses", "pause"),
+      key: expect.stringMatching(/^[0-9a-f]{32}$/),
+      body: undefined,
+    },
+  ]);
+});
+
+test("a paused Bot's banner resumes it", async () => {
+  const writes: SentRequest[] = [];
+  serving(true, writes);
+  const view = draw(BOT);
+  fireEvent.click(await view.findByRole("button", { name: "Paused. Resume" }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(writes).toEqual([
+    {
+      method: "POST",
+      path: botOperationPath("expenses", "resume"),
+      key: expect.stringMatching(/^[0-9a-f]{32}$/),
+      body: undefined,
+    },
+  ]);
 });

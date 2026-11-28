@@ -1,7 +1,4 @@
-import type {
-  LearningProposal,
-  LearningRunSummary,
-} from "@openbot/shared/learning";
+import type { LearningProposal } from "@openbot/shared/learning";
 import { IconChevronRight, IconSparkles } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useRef, useState } from "react";
@@ -22,6 +19,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { ClientError } from "@/lib/client";
 import { skillTitle } from "@/lib/learning/display";
 import {
   reviewPersonalProposalMutationOptions,
@@ -29,10 +27,17 @@ import {
   startPersonalLearningRunMutationOptions,
 } from "@/lib/learning/mutations";
 import {
+  type LearningRunSummary,
   learningKeys,
   personalProposalQueryOptions,
   personalReviewQueryOptions,
 } from "@/lib/learning/queries";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  isHeld,
+} from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 /** What a proposal would do to the Skills, in the person's words. */
@@ -47,7 +52,7 @@ function operationLabel(proposal: LearningProposal): string {
   }
 }
 
-const RUN_STATUS: Record<LearningRunSummary["status"], string> = {
+const RUN_STATUS: Partial<Record<string, string>> = {
   queued: "queued",
   freezing: "starting",
   batching: "analyzing",
@@ -57,10 +62,24 @@ const RUN_STATUS: Record<LearningRunSummary["status"], string> = {
   failed: "failed",
 };
 
+/**
+ * What a group's row says about its latest run: where it stands, and why it failed when it did. A
+ * status a newer server sends that this app doesn't know is left out.
+ */
+export function latestRunLine(
+  run: Pick<LearningRunSummary, "status" | "failure">,
+): string {
+  const status = RUN_STATUS[run.status];
+  return [status ? `Latest run ${status}.` : null, run.failure]
+    .filter(Boolean)
+    .join(" ");
+}
+
 type StartState = {
   pending: boolean;
   started: { from: string | null } | null;
-  error: string | null;
+  /** Kept whole, so a hold is said calmly (lib/load-failure.tsx). */
+  error: Failure | null;
 };
 
 /** Whether a run is going for one group: one it started and has not seen finish, or one the review shows running. */
@@ -79,11 +98,21 @@ function learningInProgress(
 }
 
 /** Why Learn now couldn't start Learning for one group. */
+/**
+ * What the review says over what it last read, when reading it again failed. The backend refuses with 429 when the
+ * organization's one project key is over its limit, which every person's reads share: that is a wait, not a fault.
+ */
+function staleSentence(error: Error): string {
+  return error instanceof ClientError && error.status === 429
+    ? "The backend is busy, so this may be out of date. OpenBot checks again in a minute."
+    : error.message;
+}
+
 function GroupError({ state }: { state: StartState | undefined }) {
   if (!state || state.pending || !state.error) return null;
   return (
     <p className="mt-4 text-destructive text-sm" role="alert">
-      {state.error}
+      {failureSaid(state.error)}
     </p>
   );
 }
@@ -92,7 +121,15 @@ function GroupError({ state }: { state: StartState | undefined }) {
  * Settings, Learning: the skills Learning proposed from the person's own recordings. Where people approve their own,
  * a row opens a dialog with Approve and Reject; where admins do, the same dialog is read-only.
  */
-export function LearningReview() {
+export function LearningReview({
+  heldAbove = false,
+}: {
+  /**
+   * The page above has already said OpenBot is holding off (a move, or the database out of reach):
+   * a hold here too is not said a second time.
+   */
+  heldAbove?: boolean;
+} = {}) {
   const review = useQuery(personalReviewQueryOptions());
   const decide = useMutation(
     reviewPersonalProposalMutationOptions(queryClient),
@@ -108,18 +145,9 @@ export function LearningReview() {
   );
   // One Learn now covers a whole group: every source is tried, and the button waits for all of them.
   // Each group keeps its own state, keyed by label. `from` is the group's latest run when it started.
-  const [starting, setStarting] = useState<
-    Record<
-      string,
-      {
-        pending: boolean;
-        started: { from: string | null } | null;
-        error: string | null;
-      }
-    >
-  >({});
+  const [starting, setStarting] = useState<Record<string, StartState>>({});
   // When a refetch finds fewer proposals waiting, some were approved on their own: Your skills shows them now.
-  const waitingCount = review.data?.sources.reduce(
+  const waitingCount = review.data?.spaces.reduce(
     (count, source) =>
       count +
       (source.proposals ?? []).filter(
@@ -146,7 +174,7 @@ export function LearningReview() {
   // A run Learn now started may not be listed at once; read the review again until it is, so the button comes back.
   const awaitingRun = Object.entries(starting).some(([label, state]) => {
     if (state.started === null) return false;
-    const runs = (review.data?.sources ?? [])
+    const runs = (review.data?.spaces ?? [])
       .filter((source) => source.label === label)
       .map((source) => source.latestRun)
       .filter((run) => run !== null);
@@ -160,18 +188,21 @@ export function LearningReview() {
   const refetchReview = review.refetch;
   useEffect(() => {
     if (!awaitingRun) return;
-    const timer = setInterval(() => void refetchReview(), 10_000);
+    const timer = setInterval(() => void refetchReview(), 30_000);
     return () => clearInterval(timer);
   }, [awaitingRun, refetchReview]);
   if (review.isPending) return null;
-  if (review.error) {
+  // A read that failed after one that answered leaves what that one said on screen, with why it may be out of date.
+  if (!review.data) {
+    if (heldAbove && isHeld(review.error)) return null;
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        {review.error.message}
+        {failureSaid(review.error)}
       </p>
     );
   }
-  const { canReview, sources, autoApprove } = review.data;
+  const stale = review.error ? staleSentence(review.error) : null;
+  const { canReview, spaces: sources, autoApprove } = review.data;
   // Shown at once while the save is on its way, as a switch is.
   const autoApproveOn =
     (saveAutoApprove.isPending ? saveAutoApprove.variables : undefined) ??
@@ -237,13 +268,13 @@ export function LearningReview() {
       [group.label]: { pending: true, started: null, error: null },
     }));
     let started = false;
-    let error: string | null = null;
+    let error: Failure | null = null;
     for (const container of group.containers) {
       try {
         await learnNow.mutateAsync(container);
         started = true;
       } catch (failure) {
-        error = failure instanceof Error ? failure.message : String(failure);
+        error = failureOf(failure, String(failure));
       }
     }
     setStarting((all) => ({
@@ -258,6 +289,11 @@ export function LearningReview() {
 
   return (
     <PageSection title={heading.title} description={heading.description}>
+      {stale ? (
+        <p className="mt-4 text-muted-foreground text-sm" role="status">
+          {stale}
+        </p>
+      ) : null}
       {autoApproveOn !== null && (
         <PageRows>
           <Item size="sm">
@@ -289,12 +325,7 @@ export function LearningReview() {
                   {canReview && (
                     <ItemDescription>
                       {group.latestRun
-                        ? [
-                            `Latest run ${RUN_STATUS[group.latestRun.status]}.`,
-                            group.latestRun.failure,
-                          ]
-                            .filter(Boolean)
-                            .join(" ")
+                        ? latestRunLine(group.latestRun)
                         : "No run yet."}
                     </ItemDescription>
                   )}
@@ -361,7 +392,7 @@ export function LearningReview() {
       )}
       {saveAutoApprove.error && (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {saveAutoApprove.error.message}
+          {failureSaid(saveAutoApprove.error)}
         </p>
       )}
       {unavailable && (
@@ -382,8 +413,8 @@ export function LearningReview() {
           {sources
             .filter((source) => !source.unavailable)
             .every((source) => source.proposals === null)
-            ? "Couldn't read your proposed skills. Reload the page."
-            : "Couldn't read some of your proposed skills. Reload the page."}
+            ? "Couldn't read your proposed skills. Try again in a moment."
+            : "Couldn't read some of your proposed skills. Try again in a moment."}
         </p>
       )}
       {open && (

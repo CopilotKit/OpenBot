@@ -16,19 +16,25 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import type {
   BotCheckInMetrics,
   CheckInMetrics,
 } from "@/lib/enterprise/queries";
-import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
 import { CheckInsPage } from "@/routes/_authed/admin/proactive";
+import {
+  capabilityPath,
+  overviewResponse,
+  SETTINGS_PATH,
+} from "./admin-settings-api";
+import { CHECK_IN_USAGE_PATH } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
  * Admin, Check-ins: the organization's switch, the daily limit, and each Bot's numbers. The server
- * is faked at the fetch boundary with the shapes `GET /api/admin/enterprise` and
- * `GET /api/admin/proactive` answer with, and the writes are the enterprise routes' own.
+ * is faked at the fetch boundary with the API's answers for the settings and the switches, and
+ * `getCheckInUsage`'s for the numbers; the writes are the API's own.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -55,7 +61,7 @@ const skipped = (counts: Partial<BotCheckInMetrics["runs"]["skipped"]>) => ({
 });
 
 const inbox: BotCheckInMetrics = {
-  agentId: "inbox-bot",
+  botId: "inbox-bot",
   name: "Inbox Bot",
   avatarSeed: "inbox-bot",
   peopleOn: 11,
@@ -70,7 +76,7 @@ const inbox: BotCheckInMetrics = {
   pinged: 44,
 };
 const fresh: BotCheckInMetrics = {
-  agentId: "general-assistant",
+  botId: "general-assistant",
   name: "General Assistant",
   avatarSeed: "general-assistant",
   peopleOn: 2,
@@ -89,56 +95,64 @@ function serving() {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const method = init?.method ?? "GET";
-    if (method === "PUT") {
+    if (method === "PATCH") {
       const body = JSON.parse(String(init?.body));
       writes.push({ request: `${method} ${path}`, body });
-      if (path === "/api/admin/enterprise/capabilities") {
-        organization = body.allowed;
-        return Response.json({ saved: { ...body, scopeId: "" } });
+      if (path === capabilityPath("proactive")) {
+        organization = body.organization;
+        return Response.json({
+          id: "proactive",
+          title: "Check-ins",
+          description: "",
+          default: true,
+          organization,
+          roles: {},
+          groups: {},
+        });
       }
-      if (path === "/api/admin/enterprise/settings/proactiveDailyRuns") {
-        dailyRuns = body.value;
-        return Response.json({ key: "proactiveDailyRuns", value: body.value });
+      if (path === SETTINGS_PATH) {
+        dailyRuns = body.proactiveDailyRuns;
+        return Response.json({});
       }
     }
-    if (path === "/api/admin/enterprise")
-      return Response.json({
-        capabilities: [
-          {
-            capability: "proactive",
-            title: "Check-ins",
-            description:
-              "Bots check people's apps in the background and tell them when something needs them.",
-            default: true,
-            organization,
-            roles: {},
-            groups: {},
-          },
-        ],
-        settings: {
-          ssoRequired: false,
-          actionRecording: false,
-          inactiveComputerDays: 30,
-          modelAllowlist: { enabled: false, models: [] },
-          mcpAllowlist: { enabled: false, servers: [] },
-          skillSharing: false,
-          proactiveDailyRuns: dailyRuns,
+    const overview = overviewResponse(path, {
+      capabilities: [
+        {
+          capability: "proactive",
+          title: "Check-ins",
+          description:
+            "Bots check people's apps in the background and tell them when something needs them.",
+          default: true,
+          organization,
+          roles: {},
+          groups: {},
         },
-        groups: [],
-        network: [],
-        defaultDestinations: [],
-        mcpServers: [],
-        builtInModel: "openai/gpt-5.6-terra",
-        scim: {
-          configured: false,
-          connectionId: "directory",
-          baseUrl: null,
-          rotating: false,
-        },
-        otel: { configured: false },
-        actionRecordRetentionDays: 90,
-      });
-    if (path.startsWith("/api/admin/proactive?days=")) {
+      ],
+      settings: {
+        ssoRequired: false,
+        actionRecording: false,
+        inactiveComputerDays: 30,
+        modelAllowlist: { enabled: false, models: [] },
+        mcpAllowlist: { enabled: false, servers: [] },
+        skillSharing: false,
+        proactiveDailyRuns: dailyRuns,
+      },
+      groups: [],
+      network: [],
+      defaultDestinations: [],
+      mcpServers: [],
+      builtInModel: "openai/gpt-5.6-terra",
+      scim: {
+        configured: false,
+        connectionId: "directory",
+        baseUrl: null,
+        rotating: false,
+      },
+      otel: { configured: false },
+      actionRecordRetentionDays: 90,
+    });
+    if (overview) return overview;
+    if (path.startsWith(`${CHECK_IN_USAGE_PATH}?days=`)) {
       const days = Number(path.split("=")[1]) as 7 | 30;
       const body: CheckInMetrics = {
         days,
@@ -216,13 +230,8 @@ test("the switch turns check-ins off for the organization, and the limit saves o
   fireEvent.click(toggle);
   await waitFor(() =>
     expect(writes).toContainEqual({
-      request: "PUT /api/admin/enterprise/capabilities",
-      body: {
-        scopeKind: "organization",
-        scopeId: "",
-        capability: "proactive",
-        allowed: false,
-      },
+      request: `PATCH ${capabilityPath("proactive")}`,
+      body: { organization: false },
     }),
   );
   await view.findByText("Off. No Bot checks in for anybody.");
@@ -248,8 +257,8 @@ test("the switch turns check-ins off for the organization, and the limit saves o
   fireEvent.click(save);
   await waitFor(() =>
     expect(writes).toContainEqual({
-      request: "PUT /api/admin/enterprise/settings/proactiveDailyRuns",
-      body: { value: 12 },
+      request: `PATCH ${SETTINGS_PATH}`,
+      body: { proactiveDailyRuns: 12 },
     }),
   );
   await view.findByText("Up to 12 check-ins a day per Bot for each person");

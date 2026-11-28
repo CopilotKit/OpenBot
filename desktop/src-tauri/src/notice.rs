@@ -84,7 +84,10 @@ pub fn let_running_openbot_come_forward() {
 /// Where a notification's launch leaves how its hand-off went, for the running OpenBot's log.
 #[cfg(windows)]
 fn handoff_record() -> std::path::PathBuf {
-    std::env::temp_dir().join("ai.copilotkit.openbot.desktop-foreground-handoff.txt")
+    std::env::temp_dir().join(format!(
+        "{}-foreground-handoff.txt",
+        openbot_desktop_lib::stack::identifier_for(crate::APP_IDENTIFIER)
+    ))
 }
 
 /// How the last notification's launch fared passing the foreground on, once.

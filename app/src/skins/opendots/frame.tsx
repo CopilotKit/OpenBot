@@ -18,11 +18,15 @@ import {
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
+import { DesktopAppMenuItem } from "@/components/app-sidebar/desktop-app-item";
+import { TroubleshootingLogsMenuItem } from "@/components/app-sidebar/troubleshooting-logs-item";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
+import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
+import { MovedAppsBanner } from "@/components/moves/moved-apps-notice";
 import {
   COMMAND_MENU_KEYS,
   openCommandMenu,
@@ -62,7 +66,7 @@ import { IconAction, initialsOf, OpenDotsSidebar } from "./sidebar";
 
 /** The rail's square buttons: 36px, borderless, a grey glyph that darkens on hover. */
 const railButton =
-  "grid size-9 place-items-center rounded-lg text-(--opendots-rail-icon) outline-none transition-colors hover:bg-(--opendots-hover) hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-[18px] [&_svg]:stroke-[1.75]";
+  "grid size-9 shrink-0 place-items-center rounded-lg text-(--opendots-rail-icon) outline-none transition-colors hover:bg-(--opendots-hover) hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-[18px] [&_svg]:stroke-[1.75]";
 
 /**
  * Where a button's Bots badge sits: centred on its icon's top-right corner, as an icon's badge is,
@@ -115,22 +119,22 @@ function RailUserMenu() {
           {/* The rail draws only the avatar, so the version sits under the name here. */}
           <OpenBotVersion className="-mt-1 max-w-56 px-1.5 pb-1 text-[10px] leading-3 text-muted-foreground" />
         </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DesktopAppMenuItem className="gap-2 px-2 py-1.5" />
+        <TroubleshootingLogsMenuItem className="gap-2 px-2 py-1.5" />
         {signOutOffered ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="gap-2 px-2 py-1.5"
-              disabled={signOut.isPending}
-              onClick={async () => {
-                await signOut.mutateAsync();
-                await navigate({ to: "/sign" });
-              }}
-              variant="destructive"
-            >
-              <IconLogout />
-              Sign out
-            </DropdownMenuItem>
-          </>
+          <DropdownMenuItem
+            className="gap-2 px-2 py-1.5"
+            disabled={signOut.isPending}
+            onClick={async () => {
+              const { leaving } = await signOut.mutateAsync();
+              if (!leaving) await navigate({ to: "/sign" });
+            }}
+            variant="destructive"
+          >
+            <IconLogout />
+            Sign out
+          </DropdownMenuItem>
         ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -197,12 +201,16 @@ function Rail({
      * (`data-desktop-titlebar`, macOS only), so the rail then starts 32px lower, below them, and
      * the sidebar beside it moves down with it. A press on the rail itself, outside its buttons,
      * moves the window there (`data-desktop-drag`, read by the desktop on macOS only).
+     *
+     * Its buttons keep their size however short the window: with Agents beside Bots, a 600px window
+     * squeezed every button to fit, and a badge rode up over the button above. Where they don't all
+     * fit, the rail scrolls.
      */
     <nav
       aria-label="Workspace navigation"
       data-desktop-drag=""
       data-opendots-chrome
-      className="flex w-12 shrink-0 flex-col items-center gap-3 border-r border-(--opendots-line) bg-(--opendots-rail) px-[5px] py-4 max-md:hidden in-data-[desktop-titlebar=overlay]:pt-12"
+      className="flex w-12 shrink-0 flex-col items-center gap-3 overflow-y-auto border-r border-(--opendots-line) bg-(--opendots-rail) px-[5px] py-4 [scrollbar-width:none] max-md:hidden in-data-[desktop-titlebar=overlay]:pt-12"
     >
       {/* OpenBot's own mark where OpenDots puts its monogram; the deployment owns the identity. */}
       <Link
@@ -511,6 +519,8 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
           onToggleNav={() => setNavCollapsed((collapsed) => !collapsed)}
           place={place}
         />
+        <ConnectionBanner />
+        <MovedAppsBanner />
         <UpdateBanner />
         <SelfHostBanner />
         <div className="relative flex min-h-0 flex-1">

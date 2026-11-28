@@ -10,10 +10,9 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
-import type { ComposioApp } from "@/lib/plugins/queries";
 import { Route as ComposioRoute } from "@/routes/_authed/admin/plugins/composio";
-import { displayName } from "../../server/src/plugins/app-names";
-import captured from "../../server/tests/fixtures/composio-key-apps.json";
+import { answerAppsApi, type TodayDirectoryApp } from "./apps-api";
+import captured from "./fixtures/composio-key-apps.json";
 
 /**
  * THE DIRECTORY SAYS WHICH APPS TAKE A KEY, BEFORE ANYBODY PRESSES ADD OR CONNECT.
@@ -24,9 +23,8 @@ import captured from "../../server/tests/fixtures/composio-key-apps.json";
  * to are listed first.
  *
  * The rows are Composio's own catalogue answer, captured read-only on 2026-11-08. Each one's
- * `connection` is the server's verdict for that exact row, which `server/tests/key-only-apps.test.ts`
- * pins against `connectionOf`: HubSpot and Gmail sign in, 1Password, PostHog, Fireflies and
- * Pipedrive take a key.
+ * `connection` is the server's verdict for that exact row: HubSpot and Gmail sign in, 1Password,
+ * PostHog, Fireflies and Pipedrive take a key.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -38,7 +36,20 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-const VERDICT: Record<string, ComposioApp["connection"]["kind"]> = {
+/**
+ * The name the server gives each captured row, read off its own naming when this fixture was
+ * recorded: 1Password arrives as its brand spells it and not as Composio's "1password".
+ */
+const NAME: Record<string, string> = {
+  hubspot: "HubSpot",
+  gmail: "Gmail",
+  _1password: "1Password",
+  posthog: "PostHog",
+  fireflies: "Fireflies",
+  pipedrive: "Pipedrive",
+};
+
+const VERDICT: Record<string, TodayDirectoryApp["connection"]["kind"]> = {
   hubspot: "consent",
   gmail: "consent",
   _1password: "fields",
@@ -47,12 +58,11 @@ const VERDICT: Record<string, ComposioApp["connection"]["kind"]> = {
   pipedrive: "fields",
 };
 
-/** The captured rows, as the directory route answers them: the server's own projection. */
-function directory(): ComposioApp[] {
+/** The captured rows, as the server projected them for the directory. */
+function directory(): TodayDirectoryApp[] {
   return captured.catalogue.map((row) => ({
     slug: row.slug,
-    // The server's own naming, so 1Password arrives as its brand spells it and not "1password".
-    name: displayName(row.slug, row.name),
+    name: NAME[row.slug] ?? row.name,
     description: row.meta.description,
     logo: null,
     categories: [],
@@ -116,27 +126,19 @@ function renderDirectory() {
   );
 }
 
-function stubFetch(apps: ComposioApp[]) {
-  global.fetch = (async (input: RequestInfo | URL) => {
-    const path = String(input).split("?")[0] ?? "";
-    const json = (body: unknown) =>
-      new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    if (path === "/api/plugins/composio/apps") return json({ apps });
-    if (path === "/api/plugins") {
-      return json({
-        catalogue: [],
-        servers: [],
-        skills: [],
-        botsMayCallBack: false,
-        redirectUri: null,
-        composioConfigured: true,
-        provider: "composio",
-      });
-    }
-    return json({ connections: [] });
+function stubFetch(apps: TodayDirectoryApp[], pageSize?: number) {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const answered = answerAppsApi(input, init, {
+      directory: apps,
+      composioConfigured: true,
+      provider: "composio",
+      pageSize,
+    });
+    if (answered) return answered;
+    return new Response(JSON.stringify({ connections: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
   }) as unknown as typeof fetch;
 }
 
@@ -163,10 +165,69 @@ test("a key-only app says it needs a key before Add, and a sign-in app does not"
   expect(view.container.textContent ?? "").not.toMatch(/composio/i);
 });
 
-test("apps you sign in to are listed ahead of apps that need a key", async () => {
-  stubFetch(directory());
-  const view = renderDirectory();
+/*
+ * The directory is read a page at a time, the next when the end of the list comes into view. Two to
+ * a page puts the captured rows on three pages: in a window tall enough to show the end of each
+ * page as it lands, the screen reads on until all six are listed, and the order holds across pages,
+ * since the server answers them in the order the screen draws.
+ */
+for (const pageSize of [undefined, 2]) {
+  test(`apps you sign in to are listed ahead of apps that need a key (${pageSize ? `${pageSize} to a page` : "one page"})`, async () => {
+    stubFetch(directory(), pageSize);
+    const restore = endAlwaysInView();
+    try {
+      await expectSignInAppsFirst(renderDirectory());
+    } finally {
+      restore();
+    }
+  });
+}
 
+test("two to a page, the first page is drawn on its own, counted as the whole directory", async () => {
+  stubFetch(directory(), 2);
+  const view = renderDirectory();
+  await view.findByTestId("directory-hubspot");
+  const order = Array.from(
+    view.container.querySelectorAll("[data-testid^='directory-']"),
+  ).map((row) => row.getAttribute("data-testid"));
+  expect(order).toEqual([
+    "directory-gmail",
+    "directory-hubspot",
+    "directory-more",
+  ]);
+  expect(view.getByText("6 apps. Search by name to narrow them.")).toBeTruthy();
+});
+
+/**
+ * A window where whatever is observed is in view at once, as the end of a short list is on a tall
+ * screen. Answers each `observe` as a browser does when the element is already showing.
+ */
+function endAlwaysInView(): () => void {
+  const original = globalThis.IntersectionObserver;
+  class InView {
+    constructor(private readonly callback: IntersectionObserverCallback) {}
+    observe(target: Element) {
+      queueMicrotask(() =>
+        this.callback(
+          [{ isIntersecting: true, target } as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver,
+        ),
+      );
+    }
+    unobserve() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  }
+  globalThis.IntersectionObserver =
+    InView as unknown as typeof IntersectionObserver;
+  return () => {
+    globalThis.IntersectionObserver = original;
+  };
+}
+
+async function expectSignInAppsFirst(view: ReturnType<typeof renderDirectory>) {
   await view.findByTestId("directory-_1password");
   await waitFor(() => {
     const order = Array.from(
@@ -181,4 +242,4 @@ test("apps you sign in to are listed ahead of apps that need a key", async () =>
       "directory-posthog",
     ]);
   });
-});
+}

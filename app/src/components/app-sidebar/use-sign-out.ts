@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "@/components/ui/toast";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
+import { failureToastType } from "@/lib/load-failure";
 
 /** The one toast a sign-out that did not finish says itself in. */
 const SIGN_OUT_TOAST = "sign-out-unfinished";
@@ -20,16 +21,19 @@ export function useSignOut() {
     run: () => {
       if (signOut.isPending) return;
       signOut.mutate(undefined, {
-        onSuccess: () => {
+        onSuccess: ({ leaving }) => {
           toast.close(SIGN_OUT_TOAST);
-          void navigate({ to: "/sign" });
+          // Inside a connected OpenBot Desktop the app shows its own setup, where sign-in is; a hosted OpenBot's
+          // sign-out is already on its way to the sign-in screen.
+          if (!leaving) void navigate({ to: "/sign" });
         },
         onError: (error) =>
           toast.add({
             // One at a time: a second refusal replaces the first rather than stacking under it.
             id: SIGN_OUT_TOAST,
             title: error.message,
-            type: "error",
+            // OpenBot holding off for now is news, not a failure (lib/load-failure.tsx).
+            type: failureToastType(error),
             priority: "high",
           }),
       });

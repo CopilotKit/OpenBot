@@ -1,7 +1,11 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { AdminSidebar } from "@/components/admin/admin-sidebar";
+import { ConnectionBanner } from "@/components/layout/connection-banner";
+import { PlanBanner } from "@/components/layout/plan-banner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { SidebarInset } from "@/components/ui/sidebar";
+import { BotListScopeProvider } from "@/lib/agents/list-scope";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { currentUserQueryOptions } from "../../../lib/auth/queries";
 
@@ -21,7 +25,7 @@ export const Route = createFileRoute("/_authed/admin")({
     const user = await context.queryClient.ensureQueryData(
       currentUserQueryOptions(),
     );
-    if (user?.role !== "admin") {
+    if (!isOrganizationAdmin(user?.role)) {
       throw redirect({ to: "/" });
     }
   },
@@ -34,7 +38,12 @@ function RouteComponent() {
     <SidebarShell className="h-svh overflow-hidden">
       <AdminSidebar />
       <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
-        <Outlet />
+        <ConnectionBanner />
+        <PlanBanner />
+        {/* Admin's screens list every Bot in the organization (lib/agents/list-scope.tsx). */}
+        <BotListScopeProvider scope="organization">
+          <Outlet />
+        </BotListScopeProvider>
       </SidebarInset>
     </SidebarShell>
   );

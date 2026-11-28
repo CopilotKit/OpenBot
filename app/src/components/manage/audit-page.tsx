@@ -1,3 +1,4 @@
+import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import {
   IconAlertTriangle,
   IconBan,
@@ -14,7 +15,7 @@ import {
   useInfiniteQuery,
   useQuery,
 } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { AskTheTrail, AuditAnswerNote } from "@/components/audit/ask-the-trail";
 import type { AuditEvent } from "@/components/audit/audit-cells";
 import {
@@ -29,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { explainable, WhyButton } from "@/components/what-if/why-button";
 import { useBotNames } from "@/lib/agents/bot-names";
+import type { AuditAnswer, AuditFilterLabels } from "@/lib/audit/ask";
 import {
   CALLS_RECORDED_AS_CHANGES,
   COMPUTER_ACTION_EVENT_TYPES,
@@ -38,16 +40,23 @@ import {
   oneRowPerAction,
   REFUSED_EVENT_TYPES,
 } from "@/lib/audit/outcome";
-import type { AuditAnswer, AuditFilterLabels } from "@/lib/audit/ask";
 import {
   auditEventsQueryOptions,
-  auditExportUrl,
   auditVocabularyQueryOptions,
+  exportAuditTrail,
 } from "@/lib/audit/queries";
-import { client } from "@/lib/client";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { useCurrentOrganizationId } from "@/lib/organizations/current";
+import { organizationMembersQueryOptions } from "@/lib/organizations/queries";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 import { cn } from "@/lib/utils";
 
 /**
@@ -131,13 +140,52 @@ function withSkillTitles(
   });
 }
 
+/** What a row's payload calls somebody nobody could put a name to. */
+const NOBODY = new Set(["unattributed", "unknown"]);
+
+/**
+ * Each row a person started with the person named, where the row says only who by id.
+ *
+ * A Bot's actions are recorded on its person's authority (`actorUserId`) and carry no address of
+ * theirs, and many rows name the person only as the payload's `actor`: an address (an app given to
+ * a Bot, a routine switched on) or a person's id (a tool called for them). They read "Started by a
+ * person" with no name, while an organization's own rows named the address they recorded. The
+ * organization's members are what the page knows people by, and the signed-in person is always one
+ * of them. A person no longer a member, named by id alone, keeps "a person": the page has no name
+ * for them to give.
+ */
+export function withPeopleNamed(
+  events: AuditEvent[],
+  people: ReadonlyMap<string, string>,
+): AuditEvent[] {
+  return events.map((event) => {
+    if ((event.initiatorKind ?? "person") !== "person") return event;
+    const by = event.payload?.by;
+    if (typeof by === "string" && by.trim()) return event;
+    const actor =
+      typeof event.payload?.actor === "string"
+        ? event.payload.actor.trim()
+        : "";
+    const fromPayload =
+      actor && !NOBODY.has(actor) && !isOpenBotActor(actor)
+        ? actor.includes("@")
+          ? actor
+          : people.get(actor)
+        : undefined;
+    const named =
+      (event.actorUserId ? people.get(event.actorUserId) : undefined) ??
+      fromPayload;
+    return named ? { ...event, startedBy: named } : event;
+  });
+}
+
 /** Admin's "Why?" on a row one of OpenBot's controls decided: see `what-if/why-button.tsx`. */
 const whyFor = (event: AuditEvent) =>
   explainable(event) ? <WhyButton event={event} /> : null;
 
 /** What the page says under its title in Admin, where an admin reviews every Bot against policy. */
 const ADMIN_DESCRIPTION =
-  "Review Bot actions and actions blocked by this deployment’s policy.";
+  "Review Bot actions and actions blocked by this organization’s policy.";
 
 /**
  * `children` are sections only the team edition's Admin adds below the page's own (the admin's
@@ -195,10 +243,16 @@ export function AuditPage({
   >(null);
   // This deployment's Bots, apps and rules, asked for the first time a chip menu opens.
   const [vocabularyWanted, setVocabularyWanted] = useState(false);
-  const vocabulary = useQuery({
+  const vocabularyRead = useQuery({
     ...auditVocabularyQueryOptions(),
     enabled: ask && vocabularyWanted,
-  }).data;
+  });
+  const vocabulary = vocabularyRead.data;
+  // Why the menus have nothing to offer, once the read has answered: a hold or a failure, not "Loading…".
+  const vocabularyFailed =
+    vocabularyRead.isError && !vocabularyRead.isFetching
+      ? vocabularyRead.error
+      : null;
   // The stored event names and OpenBot's own working are Admin's to read; the personal edition's
   // Activity is anybody's page. Its route has the edition loaded before this draws.
   const edition = useQuery(deploymentCapabilitiesQueryOptions()).data?.edition;
@@ -216,16 +270,37 @@ export function AuditPage({
   });
   // Activity names a skill by the title its page shows; the trail keeps only its slug.
   const skills = useQuery({
-    ...pluginsPageQueryOptions(),
+    ...skillListQueryOptions(),
     enabled: edition === "personal",
-  }).data?.skills;
-  const rows = withSkillTitles(
-    oneRowPerAction(events.data?.pages.flatMap((page) => page.events) ?? []),
-    skills,
+  }).data;
+  // Who started each row, by the address the People page shows: the members, and the reader.
+  const organization = useCurrentOrganizationId();
+  const members = useQuery({
+    ...organizationMembersQueryOptions(organization ?? ""),
+    enabled: edition === "team" && organization !== undefined,
+  }).data;
+  const reader = useQuery(currentUserQueryOptions()).data;
+  const people = useMemo(
+    () =>
+      new Map([
+        // Somebody who hasn't opened OpenBot yet may have no address, and has done nothing here yet.
+        ...(members ?? [])
+          .filter((member) => member.email.trim())
+          .map((member) => [member.id, member.email] as const),
+        ...(reader ? [[reader.id, reader.email] as const] : []),
+      ]),
+    [members, reader],
+  );
+  const rows = withPeopleNamed(
+    withSkillTitles(
+      oneRowPerAction(events.data?.pages.flatMap((page) => page.events) ?? []),
+      skills,
+    ),
+    people,
   );
   const nameFor = useBotNames();
   const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<Failure | null>(null);
   const [exportCapped, setExportCapped] = useState<number | null>(null);
 
   /*
@@ -239,13 +314,10 @@ export function AuditPage({
     setExportError(null);
     setExportCapped(null);
     try {
-      const response = await client(auditExportUrl(search), {
-        fallback: "Couldn't export these events. Try again.",
-      });
+      const file = await exportAuditTrail(search);
       // A file that stopped early must say so, or it reads as the whole trail.
-      const capped = Number(response.headers.get("x-audit-export-truncated"));
-      if (Number.isInteger(capped) && capped > 0) setExportCapped(capped);
-      const blob = await response.blob();
+      if (file.truncatedAt) setExportCapped(file.truncatedAt);
+      const blob = new Blob([file.csv], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -256,9 +328,7 @@ export function AuditPage({
       URL.revokeObjectURL(url);
     } catch (error) {
       setExportError(
-        error instanceof Error
-          ? error.message
-          : "Couldn't export these events. Try again.",
+        failureOf(error, "Couldn't export these events. Try again."),
       );
     } finally {
       setExporting(false);
@@ -272,12 +342,12 @@ export function AuditPage({
      * below it, the log is bounded so the page can scroll down to those controls too.
      */
     <PageShell description={description} title={paths.auditLabel} width="full">
-      {/* With admin settings below the log, the page scrolls and the log keeps its own bounded
-          viewport. Without settings, the table fills the panel as before. */}
+      {/* With admin settings below the log, the page scrolls, and the log's rows scroll with it,
+          whole, with the settings after the last of them. The log used to keep a 60vh box of its
+          own: on a phone its toolbar took most of it, and on a laptop it showed six rows with the
+          last cut mid-line. Without settings, the table fills the panel as before. */}
       <div className={children ? "min-h-0 flex-1 overflow-y-auto" : "contents"}>
-        <div
-          className={children ? "flex h-[60vh] min-h-80 flex-col" : "contents"}
-        >
+        <div className={children ? "flex flex-col" : "contents"}>
           {/*
            * Above the table rather than in its toolbar: a question being typed and its answer outlast
            * anything the table draws again. The answer's chips are the toolbar's, beside the search.
@@ -307,7 +377,10 @@ export function AuditPage({
           {events.isPending ? null : events.isError &&
             !events.isFetchNextPageError ? (
             <p className="px-4 text-destructive text-sm" role="alert">
-              Couldn't load these events. Reload the page.
+              {loadFailure(
+                events.error,
+                "Couldn't load these events. Try again in a moment.",
+              )}
             </p>
           ) : (
             <AuditTable
@@ -318,7 +391,10 @@ export function AuditPage({
                   <div className="flex flex-col items-center gap-2 py-3">
                     {events.isFetchNextPageError ? (
                       <p className="text-destructive text-sm" role="alert">
-                        Couldn't load older events. Try again.
+                        {loadFailure(
+                          events.error,
+                          "Couldn't load older events. Try again.",
+                        )}
                       </p>
                     ) : null}
                     <Button
@@ -343,13 +419,14 @@ export function AuditPage({
                 <div className="flex shrink-0 flex-col gap-3 border-border border-b px-4 pb-3">
                   {/*
                    * The saved views are one control with one answer, so they are drawn as a segmented
-                   * group: the pressed one is filled, the rest sit flat inside the same outline.
+                   * group: the pressed one is filled, the rest sit flat inside the same outline. On a
+                   * phone they wrap inside it: in one line the last two ran off the window's edge.
                    */}
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-muted-foreground text-xs">View</span>
                     <fieldset
                       aria-label="View"
-                      className="inline-flex items-center gap-0.5 rounded-lg border border-border p-0.5"
+                      className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-lg border border-border p-0.5"
                     >
                       {FILTERS.map((filter) => {
                         const active = view === filter.search;
@@ -409,8 +486,14 @@ export function AuditPage({
                         labels={answer?.labels ?? NO_LABELS}
                         nameFor={nameFor}
                         onChange={setChips}
-                        onOpen={() => setVocabularyWanted(true)}
+                        onOpen={() => {
+                          setVocabularyWanted(true);
+                          // A read that failed is asked again as a menu opens.
+                          if (vocabularyRead.isError)
+                            void vocabularyRead.refetch();
+                        }}
                         vocabulary={vocabulary}
+                        vocabularyFailed={vocabularyFailed}
                       />
                     ) : (
                       filters
@@ -443,7 +526,7 @@ export function AuditPage({
                   </div>
                   {exportError ? (
                     <p className="text-destructive text-sm" role="alert">
-                      {exportError}
+                      {failureSaid(exportError)}
                     </p>
                   ) : null}
                   {exportCapped ? (

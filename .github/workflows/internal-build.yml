@@ -1,10 +1,17 @@
 name: Internal build
 
-# Installers for the team to try, from any branch. The images are the ones built from this commit,
-# pinned by digest into the installer, and never `latest`, so what a person installs is exactly what
-# this commit builds. Nothing is published: the installers are shared as run artifacts, kept 30 days.
+# Installers for the team to try, from any branch. The Bot images are the ones built from this
+# commit, and the OpenBot server, computer, supervisor and all-in-one images are the published ones
+# at the tag chosen below, all pinned by digest into the installer and never `latest`, so what a
+# person installs is exactly what was chosen. Nothing is published: the installers are shared as run
+# artifacts, kept 30 days.
 on:
   workflow_dispatch:
+    inputs:
+      backend_tag:
+        description: "OpenBot server images tag: main, a version such as v1.0.3, or a test-<date>-<run> tag"
+        type: string
+        default: main
 
 permissions:
   contents: read
@@ -19,6 +26,7 @@ jobs:
   prepare:
     name: prepare
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # names the build, in seconds
     outputs:
       manifest_version: ${{ steps.version.outputs.manifest_version }}
     steps:
@@ -37,6 +45,7 @@ jobs:
       tags: ""
       latest: false
       manifest_version: ${{ needs.prepare.outputs.manifest_version }}
+      backend_tag: ${{ inputs.backend_tag }}
     permissions:
       contents: read
       packages: write
@@ -54,8 +63,6 @@ jobs:
       manifest_artifact: ${{ needs.images.outputs.manifest-artifact }}
       retention_days: 30
       platforms: '["macos","windows"]'
-    secrets:
-      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
 
   # One link per installer, so nobody has to dig through the run page for them. The CLI and Node
   # versions are already in each desktop leg's own summary.
@@ -63,6 +70,7 @@ jobs:
     name: summary
     needs: [prepare, desktop]
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # writes the summary, in seconds
     permissions:
       actions: read
     steps:
@@ -70,6 +78,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MANIFEST_VERSION: ${{ needs.prepare.outputs.manifest_version }}
+          BACKEND_TAG: ${{ inputs.backend_tag }}
         run: |
           set -euo pipefail
           {
@@ -77,6 +86,7 @@ jobs:
             echo
             echo "- Commit: \`$GITHUB_SHA\`"
             echo "- Manifest version: \`$MANIFEST_VERSION\`"
+            echo "- OpenBot server images: \`$BACKEND_TAG\`"
             echo
             echo "Installers, kept 30 days:"
             echo

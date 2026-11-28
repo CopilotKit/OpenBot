@@ -11,6 +11,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseReleasePolicy } from "../scripts/release-manifest";
+import candidate from "../shared/fixtures/releases/candidate.json";
+import { releaseFiles } from "./support/release-files";
 
 // The upgrade policy is reviewed with the release it describes: it lives in the tree, is read from
 // the release commit, and is refused unless it names the version being released and the database
@@ -82,23 +84,28 @@ function journal(repo: string, last: string) {
 function publisher(
   committed: unknown,
   {
+    // `null` is a release whose tree carries no migrations: its server is a published image.
     tags = { "v0.3.0": policy.compatibility.database.from[0] } as Record<
       string,
-      string
+      string | null
     >,
-    migration = policy.compatibility.database.to,
+    migration = policy.compatibility.database.to as string | null,
   } = {},
 ) {
   const repo = mkdtempSync(join(tmpdir(), "openbot-policy-"));
   directories.push(repo);
   git(repo, "init", "-b", "main");
+  const tree = (last: string | null) =>
+    last === null
+      ? rmSync(join(repo, "server"), { recursive: true, force: true })
+      : journal(repo, last);
   for (const [version, last] of Object.entries(tags)) {
-    journal(repo, last);
+    tree(last);
     writeFileSync(join(repo, "core.txt"), `${version}\n`);
     commit(repo, version);
     git(repo, "tag", version);
   }
-  journal(repo, migration);
+  tree(migration);
   writeFileSync(join(repo, "core.txt"), "release\n");
   if (committed !== undefined)
     writeFileSync(
@@ -239,6 +246,208 @@ describe("release policy", () => {
       },
     );
     expect(validate(repo, env).exitCode).toBe(0);
+  });
+
+  /**
+   * The server ships as a published image, so the release commit has no migrations of its own to
+   * read. `verify` used to stop every such release: "has no server/drizzle/meta/_journal.json".
+   * The database it migrates to is the one its OpenBot images published beside them.
+   */
+  describe("a release whose tree carries no migrations", () => {
+    const to = policy.compatibility.database.to;
+    /**
+     * By default the chart does what the committed policy declares, as a release's chart must.
+     * `"absent"` is a chart from before the `openbot.ai/requires-downtime` annotation.
+     */
+    function published(
+      database: string,
+      version = "v0.4.0",
+      downtime: boolean | "absent" = policy.upgrade.requiresDowntime,
+    ) {
+      const files = releaseFiles({
+        version,
+        database,
+        ...(downtime === "absent" ? {} : { requiresDowntime: downtime }),
+      });
+      directories.push(dirname(files));
+      return files;
+    }
+    /** A folder holding the release manifest an earlier release attached, as `<version>.json`. */
+    function manifests(databases: Record<string, string>) {
+      const directory = mkdtempSync(join(tmpdir(), "openbot-manifests-"));
+      directories.push(directory);
+      for (const [version, database] of Object.entries(databases))
+        writeFileSync(
+          join(directory, `${version}.json`),
+          JSON.stringify({
+            ...candidate,
+            version,
+            compatibility: {
+              ...candidate.compatibility,
+              database: { from: [], to: database, rollbackCompatible: true },
+            },
+          }),
+        );
+      return directory;
+    }
+
+    test("passes on the database its OpenBot images published", () => {
+      const { repo, env } = publisher(forVersion("v0.4.0"), {
+        migration: null,
+      });
+      expect(
+        validate(repo, { ...env, OPENBOT_RELEASE_FILES: published(to) }),
+      ).toEqual({
+        exitCode: 0,
+        output: expect.stringContaining("describes v0.4.0"),
+      });
+    });
+
+    test("stops on a migration its images apply that the policy does not name, naming the fix", () => {
+      const { repo, env } = publisher(forVersion("v0.4.0"), {
+        migration: null,
+      });
+      const result = validate(repo, {
+        ...env,
+        OPENBOT_RELEASE_FILES: published("0099_shipped_in_the_image"),
+      });
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain(
+        "the published OpenBot images of this release apply",
+      );
+      expect(result.output).toContain(
+        'Set compatibility.database.to to "0099_shipped_in_the_image".',
+      );
+    });
+
+    test("refuses release files published for another version", () => {
+      const { repo, env } = publisher(forVersion("v0.4.0"), {
+        migration: null,
+      });
+      const result = validate(repo, {
+        ...env,
+        OPENBOT_RELEASE_FILES: published(to, "v0.3.9"),
+      });
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain(
+        'openbot-release.json is for "v0.3.9", but this release is v0.4.0',
+      );
+    });
+
+    test("says what to fetch when nothing names its database", () => {
+      const { repo, env } = publisher(forVersion("v0.4.0"), {
+        migration: null,
+      });
+      const result = validate(repo, env);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain(
+        "Nothing says which database this release migrates to",
+      );
+      expect(result.output).toContain("scripts/release-files.sh");
+    });
+
+    test("reads a starting release with no migrations at its tag from the manifest it attached", () => {
+      const from = policy.compatibility.database.from[0];
+      const { repo, env } = publisher(
+        forVersion("v0.4.0", ["v0.3.0", "v0.3.1"]),
+        { tags: { "v0.3.0": from, "v0.3.1": null }, migration: null },
+      );
+      const files = published(to);
+      const without = validate(repo, { ...env, OPENBOT_RELEASE_FILES: files });
+      expect(without.exitCode).not.toBe(0);
+      expect(without.output).toContain(
+        "nothing says which database v0.3.1 left",
+      );
+      expect(
+        validate(repo, {
+          ...env,
+          OPENBOT_RELEASE_FILES: files,
+          OPENBOT_RELEASE_MANIFESTS: manifests({ "v0.3.1": from }),
+        }).exitCode,
+      ).toBe(0);
+      // The manifest is evidence, not permission: another database in it stops the release.
+      const other = validate(repo, {
+        ...env,
+        OPENBOT_RELEASE_FILES: files,
+        OPENBOT_RELEASE_MANIFESTS: manifests({ "v0.3.1": "0061_other" }),
+      });
+      expect(other.exitCode).not.toBe(0);
+      expect(other.output).toContain("0061_other");
+    });
+
+    /**
+     * The policy's downtime is what the release's chart does, not a note beside it. 1.1.0 declared
+     * downtime while its chart upgraded the servers one by one, so a plain `helm upgrade` ran old and
+     * new servers on a database the old could not read. The chart now stops every old server first
+     * when its Chart.yaml declares `openbot.ai/requires-downtime: "true"`, and the release is held to
+     * the two agreeing.
+     */
+    describe("downtime", () => {
+      const declaring = (requiresDowntime: boolean) => {
+        const written = forVersion("v0.4.0");
+        return publisher(
+          { ...written, upgrade: { ...written.upgrade, requiresDowntime } },
+          { migration: null },
+        );
+      };
+
+      test("a policy that declares downtime beside a chart that rolls is refused, naming both fixes", () => {
+        const { repo, env } = declaring(true);
+        const result = validate(repo, {
+          ...env,
+          OPENBOT_RELEASE_FILES: published(to, "v0.4.0", false),
+        });
+        expect(result.exitCode).not.toBe(0);
+        expect(result.output).toContain(
+          "release-policy.json says this release requires downtime, but the openbot chart it attaches upgrades its servers one by one",
+        );
+        expect(result.output).toContain(
+          "set upgrade.requiresDowntime to false in release-policy.json",
+        );
+      });
+
+      test("a policy that declares no downtime beside a chart that stops every server is refused", () => {
+        const { repo, env } = declaring(false);
+        const result = validate(repo, {
+          ...env,
+          OPENBOT_RELEASE_FILES: published(to, "v0.4.0", true),
+        });
+        expect(result.exitCode).not.toBe(0);
+        expect(result.output).toContain(
+          "release-policy.json says this release needs no downtime, but the openbot chart it attaches stops every old server",
+        );
+      });
+
+      test("a chart that declares downtime under a policy that does passes", () => {
+        const { repo, env } = declaring(true);
+        expect(
+          validate(repo, {
+            ...env,
+            OPENBOT_RELEASE_FILES: published(to, "v0.4.0", true),
+          }).exitCode,
+        ).toBe(0);
+      });
+
+      test("a chart from before the annotation rolls, so it passes under a policy with no downtime", () => {
+        const { repo, env } = declaring(false);
+        expect(
+          validate(repo, {
+            ...env,
+            OPENBOT_RELEASE_FILES: published(to, "v0.4.0", "absent"),
+          }),
+        ).toEqual({
+          exitCode: 0,
+          output: expect.stringContaining("describes v0.4.0"),
+        });
+        const { repo: other, env: otherEnv } = declaring(true);
+        expect(
+          validate(other, {
+            ...otherEnv,
+            OPENBOT_RELEASE_FILES: published(to, "v0.4.0", "absent"),
+          }).exitCode,
+        ).not.toBe(0);
+      });
+    });
   });
 
   test("a repository variable cannot stand in for the committed policy", () => {

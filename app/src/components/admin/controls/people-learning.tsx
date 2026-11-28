@@ -7,7 +7,7 @@ import {
   IconUserCheck,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Fragment, useState } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -47,6 +47,7 @@ import {
   sharingRequestsQueryOptions,
 } from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 const CHOICES: {
   value: LearningPersonalReview;
@@ -68,10 +69,10 @@ const CHOICES: {
 ];
 
 /** What a section says when the settings it depends on did not load. */
-function SettingsError({ message }: { message?: string }) {
+function SettingsError({ message }: { message?: ReactNode }) {
   return (
     <p className="mt-4 text-destructive text-sm" role="alert">
-      {message ?? "Couldn't load Learning settings. Reload the page."}
+      {message ?? "Couldn't load Learning settings. Try again in a moment."}
     </p>
   );
 }
@@ -86,7 +87,7 @@ export function WhoApprovesSection() {
   if (settings.error || !settings.data)
     return (
       <PageSection title="Approval">
-        <SettingsError message={settings.error?.message} />
+        <SettingsError message={failureSaid(settings.error)} />
       </PageSection>
     );
   const current = settings.data.personalReview ?? "admins";
@@ -173,7 +174,7 @@ function WhoApprovesDialog({
           </PageRows>
           {save.error ? (
             <p className="mt-3 text-destructive text-sm" role="alert">
-              {save.error.message}
+              {failureSaid(save.error)}
             </p>
           ) : null}
         </DialogBody>
@@ -213,13 +214,14 @@ export function PeopleProposalsSection() {
   const review = useMutation(reviewPersonProposalMutationOptions(queryClient));
   const [open, setOpen] = useState<{
     userId: string;
+    containerId: string;
     proposalId: string;
   } | null>(null);
   if (settings.isPending) return null;
   if (settings.error)
     return (
       <PageSection title="From people's recordings">
-        <SettingsError message={settings.error.message} />
+        <SettingsError message={failureSaid(settings.error)} />
       </PageSection>
     );
   if (!admins) return null;
@@ -238,17 +240,17 @@ export function PeopleProposalsSection() {
     >
       {people.isPending ? null : people.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {people.error.message}
+          {failureSaid(people.error)}
         </p>
       ) : (
         <>
           {unreadable.map((person) => (
             <p
               className="mt-4 text-destructive text-sm"
-              key={person.userId}
+              key={person.personId}
               role="alert"
             >
-              {`Couldn't read ${person.name}'s skills. Reload the page to try again.`}
+              {`Couldn't read ${person.name}'s skills. Try again in a moment.`}
             </p>
           ))}
           {rows.length === 0 ? (
@@ -261,14 +263,15 @@ export function PeopleProposalsSection() {
           ) : (
             <PageRows>
               {rows.map(({ person, proposal }, index) => (
-                <Fragment key={`${person.userId}:${proposal.id}`}>
+                <Fragment key={`${person.personId}:${proposal.id}`}>
                   {index > 0 ? <Separator /> : null}
                   <Item
                     render={
                       <button
                         onClick={() =>
                           setOpen({
-                            userId: person.userId,
+                            userId: person.personId,
+                            containerId: person.containerId,
                             proposalId: proposal.id,
                           })
                         }
@@ -301,7 +304,11 @@ export function PeopleProposalsSection() {
           decided={review.data?.status}
           deciding={review.isPending}
           error={review.error}
-          load={personProposalQueryOptions(open.userId, open.proposalId)}
+          load={personProposalQueryOptions(
+            open.userId,
+            open.containerId,
+            open.proposalId,
+          )}
           onClose={() => {
             setOpen(null);
             review.reset();
@@ -323,6 +330,7 @@ export function SharingRequestsSection() {
   const requests = useQuery(sharingRequestsQueryOptions());
   const decide = useMutation(decideSharingMutationOptions(queryClient));
   const [open, setOpen] = useState<{
+    requestId: string;
     userId: string;
     skillName: string;
     requestedAt: string;
@@ -339,13 +347,14 @@ export function SharingRequestsSection() {
   if (settings.isPending) return null;
   if (!people && rows.length === 0 && !requests.error && !settings.error)
     return null;
-  // After a refused decision the list is read again; its stamp, not the one from opening, is current.
-  const requestedAt =
-    rows.find(
-      (request) =>
-        request.userId === open?.userId &&
-        request.skillName === open?.skillName,
-    )?.requestedAt ?? open?.requestedAt;
+  // After a refused decision the list is read again; its request and stamp, not the ones from opening, are current.
+  const current = rows.find(
+    (request) =>
+      request.personId === open?.userId &&
+      request.skillName === open?.skillName,
+  );
+  const requestedAt = current?.requestedAt ?? open?.requestedAt;
+  const requestId = current?.id ?? open?.requestId;
   // Deciding means having seen the skill, and on the version the request is about.
   const cannotDecide =
     decide.isPending || !skill.data || requests.isFetching || !requestedAt;
@@ -359,11 +368,11 @@ export function SharingRequestsSection() {
       description="Approve a request to open a skill to every Bot."
     >
       {settings.error ? (
-        <SettingsError message={settings.error.message} />
+        <SettingsError message={failureSaid(settings.error)} />
       ) : null}
       {requests.isPending ? null : requests.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {requests.error.message}
+          {failureSaid(requests.error)}
         </p>
       ) : rows.length === 0 ? (
         <PageEmpty icon={IconShare} title="No requests to share">
@@ -372,14 +381,15 @@ export function SharingRequestsSection() {
       ) : (
         <PageRows>
           {rows.map((request, index) => (
-            <Fragment key={`${request.userId}:${request.skillName}`}>
+            <Fragment key={request.id}>
               {index > 0 ? <Separator /> : null}
               <Item
                 render={
                   <button
                     onClick={() =>
                       setOpen({
-                        userId: request.userId,
+                        requestId: request.id,
+                        userId: request.personId,
                         skillName: request.skillName,
                         requestedAt: request.requestedAt,
                       })
@@ -410,7 +420,7 @@ export function SharingRequestsSection() {
             <>
               {decide.error ? (
                 <p className="mr-auto text-destructive text-sm" role="alert">
-                  {decide.error.message}
+                  {failureSaid(decide.error)}
                 </p>
               ) : null}
               <Button
@@ -418,7 +428,7 @@ export function SharingRequestsSection() {
                 onClick={() =>
                   decide.mutate(
                     {
-                      ...open,
+                      requestId: requestId ?? open.requestId,
                       requestedAt: requestedAt ?? open.requestedAt,
                       decision: "decline",
                     },
@@ -435,7 +445,7 @@ export function SharingRequestsSection() {
                 onClick={() =>
                   decide.mutate(
                     {
-                      ...open,
+                      requestId: requestId ?? open.requestId,
                       requestedAt: requestedAt ?? open.requestedAt,
                       decision: "approve",
                     },

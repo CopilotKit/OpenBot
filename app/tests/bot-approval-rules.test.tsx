@@ -10,6 +10,11 @@ import {
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BotApprovalRules } from "@/components/approvals/bot-rules";
+import {
+  approvalInboxResponse,
+  approvalWriteResponse,
+  PERSON_APPROVAL_RULES_PATH,
+} from "./approvals-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** A Bot's Approval rules page: the person's rules for this Bot, and the team rules that reach it. */
@@ -46,9 +51,9 @@ function serving() {
         method: init.method,
         body: init.body ? JSON.parse(String(init.body)) : undefined,
       });
-      return Response.json({ ok: true });
+      return approvalWriteResponse(input, init) ?? Response.json({ ok: true });
     }
-    return Response.json({
+    return approvalInboxResponse(input, {
       enabled: true,
       requests: [],
       questions: [],
@@ -69,7 +74,7 @@ function serving() {
         hostCommandsCap: "allow",
       },
       hostCommands: "ask",
-    });
+    }) as Response;
   }) as unknown as typeof fetch;
 }
 
@@ -123,7 +128,7 @@ test("a rule added here is for this Bot, with no Bot to type", async () => {
   await user.click(view.getByRole("button", { name: "Save rule" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
-      path: "/api/approvals/rules",
+      path: "/api/v2/organizations/default/people/me/approval-rules",
       method: "POST",
       body: {
         botId: "expenses",
@@ -141,9 +146,13 @@ test("a personal rule whose Bot is a pattern matching this Bot is shown and can 
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const response = await served(input, init);
-    if (String(input) !== "/api/approvals" || init?.method) return response;
+    if (
+      String(input).split("?")[0] !== PERSON_APPROVAL_RULES_PATH ||
+      (init?.method ?? "GET") !== "GET"
+    )
+      return response;
     const body = await response.json();
-    body.rules.push(rule("pattern", "exp*", "mcp/linear/*"));
+    body.approvalRules.push(rule("pattern", "exp*", "mcp/linear/*"));
     return Response.json(body);
   }) as unknown as typeof fetch;
   const view = draw();

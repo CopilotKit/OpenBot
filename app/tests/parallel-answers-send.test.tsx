@@ -15,12 +15,16 @@ import {
 } from "@/lib/channels/queries";
 import { UNANSWERED } from "@/lib/copilot/repair-history";
 import { queryClient } from "@/query-client";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
+import { answerBotsList, botPath } from "./bots-api";
 import {
   ANSWERED_EARLY,
   answerOf,
   LOOKUPS,
   lookupsStored,
 } from "./parallel-lookups.fixture";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /*
  * A message sent from a conversation that missed the end of a step of parallel lookups carries the
@@ -75,17 +79,16 @@ beforeAll(() => {
             : input.url,
         "http://localhost",
       );
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
-      if (url.pathname === `/api/plugins/for/${BOT}`)
-        return NativeResponse.json({ skills: [], tools: [] });
-      if (url.pathname === `/api/agents/${BOT}`)
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
+      if (url.pathname === botGrantsPath(BOT)) return botGrantsResponse();
+      if (url.pathname === botPath(BOT))
         return NativeResponse.json({
-          agent: { id: BOT, visibility: "public", canManage: true },
+          bot: { id: BOT, visibility: "public", canManage: true },
         });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
@@ -114,9 +117,17 @@ beforeAll(() => {
           { type: "RUN_FINISHED", threadId: body.threadId, runId: body.runId },
         ]);
       }
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (/\/threads\/[^/]+\/messages$/.test(url.pathname))
         return NativeResponse.json({

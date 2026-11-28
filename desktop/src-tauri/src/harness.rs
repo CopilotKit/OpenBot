@@ -44,6 +44,9 @@ pub enum Credential {
     /// *subscription* only ever buys its own vendor's models, and this is the row where the
     /// subscription path exists.
     Anthropic,
+    /// A ChatGPT plan, signed in to with Sign in with ChatGPT, and nothing else: the OpenAI Agents
+    /// SDK engine reads the plan's token and has no key path of its own.
+    ChatgptPlan,
     /// Google, and only Google.
     ///
     /// Separate from `AnyProvider` because Antigravity's bundled harness requires a Gemini key
@@ -63,8 +66,11 @@ THE CONSTRAINT IS ON THE LOGIN, NOT THE FRAMEWORK, and this is where that bites.
 the list takes any model through an API key, so the Bot step and the model step are independent
 there. A subscription is different: it only ever buys that vendor's own models, and only through a
 path that speaks that vendor's subscription auth. Anthropic's is the Claude Agent SDK, which reads
-`CLAUDE_CODE_OAUTH_TOKEN`; OpenAI's is the Codex model, which the LangGraph AG-UI image selects from
-the token store.
+`CLAUDE_CODE_OAUTH_TOKEN`; OpenAI's is the OpenAI Agents SDK, on the token OpenAI's official Sign
+in with ChatGPT plan usage issues (`crate::chatgpt_sign_in`), sent to the public Responses API.
+
+Each plan's Bot is its vendor's own agent SDK, run as the plan's engine
+(`crate::ai_connection::Plan`), so the vendor keeps it working with its own sign-in.
 
 MEASURED, on the screen built to catch it: signing in to a Claude plan and keeping the default Bot
 produced a stack that came up clean and a Bot whose own log said "Missing credentials. Please pass
@@ -76,8 +82,46 @@ Nobody is asked to know this. The plan picks the Bot that can use it.
 pub fn speaking_for(provider: &str) -> Option<&'static str> {
     match provider {
         "anthropic" => Some("claude-agent-sdk"),
-        "openai" => Some("langgraph"),
+        "openai" => Some("openai-agents-sdk"),
         _ => None,
+    }
+}
+
+/**
+The Bot a start runs, from the Bot the window asked for and the credential the model screen chose.
+
+A plan chooses its own Bot, because only one Bot can spend it (see `speaking_for`). Anything else
+is a key or a provider sign-in, where the Bot and the model are independent and the window's choice
+stands.
+*/
+pub fn for_credential(
+    credential: &crate::env::ModelCredential,
+    chosen: Option<HarnessChoice>,
+) -> Option<HarnessChoice> {
+    let plan = match credential {
+        crate::env::ModelCredential::ClaudePlan { .. } => speaking_for("anthropic"),
+        crate::env::ModelCredential::ChatGptPlan { .. } => speaking_for("openai"),
+        _ => return chosen,
+    };
+    plan.map(|id| HarnessChoice {
+        id: id.into(),
+        agent_url: None,
+    })
+}
+
+/**
+The id an installation's saved choice means in this release.
+
+`langgraph` was the default Bot until the TypeScript LangGraph Bot replaced it. The setup window
+has no picker: it installs the default, and a plan re-points it. So an installation that saved
+`langgraph` either took the default or was on a ChatGPT plan, and both now run on the default.
+Moved here, where the image is resolved, so Install pulls the image Start then runs, and the
+installation's Bot (`picked-harness` in the package) keeps its id and its threads.
+*/
+fn current_id(id: &str) -> &str {
+    match id {
+        "langgraph" => DEFAULT_HARNESS,
+        other => other,
     }
 }
 
@@ -139,7 +183,7 @@ fn byo_remote_ag_ui_url(value: &str) -> Result<String, String> {
 
 /// The Bot a first setup installs, as the setup window names it (`DEFAULT_HARNESS` in
 /// desktop/src/harness.ts). The early downloads pull its images before Install is clicked.
-pub const DEFAULT_HARNESS: &str = "langgraph";
+pub const DEFAULT_HARNESS: &str = "langgraph-ts";
 
 /// The list, ranked as the build doc ranks it: stars first, with downloads as the sanity check,
 /// because each misleads alone.
@@ -230,23 +274,61 @@ at a container nobody started — which looks like a broken Bot rather than a ba
 */
 pub fn picked(
     choice: Option<&HarnessChoice>,
+    root: &std::path::Path,
+) -> Result<Option<crate::env::PickedHarness>, String> {
+    pick(choice, root).map_err(String::from)
+}
+
+/// Why [`pick`] refused: the pick itself, or an image list it could not read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PickError {
+    /// The release's image list is missing or unreadable. Not about the pick: the installation is
+    /// damaged, and Install puts the list back (`deployment::ReferenceError::Unreadable`).
+    ImageList(String),
+    /// The pick itself: a Bot this build does not have, one this release does not publish, or an
+    /// address that is not one.
+    Refused(String),
+}
+
+impl From<PickError> for String {
+    fn from(error: PickError) -> Self {
+        match error {
+            PickError::ImageList(detail) | PickError::Refused(detail) => detail,
+        }
+    }
+}
+
+impl From<crate::deployment::ReferenceError> for PickError {
+    fn from(error: crate::deployment::ReferenceError) -> Self {
+        match error {
+            crate::deployment::ReferenceError::Unreadable(detail) => Self::ImageList(detail),
+            crate::deployment::ReferenceError::NotIncluded(detail) => Self::Refused(detail),
+        }
+    }
+}
+
+/// [`picked`], saying whether the refusal is about the pick or about an unreadable image list.
+pub fn pick(
+    choice: Option<&HarnessChoice>,
     // Where the deployment is, because the image reference is read from the manifest laid down
     // beside it. A name built from a version was what this took before, and an unqualified name
     // sends every engine to Docker Hub: the pull was refused there and the person was shown a
     // registry permissions error for a repository that had never been pushed.
     root: &std::path::Path,
-) -> Result<Option<crate::env::PickedHarness>, String> {
+) -> Result<Option<crate::env::PickedHarness>, PickError> {
     let Some(choice) = choice else {
         return Ok(None);
     };
-    let id = choice.id.trim();
+    let id = current_id(choice.id.trim());
     if id.is_empty() {
         return Ok(None);
     };
     let row = catalogue()
         .into_iter()
         .find(|row| row.id == id)
-        .ok_or_else(|| format!("There is no Bot called \"{id}\" to install."))?;
+        .ok_or_else(|| {
+            PickError::Refused(format!("There is no Bot called \"{id}\" to install."))
+        })?;
     if row.id == "byo-url" {
         let url = choice
             .agent_url
@@ -254,7 +336,8 @@ pub fn picked(
             .ok_or_else(|| {
                 "Enter a valid http:// or https:// address for the agent endpoint.".to_string()
             })
-            .and_then(byo_remote_ag_ui_url)?;
+            .and_then(byo_remote_ag_ui_url)
+            .map_err(PickError::Refused)?;
         return Ok(Some(crate::env::PickedHarness::RemoteAgUi {
             url,
             name: row.name,
@@ -262,11 +345,13 @@ pub fn picked(
         }));
     }
     let (Some(image), Some(port)) = (row.image, row.port) else {
-        return Err(format!("\"{id}\" is not a Bot this can install."));
+        return Err(PickError::Refused(format!(
+            "\"{id}\" is not a Bot this can install."
+        )));
     };
     let mastra = row.id == "mastra";
     Ok(Some(crate::env::PickedHarness::Installed {
-        image: crate::deployment::reference(root, &image)?,
+        image: crate::deployment::image_reference(root, &image)?,
         port,
         name: row.name,
         mastra,
@@ -279,6 +364,58 @@ pub fn picked(
             String::new()
         },
     }))
+}
+
+/**
+The Bot an install of `root` puts in: `asked`, when the release laid out in `root` includes it.
+
+A Mac on Docker Desktop, after Desktop was updated from 1.0.3 to 1.1.2: the folder was still laid out
+at 1.0.3, since Start moves it to the app's release, and the first screen's install asked for the
+new default Bot, which 1.0.3 does not have. Install failed with "OpenBot v1.0.3 does not include
+agent-langgraph-ts", and Retry the same way, every time. Install puts in what the folder's own
+release runs, so a release that lacks the Bot asked for keeps the one the folder already has
+(`kept`), and without one takes the first Bot the release does include, in the catalogue's order.
+The Bot asked for comes with the release that has it, when Start moves the folder to it. A Bot the
+person typed an address for, or any other refusal, is left to `picked` to say.
+*/
+pub fn the_release_includes(
+    asked: Option<HarnessChoice>,
+    kept: Option<HarnessChoice>,
+    root: &std::path::Path,
+) -> Option<HarnessChoice> {
+    let lacks = |choice: &HarnessChoice| {
+        catalogue()
+            .into_iter()
+            .find(|row| row.id == current_id(choice.id.trim()))
+            .and_then(|row| row.image)
+            .is_some_and(|image| crate::deployment::reference(root, &image).is_err())
+    };
+    let Some(choice) = asked.as_ref().filter(|choice| lacks(choice)) else {
+        return asked;
+    };
+    // The folder's own Bot is what its release was installed with, so it is never second-guessed
+    // here: its finished install is kept as it is (`preparation::require`).
+    let instead = kept.or_else(|| {
+        catalogue()
+            .into_iter()
+            .filter(|row| row.image.is_some())
+            .map(|row| HarnessChoice {
+                id: row.id,
+                agent_url: None,
+            })
+            .find(|row| picked(Some(row), root).is_ok())
+    });
+    match instead {
+        Some(instead) => {
+            log::warn!(
+                "[install] the release laid out here does not include {}; installing {} until Start moves it to the release that does",
+                choice.id,
+                instead.id
+            );
+            Some(instead)
+        }
+        None => asked,
+    }
 }
 
 #[derive(Debug)]
@@ -318,6 +455,123 @@ mod tests {
         assert!(super::catalogue()
             .iter()
             .any(|row| row.id == super::DEFAULT_HARNESS && row.image.is_some()));
+    }
+
+    /// The default Bot is the TypeScript LangGraph image, replacing the Python one rather than
+    /// running beside it.
+    #[test]
+    fn the_default_bot_is_the_typescript_langgraph_image() {
+        let root = deployment_naming_everything("default-ts");
+        let row = catalogue()
+            .into_iter()
+            .find(|row| row.id == DEFAULT_HARNESS)
+            .expect("the default Bot is in the catalogue");
+        assert_eq!(row.id, "langgraph-ts");
+        assert_eq!(row.image.as_deref(), Some("agent-langgraph-ts"));
+        assert_eq!(row.port, Some(4215));
+        assert_eq!(row.health_path.as_deref(), Some("/health"));
+        let crate::env::PickedHarness::Installed {
+            image,
+            port,
+            run_path,
+            ..
+        } = picked(Some(&choice(DEFAULT_HARNESS)), &root)
+            .expect("refused")
+            .expect("nothing")
+        else {
+            panic!("the default Bot installs an image");
+        };
+        assert_eq!(
+            image,
+            "ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:abc"
+        );
+        assert_eq!(port, 4215);
+        assert_eq!(run_path, "");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn installed_image(root: &std::path::Path, chosen: Option<HarnessChoice>) -> String {
+        match picked(chosen.as_ref(), root).expect("refused") {
+            Some(crate::env::PickedHarness::Installed { image, .. }) => image,
+            other => panic!("expected an installed Bot, got {other:?}"),
+        }
+    }
+
+    /**
+    Which image each sign-in runs its Bot on.
+
+    A Claude plan can only be spent through the Claude Agent SDK. Every other sign-in runs the
+    TypeScript LangGraph Bot: an API key and a Gemini sign-in reach their provider directly, and a
+    ChatGPT plan's Bot sends its model calls on to the Python image, which keeps running for it
+    (`crate::env` writes the address, `crate::stack::selected_services` starts it).
+    */
+    #[test]
+    fn each_sign_in_runs_the_bot_its_routing_names() {
+        use crate::env::ModelCredential;
+        let root = deployment_naming_everything("sign-ins");
+        let default = Some(choice(DEFAULT_HARNESS));
+        let ts = "ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:abc";
+        for (credential, image) in [
+            (
+                ModelCredential::OpenAi {
+                    api_key: "sk-test".into(),
+                },
+                ts,
+            ),
+            (
+                ModelCredential::Anthropic {
+                    api_key: "sk-ant-test".into(),
+                },
+                ts,
+            ),
+            (
+                ModelCredential::ProviderOAuth {
+                    provider: "google".into(),
+                    path: "/openbot/model-oauth.json".into(),
+                    proxy_token: "proxy".into(),
+                    model: "gemini-3-pro".into(),
+                },
+                ts,
+            ),
+            (
+                ModelCredential::ChatGptPlan { store: "{}".into() },
+                "ghcr.io/copilotkit/openbot-agent-openai-agents@sha256:abc",
+            ),
+            (
+                ModelCredential::ClaudePlan {
+                    token: "plan".into(),
+                },
+                "ghcr.io/copilotkit/openbot-agent-claude-sdk@sha256:abc",
+            ),
+        ] {
+            assert_eq!(
+                installed_image(&root, for_credential(&credential, default.clone())),
+                image,
+                "{credential:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An installation from before this release saved `langgraph`, the Python image, as its Bot.
+    /// It moves to the TypeScript image on its next Install and Start, whatever it signs in with.
+    #[test]
+    fn an_installation_that_saved_the_python_default_moves_to_the_typescript_one() {
+        use crate::env::ModelCredential;
+        let root = deployment_naming_everything("saved-python");
+        let saved = Some(choice("langgraph"));
+        let ts = "ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:abc";
+        // Install, which has no credential and pulls what the saved choice resolves to.
+        assert_eq!(installed_image(&root, saved.clone()), ts);
+        let credential = ModelCredential::OpenAi {
+            api_key: "sk-test".into(),
+        };
+        assert_eq!(
+            installed_image(&root, for_credential(&credential, saved.clone())),
+            ts,
+            "{credential:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Both plans name a Bot that exists and can actually use them.
@@ -379,12 +633,13 @@ mod tests {
         }
     }
 
-    /// Anything the AG-UI table marks In Progress stays off. These three were In Progress when the
-    /// list was read, and offering one would mean a row that cannot answer.
+    /// Anything the AG-UI table marks In Progress stays off. These were In Progress when the list
+    /// was read, and offering one would mean a row that cannot answer. (The OpenAI Agents SDK has
+    /// since shipped its AG-UI integration, ag-ui-openai-agents, and runs a ChatGPT plan.)
     #[test]
     fn nothing_still_in_progress_upstream_is_offered() {
         let ids: Vec<String> = catalogue().into_iter().map(|h| h.id).collect();
-        for absent in ["openai-agents-sdk", "bedrock-agents", "cloudflare-agents"] {
+        for absent in ["bedrock-agents", "cloudflare-agents"] {
             assert!(
                 !ids.contains(&absent.to_string()),
                 "{absent} is In Progress upstream"
@@ -725,6 +980,48 @@ mod tests {
             assert_eq!(picked_run_path, run_path);
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A Mac updated from 1.0.3 to 1.1.2, its folder still laid out at 1.0.3: the first screen's
+    /// install asked for the new default Bot, and failed every time with "OpenBot v1.0.3 does not
+    /// include agent-langgraph-ts". Install now keeps the Bot the folder has, and without one takes
+    /// one its release includes. A release that includes the Bot asked for installs it.
+    #[test]
+    fn install_never_asks_for_a_bot_the_folders_release_does_not_include() {
+        let root = scratch("old-release");
+        // 1.0.3 had no TypeScript LangGraph Bot; CrewAI stands in for what it did have.
+        write_crewai_manifest(&root);
+        let asked = Some(choice(DEFAULT_HARNESS));
+        assert!(picked(asked.as_ref(), &root)
+            .expect_err("1.0.3 has no such Bot")
+            .contains("does not include agent-langgraph-ts"));
+
+        // The folder's own Bot is kept: its finished install is what Start moves forward.
+        let kept = Some(choice("langgraph"));
+        assert_eq!(
+            the_release_includes(asked.clone(), kept.clone(), &root),
+            kept
+        );
+        // Without one, a Bot the release has, which installs.
+        let instead = the_release_includes(asked.clone(), None, &root);
+        assert_eq!(instead, Some(choice("crewai")));
+        assert!(picked(instead.as_ref(), &root).is_ok());
+
+        // Once the folder is on a release with it, the Bot asked for is what installs.
+        let current = deployment_naming_everything("new-release");
+        assert_eq!(
+            the_release_includes(asked.clone(), kept.clone(), &current),
+            asked
+        );
+        // An address the person typed, or no Bot at all, is never swapped.
+        let byo = Some(HarnessChoice {
+            id: "byo-url".into(),
+            agent_url: Some("https://agent.example".into()),
+        });
+        assert_eq!(the_release_includes(byo.clone(), None, &root), byo);
+        assert_eq!(the_release_includes(None, kept, &root), None);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&current);
     }
 
     /// An image this release does not publish is named as that, rather than left to the engine.

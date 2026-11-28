@@ -45,9 +45,13 @@ import {
   type AppGrantTranslation,
   translateAppGrants,
 } from "@/lib/app-grants/translate";
-import type { SharedUseApproval } from "@/lib/plugins/shared-use";
+import {
+  approvalNamesNobody,
+  type SharedUseApproval,
+} from "@/lib/plugins/shared-use";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** What came back for one description, kept beside the words it came from. */
 type WrittenGrants = AppGrantTranslation & { text: string };
@@ -181,7 +185,7 @@ function ActionRows<T extends ChangedAction>({
   );
 }
 
-const TURNS_OFF = "text-amber-600 dark:text-amber-500";
+const TURNS_OFF = "text-warning";
 const TURNS_ON = "text-foreground";
 
 /**
@@ -332,7 +336,7 @@ export function DescribeGrants({
         ) : null}
         {checked && preview.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {preview.error.message}
+            {failureSaid(preview.error)}
           </p>
         ) : null}
         {checked && changes ? (
@@ -369,7 +373,7 @@ export function DescribeGrants({
       </FieldGroup>
       {save.error ? (
         <p className="mt-5 text-destructive text-sm" role="alert">
-          {save.error.message}
+          {failureSaid(save.error)}
         </p>
       ) : null}
       {/*
@@ -383,12 +387,12 @@ export function DescribeGrants({
               Let {botName} use the shared {appTitle} account?
             </DialogTitle>
           </DialogHeader>
-          <DialogBody className="mt-4">
+          <DialogBody className="mt-4 overflow-y-auto">
             <SharedApprovalFields onChange={setApproval} value={approval} />
           </DialogBody>
           {save.error ? (
             <p className="mt-4 text-destructive text-sm" role="alert">
-              {save.error.message}
+              {failureSaid(save.error)}
             </p>
           ) : null}
           <DialogFooter className="mt-4">
@@ -400,7 +404,7 @@ export function DescribeGrants({
               Cancel
             </Button>
             <Button
-              disabled={save.isPending}
+              disabled={save.isPending || approvalNamesNobody(approval)}
               onClick={() => commit(approval)}
               size="sm"
             >
