@@ -13,7 +13,12 @@ import {
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { authKeys } from "@/lib/auth/queries";
-import { resumeUrlFor } from "@/lib/auth/resume";
+import {
+  resumeUrlFor,
+  type ShellReturnSearch,
+  shellHandoffPathFor,
+  signInReturnUrlFor,
+} from "@/lib/auth/resume";
 
 /*
  * The Better Auth client is replaced at the module boundary: its fetch is captured when it is built,
@@ -119,7 +124,7 @@ function signedInContext() {
   return { queryClient };
 }
 
-async function redirectFrom(search: { flow_id?: string }) {
+async function redirectFrom(search: { flow_id?: string } & ShellReturnSearch) {
   const beforeLoad = Route.options.beforeLoad as (a: unknown) => Promise<void>;
   try {
     await beforeLoad({ context: signedInContext(), search });
@@ -144,6 +149,8 @@ function renderSignScreen(options: {
   providers: string[];
   sso: boolean;
   ssoRequired: boolean;
+  /** Where the screen is opened: `/sign?flow_id=h1` unless said. */
+  entry?: string;
 }) {
   const queryClient = new QueryClient();
   queryClient.setQueryData(authKeys.providers(), options);
@@ -159,7 +166,9 @@ function renderSignScreen(options: {
   const router = createRouter({
     routeTree: root.addChildren([sign]),
     context: { queryClient },
-    history: createMemoryHistory({ initialEntries: ["/sign?flow_id=h1"] }),
+    history: createMemoryHistory({
+      initialEntries: [options.entry ?? "/sign?flow_id=h1"],
+    }),
   } as never) as never;
   const view = render(
     <QueryClientProvider client={queryClient}>
@@ -300,4 +309,118 @@ test("a signed-in arrival with a handle lands on the verifier, not back on the h
       value: realLocation,
     });
   }
+});
+
+/*
+ * A PHONE APP'S SIGN-IN SHEET, LANDING ON /sign (the server's docs/shell-sign-in.md, "Returning
+ * through /sign"). The server hands it `shell_challenge`, `shell_platform` and `shell_callback`; once
+ * signed in, the sheet goes on to the hand-off on this origin, built from those values once they
+ * check out, rather than into the web app inside the sheet.
+ */
+const CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+const HANDOFF = `/api/auth/shell/handoff?challenge=${CHALLENGE}&platform=ios&callback=https`;
+
+test("well-formed sheet values build the hand-off's path, in the doc's order, the optional ones only when given", () => {
+  expect(
+    shellHandoffPathFor({
+      shell_challenge: CHALLENGE,
+      shell_platform: "ios",
+      shell_callback: "https",
+    }),
+  ).toBe(HANDOFF);
+  expect(shellHandoffPathFor({ shell_challenge: CHALLENGE })).toBe(
+    `/api/auth/shell/handoff?challenge=${CHALLENGE}`,
+  );
+  expect(
+    shellHandoffPathFor({
+      shell_challenge: CHALLENGE,
+      shell_platform: "android",
+    }),
+  ).toBe(`/api/auth/shell/handoff?challenge=${CHALLENGE}&platform=android`);
+});
+
+test("malformed sheet values are ignored, all 3 together", () => {
+  for (const search of [
+    { shell_challenge: CHALLENGE.slice(1) },
+    { shell_challenge: `${CHALLENGE}x` },
+    { shell_challenge: `${CHALLENGE.slice(1)}=` },
+    { shell_challenge: `${CHALLENGE.slice(1)}/` },
+    { shell_challenge: CHALLENGE, shell_platform: "web" },
+    { shell_challenge: CHALLENGE, shell_callback: "scheme" },
+    { shell_challenge: CHALLENGE, shell_callback: "https://elsewhere.example" },
+    { shell_platform: "ios", shell_callback: "https" },
+  ])
+    expect(shellHandoffPathFor(search)).toBeNull();
+});
+
+test("the sheet's hand-off wins over a flow handle; without sheet values, the resume is as before", () => {
+  const origin = "https://openbot.example";
+  expect(
+    signInReturnUrlFor(origin, {
+      flow_id: "h1",
+      shell_challenge: CHALLENGE,
+      shell_platform: "ios",
+      shell_callback: "https",
+    }),
+  ).toBe(`${origin}${HANDOFF}`);
+  expect(signInReturnUrlFor(origin, { flow_id: "h1" })).toBe(
+    resumeUrlFor(origin, "h1"),
+  );
+  expect(signInReturnUrlFor(origin, {})).toBe(origin);
+  expect(
+    signInReturnUrlFor(origin, { shell_challenge: "short", flow_id: "h1" }),
+  ).toBe(resumeUrlFor(origin, "h1"));
+});
+
+test("a sign-in press with well-formed sheet values comes back to the hand-off", async () => {
+  const asked: string[] = [];
+  signInSpy = async (_provider, _start, callbackURL) => {
+    asked.push(callbackURL ?? "");
+  };
+  const { view, user } = renderSignScreen({
+    providers: ["google"],
+    sso: false,
+    ssoRequired: false,
+    entry: `/sign?shell_challenge=${CHALLENGE}&shell_platform=ios&shell_callback=https`,
+  });
+  await user.click(await view.findByText(/Continue with Google/));
+  await waitFor(() => expect(asked).toHaveLength(1));
+  expect(asked[0]).toBe(`${window.location.origin}${HANDOFF}`);
+});
+
+test("a sign-in press with malformed sheet values comes back as it would without them", async () => {
+  const asked: string[] = [];
+  signInSpy = async (_provider, _start, callbackURL) => {
+    asked.push(callbackURL ?? "");
+  };
+  const { view, user } = renderSignScreen({
+    providers: ["google"],
+    sso: false,
+    ssoRequired: false,
+    entry: `/sign?shell_challenge=${CHALLENGE}&shell_callback=evil`,
+  });
+  await user.click(await view.findByText(/Continue with Google/));
+  await waitFor(() => expect(asked).toHaveLength(1));
+  expect(asked[0]).toBe(window.location.origin);
+});
+
+test("already signed in with sheet values: a document navigation to the hand-off", async () => {
+  const validate = Route.options.validateSearch as (
+    s: unknown,
+  ) => ShellReturnSearch & { flow_id?: string };
+  const onward = (await redirectFrom(
+    validate({
+      flow_id: "h1",
+      shell_challenge: CHALLENGE,
+      shell_platform: "ios",
+      shell_callback: "https",
+    }),
+  )) as { options: { href?: string; reloadDocument?: boolean } };
+  expect(onward.options.href).toBe(HANDOFF);
+  expect(onward.options.reloadDocument).toBe(true);
+  // Malformed: the flow handle's resume, as before.
+  const asBefore = await redirectFrom(
+    validate({ flow_id: "h1", shell_challenge: "nope" }),
+  );
+  expect(asBefore.options.href).toBe("/api/plugins/arcade/verify?flow_id=h1");
 });
