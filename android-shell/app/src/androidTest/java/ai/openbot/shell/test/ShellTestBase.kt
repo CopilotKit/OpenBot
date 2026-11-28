@@ -460,8 +460,21 @@ abstract class ShellTestBase {
     }
 
     /** Taps the message box near its top (where the text line is). */
+    /**
+     * Taps the message box where it is now: the page's layout can still move after the box first
+     * shows (a banner appearing under it moved it in the demo of run 46152243287, so a tap at the
+     * place read earlier raised no keyboard). Waits up to 3 s for 2 equal reads 400 ms apart.
+     */
     fun tapComposer(rect: Rect) {
-        device.click(rect.centerX(), minOf(rect.top + 40, rect.centerY()))
+        var now = composerRect() ?: rect
+        val deadline = SystemClock.uptimeMillis() + 3_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            sleep(400)
+            val next = composerRect() ?: break
+            if (next == now) break
+            now = next
+        }
+        device.click(now.centerX(), minOf(now.top + 40, now.centerY()))
     }
 
     fun dismissKeyboardIfUp() {

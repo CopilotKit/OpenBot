@@ -165,6 +165,8 @@ class ShellController(
 
     private fun changed() {
         val visible = webVisible
+        // The skeleton is the web area's default: its time on screen starts when the area shows.
+        if (visible && !lastWebVisible && pageLoading && loadingSince == 0L) loadingSince = System.currentTimeMillis()
         if (visible && !lastWebVisible && !pageLoading) {
             // The web area comes into view: covered until a page renders in it.
             pageLoading = true

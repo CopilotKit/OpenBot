@@ -277,8 +277,15 @@ class RealBackendDebugTest : ShellTestBase() {
         assertWebNavigationNote("home")
 
         // One real message, typed with the software keyboard, and the reply streaming in.
-        box?.let { tapComposer(it) }
-        val keyboard = waitKeyboard(true, 8_000)
+        // Read the box's place again just before the tap: the page's layout settles after it first
+        // draws (in run 46148698724 a tap at the earlier place raised no keyboard), and tap once more
+        // at its current place if the keyboard does not come up.
+        (composerRect() ?: box)?.let { tapComposer(it) }
+        if (!waitKeyboard(true, 4_000)) {
+            note("no keyboard after the first tap on the message box at ${composerRect()}; tapping again")
+            composerRect()?.let { tapComposer(it) }
+        }
+        val keyboard = waitKeyboard(true, 6_000)
         note("software keyboard shown for the message: $keyboard")
         shell("input text Say%shello%sin%sthree%swords.")
         sleep(1_000)
