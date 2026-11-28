@@ -22,14 +22,25 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
         let config = ShellConfig.fromEnvironment()
-        let shell = ShellController(config: config)
         let window = UIWindow(windowScene: windowScene)
         if config.forceDark { window.overrideUserInterfaceStyle = .dark }
         // Shows through before the first paint: the system background, so dark mode never flashes white.
         window.backgroundColor = .systemBackground
-        window.rootViewController = ShellHostingController(shell: shell)
-        window.makeKeyAndVisible()
         self.window = window
+        build(config: config, in: window)
+        window.makeKeyAndVisible()
+    }
+
+    /// Builds the app for `config`. A change of server builds it again from scratch (a new web view,
+    /// a new controller), so every "own origin" use follows the chosen server.
+    private func build(config: ShellConfig, in window: UIWindow) {
+        let shell = ShellController(config: config)
+        shell.onRestart = { [weak self, weak window] in
+            guard let self = self, let window = window else { return }
+            ShellConfig.restarting = true
+            self.build(config: ShellConfig.fromEnvironment(), in: window)
+        }
+        window.rootViewController = ShellHostingController(shell: shell)
         self.shell = shell
         shell.start(window: window)
     }

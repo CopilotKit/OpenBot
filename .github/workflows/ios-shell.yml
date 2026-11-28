@@ -185,6 +185,9 @@ jobs:
           # B: the same without the hand-off.
           MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3002 nohup bun app/workbench/mock-server.ts > artifacts/mock-b.log 2>&1 &
           APP_PORT=3011 SERVER_PORT=3002 nohup bun app/serve.ts > artifacts/app-b.log 2>&1 &
+          # C: a "self-hosted" OpenBot on another port, with the hand-off (the self-hosted tests).
+          MOCK_SIGNED_OUT=1 SERVER_PORT=3003 nohup bun app/workbench/mock-server.ts > artifacts/mock-c.log 2>&1 &
+          APP_PORT=3014 SERVER_PORT=3003 nohup bun app/serve.ts > artifacts/app-c.log 2>&1 &
           challenge="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
           for _ in $(seq 1 60); do
             a_page="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3010/ || true)"
@@ -193,8 +196,9 @@ jobs:
             b_handoff="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3011/api/auth/shell/handoff?challenge=$challenge" || true)"
             a_config="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3010/api/auth/shell/config?platform=ios" || true)"
             b_config="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3011/api/auth/shell/config?platform=ios" || true)"
+            c_config="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3014/api/auth/shell/config?platform=ios" || true)"
             if [ "$a_page" = 200 ] && [ "$b_page" = 200 ] && [ "$a_handoff" = 200 ] && [ "$b_handoff" = 404 ] \
-              && [ "$a_config" = 200 ] && [ "$b_config" = 404 ]; then
+              && [ "$a_config" = 200 ] && [ "$b_config" = 404 ] && [ "$c_config" = 200 ]; then
               echo "mock stacks are up (A hand-off $a_handoff, B hand-off $b_handoff)"
               exit 0
             fi
@@ -327,8 +331,8 @@ jobs:
                           -skip-testing:$f/testNoBrowserNotificationOffersInTheShell -skip-testing:$f/testKeyboardKeepsTheMessageBoxVisible
                           -skip-testing:$f/testKeyboardHidesTabBar -skip-testing:$f/testResumeFromBackground
                           -skip-testing:$f/testLoadingSkeleton -skip-testing:$f/testFallbackToWebSignIn) ;;
-            edges) only=(-only-testing:$t/HardeningUITests -only-testing:$t/ShellUITests
-                         -only-testing:$t/HandoffConfigTests -only-testing:$t/ShellURLsTests -only-testing:$t/ShellBackTests
+            edges) only=(-only-testing:$t/HardeningUITests -only-testing:$t/ShellUITests -only-testing:$t/SelfHostedUITests
+                         -only-testing:$t/HandoffConfigTests -only-testing:$t/ShellURLsTests -only-testing:$t/ShellBackTests -only-testing:$t/ServerAddressTests
                          -skip-testing:$t/ShellUITests/testLoadsHostedWebApp) ;;
           esac
           set -o pipefail

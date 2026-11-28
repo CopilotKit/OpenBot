@@ -54,6 +54,8 @@ final class ShellController: NSObject, WebControllerDelegate {
         web.delegate = self
         phaseWatch = model.$phase.sink { [weak web = self.web] phase in web?.signedIn = phase == .signedIn }
         if config.plainWebView { model.phase = .plain }
+        model.serverHost = ServerAddress.display(config.baseURL)
+        model.selfHosted = config.isSelfHosted
         diagnostics.log("launch", [
             "baseURL": Diagnostics.redact(config.baseURL),
             "version": config.version,
@@ -63,6 +65,9 @@ final class ShellController: NSObject, WebControllerDelegate {
             "ephemeralSignIn": config.ephemeralSignIn,
         ])
     }
+
+    /// Set by the scene: builds the app again for the newly chosen server.
+    var onRestart: (() -> Void)?
 
     deinit {
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
@@ -329,6 +334,84 @@ final class ShellController: NSObject, WebControllerDelegate {
             case .scheme, .https:
                 self.handoffMode = mode
                 self.presentSheet(pair: pair, mode: mode, returnTo: "/")
+            }
+        }
+    }
+
+    // MARK: - A self-hosted OpenBot
+
+    /// The quiet control (or Change address on the lock screen): the address field opens.
+    func openAddress(overLock: Bool) {
+        model.addressText = overLock && config.isSelfHosted ? ServerAddress.display(config.baseURL) : ""
+        model.addressError = nil
+        model.addressOverLock = overLock
+        model.addressOpen = true
+    }
+
+    func cancelAddress() {
+        guard !model.addressChecking else { return }
+        model.addressOpen = false
+        model.addressOverLock = false
+        model.addressError = nil
+    }
+
+    /// Continue: check the address is an OpenBot the app can use, then switch to it.
+    func chooseServer(_ typed: String) {
+        guard !model.addressChecking else { return }
+        var allowHTTP = false
+        #if DEBUG
+        allowHTTP = true
+        #endif
+        switch ServerAddress.parse(typed, allowDevelopmentHTTP: allowHTTP) {
+        case .failure(let problem):
+            model.addressError = ServerAddress.message(problem)
+        case .success(let origin):
+            if origin == config.cloudURL {
+                // OpenBot Cloud's own address: simply back to Cloud.
+                switchServer(to: nil)
+                return
+            }
+            if origin == config.baseURL {
+                cancelAddress()
+                return
+            }
+            model.addressChecking = true
+            diagnostics.log("server-choose", ["host": ServerAddress.display(origin)])
+            signInFlow.checkServer(origin) { [weak self] result in
+                guard let self = self else { return }
+                self.model.addressChecking = false
+                if result == .accepted {
+                    self.switchServer(to: origin)
+                } else {
+                    self.model.addressError = SignInFlow.message(result, host: ServerAddress.display(origin))
+                }
+            }
+        }
+    }
+
+    /// Use OpenBot Cloud.
+    func useCloud() {
+        switchServer(to: nil)
+    }
+
+    /// Changing server: the sign-in in progress is dropped and the site's data cleared (awaited),
+    /// then the choice is kept and the app is built again, so every "own origin" use follows it.
+    private func switchServer(to origin: URL?) {
+        diagnostics.log("server-switch", ["to": origin.map(ServerAddress.display) ?? "cloud"])
+        signInFlow.cancel()
+        enterTimeout?.cancel()
+        renewing = false
+        web.stop()
+        model.signIn = .idle
+        model.addressChecking = true
+        // Everything the web view stored, for every site: nothing of one server carries to the other.
+        WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) { [weak self] in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.diagnostics.log("site-data-cleared", ["reason": "server-switch", "all": true])
+                ShellConfig.saveSelfHosted(origin)
+                self.model.addressChecking = false
+                self.onRestart?()
             }
         }
     }

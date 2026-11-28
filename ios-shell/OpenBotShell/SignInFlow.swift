@@ -60,6 +60,62 @@ final class SignInFlow: NSObject, ASWebAuthenticationPresentationContextProvidin
         task.resume()
     }
 
+    /// What checking a self-hosted OpenBot's address found.
+    enum ServerCheck: Equatable {
+        case accepted
+        case notOpenBot
+        case notFound
+        case certificate
+        case noAnswer
+    }
+
+    /// GET `<origin>/api/auth/shell/config?platform=ios`, 10 s, no cookies, no redirects: an OpenBot
+    /// the app can use answers 200 with the config JSON (`handoff` true or false).
+    func checkServer(_ origin: URL, completion: @escaping (ServerCheck) -> Void) {
+        guard let url = URL(string: origin.absoluteString + "/api/auth/shell/config?platform=ios") else {
+            completion(.notOpenBot)
+            return
+        }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10)
+        request.httpShouldHandleCookies = false
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        probeSession.dataTask(with: request) { [weak self] data, response, error in
+            let result: ServerCheck
+            if let error = error as NSError? {
+                switch error.code {
+                case NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed:
+                    result = .notFound
+                case NSURLErrorServerCertificateUntrusted, NSURLErrorServerCertificateHasBadDate,
+                     NSURLErrorServerCertificateHasUnknownRoot, NSURLErrorServerCertificateNotYetValid,
+                     NSURLErrorClientCertificateRejected, NSURLErrorSecureConnectionFailed:
+                    result = .certificate
+                default:
+                    result = .noAnswer
+                }
+            } else if let http = response as? HTTPURLResponse, http.statusCode == 200, let data = data,
+                      let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                      object["handoff"] is Bool {
+                result = .accepted
+            } else {
+                result = .notOpenBot
+            }
+            DispatchQueue.main.async {
+                self?.diagnostics.log("server-check", ["result": "\(result)", "status": (response as? HTTPURLResponse)?.statusCode ?? -1])
+                completion(result)
+            }
+        }.resume()
+    }
+
+    static func message(_ check: ServerCheck, host: String) -> String {
+        switch check {
+        case .accepted: return ""
+        case .notOpenBot: return "\(host) isn't an OpenBot the phone app can use yet. Ask your admin to update it."
+        case .notFound: return "Couldn't find \(host). Check the address."
+        case .certificate: return "\(host)'s certificate isn't trusted, so the app won't connect. Ask your admin to check it."
+        case .noAnswer: return "\(host) didn't answer. Check the address and your connection, then try again."
+        }
+    }
+
     static func describe(_ mode: HandoffMode) -> String {
         switch mode {
         case .unreachable(let reason): return "unreachable " + reason
@@ -80,6 +136,12 @@ final class SignInFlow: NSObject, ASWebAuthenticationPresentationContextProvidin
     }
 
     /// Presents the system sign-in sheet on `url` and waits for the callback `mode` names.
+    /// Drops a sheet in progress (the server is being changed): its ticket, if any, goes nowhere.
+    func cancel() {
+        session?.cancel()
+        session = nil
+    }
+
     func presentSheet(_ url: URL, mode: HandoffMode, ephemeral: Bool, completion: @escaping (SheetOutcome) -> Void) {
         session?.cancel()
         let handler: (URL?, Error?) -> Void = { [weak self] callbackURL, error in

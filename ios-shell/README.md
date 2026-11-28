@@ -71,6 +71,23 @@ What is native:
   - What a simulator cannot tell: how the slide feels under a finger at 120 Hz, whether the picture
     and the live page line up to the pixel on every device, and what the pictures cost in memory on
     an older phone.
+- **A self-hosted OpenBot.** Under Sign in, a quiet "Or sign in to a self-hosted OpenBot" opens an
+  address field in place (the same wording as the Android app). The address is checked first
+  (`GET <origin>/api/auth/shell/config?platform=ios`, 10 s, no cookies, no redirects): only an
+  OpenBot that answers the config is accepted, each other case has its own sentence, and a
+  certificate error never has a way past it. https only (a debug build also takes http for local
+  development hosts). The chosen origin is kept in UserDefaults and is the app's own origin from
+  then on: changing it drops a sign-in in progress, clears everything the web view stored, then
+  builds the app again from scratch (`SceneDelegate.build`), so the bridge, the policy, `enter`,
+  the renewal, downloads, media and the lock screen all follow it. The first screen then says
+  "Signs in to <host>" with a quiet "Use OpenBot Cloud"; the lock screen says "Trying to reach
+  <host>" and, for a self-hosted OpenBot, offers "Change address". A self-hosted OpenBot signs in
+  with the custom scheme (associated domains cover my.open.bot only). iOS idiom where the 2 apps
+  differ: the field's label sits above it rather than floating in it.
+  Later, not built: an address pushed by device management (a managed `serverURL` setting), and
+  certificate authorities a company installs on its phones (iOS trusts a profile-installed root
+  for apps once a person turns on full trust for it in Settings, so the app needs nothing; App
+  Transport Security still applies).
 - **Orientation.** A phone stays in portrait; an iPad turns every way.
 - **What the web view lets through.** `enter` is loaded with the header `OpenBot-Shell: ios` and
   never kept or loaded again (a retry or a restarted web process loads its `to`). Other schemes go

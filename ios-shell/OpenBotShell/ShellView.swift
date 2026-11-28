@@ -10,6 +10,20 @@ struct ShellView: View {
     @ObservedObject var model: AppModel
     @Environment(\.colorScheme) var colorScheme
 
+    private var signInScreen: some View {
+        SignInScreen(
+            model: model,
+            launching: model.phase == .launching,
+            busy: model.signIn != .idle,
+            message: model.signInMessage,
+            signIn: { shell.signIn() },
+            chooseServer: { shell.chooseServer($0) },
+            useCloud: { shell.useCloud() },
+            openAddress: { shell.openAddress(overLock: false) },
+            cancelAddress: { shell.cancelAddress() }
+        )
+    }
+
     var body: some View {
         ZStack {
             Color(uiColor: model.chromeBackground)
@@ -32,18 +46,20 @@ struct ShellView: View {
                 .transition(.asymmetric(insertion: .identity, removal: .opacity))
             }
 
-            if model.showsSignInScreen {
-                SignInScreen(
-                    launching: model.phase == .launching,
-                    busy: model.signIn != .idle,
-                    message: model.signInMessage,
-                    signIn: { shell.signIn() }
-                )
-                .accessibilityHidden(model.showsLock)
+            if model.showsSignInScreen && !model.addressOverLock {
+                signInScreen
+                    .accessibilityHidden(model.showsLock)
             }
 
             if model.showsLock {
-                OfflineLockScreen(reason: model.lockReason, retry: { shell.retryNow() })
+                OfflineLockScreen(reason: model.lockReason, host: model.serverHost,
+                                  changeAddress: model.selfHosted ? { shell.openAddress(overLock: true) } : nil,
+                                  retry: { shell.retryNow() })
+            }
+
+            // Change address from the lock screen: the first screen over the lock, the field open.
+            if model.addressOverLock {
+                signInScreen
             }
 
             #if DEBUG

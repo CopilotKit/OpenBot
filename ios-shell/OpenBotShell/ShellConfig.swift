@@ -5,8 +5,13 @@ import Foundation
 /// The test hooks exist only in DEBUG builds: in a release build every one of them is off whatever
 /// the launch environment says, because the code that reads them is not compiled.
 struct ShellConfig {
-    /// scheme://host[:port] of the OpenBot web app.
+    /// scheme://host[:port] of the OpenBot web app: the chosen self-hosted OpenBot, or OpenBot Cloud.
+    /// Every "own origin" check in the app compares against this.
     let baseURL: URL
+    /// OpenBot Cloud's origin (Info.plist's OpenBotBaseURL; a test build's OPENBOT_BASE_URL).
+    var cloudURL: URL
+    /// A self-hosted OpenBot the person chose (kept in UserDefaults, not a secret).
+    var isSelfHosted: Bool { baseURL != cloudURL }
     /// OPENBOT_BASE_URL as given, path and query included: what the DEBUG plain mode loads.
     var startURL: URL?
     /// CFBundleShortVersionString, told to the page as `__OPENBOT_NATIVE_SHELL__.version`.
@@ -44,6 +49,10 @@ struct ShellConfig {
     /// session left in a web view that shows the sign-in screen.
     var testLateSessionCookie: String?
 
+    /// Set when the app is built again for another server: the launch's test hooks (a reset, planted
+    /// cookies, delays) ran once already and must not run again.
+    static var restarting = false
+
     static func fromEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> ShellConfig {
         let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0"
         // A store build reads nothing from its launch environment: these four exist only in DEBUG
@@ -59,8 +68,14 @@ struct ShellConfig {
         ephemeral = environment["OPENBOT_SHELL_EPHEMERAL_SIGN_IN"] == "1"
         baseOverride = environment["OPENBOT_BASE_URL"]
         #endif
+        let cloud = resolveBaseURL(override: baseOverride)
+        #if DEBUG
+        // A test's reset also forgets a self-hosted choice.
+        if environment["OPENBOT_SHELL_RESET"] == "1", !restarting { saveSelfHosted(nil) }
+        #endif
         var config = ShellConfig(
-            baseURL: resolveBaseURL(override: baseOverride),
+            baseURL: savedSelfHosted() ?? cloud,
+            cloudURL: cloud,
             version: version,
             diagnosticsEnabled: diagnostics,
             testName: testName,
@@ -102,6 +117,21 @@ struct ShellConfig {
         if let value = environment["OPENBOT_SHELL_TEST_LATE_SESSION_COOKIE"], !value.isEmpty {
             config.testLateSessionCookie = value
         }
+        // Built again for another server: the one-shot hooks (a reset, planted cookies, delays,
+        // probes) ran at launch and must not run again; the rest (the hand-off's auto mode, dark,
+        // the forced lock) still hold.
+        if restarting {
+            config.resetDataStore = false
+            config.testSessionCookie = nil
+            config.testPlainSessionCookie = nil
+            config.staleSessionCookie = false
+            config.testLateSessionCookie = nil
+            config.testEnterProbeURL = nil
+            config.testEnterProbeAfterSeconds = nil
+            config.killContentAfterSeconds = nil
+            config.delayFirstLoadSeconds = nil
+            config.debugSheetURL = nil
+        }
         #endif
         return config
     }
@@ -121,6 +151,23 @@ struct ShellConfig {
             if let origin = components.url { return origin }
         }
         return URL(string: "https://my.open.bot")!
+    }
+
+    static let selfHostedKey = "OpenBotSelfHostedOrigin"
+
+    static func savedSelfHosted() -> URL? {
+        guard let text = UserDefaults.standard.string(forKey: selfHostedKey), let url = URL(string: text),
+              url.host != nil else { return nil }
+        return url
+    }
+
+    /// Remembers a self-hosted OpenBot's origin, or forgets it (back to OpenBot Cloud).
+    static func saveSelfHosted(_ origin: URL?) {
+        if let origin = origin {
+            UserDefaults.standard.set(origin.absoluteString, forKey: selfHostedKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: selfHostedKey)
+        }
     }
 
     var baseHost: String { baseURL.host?.lowercased() ?? "" }

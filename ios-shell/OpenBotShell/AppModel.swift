@@ -104,8 +104,20 @@ final class AppModel: ObservableObject {
     /// The first segment of the page's path ("/", "/channel", "/sign"), for tests.
     @Published var webPathRoot = "-"
 
+    // A self-hosted OpenBot (the first screen's quiet control).
+    /// The host the app signs in to, as shown to a person.
+    @Published var serverHost = ""
+    @Published var selfHosted = false
+    /// The address field is open, with what is typed in it, its error and whether it is being checked.
+    @Published var addressOpen = false
+    @Published var addressText = ""
+    @Published var addressError: String?
+    @Published var addressChecking = false
+    /// The first screen opened over the lock screen by Change address.
+    @Published var addressOverLock = false
+
     var showsSignInScreen: Bool {
-        phase == .launching || (phase == .signedOut && signIn != .webFallback)
+        phase == .launching || (phase == .signedOut && signIn != .webFallback) || addressOverLock
     }
 
     var webVisible: Bool {
@@ -138,6 +150,6 @@ final class AppModel: ObservableObject {
 
     /// For UI tests (DEBUG only on screen).
     var debugState: String {
-        "phase=\(phase.rawValue) signIn=\(signIn.rawValue) tab=\(selectedTab.rawValue) nav=\(lastNavigation) commits=\(mainFrameCommits) restarts=\(contentRestarts) skeletons=\(skeletonsShown) cleared=\(siteDataClears) back=\(backMode) lock=\(lockReason) loading=\(pageLoading ? 1 : 0) keyboard=\(keyboardVisible ? 1 : 0) path=\(webPathRoot) dark=\(pageIsDark.map { $0 ? "1" : "0" } ?? "-")"
+        "phase=\(phase.rawValue) signIn=\(signIn.rawValue) tab=\(selectedTab.rawValue) nav=\(lastNavigation) commits=\(mainFrameCommits) restarts=\(contentRestarts) skeletons=\(skeletonsShown) cleared=\(siteDataClears) back=\(backMode) server=\(serverHost) lock=\(lockReason) loading=\(pageLoading ? 1 : 0) keyboard=\(keyboardVisible ? 1 : 0) path=\(webPathRoot) dark=\(pageIsDark.map { $0 ? "1" : "0" } ?? "-")"
     }
 }

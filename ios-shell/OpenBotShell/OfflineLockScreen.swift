@@ -9,6 +9,10 @@ struct OfflineLockScreen: View {
     static let supportAddress = "support@open.bot"
 
     let reason: String
+    /// The host the app is trying to reach, as shown to a person.
+    var host: String = ""
+    /// A self-hosted OpenBot: Change address goes back to the first screen with the address open.
+    var changeAddress: (() -> Void)? = nil
     let retry: () -> Void
 
     var body: some View {
@@ -30,6 +34,12 @@ struct OfflineLockScreen: View {
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("offline-lock-message")
+                    if !host.isEmpty {
+                        Text("Trying to reach \(host)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("offline-lock-host")
+                    }
                     Button(action: retry) {
                         Text("Try again")
                             .font(.headline)
@@ -41,6 +51,17 @@ struct OfflineLockScreen: View {
                     .buttonStyle(.plain)
                     .padding(.top, 8)
                     .accessibilityIdentifier("retry-button")
+                    if let changeAddress = changeAddress {
+                        Button(action: changeAddress) {
+                            Text("Change address")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("change-address")
+                    }
                     HStack(spacing: 4) {
                         Text("Need help?")
                             .foregroundStyle(.secondary)

@@ -122,3 +122,41 @@ final class ShellBackTests: XCTestCase {
         XCTAssertFalse(ShellBack.decide(canGoBack: false).usesWebKitGesture)
     }
 }
+
+/// A self-hosted OpenBot's address.
+final class ServerAddressTests: XCTestCase {
+    func parse(_ text: String, dev: Bool = false) -> String {
+        switch ServerAddress.parse(text, allowDevelopmentHTTP: dev) {
+        case .success(let url): return url.absoluteString
+        case .failure(let problem): return "\(problem)"
+        }
+    }
+
+    func testAcceptedForms() {
+        XCTAssertEqual(parse("openbot.acme.com"), "https://openbot.acme.com")
+        XCTAssertEqual(parse("  OpenBot.Acme.com/  "), "https://openbot.acme.com")
+        XCTAssertEqual(parse("openbot.acme.com:8443"), "https://openbot.acme.com:8443")
+        XCTAssertEqual(parse("https://openbot.acme.com/some/path?x=1"), "https://openbot.acme.com")
+        XCTAssertEqual(parse("https://openbot.acme.com:443"), "https://openbot.acme.com")
+    }
+
+    func testRefused() {
+        XCTAssertEqual(parse(""), "empty")
+        XCTAssertEqual(parse("not an address"), "notAnAddress")
+        XCTAssertEqual(parse("ftp://openbot.acme.com"), "notAnAddress")
+        XCTAssertEqual(parse("https://me:secret@openbot.acme.com"), "credentials")
+        XCTAssertEqual(parse("http://openbot.acme.com"), "insecure")
+        XCTAssertEqual(parse("http://127.0.0.1:3014"), "insecure")
+    }
+
+    func testDevelopmentHTTPOnlyWhenAllowed() {
+        XCTAssertEqual(parse("http://127.0.0.1:3014", dev: true), "http://127.0.0.1:3014")
+        XCTAssertEqual(parse("http://openbot.acme.com", dev: true), "insecure")
+        XCTAssertEqual(parse("http://box.test:3000", dev: true), "http://box.test:3000")
+    }
+
+    func testDisplay() {
+        XCTAssertEqual(ServerAddress.display(URL(string: "https://openbot.acme.com")!), "openbot.acme.com")
+        XCTAssertEqual(ServerAddress.display(URL(string: "https://openbot.acme.com:8443")!), "openbot.acme.com:8443")
+    }
+}

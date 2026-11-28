@@ -145,3 +145,69 @@ enum ShellBack: Equatable {
     /// a mixed history must not be walked).
     var usesWebKitGesture: Bool { self == .webHistory }
 }
+
+/// A self-hosted OpenBot's address as a person types it, checked before anything is fetched.
+/// Pure, so the UI test target tests it.
+enum ServerAddress {
+    enum Problem: Equatable {
+        case empty
+        case notAnAddress
+        case credentials
+        case insecure
+    }
+
+    /// The origin (scheme, host, port; no path) for what was typed, or why it cannot be one. A host
+    /// alone means https. `http` only for a development host, and only where `allowDevelopmentHTTP`
+    /// (DEBUG builds).
+    static func parse(_ typed: String, allowDevelopmentHTTP: Bool) -> Result<URL, Problem> {
+        let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return .failure(.empty) }
+        let lower = text.lowercased()
+        let withScheme: String
+        if lower.hasPrefix("https://") || lower.hasPrefix("http://") {
+            withScheme = text
+        } else if lower.contains("://") {
+            return .failure(.notAnAddress)
+        } else {
+            withScheme = "https://" + text
+        }
+        guard let components = URLComponents(string: withScheme), let rawHost = components.host, !rawHost.isEmpty else {
+            return .failure(.notAnAddress)
+        }
+        if components.user != nil || components.password != nil { return .failure(.credentials) }
+        let host = rawHost.lowercased()
+        let hostOK = host.range(of: "^[a-z0-9.\\-\\[\\]:]+$", options: .regularExpression) != nil
+            && !host.hasPrefix(".") && !host.hasSuffix(".") && !host.contains("..")
+        guard hostOK, host.contains(".") || isDevelopmentHost(host) else { return .failure(.notAnAddress) }
+        let scheme = (components.scheme ?? "https").lowercased()
+        if scheme == "http" && !(allowDevelopmentHTTP && isDevelopmentHost(host)) { return .failure(.insecure) }
+        var origin = URLComponents()
+        origin.scheme = scheme
+        origin.host = host
+        let defaultPort = scheme == "https" ? 443 : 80
+        if let port = components.port, port != defaultPort { origin.port = port }
+        guard let url = origin.url else { return .failure(.notAnAddress) }
+        return .success(url)
+    }
+
+    static func isDevelopmentHost(_ host: String) -> Bool {
+        ["localhost", "127.0.0.1", "[::1]", "::1"].contains(host) || host.hasSuffix(".localhost") || host.hasSuffix(".test")
+    }
+
+    /// The host as it is shown back to a person: lower case, the port only when it is not the default.
+    static func display(_ origin: URL) -> String {
+        guard let host = origin.host else { return origin.absoluteString }
+        if let port = origin.port { return "\(host):\(port)" }
+        return host
+    }
+
+    /// The sentence for a problem with what was typed (the openbot-copy wording, as on Android).
+    static func message(_ problem: Problem) -> String {
+        switch problem {
+        case .empty: return "Enter your OpenBot's address, like openbot.example.com."
+        case .notAnAddress: return "That doesn't look like an address. Enter one like openbot.example.com."
+        case .credentials: return "Leave the user name and password out of the address."
+        case .insecure: return "The app connects only over https. Use an address that starts with https:// or has no prefix."
+        }
+    }
+}
