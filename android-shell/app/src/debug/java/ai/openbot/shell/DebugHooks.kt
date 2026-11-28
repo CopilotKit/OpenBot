@@ -58,6 +58,7 @@ object DebugHooks {
             isClickable = false
             isFocusable = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            tag = "debug-state"
         }
         root.addView(label, FrameLayout.LayoutParams(4, 4, Gravity.TOP or Gravity.START))
         return { state ->

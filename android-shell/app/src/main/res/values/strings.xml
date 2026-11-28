@@ -21,11 +21,6 @@
     <string name="support_address" translatable="false">support@open.bot</string>
 
     <string name="loading">Loading</string>
-    <string name="more">More</string>
-    <string name="menu_reload">Reload</string>
-    <string name="menu_sign_out">Sign out</string>
-    <string name="sign_out_question">Sign out of OpenBot?</string>
-    <string name="sign_out_confirm">Sign out</string>
 
     <string name="dialog_ok">OK</string>
     <string name="dialog_cancel">Cancel</string>

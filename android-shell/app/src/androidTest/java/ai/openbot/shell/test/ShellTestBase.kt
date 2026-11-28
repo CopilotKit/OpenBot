@@ -210,8 +210,19 @@ abstract class ShellTestBase {
         return null
     }
 
-    fun debugState(): String =
-        device.findObject(By.descStartsWith("debug-state"))?.contentDescription?.removePrefix("debug-state ") ?: "(no debug-state)"
+    /** The debug build's state line: read from the app's own view (the test runs in its process). */
+    fun debugState(): String {
+        if (variant != "debug") return "(no debug-state: $variant build)"
+        var state: String? = null
+        instrumentation.runOnMainSync {
+            val registry = ActivityLifecycleMonitorRegistry.getInstance()
+            val activity = listOf(Stage.RESUMED, Stage.PAUSED, Stage.STARTED, Stage.STOPPED)
+                .flatMap { registry.getActivitiesInStage(it) }
+                .firstOrNull { it.javaClass.name == ACTIVITY }
+            state = activity?.window?.decorView?.findViewWithTag<View>("debug-state")?.contentDescription?.toString()
+        }
+        return state?.removePrefix("debug-state ") ?: "(no debug-state)"
+    }
 
     fun stateValue(key: String): String? =
         debugState().split(" ").firstOrNull { it.startsWith("$key=") }?.substringAfter("=")
@@ -398,38 +409,11 @@ abstract class ShellTestBase {
         return ok
     }
 
+    /** A video mark in plain decimal seconds (Kotlin prints big doubles in E notation). */
+    fun mark(kind: String) = note("video-mark $kind " + String.format(java.util.Locale.US, "%.3f", System.currentTimeMillis() / 1000.0))
+
     /** True when the run is a recording (the video workflow): scenes paced and shortened for watching. */
     val forVideo: Boolean get() = args.getString("video") == "1"
-
-    // The native More menu. ------------------------------------------------------------------------------
-
-    /** Opens the More menu; answers the labels of its items. */
-    fun openMoreMenu(): List<String> {
-        val more = waitFor("more_button", 5_000) ?: return emptyList()
-        more.click()
-        sleep(800)
-        return listOf("Reload", "Sign out").filter { label -> device.findObject(By.text(label))?.let { it.applicationPackage == pkg } == true }
-    }
-
-    /** More, Sign out, then the confirmation's Sign out (or Cancel). True when the dialog asked. */
-    fun signOutFromMoreMenu(confirm: Boolean, moment: String): Boolean {
-        val items = openMoreMenu()
-        check(items == listOf("Reload", "Sign out"), "$moment: the More menu has $items, not exactly Reload and Sign out")
-        device.findObject(By.text("Sign out"))?.click() ?: return false
-        val question = device.wait(Until.findObject(By.text("Sign out of OpenBot?")), 5_000)
-        check(question != null, "$moment: no native confirmation 'Sign out of OpenBot?'")
-        sleep(600)
-        screenshot("$moment-sign-out-confirmation")
-        val button = if (confirm) {
-            // The dialog's own Sign out (the menu has closed: the only one on screen).
-            device.findObjects(By.text("Sign out")).lastOrNull() ?: device.findObject(By.text("SIGN OUT"))
-        } else {
-            device.findObject(By.text("Cancel")) ?: device.findObject(By.text("CANCEL"))
-        }
-        check(button != null, "$moment: the confirmation has no ${if (confirm) "Sign out" else "Cancel"}")
-        button?.click()
-        return question != null
-    }
 
     // The real backend. --------------------------------------------------------------------------------
 

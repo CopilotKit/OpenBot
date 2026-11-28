@@ -122,14 +122,15 @@ class ShellController(
     var webPathRoot = "-"
         private set
 
-    /** A main-frame page is loading and has not rendered yet: the loading skeleton covers the web area. */
-    var pageLoading = false
+    /**
+     * The web area has no rendered page yet: the loading skeleton covers it. This is the web area's
+     * DEFAULT state: true from the start, true again whenever the web area comes into view and when a
+     * full load starts, false only once the page has rendered. So no white WebView ever shows.
+     */
+    var pageLoading = true
         private set
+    private var lastWebVisible = false
     private var loadingSince = 0L
-
-    /** A native sign-out is waiting for the web app's own sign-out to land on /sign. */
-    var signingOut = false
-        private set
 
     /** The sign-in screen; while entering, the web area (and its skeleton) shows instead. */
     val showsSignInScreen: Boolean
@@ -160,9 +161,19 @@ class ShellController(
         get() = "phase=${phase.label} signIn=${signIn.label} tab=${selectedTab.key} nav=$lastNavigation " +
             "commits=$mainFrameCommits lock=$lockReason keyboard=${if (keyboardVisible) 1 else 0} " +
             "path=$webPathRoot dark=${pageIsDark?.let { if (it) "1" else "0" } ?: "-"} " +
-            "skeleton=${if (showsSkeleton) 1 else 0} signingOut=${if (signingOut) 1 else 0}"
+            "skeleton=${if (showsSkeleton) 1 else 0}"
 
-    private fun changed() = activity.render()
+    private fun changed() {
+        val visible = webVisible
+        if (visible && !lastWebVisible && !pageLoading) {
+            // The web area comes into view: covered until a page renders in it.
+            pageLoading = true
+            loadingSince = System.currentTimeMillis()
+            main.removeCallbacks(hideSkeleton)
+        }
+        lastWebVisible = visible
+        activity.render()
+    }
 
     // Sign-in bookkeeping. ------------------------------------------------------------------------
 
@@ -251,7 +262,8 @@ class ShellController(
         }
         fun run(index: Int) {
             if (index >= steps.size) {
-                main.post { done() }
+                // At once when there is nothing to prepare: the first frame is already the tabs.
+                if (index == 0) done() else main.post { done() }
                 return
             }
             steps[index] { main.post { run(index + 1) } }
@@ -446,8 +458,6 @@ class ShellController(
     private fun sessionEnded(reason: String) {
         diagnostics.log("session-ended", mapOf("reason" to reason))
         main.removeCallbacks(enterTimeout)
-        main.removeCallbacks(signOutTimeout)
-        signingOut = false
         stopSkeleton()
         renewing = false
         phase = Phase.SIGNED_OUT
@@ -507,53 +517,6 @@ class ShellController(
             pageLoading = false
             changed()
         }
-    }
-
-    // The More menu. -------------------------------------------------------------------------------------
-
-    fun reload() {
-        if (phase != Phase.SIGNED_IN) return
-        web.reloadPage()
-    }
-
-    private val signOutTimeout = Runnable {
-        diagnostics.log("native-sign-out", mapOf("result" to "timeout"))
-        sessionEnded("native-sign-out-timeout")
-    }
-
-    /**
-     * Sign out from the native menu, whatever the web app's version: the web app's own sign-out in
-     * the WebView (Better Auth's POST /api/auth/sign-out; on OpenBot Cloud then the hosted sign-out,
-     * which ends the OpenBot by CopilotKit sign-in too and returns to /sign), up to 8 s for /sign or
-     * `signed-out`, then the session cookies go and the native sign-in shows. Offline: at once.
-     */
-    fun nativeSignOut() {
-        if (phase != Phase.SIGNED_IN || signingOut) return
-        if (offline || showsLock) {
-            diagnostics.log("native-sign-out", mapOf("result" to "offline"))
-            sessionEnded("native-sign-out-offline")
-            return
-        }
-        signingOut = true
-        changed()
-        val hosted = config.baseHost == "open.bot" || config.baseHost.endsWith(".open.bot")
-        val then = if (hosted) {
-            "/api/auth/hosted/sign-out?returnTo=" + Uri.encode(config.origin + "/sign")
-        } else {
-            "/sign"
-        }
-        diagnostics.log("native-sign-out", mapOf("result" to "started", "hosted" to hosted))
-        main.postDelayed(signOutTimeout, SIGN_OUT_TIMEOUT_MS)
-        val script = """
-            (function (next) {
-              var go = function () { location.assign(next); };
-              try {
-                fetch("/api/auth/sign-out", { method: "POST", credentials: "include",
-                  headers: { "content-type": "application/json" }, body: "{}" }).then(go, go);
-              } catch (e) { go(); }
-            })(${WebController.jsString(then)})
-        """.trimIndent()
-        web.webView.evaluateJavascript(script, null)
     }
 
     // Tabs, back, chrome. ---------------------------------------------------------------------------
@@ -771,7 +734,6 @@ class ShellController(
 
     companion object {
         const val MIN_SKELETON_MS = 300L
-        const val SIGN_OUT_TIMEOUT_MS = 8_000L
         const val NO_READY_MS = 1_500L
     }
 }

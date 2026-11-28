@@ -16,11 +16,11 @@ class DemoTourTest : ShellTestBase() {
 
     @Test
     fun testDemoTour() {
-        note("video-mark start ${System.currentTimeMillis() / 1000.0}")
+        mark("start")
         try {
             tour()
         } finally {
-            note("video-mark end ${System.currentTimeMillis() / 1000.0}")
+            mark("end")
         }
     }
 

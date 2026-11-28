@@ -79,7 +79,6 @@ SUITE2 = [
     "ShellFlowTest#testKeyboardHidesTabBar",
     "ShellFlowTest#testResumeFromBackground",
     "ShellFlowTest#testLoadingSkeleton",
-    "ShellFlowTest#testNativeMoreMenuSignOut",
     "ShellFlowTest#testLockLiftsWhenServerComesBack",
 ]
 DEMO = ["DemoTourTest#testDemoTour"]
@@ -106,7 +105,11 @@ STATUS = {"0": "passed", "-1": "failed", "-2": "failed", "-3": "skipped", "-4": 
 
 
 def adb(*args, timeout=120, check=False):
-    return subprocess.run(["adb", *args], capture_output=True, text=True, timeout=timeout, check=check)
+    try:
+        return subprocess.run(["adb", *args], capture_output=True, text=True, timeout=timeout, check=check)
+    except subprocess.TimeoutExpired:
+        print(f"    adb {' '.join(args)[:60]} timed out", flush=True)
+        return subprocess.CompletedProcess(args, 1, "", "timeout")
 
 
 def is_private(test_id):
@@ -286,7 +289,11 @@ def run_one(test_id, results, logs):
         message = re.sub(r"^org\.junit\.AssumptionViolatedException: ", "", stack.splitlines()[0])
     # Evidence: logcat and screenshots, private tests apart.
     target = private if is_private(test_id) else artifacts
-    log = adb("logcat", "-d", "-v", "threadtime", timeout=120).stdout
+    try:
+        log = adb("logcat", "-d", "-v", "threadtime", timeout=300).stdout
+    except subprocess.TimeoutExpired:
+        log = ""
+        print("    logcat did not answer in 5 minutes", flush=True)
     for value in SECRET_ARGS.values():
         if value:
             log = log.replace(value, "***")

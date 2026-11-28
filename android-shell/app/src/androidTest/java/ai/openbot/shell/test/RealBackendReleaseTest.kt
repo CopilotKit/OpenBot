@@ -93,7 +93,7 @@ class RealBackendReleaseTest : ShellTestBase() {
      * The real sign-in a person does on production today, with no hook: fresh install, native
      * sign-in, Sign in, config 404, the real web sign-in in the WebView, OpenBot by CopilotKit's page,
      * Google, email, password, 2-Step, "Try another way", the authenticator code, back on
-     * my.open.bot signed in with the bottom bar, the journey, then the native Sign out. Runs only when
+     * my.open.bot signed in with the bottom bar, and a short journey. Runs only when
      * started by hand with google_sign_in on (each attempt sends a prompt to the account's phone).
      * If Google refuses Android's WebView (disallowed_useragent), that is recorded and the test
      * skips with "refused": the runner then proves the Custom Tab path instead. The user agent is
@@ -110,7 +110,7 @@ class RealBackendReleaseTest : ShellTestBase() {
         val password = secret(names[1]) ?: skip("the Google password secret is not set")
         val totp = secret(names[2])?.let { Totp.base32Decode(it) } ?: skip("the TOTP secret is not set or not base32")
         requireProduction()
-        note("video-mark start ${System.currentTimeMillis() / 1000.0}")
+        mark("start")
         try {
             launchPlain(null, "google-webview")
             val button = waitFor("sign_in_button", 15_000) ?: skip("no Sign in button")
@@ -138,18 +138,15 @@ class RealBackendReleaseTest : ShellTestBase() {
             screenshot("4-after-google")
             note("Google sign-in in the WebView reached the tabs: ${home != null}")
             if (home == null) skip("Google's sign-in in the WebView did not end signed in")
-            // A short journey, then the native Sign out.
+            // A short journey.
             tab(Tab.BOTS)?.click()
             sleep(4_000)
             screenshot("5-bots")
             tab(Tab.HOME)?.click()
             sleep(3_000)
-            signOutFromMoreMenu(confirm = true, moment = "6")
-            check(waitFor("sign_in_button", 15_000) != null, "the native Sign out did not reach the native sign-in")
-            sleep(2_000)
-            screenshot("7-signed-out")
+            screenshot("6-home")
         } finally {
-            note("video-mark end ${System.currentTimeMillis() / 1000.0}")
+            mark("end")
         }
     }
 }

@@ -213,11 +213,11 @@ class RealBackendDebugTest : ShellTestBase() {
         val password = secret(names[1]) ?: skip("the Google password secret is not set")
         val totpSecret = secret(names[2])?.let { Totp.base32Decode(it) } ?: skip("the TOTP secret is not set or not base32")
         requireProduction()
-        note("video-mark start ${System.currentTimeMillis() / 1000.0}")
+        mark("start")
         try {
             googleSignIn(email, password, totpSecret)
         } finally {
-            note("video-mark end ${System.currentTimeMillis() / 1000.0}")
+            mark("end")
         }
     }
 
@@ -251,7 +251,7 @@ class RealBackendDebugTest : ShellTestBase() {
         note("secret-inputs: ${if (session == null) "absent" else "present"}")
         if (session == null) skip("OPENBOT_SHELL_TEST_SESSION is not set")
         requireProduction()
-        note("video-mark start ${System.currentTimeMillis() / 1000.0}")
+        mark("start")
         launch(null, "session", extras = mapOf("openbot.test_session_cookie" to session))
         if (forVideo) {
             val seen = waitFor("loading_skeleton", 3_000) != null
@@ -325,18 +325,6 @@ class RealBackendDebugTest : ShellTestBase() {
 
         tab(Tab.HOME)?.click()
         sleep(3_000)
-        // The native More menu on today's production web app: Reload, and Sign out up to its
-        // confirmation (Cancel: signing out would end the session the secret holds).
-        val items = openMoreMenu()
-        check(items == listOf("Reload", "Sign out"), "the More menu has $items")
-        screenshot("j7b-more-menu")
-        device.findObject(By.text("Reload"))?.click()
-        note("Reload showed the skeleton: ${waitFor("loading_skeleton", 2_000) != null}")
-        check(waitGone("loading_skeleton", 20_000), "the skeleton stayed after Reload")
-        sleep(2_000)
-        signOutFromMoreMenu(confirm = false, moment = "j7c")
-        sleep(1_000)
-        check(waitForTab(Tab.HOME, 3_000) != null, "Cancel on the sign-out confirmation signed out")
         // Background (40 s; about 6 s in the recording), then back.
         device.pressHome()
         sleep(if (forVideo) 6_000 else 40_000)
@@ -364,7 +352,7 @@ class RealBackendDebugTest : ShellTestBase() {
             note("cold relaunch: bot check shown ${challengeShown()}; cookie names ${cookieNames()}")
             note("relaunched: ${debugState()}")
         } finally {
-            note("video-mark end ${System.currentTimeMillis() / 1000.0}")
+            mark("end")
         }
     }
 

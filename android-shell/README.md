@@ -37,16 +37,16 @@ What is native:
   navigate with the `openbot:open` event and loads the page if nobody handled it. The page's `route`
   messages select the tab. One WebView for all tabs. The bar hides while the keyboard is up. The bar,
   the status bar and the navigation bar take the page's background colour and light or dark style.
-- **More.** A `more_vert` icon button at the end of the bottom bar's row (`more_button`), visible only
-  when signed in and hidden with the bar. Its menu: Reload (the page again, with the skeleton) and
-  Sign out (a native confirmation "Sign out of OpenBot?", then the web app's own sign-out in the
-  WebView: Better Auth's `POST /api/auth/sign-out`, and on OpenBot Cloud the hosted sign-out that ends
-  the OpenBot by CopilotKit sign-in too; up to 8 s for `/sign` or `signed-out`; then the two session
-  cookies go and the native sign-in shows; offline, at once). It works whatever the web app's version.
-- **The loading skeleton.** `LoadingSkeletonView` (`loading_skeleton`, "Loading") covers the web area
-  (between the status bar and the bottom bar, which stays usable) from the start of every full page
-  load until the page has rendered: 200 ms after the page's `ready`, or when the page has finished and
-  its body has text (a web app without the bridge), never shorter than 300 ms. Neutral shapes in
+- **Signing out.** The web app's own sign-out: the shell notices the bridge's `signed-out` message or
+  the WebView landing on `/sign`, deletes the two session cookies (and no others) and shows its own
+  sign-in screen.
+- **The loading skeleton.** `LoadingSkeletonView` (`loading_skeleton`, "Loading") is the web area's
+  default state: it covers the area (between the status bar and the bottom bar, which stays usable)
+  from the instant the area is shown (cold launch with a session, the return from the Custom Tab before
+  `enter` loads, the web sign-in, the lock lifting, a recreated WebView) and from the start of every
+  full page load, until the page has rendered: 200 ms after the page's `ready`, or 1.5 s after the page
+  finished without one (a web app without the bridge, or a bot check that must stay usable), never
+  shorter than 300 ms. The WebView's own background is the app's or the page's colour, never white. Neutral shapes in
   surface-variant tones with a left-to-right highlight (1.3 s, linear); still when animations are off.
   A load failure hands over to the lock screen.
 - **The lock screen.** No network (`ConnectivityManager` default-network callback), or the web app

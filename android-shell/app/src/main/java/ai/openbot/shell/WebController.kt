@@ -187,48 +187,6 @@ class WebController(
         webView.loadUrl(url)
     }
 
-    /** The More menu's Reload: the page again, from the network. */
-    fun reloadPage() {
-        diagnostics.log("reload", mapOf("url" to Diagnostics.redact(webView.url)))
-        delegate?.onFullLoad()
-        lastLoadFailed = false
-        armWatchdog()
-        webView.reload()
-    }
-
-    fun loadPath(path: String) = load(config.url(path))
-
-    /**
-     * Opens a page of the web app through the page's own router with `openbot:open` when the page
-     * is up, else by loading it. Answers "event" or "load".
-     */
-    fun open(path: String, done: (String) -> Unit) {
-        if (!pageReady || !config.isOwnOrigin(webView.url)) {
-            diagnostics.log("open", mapOf("path" to path, "mode" to "load", "why" to "page-not-ready"))
-            loadPath(path)
-            done("load")
-            return
-        }
-        val script = """
-            (function (p) {
-              try {
-                return window.dispatchEvent(new CustomEvent("openbot:open", { cancelable: true, detail: { path: p } }));
-              } catch (e) { return true; }
-            })(${jsString(path)})
-        """.trimIndent()
-        webView.evaluateJavascript(script) { result ->
-            // dispatchEvent answers false when a listener called preventDefault: the page handled it.
-            if (result == "false") {
-                diagnostics.log("open", mapOf("path" to path, "mode" to "event"))
-                done("event")
-            } else {
-                diagnostics.log("open", mapOf("path" to path, "mode" to "load", "why" to if (result == "true") "not-handled" else "script-error"))
-                loadPath(path)
-                done("load")
-            }
-        }
-    }
-
     fun retry() {
         diagnostics.log("retry", mapOf("url" to Diagnostics.redact(lastRequestedUrl)))
         val current = webView.url

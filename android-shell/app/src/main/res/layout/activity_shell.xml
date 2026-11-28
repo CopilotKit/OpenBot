@@ -46,33 +46,13 @@
                 android:visibility="gone" />
         </FrameLayout>
 
-        <!-- The bottom bar's row: the three tabs, and the native More menu at its end. -->
-        <LinearLayout
-            android:id="@+id/bottom_bar"
+        <com.google.android.material.bottomnavigation.BottomNavigationView
+            android:id="@+id/bottom_nav"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:visibility="gone">
-
-            <com.google.android.material.bottomnavigation.BottomNavigationView
-                android:id="@+id/bottom_nav"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                app:labelVisibilityMode="labeled"
-                app:menu="@menu/tabs" />
-
-            <ImageButton
-                android:id="@+id/more_button"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_gravity="top"
-                android:layout_marginTop="4dp"
-                android:layout_marginEnd="4dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/more"
-                android:src="@drawable/ic_more_vert" />
-        </LinearLayout>
+            android:visibility="gone"
+            app:labelVisibilityMode="labeled"
+            app:menu="@menu/tabs" />
     </LinearLayout>
 
     <include
