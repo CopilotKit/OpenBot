@@ -454,6 +454,8 @@ describe("what the shell is told", () => {
           tab: "home",
           signedIn: false,
           canGoBack: false,
+          depth: 1,
+          scrollRestored: true,
         },
         {
           type: "route",
@@ -461,6 +463,8 @@ describe("what the shell is told", () => {
           tab: "bots",
           signedIn: false,
           canGoBack: false,
+          depth: 1,
+          scrollRestored: true,
         },
         {
           type: "route",
@@ -468,6 +472,8 @@ describe("what the shell is told", () => {
           tab: "conversations",
           signedIn: false,
           canGoBack: false,
+          depth: 1,
+          scrollRestored: true,
         },
         {
           type: "route",
@@ -475,6 +481,8 @@ describe("what the shell is told", () => {
           tab: "home",
           signedIn: false,
           canGoBack: false,
+          depth: 1,
+          scrollRestored: true,
         },
       ]),
     );
@@ -536,6 +544,8 @@ describe("the tabs' stacks in the shell", () => {
         path: "/bots",
         tab: "bots",
         canGoBack: false,
+        depth: 1,
+        scrollRestored: true,
       }),
     );
     // In the shell the stacks are the history: the web view's own stays one entry long.
@@ -619,6 +629,202 @@ describe("the tabs' stacks in the shell", () => {
     });
     await settleReactWork();
     expect(router.state.location.pathname).toBe("/channel/c-4");
+  });
+});
+
+describe("the app's swipe back", () => {
+  type Heard = {
+    type: string;
+    direction?: string;
+    depth?: number;
+    path?: string;
+    at: number;
+    showing: string;
+  };
+  /**
+   * What the app hears, with when and what the page was showing at that moment. On iOS through its
+   * handler, which answers `will-navigate` with `openbot:navigate-ok` when `answer` is set; on Android
+   * through its object, which never answers.
+   */
+  function hear(platform: "ios" | "android", answer = false): Heard[] {
+    const heard: Heard[] = [];
+    const page = window as unknown as Record<string, unknown>;
+    page.__OPENBOT_NATIVE_SHELL__ = { platform, version: "0.1", bridge: 1 };
+    forgetNativeShellForTests();
+    const take = (message: Record<string, unknown>) => {
+      heard.push({
+        ...(message as { type: string }),
+        at: performance.now(),
+        showing: document.body.textContent ?? "",
+      });
+      if (answer && message.type === "will-navigate")
+        window.dispatchEvent(new CustomEvent("openbot:navigate-ok"));
+    };
+    if (platform === "ios")
+      page.webkit = {
+        messageHandlers: { openbotShell: { postMessage: take } },
+      };
+    else
+      page.OpenBotShellAndroid = {
+        postMessage: (json: string) => take(JSON.parse(json)),
+      };
+    return heard;
+  }
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).OpenBotShellAndroid;
+  });
+  const of = (heard: Heard[], type: string) =>
+    heard.filter((message) => message.type === type);
+  const toConversation = (channelId: string, replace = false) =>
+    ({ to: "/channel/$channelId", params: { channelId }, replace }) as const;
+
+  test("depth: 1 at a root, deeper as pages open, back down on Back, kept by a replace, a tab's own", async () => {
+    inShell(true);
+    const heard = hear("ios", true);
+    serve([]);
+    const { view, router } = renderApp("/conversations");
+    await view.findByText("No conversations yet");
+    await act(() => router.navigate(toConversation("c-1")));
+    await view.findByText("A conversation");
+    await act(() => router.navigate(toConversation("c-2", true)));
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/channel/c-2"),
+    );
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("openbot:open", {
+          detail: { path: "/bots" },
+          cancelable: true,
+        }),
+      );
+    });
+    await view.findByText("The roster");
+    await waitFor(() =>
+      expect(
+        of(heard, "route").map(({ path, depth }) => [path, depth]),
+      ).toEqual([
+        ["/conversations", 1],
+        ["/channel/c-1", 2],
+        ["/channel/c-2", 2],
+        ["/bots", 1],
+      ]),
+    );
+  });
+
+  test("a cold deep link starts at depth 2", async () => {
+    inShell(true);
+    const heard = hear("ios");
+    serve([]);
+    const { view } = renderApp("/channel/c-9");
+    await view.findByText("A conversation");
+    await waitFor(() =>
+      expect(of(heard, "route")[0]).toMatchObject({
+        path: "/channel/c-9",
+        depth: 2,
+        canGoBack: true,
+      }),
+    );
+  });
+
+  test("will-navigate comes before the page changes, with its direction and where it leads", async () => {
+    inShell(true);
+    const heard = hear("ios", true);
+    serve([]);
+    const { view, router } = renderApp("/conversations");
+    await view.findByText("No conversations yet");
+    await act(() => router.navigate(toConversation("c-1")));
+    await view.findByText("A conversation");
+    fireEvent.click(view.getByRole("button", { name: "Back" }));
+    await view.findByText("No conversations yet");
+    const announced = of(heard, "will-navigate");
+    expect(
+      announced.map(({ direction, depth }) => ({ direction, depth })),
+    ).toEqual([
+      { direction: "push", depth: 2 },
+      { direction: "back", depth: 1 },
+    ]);
+    // Each while the page it leaves is still on screen.
+    expect(announced[0]?.showing).toContain("No conversations yet");
+    expect(announced[1]?.showing).toContain("A conversation");
+  });
+
+  test("on iOS with no answer the page goes ahead after 120 ms; with an answer, at once", async () => {
+    inShell(true);
+    const silent = hear("ios");
+    serve([]);
+    const first = renderApp("/conversations");
+    await first.view.findByText("No conversations yet");
+    const asked = performance.now();
+    await act(() => first.router.navigate(toConversation("c-1")));
+    await first.view.findByText("A conversation");
+    const waited = performance.now() - asked;
+    expect(of(silent, "will-navigate")).toHaveLength(1);
+    expect(waited).toBeGreaterThanOrEqual(110);
+    expect(waited).toBeLessThan(1000);
+    cleanup();
+
+    inShell(true);
+    const answering = hear("ios", true);
+    serve([]);
+    const second = renderApp("/conversations");
+    await second.view.findByText("No conversations yet");
+    const askedAgain = performance.now();
+    await act(() => second.router.navigate(toConversation("c-1")));
+    await second.view.findByText("A conversation");
+    expect(of(answering, "will-navigate")).toHaveLength(1);
+    expect(performance.now() - askedAgain).toBeLessThan(110);
+  });
+
+  test("on Android it is said and never waited for", async () => {
+    inShell(true);
+    const heard = hear("android");
+    serve([]);
+    const { view, router } = renderApp("/conversations");
+    await view.findByText("No conversations yet");
+    const asked = performance.now();
+    await act(() => router.navigate(toConversation("c-1")));
+    await view.findByText("A conversation");
+    expect(performance.now() - asked).toBeLessThan(110);
+    expect(of(heard, "will-navigate")).toHaveLength(1);
+  });
+
+  test("in a browser nothing is said or waited for", async () => {
+    inShell(false);
+    const heard = listen();
+    serve([]);
+    const { view, router } = renderApp("/conversations");
+    await waitFor(() =>
+      expect(view.getAllByText("No conversations yet").length).toBeGreaterThan(
+        0,
+      ),
+    );
+    await act(() => router.navigate(toConversation("c-1")));
+    await view.findByText("A conversation");
+    expect(heard).toEqual([]);
+  });
+
+  test("Back the app asks for is not announced back to it", async () => {
+    inShell(true);
+    const heard = hear("ios", true);
+    serve([]);
+    const { view, router } = renderApp("/conversations");
+    await view.findByText("No conversations yet");
+    await act(() => router.navigate(toConversation("c-1")));
+    await view.findByText("A conversation");
+    act(() => {
+      window.dispatchEvent(new CustomEvent("openbot:back"));
+    });
+    await view.findByText("No conversations yet");
+    expect(
+      of(heard, "will-navigate").map(({ direction }) => direction),
+    ).toEqual(["push"]);
+    await waitFor(() =>
+      expect(of(heard, "route").at(-1)).toMatchObject({
+        path: "/conversations",
+        depth: 1,
+        scrollRestored: true,
+      }),
+    );
   });
 });
 
@@ -755,6 +961,8 @@ describe("when the shell hears ready", () => {
           tab: "home",
           signedIn: false,
           canGoBack: false,
+          depth: 1,
+          scrollRestored: true,
         },
       ]),
     );
@@ -788,6 +996,8 @@ describe("when the shell hears ready", () => {
       tab: "home",
       signedIn: false,
       canGoBack: false,
+      depth: 1,
+      scrollRestored: true,
     });
   });
 
@@ -800,9 +1010,22 @@ describe("when the shell hears ready", () => {
     await view.findByText("Next");
     await act(() => router.navigate({ to: "/" }));
     await view.findByText("Drawn");
-    await waitFor(() => expect(heard.length).toBe(4));
+    // Ready, then a route for each page, each change of page announced first.
+    await waitFor(() =>
+      expect(
+        heard.filter((m) => (m as { type: string }).type === "route"),
+      ).toHaveLength(3),
+    );
     expect(readies(heard)).toHaveLength(1);
     expect(heard[0]).toEqual({ type: "ready" });
+    expect(heard.map((m) => (m as { type: string }).type)).toEqual([
+      "ready",
+      "route",
+      "will-navigate",
+      "route",
+      "will-navigate",
+      "route",
+    ]);
   });
 
   test("signed out: the quiet page counts as drawn, and signed-out follows ready", async () => {
@@ -824,6 +1047,8 @@ describe("when the shell hears ready", () => {
           tab: null,
           signedIn: false,
           canGoBack: false,
+          depth: 1,
+          scrollRestored: true,
         },
       ]),
     );
