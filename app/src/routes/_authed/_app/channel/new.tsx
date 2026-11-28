@@ -23,6 +23,7 @@ import {
 } from "@/components/channels/composer/saved-draft";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { seedMessage } from "@/components/channels/transcript-messages";
+import { ShellBackButton } from "@/components/layout/native-shell-back";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import {
@@ -374,6 +375,7 @@ function NewConversation({ composition }: { composition: string }) {
         data-slot="conversation-header"
       >
         <SidebarToggle className="mr-1" />
+        <ShellBackButton />
         <span className="text-sm text-muted-foreground">To:</span>
         <Combobox
           // Never opens by itself: OpenBot picks unless the person opens it to choose.

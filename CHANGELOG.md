@@ -8,12 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- **A Conversations page.** `/conversations` lists every conversation, pinned first, with
-  search and New conversation, as the sidebar's Conversations panel does. Nothing links to it from
-  the sidebar. It is the page behind the Conversations tab of a phone app that shows the web app in
-  a native shell: inside such a shell (it names itself in its user agent) the web app draws only
-  the page, without its sidebar, and leaves sign-in and notifications to the shell. A browser, and
-  OpenBot Desktop, behave as before.
+- **A Conversations page, and the web app inside a phone app.** `/conversations` lists every
+  conversation, pinned first, with search and New conversation, as the sidebar's Conversations
+  panel does. Nothing links to it from the sidebar. Inside a phone app that shows the web app in a
+  native shell (it names itself in its user agent) the web app draws only the page, without its
+  sidebar, and leaves sign-in and notifications to the shell. There its Chats and Bots tabs are the
+  sidebar's own Conversations and Bots panels, full width; every page under a tab has Back, which
+  returns to where it was opened inside that tab; and each tab keeps its place when another is
+  opened. A browser, and OpenBot Desktop, behave as before.
 
 ## 1.2.2
 

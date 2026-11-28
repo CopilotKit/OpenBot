@@ -4,6 +4,7 @@ import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { GroupChat } from "@/components/channels/group-chat";
 import { GroupPeopleButton } from "@/components/channels/group-people";
+import { ShellBackButton } from "@/components/layout/native-shell-back";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
 import { channelQueryOptions } from "@/lib/channels/queries";
@@ -32,6 +33,7 @@ function RouteComponent() {
         data-slot="conversation-header"
       >
         <SidebarToggle />
+        <ShellBackButton />
         <ChannelAvatar
           participantIds={channel.data?.agentIds ?? []}
           size={22}

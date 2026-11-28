@@ -358,6 +358,7 @@ describe("telling the shell", () => {
     path: "/bots",
     tab: "bots",
     signedIn: true,
+    canGoBack: false,
   };
 
   test("on iOS, the object itself to the openbotShell handler", () => {
