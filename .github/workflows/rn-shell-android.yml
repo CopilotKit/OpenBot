@@ -72,7 +72,7 @@ jobs:
         with:
           bun-version: 1.4.3
 
-      - name: Key the built web app on its sources (git's index: hashFiles over app/ timed out on macOS)
+      - name: Key the built web app on its sources from git's index (hashFiles over app timed out on macOS)
         id: web-key
         run: |
           sum="$(git ls-files -s app/src app/public app/index.html app/package.json shared tokens bun.lock package.json .env.example \
