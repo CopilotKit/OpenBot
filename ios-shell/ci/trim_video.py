@@ -6,8 +6,8 @@ Usage: trim_video.py <video.mp4> <xcodebuild log> <epoch when the recording star
 With ffmpeg it also writes <video>-600.mp4, a 600-px-wide H.264 copy for a phone.
 
 The test prints `SHELL_NOTE <test>: video-mark start <epoch>` and `... video-mark end <epoch>`
-(the simulator shares the Mac's clock). Uses ffmpeg when the runner has it, else avconvert, else
-leaves the file as it is.
+(the simulator shares the Mac's clock). Uses ffmpeg when the runner has it, else ci/video_tool.swift
+(AVFoundation), else leaves the file as it is.
 """
 import os
 import re
@@ -28,29 +28,31 @@ length = (ends[-1] - started + 1.5 - begin) if ends else None
 print(f"trim: start at {begin:.1f} s, length {length if length is None else round(length, 1)} s")
 
 tmp = video + ".trim.mp4"
+small = video[:-4] + "-600.mp4"
+tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "video_tool.swift")
 ffmpeg = shutil.which("ffmpeg")
+
+
+def run(cmd):
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return result.returncode == 0, (result.stderr or "").strip()[:300]
+
+
 if ffmpeg:
-    cmd = [ffmpeg, "-loglevel", "error", "-y", "-ss", f"{begin:.2f}", "-i", video]
-    if length:
-        cmd += ["-t", f"{length:.2f}"]
-    cmd += ["-vf", "scale=720:-2", "-c:v", "libx264", "-crf", "26", "-pix_fmt", "yuv420p", tmp]
+    cut = [ffmpeg, "-loglevel", "error", "-y", "-ss", f"{begin:.2f}", "-i", video] + (["-t", f"{length:.2f}"] if length else []) \
+        + ["-c:v", "libx264", "-crf", "24", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", tmp]
+    shrink = [ffmpeg, "-loglevel", "error", "-y", "-i", tmp, "-vf", "scale=600:-2", "-c:v", "libx264", "-crf", "28",
+              "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", small]
 else:
-    cmd = ["avconvert", "--source", video, "--output", tmp, "--preset", "PresetHEVC1920x1080", "--replace",
-           "--start", f"{begin:.2f}"]
-    if length:
-        cmd += ["--duration", f"{length:.2f}"]
-result = subprocess.run(cmd, capture_output=True, text=True)
-if result.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 10000:
+    cut = ["xcrun", "swift", tool, video, tmp, f"{begin:.2f}", f"{length or 0:.2f}", "0"]
+    shrink = ["xcrun", "swift", tool, tmp, small, "0", "0", "600"]
+ok, error = run(cut)
+if ok and os.path.exists(tmp) and os.path.getsize(tmp) > 10000:
+    ok2, error2 = run(shrink)
     os.replace(tmp, video)
-    print(f"trimmed with {os.path.basename(cmd[0])}: {os.path.getsize(video)} bytes")
+    print(f"cut with {'ffmpeg' if ffmpeg else 'AVFoundation'}: {os.path.getsize(video)} bytes")
+    print(f"600-px copy: {os.path.getsize(small) if ok2 and os.path.exists(small) else 'failed ' + error2}")
 else:
-    print(f"could not trim ({result.stderr.strip()[:300]}); the raw recording stays")
+    print(f"could not cut ({error}); the raw recording stays")
     if os.path.exists(tmp):
         os.remove(tmp)
-
-if ffmpeg and os.path.exists(video):
-    small = video[:-4] + "-600.mp4"
-    result = subprocess.run([ffmpeg, "-loglevel", "error", "-y", "-i", video, "-vf", "scale=600:-2", "-c:v", "libx264",
-                             "-crf", "28", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", small],
-                            capture_output=True, text=True)
-    print(f"600-px copy: {os.path.getsize(small) if result.returncode == 0 else 'failed ' + result.stderr[:200]}")

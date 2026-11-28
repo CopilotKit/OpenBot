@@ -1,13 +1,22 @@
 import XCTest
 
-/// A paced tour of the app against mock stack A, for the screen recording CI makes of it
-/// (`-only-testing:OpenBotShellUITests/DemoTourUITests/testDemoTour`). Not part of the main suite.
+/// A paced tour of the app against mock stack A, for the screen recording the video workflow makes
+/// of it (`-only-testing:OpenBotShellUITests/DemoTourUITests/testDemoTour`). Each scene waits for
+/// the next thing to appear rather than sleeping, and pauses only where a person needs to read.
 final class DemoTourUITests: ShellTestCase {
-    private func pause(_ seconds: Double = 1.2) {
+    private var sceneStart = Date()
+
+    private func pause(_ seconds: Double = 1.0) {
         Thread.sleep(forTimeInterval: seconds)
     }
 
-    private func tapWhenThere(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 20) {
+    /// Notes how long the last scene took, to see where a recording spends its time.
+    private func scene(_ name: String) {
+        note(String(format: "scene %@ took %.1f s", name, Date().timeIntervalSince(sceneStart)))
+        sceneStart = Date()
+    }
+
+    private func tapWhenThere(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 15) {
         guard element.waitForExistence(timeout: timeout) else {
             XCTFail("demo: no \(what)")
             return
@@ -15,118 +24,90 @@ final class DemoTourUITests: ShellTestCase {
         element.tap()
     }
 
-    /// Swipes in from the left edge: the web view's back gesture.
-    private func edgeSwipeBack(_ app: XCUIApplication) {
-        let window = app.windows.firstMatch
-        let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
-        let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
-        start.press(forDuration: 0.05, thenDragTo: end)
-    }
-
     func testDemoTour() throws {
         note("video-mark start \(Date().timeIntervalSince1970)")
         defer { note("video-mark end \(Date().timeIntervalSince1970)") }
-        // Not ephemeral: the system's consent alert, as a person sees it.
+        sceneStart = Date()
+
+        // Sign in, not ephemeral: the system's consent alert, as a person sees it.
         var app = launch(base: ShellTestCase.mockA, moment: "tour", ephemeral: false)
         let signIn = app.buttons["sign-in-button"]
         XCTAssertTrue(signIn.waitForExistence(timeout: 20))
-        pause(2)
+        pause(1.5)
         signIn.tap()
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        if let consent = firstExisting([springboard.alerts.buttons["Continue"], springboard.buttons["Continue"]], timeout: 10) {
-            pause(1.5)
+        let consent = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Continue"]
+        if consent.waitForExistence(timeout: 6) {
+            pause(2)
             consent.tap()
+        } else {
+            note("demo: no consent alert this time")
         }
-
-        // The system sheet with the mock's page, followed by hand.
         let link = app.webViews.links["Sign in as test person"]
-        if link.waitForExistence(timeout: 20) {
-            pause(1.5)
+        if link.waitForExistence(timeout: 15) {
+            pause(1.2)
             link.tap()
         } else {
             XCTFail("demo: the sheet's link was not reachable")
         }
-        XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 45), "demo: no tabs after signing in")
-        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
-        pause(2)
-
-        // The software keyboard: the tab bar hides, the message box sits on the keyboard.
-        if let box = firstExisting([app.webViews.textViews.firstMatch, app.webViews.textFields.firstMatch], timeout: 10) {
-            box.tap()
-            if app.keyboards.firstMatch.waitForExistence(timeout: 8) {
-                pause(1)
-                box.typeText("What changed in competitor pricing?")
-                pause(1.5)
-                webText(app, "Start a conversation").tap()
-                if !app.keyboards.firstMatch.waitForNonExistence(timeout: 4) {
-                    app.webViews.firstMatch.swipeDown()
-                }
-            } else {
-                note("demo: the software keyboard did not show")
-            }
-        }
-        pause(1.5)
-
-        // Conversations: scroll, open one, swipe back.
-        tapWhenThere(tab(app, .conversations), "Conversations tab")
-        XCTAssertTrue(webText(app, "Competitor pricing notes").waitForExistence(timeout: 20))
+        XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 30), "demo: no tabs after signing in")
+        let composer = app.webViews.textViews.firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 20))
         pause(1.2)
-        app.webViews.firstMatch.swipeUp()
-        pause(0.8)
-        app.webViews.firstMatch.swipeDown()
+        scene("sign-in")
+
+        // The software keyboard: the tab bar hides, the message box sits on it.
+        composer.tap()
+        if app.keyboards.firstMatch.waitForExistence(timeout: 6) {
+            composer.typeText("What changed in competitor pricing?")
+            pause(1)
+            dismissKeyboardIfUp(app)
+        }
+        scene("keyboard")
+
+        // Conversations, one conversation.
+        tab(app, .conversations).tap()
+        let row = webText(app, "Competitor pricing notes")
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
         pause(1)
-        webText(app, "Competitor pricing notes").tap()
-        let transcript = firstExisting([webText(app, "All three moved to per-seat pricing this year."),
-                                        webText(app, "What do our three closest competitors charge?")], timeout: 20)
-        pause(2)
-        // The conversation focuses its message box: put the keyboard away to see the tab bar again.
-        dismissKeyboardIfUp(app, tapping: transcript)
-        pause(1.2)
-        edgeSwipeBack(app)
-        if !webText(app, "Quarterly forecast").waitForExistence(timeout: 6) {
-            note("demo: the edge swipe did not go back; using the tab")
-            tab(app, .conversations).tap()
-        }
+        row.tap()
+        let answer = webText(app, "All three moved to per-seat pricing this year.")
+        _ = answer.waitForExistence(timeout: 15)
         pause(1.5)
+        dismissKeyboardIfUp(app, tapping: answer)
+        scene("conversation")
 
-        // Bots: open one.
-        tapWhenThere(tab(app, .bots), "Bots tab")
+        // Bots, one Bot.
+        tab(app, .bots).tap()
         tapWhenThere(webText(app, "Research Bot"), "Research Bot")
-        pause(2)
+        pause(1.5)
         dismissKeyboardIfUp(app)
+        scene("bots")
 
-        // Home, the Account menu, Settings and back.
-        tapWhenThere(tab(app, .home), "Home tab")
-        pause(1.2)
-        tapWhenThere(webElement(app, label: "Account"), "Account button")
-        pause(1.2)
-        tapWhenThere(webElement(app, label: "Settings"), "Settings item")
-        pause(2.5)
-        tapWhenThere(tab(app, .home), "Home tab")
-        _ = webText(app, "Start a conversation").waitForExistence(timeout: 10)
-        pause(1.5)
-
-        // The native More button: Reload (the skeleton, as long as it really takes), then Sign out.
+        // Home, then the native More button: Reload (the skeleton, as long as it really takes) and Sign out.
+        tab(app, .home).tap()
+        _ = composer.waitForExistence(timeout: 10)
         let more = app.buttons["more-button"]
-        tapWhenThere(more, "More button", timeout: 10)
-        pause(1.2)
-        tapWhenThere(app.buttons["Reload"].firstMatch, "Reload")
-        _ = webText(app, "Start a conversation").waitForExistence(timeout: 15)
-        pause(1.5)
-        tapWhenThere(more, "More button", timeout: 10)
-        pause(1.2)
-        tapWhenThere(app.buttons["Sign out"].firstMatch, "Sign out")
-        pause(1.2)
-        tapWhenThere(app.alerts["Sign out of OpenBot?"].buttons["Sign out"], "confirmation")
+        tapWhenThere(more, "More button")
+        pause(0.8)
+        tapWhenThere(app.buttons["Reload"].firstMatch, "Reload", timeout: 5)
+        _ = composer.waitForExistence(timeout: 15)
+        pause(1)
+        tapWhenThere(more, "More button")
+        pause(0.8)
+        tapWhenThere(app.buttons["Sign out"].firstMatch, "Sign out", timeout: 5)
+        pause(1)
+        tapWhenThere(app.alerts["Sign out of OpenBot?"].buttons["Sign out"], "confirmation", timeout: 5)
         XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 20), "demo: Sign out did not return")
-        pause(2)
+        pause(1.5)
         app.terminate()
+        scene("more-menu")
 
         // The lock screen, then the connection comes back.
         app = launch(base: ShellTestCase.mockA, moment: "tour-offline", reset: false,
-                     extra: ["OPENBOT_SHELL_FORCE_OFFLINE_SECONDS": "8"])
+                     extra: ["OPENBOT_SHELL_FORCE_OFFLINE_SECONDS": "6"])
         XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 8), "demo: no lock screen")
         XCTAssertTrue(lockScreen(app).waitForNonExistence(timeout: 15), "demo: the lock did not lift")
-        pause(2)
+        pause(1.5)
+        scene("lock")
     }
 }
