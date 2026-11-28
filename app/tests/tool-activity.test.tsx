@@ -11,6 +11,7 @@ import {
   type StepDetails,
   stepDetails,
   summarise,
+  StepOutput,
   ToolActivity,
   type ToolGroup,
   useDrawnTool,
@@ -545,4 +546,42 @@ test("the same app's card for two different Bots in one conversation is two card
     "scout",
     "writer",
   ]);
+});
+
+test("Show all follows output that grows after the first render", () => {
+  const prototypes = [Element.prototype, HTMLElement.prototype];
+  const saved = prototypes.map((prototype) => ({
+    prototype,
+    scroll: Object.getOwnPropertyDescriptor(prototype, "scrollHeight"),
+    client: Object.getOwnPropertyDescriptor(prototype, "clientHeight"),
+  }));
+  let tall = false;
+  for (const prototype of prototypes) {
+    Object.defineProperty(prototype, "scrollHeight", {
+      configurable: true,
+      get: () => (tall ? 400 : 100),
+    });
+    Object.defineProperty(prototype, "clientHeight", {
+      configurable: true,
+      get: () => 160,
+    });
+  }
+  try {
+    const view = render(<StepOutput output="short" verbatim />);
+    expect(view.queryByRole("button", { name: "Show all" })).toBeNull();
+    tall = true;
+    view.rerender(
+      <StepOutput output="an answer that grew much longer" verbatim />,
+    );
+    expect(view.getByRole("button", { name: "Show all" })).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Show all" })!);
+    expect(view.getByRole("button", { name: "Show less" })).toBeTruthy();
+  } finally {
+    for (const { prototype, scroll, client } of saved) {
+      if (scroll) Object.defineProperty(prototype, "scrollHeight", scroll);
+      else delete (prototype as { scrollHeight?: number }).scrollHeight;
+      if (client) Object.defineProperty(prototype, "clientHeight", client);
+      else delete (prototype as { clientHeight?: number }).clientHeight;
+    }
+  }
 });
