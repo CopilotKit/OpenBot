@@ -612,3 +612,35 @@ html[data-native-shell]
 html[data-native-shell] [data-slot="combobox-chip-input"]::placeholder {
   font-size: 0.875rem;
 }
+
+/*
+ * Text in the native shell is set on Tailwind's own 16px base: `text-xs`, `text-sm` and
+ * `text-base` are 12, 14 and 16px there, as Tailwind and shadcn define them, where everywhere else
+ * they are the same sizes times 15/16 (theme.css). The desktop's denser type is small on a phone
+ * held at arm's length. Only the three body sizes move, so headings keep their places on the scale.
+ * Not in a layer, so it outranks the utilities, which `@theme inline` writes as fixed values.
+ *
+ * The same rule outranks a responsive size too, so the two the app uses (`sm:text-sm`,
+ * `md:text-sm`) are given the shell's size at their own widths, on an iPad or a phone held sideways.
+ * A new responsive text size needs its line here.
+ */
+html[data-native-shell] body,
+html[data-native-shell] .text-base {
+  font-size: 1rem;
+}
+html[data-native-shell] .text-sm {
+  font-size: 0.875rem;
+}
+html[data-native-shell] .text-xs {
+  font-size: 0.75rem;
+}
+@media (width >= 40rem) {
+  html[data-native-shell] .sm\:text-sm {
+    font-size: 0.875rem;
+  }
+}
+@media (width >= 48rem) {
+  html[data-native-shell] .md\:text-sm {
+    font-size: 0.875rem;
+  }
+}
