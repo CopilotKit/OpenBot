@@ -5,11 +5,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PageEmpty, PageRows } from "@/components/layout/page-shell";
 import { SectionPanel } from "@/components/layout/section-panel";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group";
+import { PanelSearch } from "./panel-search";
 import {
   SidebarContent,
   SidebarGroup,
@@ -179,7 +175,7 @@ export function ChannelRow({
   view: ConversationView;
   delegating: readonly string[];
   /** In the sidebar, or a row of the Conversations page's card (see `Channel`). */
-  layout?: "sidebar" | "page";
+  layout?: "sidebar" | "page" | "mobile";
   /** On the page, a divider above every row but the first, inside the row so it moves with it. */
   divided?: boolean;
 }) {
@@ -255,7 +251,7 @@ export function SearchResults({
   view: ConversationView;
   delegating: readonly string[];
   /** In the sidebar, or the Conversations page's card of rows. */
-  layout?: "sidebar" | "page";
+  layout?: "sidebar" | "page" | "mobile";
 }) {
   const results = useInfiniteQuery(channelSearchInfiniteQueryOptions(term));
   const page = layout === "page";
@@ -401,6 +397,9 @@ export function ConversationsPanel({
   }, [searching, scrollRoot]);
   const visibleChannels = pinnedFirst(channels.data ?? []);
   const animateOrder = (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
+  const searchField = (
+    <PanelSearch label="Search conversations" placeholder={standalone ? "Search conversations…" : "Search…"} describedBy={searching ? "conversation-search-scope" : undefined} onChange={changeSearch} value={search} mobile={standalone} />
+  );
 
   return (
     <SectionPanel
@@ -408,6 +407,7 @@ export function ConversationsPanel({
       className="group-data-[collapsible=icon]:hidden"
       hidden={hidden}
       standalone={standalone}
+      search={searchField}
       title="Conversations"
       actions={
         // The sidebar's hover rather than `muted`, which is nearly the sidebar's own colour.
@@ -433,22 +433,7 @@ export function ConversationsPanel({
       <SidebarContent ref={scrollRoot} className="scroll-fade-b">
         <SidebarMenu>
           <SidebarGroup className="gap-px pt-0">
-            <SidebarMenuItem>
-              <InputGroup className="bg-background text-sm rounded-lg h-9">
-                <InputGroupInput
-                  aria-label="Search conversations"
-                  aria-describedby={
-                    searching ? "conversation-search-scope" : undefined
-                  }
-                  onChange={(event) => changeSearch(event.target.value)}
-                  placeholder="Search…"
-                  value={search}
-                />
-                <InputGroupAddon>
-                  <IconSearch />
-                </InputGroupAddon>
-              </InputGroup>
-            </SidebarMenuItem>
+            {!standalone && <SidebarMenuItem>{searchField}</SidebarMenuItem>}
             {/*
              * What is searched, said while somebody types: names and the recent lines the rows
              * show, not every message of every conversation. One character is not searched at
@@ -462,10 +447,11 @@ export function ConversationsPanel({
                 {searchable ? SEARCH_SCOPE : SEARCH_HINT}
               </p>
             ) : null}
-            <div className="w-full h-2" />
+            {!standalone && <div className="w-full h-2" />}
             {searching ? (
               searchable ? (
                 <SearchResults
+                  layout={standalone ? "mobile" : "sidebar"}
                   view={view}
                   emphasis={emphasis}
                   delegating={delegating}
@@ -518,6 +504,7 @@ export function ConversationsPanel({
                 <AnimatePresence initial={false}>
                   {visibleChannels.map((channel) => (
                     <ChannelRow
+                      layout={standalone ? "mobile" : "sidebar"}
                       view={view}
                       emphasis={emphasis}
                       key={channel.id}

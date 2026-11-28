@@ -370,7 +370,7 @@ describe("the Conversations page", () => {
     const { view } = renderApp("/conversations");
     await view.findByText("No conversations yet");
     expect(newConversationLinks(view.container)).toEqual(["/channel/new"]);
-    expect(view.getByPlaceholderText("Search…")).toBeTruthy();
+    expect(view.getByRole("textbox", { name: "Search conversations" })).toBeTruthy();
     expect(
       view.container.querySelector('[data-slot="native-tab-panel"]'),
     ).not.toBeNull();
