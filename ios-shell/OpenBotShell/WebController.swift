@@ -314,6 +314,8 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
                 self.considerKeyboardDismiss()
             }
         case .changed, .ended:
+            // A drag may have scrolled the page: a fresh picture once it has come to rest.
+            if pan.state == .ended { transition.refresh(after: 0.8) }
             dragFinger = pan.location(in: nil)
             dragMove = pan.translation(in: webView)
             considerKeyboardDismiss()
@@ -350,6 +352,8 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     /// that keeps no stacks, the shell's own edge swipe sending `openbot:back` for one that does.
     func updateBack(canGoBack: Bool?, depth: Int? = nil, tab: String? = nil) {
         if let tab = tab { transition.route(tab: tab, depth: depth) }
+        // A fresh picture of the new page once it has settled, for the next push.
+        transition.refresh(after: 0.6)
         // The page has its new route: once it has drawn, a cover left by a back goes.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.transition.pageDrawn() }
         let mode = ShellBack.decide(canGoBack: canGoBack)

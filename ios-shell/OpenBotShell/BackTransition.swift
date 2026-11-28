@@ -45,16 +45,33 @@ final class BackTransition {
 
     // MARK: - Mirroring the page's stack
 
-    /// The page is about to show a new page in this tab: keep a picture of what is on screen now.
-    func willPush(tab: String, completion: @escaping () -> Void) {
-        guard let webView = webView else { completion(); return }
-        let config = WKSnapshotConfiguration()
-        config.afterScreenUpdates = false
-        webView.takeSnapshot(with: config) { [weak self] image, _ in
-            guard let self = self else { completion(); return }
-            self.stacks[tab, default: []].append(image)
-            completion()
+    /// A picture of the page as it is now, kept fresh (after each route, each drag or scroll), because
+    /// taking one when `will-navigate` arrives is too late: the page waits 120 ms at most, and a
+    /// snapshot on the simulator took longer, so it showed the new page (run 46165013120).
+    private var latest: UIImage?
+    private var refreshWork: DispatchWorkItem?
+
+    func refresh(after seconds: TimeInterval) {
+        refreshWork?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self = self, let webView = self.webView, self.under == nil, self.cover == nil else { return }
+            let config = WKSnapshotConfiguration()
+            config.afterScreenUpdates = false
+            webView.takeSnapshot(with: config) { [weak self] image, _ in
+                if let image = image { self?.latest = image }
+            }
         }
+        refreshWork = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: item)
+    }
+
+    /// The page is about to show a new page in this tab: keep the picture of what is on screen now,
+    /// at once, so the page can go ahead.
+    func willPush(tab: String, completion: @escaping () -> Void) {
+        refreshWork?.cancel()
+        stacks[tab, default: []].append(latest)
+        latest = nil
+        completion()
     }
 
     /// A `route` with `depth`: drop or pad snapshots so this tab holds depth - 1 entries.
