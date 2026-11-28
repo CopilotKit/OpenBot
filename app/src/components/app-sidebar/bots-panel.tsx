@@ -53,6 +53,7 @@ import { useMessageListEmphasis } from "@/lib/settings/message-list";
 import { delegatingConversationsQueryOptions } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { Channel } from "./channel";
+import { usePanelPosition } from "./use-panel-position";
 import {
   isUnread,
   isWorking,
@@ -290,11 +291,20 @@ function BotRow({
  * The Bots section's panel: every Bot, newest conversation first (`orderBots`), the top three open
  * with their latest conversations. The search narrows the Bots by name; New Bot is in the header.
  */
-export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
+export function BotsPanel({
+  hidden = false,
+  standalone = false,
+}: {
+  hidden?: boolean;
+  standalone?: boolean;
+}) {
   const bots = useQuery(agentListQueryOptions());
   const roster = useInfiniteQuery(channelListQueryOptions());
   const attention = useQuery(botAttentionQueryOptions());
-  const [search, setSearch] = useState("");
+  const { search, setSearch, scrollRoot } = usePanelPosition(
+    standalone,
+    bots.data?.length ?? 0,
+  );
 
   const ordered = useMemo(
     () => orderBots(bots.data ?? [], roster.data ?? []),
@@ -345,9 +355,10 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
       }
       className="group-data-[collapsible=icon]:hidden"
       hidden={hidden}
+      standalone={standalone}
       title="Bots"
     >
-      <SidebarContent className="scroll-fade-b px-2 pb-2">
+      <SidebarContent ref={scrollRoot} className="scroll-fade-b px-2 pb-2">
         <InputGroup className="h-9 rounded-lg bg-background text-sm">
           <InputGroupInput
             aria-label="Search Bots"

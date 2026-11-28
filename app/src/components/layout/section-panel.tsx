@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ShellAccountMenu } from "@/components/layout/native-shell-account";
 import { Sidebar } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 
@@ -20,13 +21,47 @@ export function SectionPanel({
   children,
   className,
   hidden = false,
+  standalone = false,
 }: {
   title: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
   className?: string;
   hidden?: boolean;
+  /** Fill a native tab with the section instead of mounting it inside the desktop sidebar. */
+  standalone?: boolean;
 }) {
+  const Heading = standalone ? "h1" : "h2";
+  const content = (
+    <>
+      <div
+        className={cn(
+          "flex h-12 shrink-0 items-center gap-0.5 pr-2 pl-4",
+          standalone && "h-14 [&>a]:size-11",
+        )}
+        data-desktop-drag="deep"
+      >
+        <Heading className="min-w-0 flex-1 truncate font-semibold text-base tracking-tight">
+          {title}
+        </Heading>
+        {actions}
+        {standalone && <ShellAccountMenu />}
+      </div>
+      {children}
+    </>
+  );
+
+  // A native tab fills the screen with the panel; the OS supplies its navigation.
+  if (standalone) {
+    return (
+      <section
+        className="flex min-h-0 min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
+        data-slot="native-tab-panel"
+      >
+        {content}
+      </section>
+    );
+  }
   return (
     <Sidebar
       collapsible="none"
@@ -38,16 +73,7 @@ export function SectionPanel({
       )}
       hidden={hidden}
     >
-      <div
-        className="flex h-12 shrink-0 items-center gap-0.5 pr-2 pl-4"
-        data-desktop-drag="deep"
-      >
-        <h2 className="min-w-0 flex-1 truncate font-semibold text-base tracking-tight">
-          {title}
-        </h2>
-        {actions}
-      </div>
-      {children}
+      {content}
     </Sidebar>
   );
 }
