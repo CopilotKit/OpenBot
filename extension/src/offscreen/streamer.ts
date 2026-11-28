@@ -68,6 +68,9 @@ export type StreamerDeps = {
   retryEscalateMs?: number;
   /** Default TRAJECTORY_ROLLOVER_AT. */
   rolloverAt?: number;
+  /** The OpenBot this recording is sent through, as the Recorder was connected to it: a socket on its own address is
+   * refused by OpenBot, and one anywhere else by the backend. */
+  openbotUrl?: () => string | undefined;
   /** Test seam. */
   socketFactory?: (url: string, params: Record<string, string>) => PhoenixLike;
   /** Test seams: the clock the streamer measures windows and timestamps with, and its timers. */
@@ -159,10 +162,36 @@ const messagesRefusedSentence = (reason: string) =>
   `Learning capture is paused: OpenBot's backend refused the recorder's messages (${reason}).`;
 const sessionEndedSentence = (reason: string) =>
   `Learning capture is paused: OpenBot's backend ended the capture session (${reason}).`;
-/** Names the origin Intelligence saw, the id this copy runs under: the Recorder's fixed id unpacked, under policy or
- * from the Chrome Web Store, and the id Edge Add-ons assigned it in Edge, never the fixed one in its place. */
-const checkOriginSentence = () =>
-  `OpenBot's backend refused the connection. If it sets CHECK_ORIGIN, that list must include chrome-extension://${chrome.runtime.id}.`;
+/**
+ * Said when the socket a recording streams on is refused three times before it opens. A browser does not say why a
+ * socket was refused, but it does say where it went, and that is who refused it.
+ *
+ * Through OpenBot's own address (a backend that runs beside OpenBot, reached through it): OpenBot refused it. The
+ * backend behind it never sees this browser's origin, so its list of allowed origins is not the cause.
+ */
+const RELAY_REFUSED =
+  "Learning capture is paused: OpenBot didn't accept this browser's connection for recordings. If it keeps happening, ask an admin to check that OpenBot is up to date.";
+/** Straight to the backend's own address: the backend refused it, and the usual cause is its list of allowed origins.
+ * Names the id this copy runs under: the Recorder's fixed id unpacked, under policy or from the Chrome Web Store, and
+ * the id Edge Add-ons assigned it in Edge, never the fixed one in its place. */
+const backendRefusedSentence = () =>
+  `Learning capture is paused: OpenBot's backend refused this browser's connection. If the backend only accepts listed origins, an admin must add chrome-extension://${chrome.runtime.id}.`;
+
+/** Whether a socket address is on OpenBot's own origin (`ws:` for `http:`, `wss:` for `https:`). */
+export function onOpenBotsOwnAddress(
+  socketUrl: string | undefined,
+  openbotUrl: string | undefined,
+): boolean {
+  if (!socketUrl || !openbotUrl) return false;
+  try {
+    const socket = new URL(socketUrl);
+    const openbot = new URL(openbotUrl);
+    const scheme = { "ws:": "http:", "wss:": "https:" }[socket.protocol];
+    return scheme === openbot.protocol && socket.host === openbot.host;
+  } catch {
+    return false;
+  }
+}
 
 type WireEvent = CapturedEvent & { value: Record<string, JsonValue> };
 
@@ -347,7 +376,7 @@ function regrant(row: RegrantRow, detail = "unknown"): Failure {
       return {
         kind: "regrant",
         row,
-        reason: checkOriginSentence(),
+        reason: detail === "openbot" ? RELAY_REFUSED : backendRefusedSentence(),
         holdAt: 3,
         showFrom: 3,
       };
@@ -1043,7 +1072,11 @@ export async function createStreamer(
   const socketFailed = (lane: Lane, conn: Connection, code?: number) => {
     if (!current(lane, conn)) return;
     if (!conn.opened) {
-      fail(lane, conn, regrant("24"));
+      // Who refused it: OpenBot, when the socket went to its own address, or else the backend.
+      const where = onOpenBotsOwnAddress(conn.gatewayUrl, deps.openbotUrl?.())
+        ? "openbot"
+        : "backend";
+      fail(lane, conn, regrant("24", where));
       return;
     }
     if (code === 1012 || code === 1002) {

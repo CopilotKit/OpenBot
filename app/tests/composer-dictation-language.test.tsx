@@ -1,8 +1,9 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { test } from "./renderer-crash";
 
 /**
  * FOUND IN DOGFOODING. OpenBot Desktop on a Mac set to English (United Kingdom), with Dictation on for

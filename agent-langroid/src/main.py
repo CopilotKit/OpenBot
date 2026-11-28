@@ -9,6 +9,7 @@ from pathlib import Path
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import bot_settings, openai_api
+from run_model_key import RunModelKey
 
 import litellm
 from ag_ui_langroid import create_langroid_app
@@ -90,6 +91,8 @@ agent = ChatAgent(
 )
 
 app = create_langroid_app(FrontendToolsAgent(name="openbot", agent=agent))
+# Each run's model calls carry its own gateway token, in its organization. See run_model_key.py.
+app.add_middleware(RunModelKey)
 
 
 @app.middleware("http")

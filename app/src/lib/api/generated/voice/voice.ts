@@ -24,6 +24,7 @@ import type {
   InvalidRequestResponse,
   ListVoiceSessionsParams,
   OrganizationNotFoundResponse,
+  PlanRequiredResponse,
   SaveVoiceSessionHeaders,
   ServerErrorResponse,
   ServiceUnavailableResponse,
@@ -125,6 +126,7 @@ export const getStartVoiceCallMutationOptions = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | ConversationNotFoundResponse
     | ConversationConflictResponse
@@ -181,6 +183,7 @@ export type StartVoiceCallMutationBody = VoiceCallRequest;
 export type StartVoiceCallMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
+  | PlanRequiredResponse
   | ForbiddenResponse
   | ConversationNotFoundResponse
   | ConversationConflictResponse
@@ -202,6 +205,7 @@ export const useStartVoiceCall = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | ConversationNotFoundResponse
     | ConversationConflictResponse

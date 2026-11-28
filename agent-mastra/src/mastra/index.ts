@@ -35,7 +35,7 @@ const SUPPORTED_PROVIDERS = new Set(["openai", "anthropic"]);
  * and one it has that this harness has no module for, used to fall through to the OpenAI branch
  * below and answer with a model the deployment never chose.
  */
-async function buildModel() {
+async function buildModel(runKey?: string) {
   const settings = botSettings("agent-mastra");
   const providerName = settings.provider;
   const spec = providerSpec(providerName);
@@ -56,12 +56,16 @@ async function buildModel() {
   // Provider modules create default clients at import, which reject Compose's empty overrides.
   if (!baseURL) delete process.env[baseVariable];
 
+  // The run's own gateway token, only where the address is OpenBot's model gateway.
+  const key = runKey && baseURL && onTheGateway(baseURL) ? runKey : undefined;
+
   if (spec.id === "anthropic") {
     const { createAnthropic } = await import("@ai-sdk/anthropic");
     // Other harnesses accept an Anthropic origin; AI SDK expects the /v1 API prefix.
     const origin = (baseURL || "https://api.anthropic.com").replace(/\/+$/, "");
     return createAnthropic({
       baseURL: origin.endsWith("/v1") ? origin : `${origin}/v1`,
+      ...(key ? { apiKey: key } : {}),
     })(model);
   }
   const { createOpenAI } = await import("@ai-sdk/openai");
@@ -70,9 +74,11 @@ async function buildModel() {
     baseURL?.replace(/\/+$/, "") !== "https://api.openai.com/v1";
   const openai = createOpenAI({
     baseURL: baseURL || "https://api.openai.com/v1",
-    apiKey: compatible
-      ? apiKeyOrPlaceholder(process.env[spec.keyVariable])
-      : undefined,
+    apiKey:
+      key ??
+      (compatible
+        ? apiKeyOrPlaceholder(process.env[spec.keyVariable])
+        : undefined),
   });
   // Compatible endpoints commonly expose Chat Completions; OpenAI keeps its Responses default.
   return compatible ? openai.chat(model) : openai(model);
@@ -161,11 +167,58 @@ export function buildOpenBotInstructions({
   return [openbotBaseInstructions, ...instructions].join("\n\n");
 }
 
+/** OpenBot's model gateway: its OpenAI and Anthropic wires are under this path on the server. */
+const GATEWAY_PATH = "/api/model-provider/";
+
+function onTheGateway(baseURL: string): boolean {
+  try {
+    return `${new URL(baseURL.trim()).pathname.replace(/\/+$/, "")}/`.includes(
+      GATEWAY_PATH,
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The run's own gateway token, in its organization, which the server sends a harness it runs as
+ * the `OpenBot model route` context entry: `{"via": "openai" | "anthropic", "token": ...}`.
+ *
+ * One harness serves every organization of an OpenBot, and the key in its environment is the
+ * deployment's gateway token, which names one organization. A run with none keeps that key.
+ */
+export function runKeyFrom(
+  requestContext?: OpenBotInstructionArgs["requestContext"],
+): string | undefined {
+  const entry = agUiContextEntries(requestContext).find(
+    (candidate): candidate is ContextEntry =>
+      isUsableEntry(candidate) &&
+      candidate.description === "OpenBot model route",
+  );
+  if (!entry) return undefined;
+  try {
+    const route = JSON.parse(entry.value) as { via?: unknown; token?: unknown };
+    if (route.via !== "openai" && route.via !== "anthropic") return undefined;
+    return typeof route.token === "string" && route.token.trim()
+      ? route.token.trim()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Built at start, so a provider this Bot cannot drive is refused before it serves anything.
+const deploymentModel = await buildModel();
+
 const openbot = new Agent({
   id: "openbot",
   name: "openbot",
   instructions: buildOpenBotInstructions,
-  model: await buildModel(),
+  // A run that brought its own gateway token answers on a model that calls with it.
+  model: async ({ requestContext }) => {
+    const key = runKeyFrom(requestContext);
+    return key ? buildModel(key) : deploymentModel;
+  },
 });
 
 /** The one header OpenBot's server sends, compared without leaking length through timing. */

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { GoAhead } from "./SetupProgress";
 
 type Call = { command: string; args?: Record<string, unknown> };
 
@@ -78,6 +79,21 @@ async function startSigningIn() {
     <CopilotKitAccount root="/tmp/account-sign-in" onDone={() => {}} />,
   );
 }
+
+test("checking keeps the heading outside the scrollable account interaction", async () => {
+  invokeHandler = async () => new Promise(() => {});
+  const screen = await startSigningIn();
+  const heading = screen.getByRole("heading", { name: "Your OpenBot account" });
+  const sheet = heading.closest<HTMLElement>(".sheet");
+  expect(sheet?.classList.contains("account-layout")).toBe(true);
+  expect(sheet?.classList.contains("setup-layout")).toBe(true);
+  expect(heading.closest(".setup-header-block")?.parentElement).toBe(sheet);
+  const status = screen.getByText("Checking your OpenBot account…");
+  expect(status.closest(".setup-body")?.parentElement).toBe(sheet);
+  expect(status.closest(".setup-content > .setup-panel")).not.toBeNull();
+  expect(!!sheet?.querySelector(".setup-panel > .row:empty")).toBe(false);
+  expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+});
 
 /** OpenBot's own engine check: a Docker short of disk is caught here, before Start fails on it. */
 test("an engine short of disk says how to raise it, and Try again checks again", async () => {
@@ -294,41 +310,56 @@ test("while Install sets up the engine, the signed-in account step says so, then
 }, 15000);
 
 /**
- * Closing macOS's password prompt without a password is a decision: Install asks again, the step
- * says why, and Continue works again.
+ * macOS's password prompt comes only on Continue, said in a card on the Account step, and closing
+ * it without a password is a decision: Install asks again, the step says why, and Try again works.
  */
-test("a closed password prompt is said with Try again, and no Continue comes before one", async () => {
+test("the password prompt waits for Continue in the step, and a closed one is said with Try again", async () => {
   invokeHandler = alreadySignedIn(async ({ command }) => {
     if (command === "local_eval_terms") return noEngine;
     if (command === "allow_podman_install") return true;
     throw new Error(`unexpected ${command}`);
   });
-  const account = (goAhead: string | null) => (
+  const account = (goAhead: GoAhead | null) => (
     <CopilotKitAccount
       root="/tmp/account-go-ahead"
       onDone={() => {}}
       goAhead={goAhead}
     />
   );
-  // Before any prompt: nothing to click.
+  // Nothing waits on the person: nothing to click.
   const screen = render(account(null));
   await screen.findByRole("heading", { name: "Setting up this computer" });
   expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  const allowed = () =>
+    invokeCalls.filter((call) => call.command === "allow_podman_install");
+
+  // Before the prompt: what comes next and why, and Continue, which lets the prompt come up.
+  const before =
+    "OpenBot needs to install the software it runs on. Choose Continue, then enter your Mac password when your Mac asks for it.";
+  screen.rerender(account({ line: before, beforePrompt: true }));
+  const card = screen.getByRole("region", {
+    name: "Your Mac will ask for your password",
+  });
+  expect(card.textContent).toContain(before);
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(allowed()).toHaveLength(1);
 
   // Closed without a password: what that means, and Try again.
   const declined =
     "OpenBot needs your password to install what it needs to run. It asks again in a moment, or choose Try again.";
-  screen.rerender(account(declined));
+  screen.rerender(account({ line: declined, beforePrompt: false }));
+  expect(
+    screen.getByRole("region", { name: "Your password is needed" }),
+  ).toBeTruthy();
   expect(screen.getByText(declined)).toBeTruthy();
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(
     (screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
-  expect(
-    invokeCalls.filter((call) => call.command === "allow_podman_install"),
-  ).toHaveLength(1);
+  expect(allowed()).toHaveLength(2);
 });
 
 /** A refusal with no sentence of the CLI's own still says what is wrong, and is not waited out. */
@@ -350,7 +381,16 @@ test("a refused engine with no sentence from the CLI says so in OpenBot's words"
 test("a sign-in waiting on the browser shows its code and a way back to the page", async () => {
   waitingSignIn();
   const screen = await startSigningIn();
-  await screen.findByText("Finish signing in to OpenBot in your browser…");
+  const instruction = await screen.findByRole("heading", {
+    level: 3,
+    name: "Finish signing in to OpenBot in your browser…",
+  });
+  const waiting = screen.getByText("Waiting for you to finish signing in…");
+  expect(waiting.closest(".status-line")).not.toBeNull();
+  expect(instruction.closest(".status-line")).toBeNull();
+  expect(
+    screen.container.querySelectorAll(".sign-in-wait .step-spinner"),
+  ).toHaveLength(1);
   expect((await screen.findByText(PAGE.userCode)).tagName).toBe("STRONG");
   expect(
     screen.getByText(
@@ -373,6 +413,16 @@ test("Cancel stops the CLI's sign-in and goes back to the start of the step", as
   waitingSignIn();
   const screen = await startSigningIn();
   await screen.findByText(PAGE.userCode);
+  const panel = screen.getByText(PAGE.userCode).closest(".setup-panel");
+  expect(panel).not.toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Cancel" }).closest(".setup-panel"),
+  ).toBe(panel);
+  const explanation = screen.getByText(/Signing in gets your free license key/);
+  expect(explanation.nextElementSibling).toBe(panel);
+  expect(explanation.parentElement?.classList.contains("setup-content")).toBe(
+    true,
+  );
   await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
   expect(
@@ -385,6 +435,11 @@ test("Cancel stops the CLI's sign-in and goes back to the start of the step", as
       name: "Sign in for a free local license key",
     }),
   ).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: "Sign in for a free local license key" })
+      .closest(".setup-panel"),
+  ).not.toBeNull();
   expect(screen.queryByText(PAGE.userCode)).toBeNull();
   // The stopped sign-in is not reported as a failure.
   await new Promise((settle) => setTimeout(settle, 50));
@@ -488,6 +543,59 @@ test("the sign-in leads with OpenBot, while it waits and once stopped", async ()
   expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();
 });
 
+test("the agreement groups its explanation, legal link and explicit Accept in the centered panel", async () => {
+  const terms = {
+    status: "required",
+    accepted: false,
+    version: "developer-edition-2026-10-01-web",
+    url: "https://copilotkit.ai/legal/developer-edition",
+    organizationName: "Acme",
+  };
+  invokeHandler = alreadySignedIn(async ({ command }) => {
+    if (command === "local_eval_terms") return terms;
+    if (command === "plugin:opener|open_url") return null;
+    throw new Error(`unexpected ${command}`);
+  });
+  const screen = await startSigningIn();
+  const accept = await screen.findByRole("button", { name: "Accept" });
+  const heading = screen.getByRole("heading", {
+    name: "Accept the license agreement",
+  });
+  const sheet = heading.closest<HTMLElement>(".sheet");
+  expect(sheet?.classList.contains("setup-layout")).toBe(true);
+  expect(sheet?.classList.contains("account-layout")).toBe(true);
+  expect(heading.closest(".setup-header-block")?.parentElement).toBe(sheet);
+  const panel = accept.closest<HTMLElement>(".setup-panel");
+  expect(panel).not.toBeNull();
+  const documentIcon = panel?.querySelector("svg.agreement-icon");
+  expect(documentIcon).not.toBeNull();
+  expect(documentIcon?.getAttribute("aria-hidden")).toBe("true");
+  expect(documentIcon?.getAttribute("width")).toBe("28");
+  expect(documentIcon?.getAttribute("height")).toBe("28");
+  expect(documentIcon?.getAttribute("stroke-width")).toBe("1.5");
+  expect(screen.queryByRole("img")).toBeNull();
+  expect(panel?.closest(".setup-body")?.parentElement).toBe(sheet);
+  expect(panel?.parentElement?.classList.contains("setup-content")).toBe(true);
+  const explanation = screen.getByText(
+    "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement.",
+  );
+  expect(explanation.closest<HTMLElement>(".setup-panel")).toBe(panel);
+  expect(explanation.closest(".setup-header-block")).toBeNull();
+  const link = screen.getByRole("link", { name: "Read the license agreement" });
+  expect(link.closest<HTMLElement>(".setup-panel")).toBe(panel);
+  expect(link.getAttribute("href")).toBe(terms.url);
+  expect(accept.closest(".step-footer")).toBeNull();
+  expect(
+    Array.from(panel?.querySelectorAll("a, button") ?? []).map(
+      (element) => element.textContent,
+    ),
+  ).toEqual(["Read the license agreement", "Accept"]);
+  await userEvent.click(link);
+  expect(
+    invokeCalls.some((call) => call.command === "connect_copilotkit_apps"),
+  ).toBe(false);
+});
+
 test("after Accept, the step says it is setting up your apps, not to sign in", async () => {
   // Seen on Windows: Accept was followed for two seconds by the sign-in heading and its
   // sign-in lede, over "Connecting your apps…", for a person already signed in and agreed.
@@ -528,4 +636,51 @@ test("after Accept, the step says it is setting up your apps, not to sign in", a
   expect(screen.queryByText(/needs a free license key/)).toBeNull();
   connected();
   await waitFor(() => expect(done).toBe("developer-edition-2026-10-01-web"));
+});
+
+/*
+ * The install behind this step is said at the sidebar's foot, never in the step, and it never
+ * spins: beside "Finish signing in to OpenBot in your browser…" it was a second spinner, and as it
+ * came and went it moved the button the person was about to press.
+ */
+test("the install behind the step is at the sidebar's foot, quiet, and never in the page", async () => {
+  waitingSignIn();
+  const asked: string[] = [];
+  const screen = render(
+    <CopilotKitAccount
+      root="/tmp/account-behind"
+      onDone={() => {}}
+      behind={(waitingFor) => {
+        asked.push(waitingFor);
+        return {
+          step: "install",
+          ok: true,
+          running: true,
+          detail: waitingFor,
+          position: { at: 3, of: 4 },
+        };
+      }}
+    />,
+  );
+  await screen.findByText(PAGE.userCode);
+  const list = screen.getByRole("list", { name: "Background install" });
+  expect(list.closest("aside.rail > .rail-foot")).not.toBeNull();
+  expect(list.closest(".sheet")).toBeNull();
+  // The step's own wait is the one spinner on the screen; the row behind it is marked, not spun.
+  expect(list.querySelector(".step-spinner")).toBeNull();
+  expect(list.querySelector(".step-current")).not.toBeNull();
+  const page = screen
+    .getByRole("heading", { name: "Get your free license key" })
+    .closest(".sheet") as HTMLElement;
+  expect(page.previousElementSibling).toBe(list.closest("aside.rail"));
+  expect(
+    page.querySelector('[aria-label="Background install"], .rail-foot'),
+  ).toBeNull();
+  expect(list.textContent).toContain(asked.at(-1) ?? "");
+  // The sections head the sidebar, with Account the step it is on.
+  const sections = screen.getByRole("list", { name: "Setup" });
+  expect(sections.closest("aside.rail")).toBe(list.closest("aside.rail"));
+  expect(sections.querySelector('[aria-current="step"]')?.textContent).toBe(
+    "Account",
+  );
 });

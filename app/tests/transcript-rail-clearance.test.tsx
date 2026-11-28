@@ -138,6 +138,19 @@ async function open(width: number, height: number): Promise<Page> {
   });
   await page.goto(`${ORIGIN}/`);
   await page.getByText(LAST_REPLY).waitFor({ timeout: 8000 });
+  await style(page);
+  /*
+   * The rail is drawn once the turns are measured running past the window, which takes the styled
+   * page: unstyled, the view grows with them. So the page is styled again once it is there, for the
+   * rail's own classes.
+   */
+  await page.locator('nav[aria-label="Turns"]').waitFor({ state: "attached" });
+  await style(page);
+  return page;
+}
+
+/** Styles the classes the page draws now. */
+async function style(page: Page) {
   const classes = await page.evaluate(() => [
     ...new Set(
       [...document.querySelectorAll("[class]")].flatMap((element) => [
@@ -146,7 +159,6 @@ async function open(width: number, height: number): Promise<Page> {
     ),
   ]);
   await page.addStyleTag({ content: await stylesheet(classes) });
-  return page;
 }
 
 /** Whether the rail draws, its marks' right edge, and where the column's leftmost text starts. */

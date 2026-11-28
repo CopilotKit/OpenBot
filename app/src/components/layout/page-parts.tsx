@@ -179,7 +179,7 @@ export function PageRows({
      */
     <div
       className={cn(
-        "mt-4 overflow-hidden rounded-lg border border-border bg-card dark:border-transparent",
+        "mt-4 overflow-hidden rounded-lg border border-border bg-card",
         "[&_[data-slot=item]]:rounded-none [&_[data-slot=item]]:min-h-14",
         // Dividers stop 16px short of each edge, lined up with the rows' text, as Linear draws them.
         // Any depth: a screen may wrap each row and its divider, as Admin does to stagger them in.
@@ -211,10 +211,7 @@ export function PageCard({
 }) {
   return (
     <div
-      className={cn(
-        "rounded-lg border border-border bg-card p-4 dark:border-transparent",
-        className,
-      )}
+      className={cn("rounded-lg border border-border bg-card p-4", className)}
     >
       {children}
       {footer ? (

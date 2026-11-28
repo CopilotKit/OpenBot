@@ -122,16 +122,16 @@ fn repository(image: &str) -> Option<(String, String)> {
 }
 
 /**
-The two images only a plan runs, by their published names. Each carries its vendor's sign-in, and
-each runs only on that vendor's plan:
+The two images only a plan runs, by their published names. Each runs only on that vendor's plan:
 
 - `plan::SIGN_IN_IMAGE`, the Claude Agent SDK, is the Bot a Claude plan runs on.
-- `plan::CHATGPT_SIGN_IN_IMAGE`, the Python LangGraph image, is a ChatGPT plan's model service
-  beside the Bot (`plan::CHATGPT_PLAN_SERVICE`).
+- `plan::CHATGPT_SIGN_IN_IMAGE`, the OpenAI Agents SDK, is the Bot a ChatGPT plan runs on
+  (`plan::CHATGPT_PLAN_SERVICE`).
 
-Install pulls one only for an installation on its plan ([`plan_images`]). A sign-in to a plan pulls
-its image, and a Start on a plan pulls whatever its Bot and services need that is not there, each
-showing the download as Install does (`main.rs`). So a switch to a plan downloads its image then.
+Install pulls one only for an installation on its plan ([`plan_images`]). Neither plan's sign-in
+needs an image: both are native (`claude_sign_in`, `chatgpt_sign_in`). A Start on a
+plan pulls whatever its Bot and services need that is not there, each showing the download as
+Install does (`main.rs`). So a switch to a plan downloads its image then.
 */
 pub const PLAN_IMAGES: [&str; 2] = [
     crate::plan::SIGN_IN_IMAGE,
@@ -173,7 +173,12 @@ pub fn plan_images(root: &Path) -> Vec<&'static str> {
     if engine == Some("agent-claude-plan") && !images.contains(&crate::plan::SIGN_IN_IMAGE) {
         images.push(crate::plan::SIGN_IN_IMAGE);
     }
-    if named("CHATGPT_AUTH_FILE") || engine == Some(crate::plan::CHATGPT_PLAN_SERVICE) {
+    // Only when the release laid out here has the ChatGPT plan's engine: a release from before the
+    // OpenAI Agents SDK engine has none, and the plan's engine comes with the release that does, when
+    // Start moves the folder to it (as `harness::the_release_includes` does for the Bot).
+    if (named("CHATGPT_AUTH_FILE") || engine == Some(crate::plan::CHATGPT_PLAN_SERVICE))
+        && deployment::reference(root, crate::plan::CHATGPT_SIGN_IN_IMAGE).is_ok()
+    {
         images.push(crate::plan::CHATGPT_SIGN_IN_IMAGE);
     }
     images
@@ -484,14 +489,36 @@ fn require_with(
     }
     // A deployment laid out by an app that copied less still matches its own fingerprint. Install
     // lays it out again; Start cannot.
-    if deployment::installed(root)
-        .is_some_and(|found| deployment::needs_fetch(root, &found.version))
-    {
-        return Err(required(
-            "The deployment was laid out by an earlier OpenBot and is missing files this version runs.",
-        ));
+    if let Some(problem) = incomplete_deployment(root) {
+        return Err(problem);
     }
     verify(&record.images)
+}
+
+/// An installed deployment Install has to lay out again before it can start, as the problem that
+/// sends the window back to Install: one whose image list is gone, or that an earlier app laid out
+/// with less than this one runs ([`deployment::needs_fetch`]). None for anything else, a folder
+/// nothing was installed in included.
+///
+/// Start asks this before it reads the Bot's image from the list. A list something outside OpenBot
+/// deleted was read as a release without the Bot: the window said to choose another Bot, never ran
+/// Install, and every Retry failed the same way, while Repair, which re-downloads only the list,
+/// fixed it.
+pub fn incomplete_deployment(root: &Path) -> Option<Problem> {
+    let found = deployment::installed(root)?;
+    if !deployment::needs_fetch(root, &found.version) {
+        return None;
+    }
+    let images = deployment::images_path(root);
+    Some(required(if images.exists() {
+        "The deployment was laid out by an earlier OpenBot and is missing files this version runs."
+            .to_string()
+    } else {
+        format!(
+            "The image list {} is missing. Install downloads it again.",
+            images.display()
+        )
+    }))
 }
 
 /// Every image Install pulls for the release laid out in `release`, run as `root`'s project: the
@@ -635,6 +662,65 @@ mod tests {
         let problem = require_with(&f.root, None, |_| Ok(()))
             .expect_err("a deployment missing folders this app copies cannot start");
         assert!(problem.said.contains("Finish installing"));
+    }
+
+    /// An image list something outside OpenBot deleted, from a finished install: Start sends it
+    /// back to Install, Install's lay-out step downloads the list and nothing else (never the
+    /// release's archive), and the install check passes after, as Repair did by hand.
+    #[test]
+    fn a_deleted_image_list_is_downloaded_again_alone_and_the_install_check_passes() {
+        let f = Fixture::new();
+        let list = serde_json::json!({
+            "version": "v-test",
+            "images": {
+                "server": { "reference": "ghcr.io/copilotkit/openbot-server@sha256:00" },
+                "supervisor": { "reference": "ghcr.io/copilotkit/openbot-supervisor@sha256:00" },
+                "agent-computer": { "reference": "ghcr.io/copilotkit/openbot-agent-computer@sha256:00" },
+            },
+        })
+        .to_string();
+        std::fs::write(deployment::images_path(&f.root), &list).unwrap();
+        f.prepared(None);
+        require_with(&f.root, Some(&None), |_| Ok(())).expect("installed");
+
+        std::fs::remove_file(deployment::images_path(&f.root)).unwrap();
+        let refused = incomplete_deployment(&f.root).expect("Start sends it back to Install");
+        assert_eq!(refused.said, REQUIRED);
+        assert_eq!(
+            refused.connection,
+            Some(crate::problem::Connection::Installation)
+        );
+        assert!(
+            refused
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("container-images.json")),
+            "{refused:?}"
+        );
+        assert!(require_with(&f.root, Some(&None), |_| Ok(())).is_err());
+
+        let asked = std::sync::Mutex::new(Vec::<String>::new());
+        let get = |url: &str| -> Result<Vec<u8>, String> {
+            asked.lock().unwrap().push(url.to_string());
+            if url.ends_with("/releases/download/v-test/container-images.json") {
+                Ok(list.clone().into_bytes())
+            } else {
+                Err(format!("unexpected download {url}"))
+            }
+        };
+        deployment::fetch_with(&f.root, "v-test", &get).expect("Install puts the list back");
+
+        assert_eq!(
+            asked.into_inner().unwrap().len(),
+            1,
+            "only the image list is downloaded"
+        );
+        assert_eq!(
+            std::fs::read_to_string(deployment::images_path(&f.root)).unwrap(),
+            list
+        );
+        assert!(incomplete_deployment(&f.root).is_none());
+        require_with(&f.root, Some(&None), |_| Ok(())).expect("the install check passes again");
     }
 
     /// Installing is pulling images, so a clean machine completes it with nothing on the host but

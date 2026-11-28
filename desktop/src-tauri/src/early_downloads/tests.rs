@@ -481,6 +481,7 @@ fn with_too_little_free_disk_nothing_downloads_until_there_is_room() {
                 needed.total()
             })
         },
+        |_| None,
         &|summary| said.lock().unwrap().push(summary),
         Duration::ZERO,
     );
@@ -541,6 +542,7 @@ fn on_windows_f_the_first_screen_says_the_account_steps_40_and_the_download_apar
                 needed.total()
             })
         },
+        |_| None,
         &|summary| said.lock().unwrap().push(summary),
         Duration::ZERO,
     );
@@ -637,6 +639,209 @@ fn free_space_is_read_from_the_disk_that_holds_the_folder() {
     assert!(free > 0);
 }
 
+/// A machine whose disk WSL records on `drive`, with `free` bytes free there.
+fn machine_on(drive: &str, free: u64) -> crate::windows::MachineDrive {
+    crate::windows::MachineDrive {
+        drive: Some(drive.to_string()),
+        free,
+        mac: false,
+    }
+}
+
+/// The space check looks at the drive of the machine that exists, wherever the install folder is.
+#[test]
+fn an_existing_machine_is_measured_on_its_own_drive() {
+    assert_eq!(
+        disk_place(
+            true,
+            Some(machine_on("C:", 15_000_000_000)),
+            Some(PathBuf::from(r"F:\openbot\engine")),
+            Some(PathBuf::from(r"C:\Users\person")),
+        ),
+        Some(DiskPlace::Machine(machine_on("C:", 15_000_000_000)))
+    );
+}
+
+/// With no machine yet, the space check looks at the folder a new machine's disk goes into.
+#[test]
+fn a_new_machine_is_measured_in_the_install_folders_engine_folder() {
+    assert_eq!(
+        disk_place(
+            true,
+            None,
+            Some(PathBuf::from(r"F:\openbot\engine")),
+            Some(PathBuf::from(r"C:\Users\person")),
+        ),
+        Some(DiskPlace::Folder(PathBuf::from(r"F:\openbot\engine")))
+    );
+}
+
+/// Install uses Docker Desktop, which keeps its disk under the user profile, not in the install
+/// folder: the profile's drive is measured, though the install folder is on F: with a machine home.
+#[test]
+fn an_install_on_docker_is_measured_on_the_user_profiles_drive() {
+    assert_eq!(
+        disk_place(
+            false,
+            None,
+            Some(PathBuf::from(r"F:\openbot\engine")),
+            Some(PathBuf::from(r"C:\Users\person")),
+        ),
+        Some(DiskPlace::Folder(PathBuf::from(r"C:\Users\person")))
+    );
+    assert!(!uses_podman(crate::install::Choice::UseDocker));
+    assert!(!uses_podman(crate::install::Choice::OpenDockerDesktop));
+    assert!(!uses_podman(crate::install::Choice::DockerNotRunning));
+    assert!(uses_podman(crate::install::Choice::UsePodman));
+    assert!(uses_podman(crate::install::Choice::InstallPodman));
+}
+
+/// With no machine and no machine home, Podman puts the disk in the user profile, so the space
+/// check looks there.
+#[test]
+fn with_no_machine_home_the_user_profile_is_measured() {
+    assert_eq!(
+        disk_place(true, None, None, Some(PathBuf::from(r"C:\Users\person"))),
+        Some(DiskPlace::Folder(PathBuf::from(r"C:\Users\person")))
+    );
+}
+
+/// 40 GiB to run, and 1.5 GB of downloads: what the first screen asks for on Windows.
+const NEED: u64 = 44_436_190_301;
+
+/// The machine is on C:, the install folder is on F: with room, and this WSL can move a distro:
+/// the window offers to move the engine to F:.
+#[test]
+fn a_machine_on_another_drive_is_offered_a_move_to_the_install_folders_drive() {
+    assert_eq!(
+        move_offer(Some("C:"), Some("F:"), Some(NEED), NEED, true),
+        Some("F:".to_string())
+    );
+}
+
+/// The install folder is on C:, the same drive as the machine: a move frees nothing.
+#[test]
+fn no_move_is_offered_when_the_machine_is_already_on_the_install_folders_drive() {
+    assert_eq!(
+        move_offer(Some("C:"), Some("C:"), Some(400_000_000_000), NEED, true),
+        None
+    );
+}
+
+/// This WSL is too old for `wsl --manage <distro> --move`: there is no button.
+#[test]
+fn no_move_is_offered_when_this_wsl_cannot_move_a_distro() {
+    assert_eq!(
+        move_offer(Some("C:"), Some("F:"), Some(400_000_000_000), NEED, false),
+        None
+    );
+}
+
+/// The install folder's drive is short too: a move does not help.
+#[test]
+fn no_move_is_offered_when_the_install_folders_drive_is_short_too() {
+    assert_eq!(
+        move_offer(Some("C:"), Some("F:"), Some(NEED - 1), NEED, true),
+        None
+    );
+}
+
+/// With no machine yet, the new machine goes into the install folder anyway: nothing to move.
+#[test]
+fn no_move_is_offered_when_there_is_no_machine() {
+    assert_eq!(
+        move_offer(None, Some("F:"), Some(400_000_000_000), NEED, true),
+        None
+    );
+}
+
+/// While the disk is short, the window is told the drive the engine can move to, as `moveTo`.
+/// The offer is asked about the whole need, and is gone once the downloads start.
+#[test]
+fn a_short_disk_tells_the_window_the_drive_the_engine_can_move_to() {
+    let _table = table_to_myself();
+    let needed = Needed {
+        back_end: crate::local_eval::MIN_ENGINE_FREE_DISK_BYTES,
+        downloads: 1_000,
+    };
+    let looks = AtomicUsize::new(0);
+    let asked = Mutex::new(Vec::<u64>::new());
+    let said = Mutex::new(Vec::<Summary>::new());
+    run(
+        vec![Job {
+            key: "machine-image",
+            size: Some(0),
+            also: Vec::new(),
+            work: Box::new(|| Ok(())),
+        }],
+        needed,
+        || {
+            let look = looks.fetch_add(1, Ordering::SeqCst);
+            Some(if look == 0 {
+                15_000_000_000
+            } else {
+                needed.total()
+            })
+        },
+        |need| {
+            asked.lock().unwrap().push(need);
+            Some("F:".to_string())
+        },
+        &|summary| said.lock().unwrap().push(summary),
+        Duration::ZERO,
+    );
+    let said = said.into_inner().unwrap();
+    assert_eq!(said[0].move_to, Some("F:".to_string()));
+    assert_eq!(
+        serde_json::to_value(&said[0]).unwrap()["moveTo"],
+        serde_json::json!("F:")
+    );
+    assert_eq!(asked.into_inner().unwrap(), vec![42_949_673_960]);
+    let last = said.last().unwrap();
+    assert_eq!(last.state, State::Done, "{said:?}");
+    assert_eq!(last.move_to, None);
+    assert!(serde_json::to_value(last).unwrap().get("moveTo").is_none());
+}
+
+/// Box A: the move freed C: while the machine was still starting on D:, the next look at the disk
+/// started the image pulls, and all three failed on "Cannot connect to Podman". While the disk
+/// moves, nothing starts, however much room there is; once the move is done, the downloads start.
+#[test]
+fn downloads_wait_while_the_engines_disk_moves() {
+    let _table = table_to_myself();
+    let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let moving = moving();
+    let job_started = started.clone();
+    std::thread::scope(|scope| {
+        let running = scope.spawn(move || {
+            run(
+                vec![Job {
+                    key: "images",
+                    size: Some(0),
+                    also: Vec::new(),
+                    work: Box::new(move || {
+                        job_started.store(true, Ordering::SeqCst);
+                        Ok(())
+                    }),
+                }],
+                Needed::default(),
+                || Some(u64::MAX),
+                |_| None,
+                &|_| {},
+                Duration::from_millis(5),
+            )
+        });
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !started.load(Ordering::SeqCst),
+            "a download started while the engine's disk was moving"
+        );
+        drop(moving);
+        running.join().unwrap();
+    });
+    assert!(started.load(Ordering::SeqCst));
+}
+
 /// A download that fails is said as failed, and the others still finish.
 #[test]
 fn a_download_that_fails_is_said_and_the_others_finish() {
@@ -667,6 +872,7 @@ fn a_download_that_fails_is_said_and_the_others_finish() {
         ],
         Needed::default(),
         || None,
+        |_| None,
         &|summary| said.lock().unwrap().push(summary),
         Duration::ZERO,
     );

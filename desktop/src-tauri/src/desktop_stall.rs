@@ -15,6 +15,10 @@ const EVERY: Duration = Duration::from_secs(5);
 pub struct Stalls {
     steps: Mutex<stall::StepWatch>,
     ui: Mutex<stall::UiWatch>,
+    /// Whether the setup page is alive and drawing (`stall::PageWatch`).
+    page: Mutex<stall::PageWatch>,
+    /// What the setup page last said it shows: its heading, or nothing drawn. Logged when it changes.
+    screen: Mutex<Option<String>>,
     /// The bytes the running setup or update's download had at the last look, by its attempt.
     bytes: Mutex<Option<(String, u64)>>,
     /// The window's handle, read when its page loads. Whether it is shown and minimised is read from
@@ -31,8 +35,14 @@ fn lock<T>(held: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Start watching, on a thread of its own.
-pub fn initialize<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+/**
+Start watching, on a thread of its own. `give_up` is called, on this thread, when the setup page was
+reloaded and is still stuck (`stall::PageWatch`): it tells the person, with Restart and Get logs.
+*/
+pub fn initialize<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    give_up: impl Fn(&tauri::AppHandle<R>) + Send + 'static,
+) {
     app.manage(Stalls::default());
     let app = app.clone();
     let watching = std::thread::Builder::new()
@@ -41,7 +51,11 @@ pub fn initialize<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             std::thread::sleep(EVERY);
             let on_screen = on_screen(&app);
             follow_cli(&app, Instant::now());
-            tick(&app, Instant::now(), on_screen);
+            match tick(&app, Instant::now(), on_screen) {
+                Some(stall::PageAct::Reload { .. }) => reload_setup_page(&app),
+                Some(stall::PageAct::GiveUp { .. }) => give_up(&app),
+                None => {}
+            }
         });
     if watching.is_err() {
         log::warn!("[stall] the watch for steps that run long could not start");
@@ -112,12 +126,59 @@ fn sent_at<R: tauri::Runtime>(app: &tauri::AppHandle<R>, step: &str, now: Instan
     })
 }
 
-/// The setup page's heartbeat: the highest progress number it has taken, and whether it has just
-/// loaded.
-pub fn heartbeat<R: tauri::Runtime>(app: &tauri::AppHandle<R>, seen: u64, fresh: bool) {
+/// The setup page's heartbeat: the highest progress number it has taken, whether it has just
+/// loaded, and what it shows (`Shown`).
+pub fn heartbeat<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    seen: u64,
+    fresh: bool,
+    shown: Shown,
+) {
     #[cfg(windows)]
     know_hwnd(app);
     heartbeat_at(app, seen, fresh, Instant::now());
+    shown_at(app, shown, Instant::now());
+}
+
+/// What the setup page says it shows, with its heartbeat. A page from before this said nothing,
+/// which counts as drawn.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Shown {
+    /// The screen's heading, or None when its page didn't say.
+    pub screen: Option<String>,
+    /// Whether anything is drawn: the page's root holds some text.
+    pub drawn: bool,
+}
+
+impl Shown {
+    pub fn from_page(screen: Option<String>, drawn: Option<bool>) -> Self {
+        Shown {
+            screen,
+            drawn: drawn.unwrap_or(true),
+        }
+    }
+}
+
+/// The page watch hears the heartbeat, and the log hears which screen shows when it changes.
+fn shown_at<R: tauri::Runtime>(app: &tauri::AppHandle<R>, shown: Shown, now: Instant) {
+    let Some(stalls) = app.try_state::<Stalls>() else {
+        return;
+    };
+    if lock(&stalls.page).heartbeat(shown.drawn, now) {
+        log::info!("[ui] the setup page is answering again");
+    }
+    let said = match (&shown.screen, shown.drawn) {
+        (_, false) => "nothing".to_owned(),
+        (Some(screen), true) if !screen.trim().is_empty() => {
+            format!("\"{}\"", screen.trim().chars().take(80).collect::<String>())
+        }
+        _ => "a screen with no heading".to_owned(),
+    };
+    let mut last = lock(&stalls.screen);
+    if last.as_deref() != Some(said.as_str()) {
+        log::info!("[ui] the setup window shows {said}");
+        *last = Some(said);
+    }
 }
 
 /// The window's handle, if its page loaded before the watch began: asked once, while the page is
@@ -152,30 +213,67 @@ fn heartbeat_at<R: tauri::Runtime>(
     say(app, news);
 }
 
-/// The main window loaded a page. Until that page sends a heartbeat nothing is expected of it: it
-/// may be OpenBot itself, which sends none.
-pub fn page_loaded<R: tauri::Runtime>(window: &tauri::Webview<R>) {
+/// The main window started loading a page. Until that page sends a heartbeat no progress is
+/// expected of it: it may be OpenBot itself, which sends none. The setup page (`setup`) has to
+/// answer (`stall::PageWatch`).
+pub fn page_loaded<R: tauri::Runtime>(window: &tauri::Webview<R>, setup: bool) {
     let app = window.app_handle();
-    let Some(stalls) = app.try_state::<Stalls>() else {
-        return;
-    };
     #[cfg(windows)]
-    if let Ok(hwnd) = window.window().hwnd() {
+    if let (Some(stalls), Ok(hwnd)) = (app.try_state::<Stalls>(), window.window().hwnd()) {
         stalls
             .hwnd
             .store(hwnd.0 as isize, std::sync::atomic::Ordering::SeqCst);
     }
-    let news = lock(&stalls.ui).page_left(Instant::now());
+    page_started_at(app, setup, Instant::now());
+}
+
+fn page_started_at<R: tauri::Runtime>(app: &tauri::AppHandle<R>, setup: bool, now: Instant) {
+    let Some(stalls) = app.try_state::<Stalls>() else {
+        return;
+    };
+    let news = lock(&stalls.ui).page_left(now);
+    {
+        let mut page = lock(&stalls.page);
+        if setup {
+            page.setup_started(now);
+        } else {
+            page.elsewhere();
+        }
+    }
+    *lock(&stalls.screen) = None;
     say(app, news);
 }
 
-/// OpenBot is quitting: a stall still going is recorded now, before the usage data is flushed.
+/// The main window finished loading the setup page: its first heartbeat is due.
+pub fn setup_page_finished<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    setup_finished_at(app, Instant::now());
+}
+
+fn setup_finished_at<R: tauri::Runtime>(app: &tauri::AppHandle<R>, now: Instant) {
+    if let Some(stalls) = app.try_state::<Stalls>() {
+        lock(&stalls.page).setup_finished(now);
+    }
+}
+
+/// OpenBot is quitting: a stall still going is recorded now, before the usage data is flushed, and
+/// the Shutting down page is never reloaded.
 pub fn at_quit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(stalls) = app.try_state::<Stalls>() else {
         return;
     };
+    lock(&stalls.page).quit();
     let news = lock(&stalls.ui).quit(Instant::now());
     say(app, news);
+}
+
+/// The setup page stopped answering: loaded again, once (`stall::PageWatch`).
+fn reload_setup_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if let Err(error) = window.reload() {
+        log::warn!("[ui] couldn't reload the setup page: {error}");
+    }
 }
 
 /// The `local setup` or `local update` running now, from the CLI's log, and its download's bytes.
@@ -211,11 +309,45 @@ fn follow_cli<R: tauri::Runtime>(app: &tauri::AppHandle<R>, now: Instant) {
     }
 }
 
-/// One look: steps past their limit, and the window. `on_screen` is None when it could not be read.
-fn tick<R: tauri::Runtime>(app: &tauri::AppHandle<R>, now: Instant, on_screen: Option<bool>) {
-    let Some(stalls) = app.try_state::<Stalls>() else {
-        return;
+/// One look: steps past their limit, the window, and the setup page in it. `on_screen` is None when
+/// it could not be read. What to do about a setup page that is stuck, said in the log here, is done
+/// by the caller.
+fn tick<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    now: Instant,
+    on_screen: Option<bool>,
+) -> Option<stall::PageAct> {
+    let stalls = app.try_state::<Stalls>()?;
+    look_at_steps(app, &stalls, now, on_screen);
+    let act = {
+        let mut page = lock(&stalls.page);
+        if let Some(on_screen) = on_screen {
+            page.window(on_screen, now);
+        }
+        page.tick(now, on_screen)
     };
+    match act {
+        Some(stall::PageAct::Reload { quiet, waited }) => log::warn!(
+            "[ui] the setup page {} for {}s with the window on screen; reloading it once",
+            quiet.said(),
+            waited.as_secs()
+        ),
+        Some(stall::PageAct::GiveUp { quiet, waited }) => log::warn!(
+            "[ui] the setup page still {} {}s after its reload; asking the person to restart OpenBot",
+            quiet.said(),
+            waited.as_secs()
+        ),
+        None => {}
+    }
+    act
+}
+
+fn look_at_steps<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    stalls: &Stalls,
+    now: Instant,
+    on_screen: Option<bool>,
+) {
     let stalled = lock(&stalls.steps).tick(now);
     for stalled in stalled {
         log::warn!(
@@ -496,6 +628,114 @@ mod tests {
         window_stops_answering(app.handle(), Instant::now(), false);
         app.state::<DesktopTelemetry>().deliver();
         assert!(sink.next(Duration::from_secs(2)).is_none());
+    }
+
+    /**
+    FOUND ON 1.2.0-rc.3, a Mac, after an update: the setup window stayed a plain ground for good.
+    Through the same calls the window and its page make: a setup page that loads and never answers
+    is reloaded once, then the person is told. One that answers with its heading is left alone, and
+    OpenBot itself in the window is never waited on.
+    */
+    #[test]
+    fn a_setup_page_that_never_answers_is_reloaded_then_the_person_is_told() {
+        let sink = Sink::start();
+        let app = app("stall-page", false, &sink);
+        let app = app.handle();
+        let start = Instant::now();
+        let looks = |from: u64, to: u64| {
+            (from..=to).find_map(|second| {
+                tick(app, at(start, second), Some(true)).map(|act| (second, act))
+            })
+        };
+        tick(app, start, Some(true));
+        page_started_at(app, true, start);
+        setup_finished_at(app, at(start, 1));
+        assert!(matches!(
+            looks(1, 60),
+            Some((12, stall::PageAct::Reload { .. }))
+        ));
+        page_started_at(app, true, at(start, 12));
+        setup_finished_at(app, at(start, 13));
+        assert!(matches!(
+            looks(13, 60),
+            Some((24, stall::PageAct::GiveUp { .. }))
+        ));
+        // A page that answers, with its heading: left alone.
+        page_started_at(app, true, at(start, 100));
+        setup_finished_at(app, at(start, 101));
+        for second in (101..=400).step_by(5) {
+            shown_at(
+                app,
+                Shown::from_page(Some("Move to OpenBot Cloud?".into()), Some(true)),
+                at(start, second),
+            );
+            assert_eq!(tick(app, at(start, second + 1), Some(true)), None);
+        }
+        // An older page, which says nothing of what it shows, counts as drawn.
+        shown_at(app, Shown::from_page(None, None), at(start, 401));
+        assert_eq!(looks(402, 421), None);
+        // OpenBot in the window: never waited on.
+        page_started_at(app, false, at(start, 500));
+        assert_eq!(looks(500, 1000), None);
+    }
+
+    /**
+    FOUND IN A MAC UPGRADE CHECK of 1.2: a setup page frozen on its screen was reloaded, stayed
+    frozen, and the alert said "it still isn't showing anything" over a window that still showed
+    that screen. Through the same calls the window and its page make: a page that drew its heading
+    and then froze is reloaded once, the reload never takes, and the person is told. What they are
+    told is true of a window still showing its last screen, as it is of a blank one.
+    */
+    #[test]
+    fn a_setup_page_frozen_on_its_screen_is_told_in_words_true_of_it() {
+        let sink = Sink::start();
+        let app = app("stall-frozen", false, &sink);
+        let app = app.handle();
+        let start = Instant::now();
+        let looks = |from: u64, to: u64| {
+            (from..=to).find_map(|second| {
+                tick(app, at(start, second), Some(true)).map(|act| (second, act))
+            })
+        };
+        tick(app, start, Some(true));
+        page_started_at(app, true, start);
+        setup_finished_at(app, at(start, 1));
+        // It draws "Move to OpenBot Cloud?" and answers, then freezes at 10 with it on screen.
+        for second in (2..=10).step_by(4) {
+            shown_at(
+                app,
+                Shown::from_page(Some("Move to OpenBot Cloud?".into()), Some(true)),
+                at(start, second),
+            );
+        }
+        assert!(matches!(
+            looks(11, 60),
+            Some((
+                31,
+                stall::PageAct::Reload {
+                    quiet: stall::Quiet::Stopped,
+                    ..
+                }
+            ))
+        ));
+        // The frozen page never starts loading again: past the time a load has, it gives up.
+        let gave_up = looks(32, 120);
+        assert!(
+            matches!(gave_up, Some((_, stall::PageAct::GiveUp { .. }))),
+            "{gave_up:?}"
+        );
+
+        let told = crate::setup_stuck_prompt();
+        assert_eq!(told.title, "OpenBot's window isn't responding");
+        assert_eq!(told.buttons, Some(("Restart", "Get logs")));
+        assert_eq!(
+            told.message,
+            "OpenBot tried reloading it, and it still isn't updating. Restart OpenBot to try again. Get logs saves what happened to a file you can share."
+        );
+        // Nothing in it says the window is empty: this one still shows "Move to OpenBot Cloud?".
+        for empty in ["showing anything", "nothing", "blank", "empty"] {
+            assert!(!told.message.contains(empty), "{}", told.message);
+        }
     }
 
     /// Usage data turned off: the same step and the same window send nothing at all.

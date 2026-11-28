@@ -1,5 +1,8 @@
 # OpenBot's API spec
 
+**Before you change anything here, read [docs/api-and-migrations.md](../docs/api-and-migrations.md).
+Not optional.** Anything a released app uses keeps working for 12 months.
+
 `api/openapi.yaml` is the REST API every client is generated from and every check reads: the app's
 client (Orval), the breaking-change check (oasdiff), the lint (`bun run api:lint`) and the server's
 contract tests. It is a bundle. Never edit it by hand: edit its sources and bundle.
@@ -19,6 +22,7 @@ not touch the same lines:
 | `conversations.yaml` | Conversations and their members, messages and attachments, tasks, reactions, dictation, voice calls, conversation join tokens and product events |
 | `model-connections.yaml` | The vault, the model key, the model catalogue and model choices |
 | `notifications.yaml` | Devices, destinations, deliveries and notification settings |
+| `web-push.yaml` | Web push: the key a browser subscribes with, and each browser's push subscription |
 | `components.yaml` | The components a Bot draws, their drafts and publishing, their data functions, and which a Bot may use |
 | `skills.yaml` | Skills |
 | `apps.yaml` | The apps added to OpenBot, the app directory, app setup and each app's account mode and OAuth client |
@@ -33,6 +37,8 @@ not touch the same lines:
 | `learning.yaml` | OpenBot's side of Automatic learning: Learning settings, each person's spaces and sharing choices, sharing requests, and the skills delivered to Bots |
 | `memory.yaml` | A person's memories and memory sources |
 | `agents.yaml` | The agents Bots hand work to (`bot-agents`), their callback tokens, and each Bot's delegation |
+| `management.yaml` | Connecting a self-hosted OpenBot to CopilotKit's management service: where it stands, starting and stopping it |
+| `moves.yaml` | Moving to OpenBot Cloud: exporting what a person has in an OpenBot on their own computer, importing it into a Cloud organization, and checking it all arrived |
 
 An area file holds its operations under `paths`, and under `components` the schemas, parameters,
 responses and examples only it uses. Inside the file, refer to them as usual

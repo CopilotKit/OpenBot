@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { useNoBotComputers } from "@/lib/deployment/queries";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { deleteSavedLoginMutationOptions } from "@/lib/passwords/mutations";
 import { savedLoginsQueryOptions } from "@/lib/passwords/queries";
 import { queryClient } from "@/query-client";
@@ -35,9 +36,12 @@ export function SavedLogins() {
     <>
       {logins.isPending ? null : logins.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your saved logins. Try again in a moment.
+          {loadFailure(
+            logins.error,
+            "Couldn't load your saved logins. Try again in a moment.",
+          )}
         </p>
-      ) : !logins.data.passwordManager ? (
+      ) : !logins.data.passwordManager && logins.data.logins.length === 0 ? (
         /*
          * Off for one of two reasons, and the list alone can't tell them apart: an OpenBot with no
          * computers for Bots answers an empty list with the password manager off too. Which one it
@@ -62,6 +66,27 @@ export function SavedLogins() {
         </PageEmpty>
       ) : (
         <PageRows>
+          {/*
+           * Turned off with logins already saved: the server still lists them and deleting one is
+           * not behind the switch, so the list stays, with what being off means above it.
+           */}
+          {logins.data.passwordManager ? null : (
+            <>
+              <Item size="sm">
+                <ItemMedia variant="icon">
+                  <IconLockOff />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>Saved logins are off</ItemTitle>
+                  <ItemDescription>
+                    An admin turned them off. These logins won't be offered or
+                    used. You can delete them.
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
+              <Separator />
+            </>
+          )}
           {logins.data.logins.map((login, index) => (
             <div key={login.id}>
               {index > 0 ? <Separator /> : null}
@@ -96,7 +121,7 @@ export function SavedLogins() {
       )}
       {remove.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          {remove.error.message}
+          {failureSaid(remove.error)}
         </p>
       ) : null}
     </>

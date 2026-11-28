@@ -174,6 +174,7 @@ export function appAccessRequest(
     createdAt: "2026-10-20T10:00:00.000Z",
     resolvedAt: null,
     resolvedBy: null,
+    actions: [],
     ...overrides,
   };
 }
@@ -194,6 +195,7 @@ export function appAccessRequestBody(request: AppAccessRequest) {
     createdAt: request.createdAt,
     resolvedAt: request.resolvedAt,
     resolvedBy: request.resolvedBy,
+    actions: request.actions,
   };
 }
 

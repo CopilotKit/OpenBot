@@ -22,6 +22,7 @@ import {
 import { updateProfileNameMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * Saves the person's display name, refreshes who they are, then runs `onSaved`. Shared by this form
@@ -75,7 +76,7 @@ export function ProfileNameForm({
       />
       {save.error && (
         <p role="alert" className="text-sm text-destructive">
-          {save.error.message}
+          {failureSaid(save.error)}
         </p>
       )}
       {save.isSuccess && (

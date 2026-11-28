@@ -315,7 +315,7 @@ export const getCreateSharedUseRequestUrl = (organizationId: string) => {
 };
 
 /**
- * Ask an administrator to approve a Bot's use of a shared app's one account. What is asked for is never sent: it is the Bot's audience as the server reads it now, so a request can't be worded wider than the Bot is. A request already waiting for the same audience is answered again rather than filed twice, and one waiting for a different audience is replaced. Recorded on the audit trail. Only the Bot's owner or an administrator may ask.
+ * Ask an administrator to approve a Bot's use of a shared app's one account. What is asked for is never sent: it is the Bot's audience as the server reads it now, so a request can't be worded wider than the Bot is. A request already waiting for the same audience is answered again rather than filed twice, and one waiting for a different audience is replaced. Recorded on the audit trail. Only the Bot's owner or an administrator may ask. Asking matters only where the organization's apps are locked down (getAppsSetting): while they're open, anybody who can use a Bot may use its shared accounts, and there is nothing to approve.
  * @summary Ask that a Bot may use a shared app account
  */
 export const createSharedUseRequest = async (
@@ -782,7 +782,7 @@ export const getGetBotSharedUseUrl = (
 };
 
 /**
- * Return the shared apps a Bot holds, each with the audience it is approved for, the audience the Bot needs now, and whether the first covers the second, and the Bot's requests still waiting for an administrator. A Bot that holds no shared app answers with none. Only the Bot's owner or an administrator may read it.
+ * Return the shared apps a Bot holds, each with the audience it is approved for, the audience the Bot needs now, and whether the first covers the second, and the Bot's requests still waiting for an administrator. A Bot that holds no shared app answers with none. While the organization's apps are open (getAppsSetting), every shared app reads as covered. Only the Bot's owner or an administrator may read it.
  * @summary Read a Bot's use of shared app accounts
  */
 export const getBotSharedUse = async (

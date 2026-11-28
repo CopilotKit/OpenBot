@@ -34,6 +34,7 @@ import {
   OPEN_AND_RECORD,
 } from "@/components/browser/teach-steps";
 import { Toaster, toast } from "@/components/ui/toast";
+import type { Problem } from "@/lib/api/generated/model";
 import type { Recognition } from "@/lib/browser/narration";
 import { browserKeys } from "@/lib/browser/queries";
 import type {
@@ -50,17 +51,17 @@ import {
 } from "./accounts-api";
 import { installChrome } from "./browser-narration.fixture";
 import {
+  type DesktopShellOptions,
+  installDesktopShell,
+  removeDesktopShell,
+} from "./desktop-shell.fixture";
+import {
   learningContract,
   personLearning,
   runBody,
   served,
   testId,
 } from "./learning-api";
-import {
-  type DesktopShellOptions,
-  installDesktopShell,
-  removeDesktopShell,
-} from "./desktop-shell.fixture";
 import {
   everyLanguage,
   type OnDeviceModel,
@@ -93,6 +94,10 @@ let stateFails = false;
 let stateHeld: Promise<void> | null = null;
 /** Requests the server refuses, by path, with the sentence it answers: as it passes on the Recorder's own (409). */
 let refusals: Partial<Record<string, string>> = {};
+/** What opening the browser is answered with instead, when it is refused some other way than `refusals` says. */
+let openRefusal: (() => Response) | null = null;
+/** The signed-in person's role. */
+let meRole: "user" | "admin" = "user";
 /** The person's actions the Recorder counts by the read after Record. */
 let actionsAfterStart = 7;
 /** Phrases the Recorder heard the person say itself (a native window's own narration) in the recording now running. */
@@ -283,7 +288,7 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
       user: {
         id: "ada",
         email: "ada@example.com",
-        role: "user",
+        role: meRole,
         onboarding: null,
       },
     });
@@ -337,6 +342,7 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
   }
   if (path === browserApiPaths.open && method === "POST") {
     if (body !== undefined) return refuse();
+    if (openRefusal) return openRefusal();
     await opening;
     state = { ...state, open: true };
     return Response.json(openAnswer);
@@ -507,6 +513,8 @@ beforeEach(() => {
   stateFails = false;
   stateHeld = null;
   refusals = {};
+  openRefusal = null;
+  meRole = "user";
   actionsAfterStart = 7;
   phrasesHeard = 0;
   phrasesPassed = 0;
@@ -2561,6 +2569,93 @@ test("arriving while the browser is not answering, the page says so rather than 
   expect(await view.findByText(NOT_ANSWERING)).toBeTruthy();
   expect(view.getAllByText(NOT_ANSWERING)).toHaveLength(1);
   expect(view.getByRole("button", { name: "Try again" })).toBeTruthy();
+});
+
+/** The organization's computer limit, as the server says it: a refusal asking again can't change. */
+const AT_LIMIT =
+  "This organization already has 1 computer, the most OpenBot allows it. Ask an admin to make room.";
+const refused = (
+  status: number,
+  code: string,
+  detail: string,
+  retryable: boolean,
+) => {
+  const body: Problem = {
+    type: "https://open.bot/errors/test",
+    title: detail,
+    status,
+    detail,
+    code,
+    category: retryable ? "dependency" : "rate_limit",
+    retryable,
+    requestId: "req_test",
+    traceId: "trace_test",
+  };
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/problem+json" },
+  });
+};
+
+test("at the organization's computer limit, the browser that can't open says so calmly, with no Try again", async () => {
+  // The end-to-end run: the limit's sentence in red over a Try again that could only be refused again.
+  state = { ...screenState(), open: false, tabs: [] };
+  openRefusal = () => refused(429, "COMPUTER_LIMIT_REACHED", AT_LIMIT, false);
+  const view = draw(<BrowserPage />);
+  const blocked = await view.findByText(AT_LIMIT);
+  const box = blocked.closest("[data-slot=computer-blocked]") as HTMLElement;
+  expect(box).toBeTruthy();
+  expect(within(box).getByText("Can't open your browser")).toBeTruthy();
+  // Not an error: no alert, nothing red, nothing to press that would be refused again.
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
+  // A person who isn't an admin is told to ask one, in the server's sentence, and offered no way into Admin.
+  expect(view.queryByRole("link", { name: "Open Computers" })).toBeNull();
+  await settleReactWork();
+  expect(opens()).toBe(1);
+});
+
+test("at the organization's computer limit, an admin gets the way to Computers, where stopping one makes room", async () => {
+  meRole = "admin";
+  state = { ...screenState(), open: false, tabs: [] };
+  openRefusal = () => refused(429, "COMPUTER_LIMIT_REACHED", AT_LIMIT, false);
+  const view = draw(<BrowserPage />);
+  const link = await view.findByRole("link", { name: "Open Computers" });
+  expect(link.getAttribute("href")).toBe("/admin/computers");
+  expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
+});
+
+test("a browser that couldn't open for now still offers Try again, which asks again", async () => {
+  state = { ...screenState(), open: false, tabs: [] };
+  const busy = "Couldn't start your browser. Try again in a moment.";
+  openRefusal = () => refused(503, "SERVICE_UNAVAILABLE", busy, true);
+  const view = draw(<BrowserPage />);
+  expect((await view.findByRole("alert")).textContent).toBe(busy);
+  openRefusal = null;
+  openAnswer = answerFor("screen");
+  await userEvent.click(view.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(opens()).toBe(2));
+});
+
+test("on OpenBot Desktop, Open browser and record refused at the computer limit says so calmly in place of the error", async () => {
+  state = { ...nativeState(), open: false };
+  openRefusal = () => refused(429, "COMPUTER_LIMIT_REACHED", AT_LIMIT, false);
+  const view = draw(<BrowserPage />);
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByRole("textbox", { name: "Task name" }),
+    "Submit an expense report",
+  );
+  await pressRecord(view, user);
+  const blocked = await view.findByText(AT_LIMIT);
+  expect(
+    within(
+      blocked.closest("[data-slot=computer-blocked]") as HTMLElement,
+    ).getByText("Can't open your browser"),
+  ).toBeTruthy();
+  expect(view.queryByRole("alert")).toBeNull();
+  // Nothing was recorded: the browser never opened.
+  expect(writes.map((write) => write.path)).toEqual([browserApiPaths.open]);
 });
 
 test("on OpenBot Desktop a window that is not answering says so", async () => {

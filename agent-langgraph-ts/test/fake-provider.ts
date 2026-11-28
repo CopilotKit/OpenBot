@@ -9,7 +9,9 @@
  *  - OpenAI Responses: `response.*` SSE events, a `function_call` output item.
  *  - Anthropic Messages: `message_start` ... `message_stop`, `tool_use` blocks with `input_json_delta`.
  *  - Gemini: `:streamGenerateContent?alt=sse`, `functionCall` parts.
- * An error answer is the status and the provider's own error body.
+ * An error answer is the status and the provider's own error body. A Gemini model, on either of
+ * Google's wires, is held to Gemini's thought-signature rule and to the models Google has retired,
+ * and refused as Google refuses (`geminiRefusal`).
  */
 import {
   createServer,
@@ -33,6 +35,8 @@ export type Recorded = {
   path: string;
   headers: IncomingMessage["headers"];
   body: Record<string, unknown>;
+  /** Gemini's refusal of the request, where the thought-signature rule refused it. */
+  refused?: unknown;
 };
 export type Responder = (request: Recorded, index: number) => Turn;
 
@@ -109,6 +113,14 @@ function chatCompletions(
                   id: call.id,
                   type: "function",
                   function: { name: call.name, arguments: "" },
+                  // Gemini's OpenAI-compatible API: the thought signature on the call's delta.
+                  ...(call.signature
+                    ? {
+                        extra_content: {
+                          google: { thought_signature: call.signature },
+                        },
+                      }
+                    : {}),
                 },
               ],
             },
@@ -430,8 +442,167 @@ function gemini(
   sse(response, frames);
 }
 
+/*
+ * GEMINI'S THOUGHT-SIGNATURE RULE, as the real API enforces it on Gemini 3 and later
+ * (https://ai.google.dev/gemini-api/docs/thought-signatures), on both of Google's wires:
+ *  - The current turn is everything after the latest user message with text in it (a function
+ *    response is not one). Earlier turns are not checked.
+ *  - The first function call of each model step in the current turn must carry the signature
+ *    Gemini gave it: natively the part's `thoughtSignature`, on the OpenAI-compatible API the tool
+ *    call's `extra_content.google.thought_signature`. Missing: 400, in Google's words. One Gemini
+ *    never gave: 400. Google's two documented placeholders for calls it did not make pass.
+ *  - Gemini 1 and 2 check nothing.
+ * The error body is Google's as its OpenAI-compatible API sends it: a JSON array of one error.
+ */
+const GEMINI_PLACEHOLDERS = new Set([
+  "skip_thought_signature_validator",
+  "context_engineering_is_the_way_to_go",
+]);
+
+function checksSignatures(model: string): boolean {
+  return (
+    /^(models\/)?gemini-/i.test(model) && !/gemini-[12](\.|-)/i.test(model)
+  );
+}
+
+export type Issued = { byId: Map<string, string>; all: Set<string> };
+
+const googleError = (message: string) => [
+  { error: { code: 400, message, status: "INVALID_ARGUMENT" } },
+];
+
+function missing(name: string, position: number) {
+  return googleError(
+    `Function call is missing a thought_signature in functionCall parts. This is required for tools to work correctly, and missing thought_signature may lead to degraded model performance. Additional data, function call \`default_api:${name}\` , position ${position}. Please refer to https://aistudio.google.com/docs/thought-signatures for more details.`,
+  );
+}
+
+const INVALID = googleError("Thought signature is not valid.");
+
+/** One step's first call, as either wire sends it back. */
+type Step = {
+  position: number;
+  name: string;
+  id?: string;
+  signature?: string;
+};
+
+function checkSteps(steps: Step[], issued: Issued): unknown | undefined {
+  for (const step of steps) {
+    if (!step.signature) return missing(step.name, step.position);
+    if (GEMINI_PLACEHOLDERS.has(step.signature)) continue;
+    const given = step.id ? issued.byId.get(step.id) : undefined;
+    if (given ? given !== step.signature : !issued.all.has(step.signature))
+      return INVALID;
+  }
+  return undefined;
+}
+
+/** The OpenAI-compatible request's current-turn steps. */
+function chatSteps(body: Record<string, unknown>): Step[] {
+  const contents = ((body.messages ?? []) as Record<string, unknown>[]).filter(
+    (message) => message.role !== "system" && message.role !== "developer",
+  );
+  const start = contents.findLastIndex((message) => message.role === "user");
+  const steps: Step[] = [];
+  for (const [position, message] of contents.entries()) {
+    if (position <= start || message.role !== "assistant") continue;
+    const first = (
+      message.tool_calls as
+        | {
+            id?: string;
+            function?: { name?: string };
+            extra_content?: { google?: { thought_signature?: string } };
+          }[]
+        | undefined
+    )?.[0];
+    if (!first) continue;
+    steps.push({
+      position,
+      name: String(first.function?.name ?? ""),
+      id: first.id,
+      signature: first.extra_content?.google?.thought_signature,
+    });
+  }
+  return steps;
+}
+
+/** The native request's current-turn steps. */
+function nativeSteps(body: Record<string, unknown>): Step[] {
+  const contents = (body.contents ?? []) as {
+    role?: string;
+    parts?: Record<string, unknown>[];
+  }[];
+  const start = contents.findLastIndex(
+    (content) =>
+      content.role === "user" &&
+      (content.parts ?? []).some(
+        (part) => typeof part.text === "string" && part.text,
+      ),
+  );
+  const steps: Step[] = [];
+  for (const [position, content] of contents.entries()) {
+    if (position <= start || content.role !== "model") continue;
+    const first = (content.parts ?? []).find((part) => "functionCall" in part);
+    if (!first) continue;
+    const call = first.functionCall as { id?: string; name?: string };
+    steps.push({
+      position,
+      name: String(call.name ?? ""),
+      id: call.id,
+      signature:
+        typeof first.thoughtSignature === "string"
+          ? first.thoughtSignature
+          : undefined,
+    });
+  }
+  return steps;
+}
+
+/**
+ * Models Google no longer serves to new keys, with its 404 as both wires send it (seen live on
+ * 2026-11-27: "This model models/gemini-2.5-flash is no longer available to new users").
+ */
+const RETIRED_GEMINI = new Set(["gemini-2.5-flash", "gemini-2.5-flash-lite"]);
+
+function retired(model: string, wire: "chat" | "native") {
+  const error = {
+    error: {
+      code: 404,
+      message: `This model models/${model} is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).`,
+      status: "NOT_FOUND",
+    },
+  };
+  return { status: 404, body: wire === "chat" ? [error] : error };
+}
+
+/** Gemini's refusal of this request, or undefined where Gemini would take it. */
+function geminiRefusal(
+  recorded: Recorded,
+  issued: Issued,
+): { status: number; body: unknown } | undefined {
+  const path = recorded.path;
+  const refusedBy = (body: unknown) =>
+    body === undefined ? undefined : { status: 400, body };
+  if (path.endsWith("/chat/completions")) {
+    const model = String(recorded.body.model ?? "");
+    if (RETIRED_GEMINI.has(model)) return retired(model, "chat");
+    if (!checksSignatures(model)) return undefined;
+    return refusedBy(checkSteps(chatSteps(recorded.body), issued));
+  }
+  const native = /\/models\/([^/:]+):streamGenerateContent/.exec(path);
+  if (native) {
+    const model = native[1] ?? "";
+    if (RETIRED_GEMINI.has(model)) return retired(model, "native");
+    if (!checksSignatures(model)) return undefined;
+    return refusedBy(checkSteps(nativeSteps(recorded.body), issued));
+  }
+  return undefined;
+}
+
 export async function fakeProvider(respond: Responder): Promise<FakeProvider> {
   const requests: Recorded[] = [];
+  const issued: Issued = { byId: new Map(), all: new Set() };
   const server: Server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk as Buffer);
@@ -443,11 +614,25 @@ export async function fakeProvider(respond: Responder): Promise<FakeProvider> {
       body: raw ? JSON.parse(raw) : {},
     };
     requests.push(recorded);
+    const refused = geminiRefusal(recorded, issued);
+    if (refused) {
+      recorded.refused = refused.body;
+      response.writeHead(refused.status, {
+        "content-type": "application/json",
+      });
+      response.end(JSON.stringify(refused.body));
+      return;
+    }
     const turn = respond(recorded, requests.length - 1);
     if ("status" in turn) {
       response.writeHead(turn.status, { "content-type": "application/json" });
       response.end(JSON.stringify(turn.body));
       return;
+    }
+    for (const call of turn.calls ?? []) {
+      if (!call.signature) continue;
+      issued.all.add(call.signature);
+      if (call.id) issued.byId.set(call.id, call.signature);
     }
     if (path.endsWith("/chat/completions"))
       return chatCompletions(response, recorded.body, turn);

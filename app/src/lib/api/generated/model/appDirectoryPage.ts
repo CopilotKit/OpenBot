@@ -4,7 +4,7 @@
 import type { AppDirectoryEntry } from "./appDirectoryEntry";
 
 export interface AppDirectoryPage {
-  /** The catalogue in its own order, then the wider directory by title, ignoring case, and then by id. */
+  /** The catalogue in its own order, then the wider directory: apps a person signs in to before apps that take a key (connectsWith key), each by title, ignoring case, and then by id. */
   entries: AppDirectoryEntry[];
   /**
    * Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
@@ -13,4 +13,9 @@ export interface AppDirectoryPage {
    * @pattern ^[A-Za-z0-9_-]+$
    */
   nextCursor: string | null;
+  /**
+   * How many entries the whole list holds for this search and source, across every page, so a screen can say how many there are while it reads only the first page.
+   * @minimum 0
+   */
+  total?: number;
 }

@@ -80,6 +80,12 @@ export const ListApiKeysResponse = zod.object({
             .datetime({ offset: true })
             .nullable()
             .describe("When it last signed a request. Null if never."),
+          organizationId: zod
+            .string()
+            .nullish()
+            .describe(
+              "The organization this key acts in: the one it was made in. Null for a key made before keys were bound to an organization, which acts in `default`. Absent from an older server.",
+            ),
         })
         .describe("An API key a person made. Never the key itself."),
     )
@@ -95,7 +101,7 @@ export const ListApiKeysResponse = zod.object({
 });
 
 /**
- * Make an API key that acts as the person, in every organization they are a member of, on the API. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app's sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.
+ * Make an API key that acts as the person on the API, in this organization only: the one it was made in. In any other organization it is refused as if the organization did not exist. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app's sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.
  * @summary Make an API key
  */
 
@@ -170,6 +176,12 @@ export const CreateApiKeyResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When it last signed a request. Null if never."),
+      organizationId: zod
+        .string()
+        .nullish()
+        .describe(
+          "The organization this key acts in: the one it was made in. Null for a key made before keys were bound to an organization, which acts in `default`. Absent from an older server.",
+        ),
     })
     .describe("An API key a person made. Never the key itself."),
   key: zod

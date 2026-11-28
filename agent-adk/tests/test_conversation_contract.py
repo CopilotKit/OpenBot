@@ -29,6 +29,7 @@ from harness_contract import (
     LATEST_QUESTION,
     STANDING_ROLE,
     anthropic_environment,
+    check_gateway_keys,
     conversation,
     fake_provider,
     missing_from,
@@ -117,6 +118,26 @@ def _two_turns(monkeypatch, thread, between=None, second=None, first=None):
                 return bodies[-1]
 
         return asyncio.run(asyncio.wait_for(turns(), timeout=60))
+
+
+@pytest.mark.parametrize("wire", ["openai", "anthropic"])
+def test_a_run_calls_the_gateway_with_its_own_key(monkeypatch, wire):
+    """The run's own gateway token, in its organization; the environment's without one.
+
+    See `shared/run_model_key.py`. Gemini goes to Google with its own key, never the gateway.
+    """
+
+    def app_for(environment):
+        monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+        monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        for key, value in environment.items():
+            monkeypatch.setenv(key, value)
+        from src import main
+
+        return importlib.reload(main).app
+
+    check_gateway_keys(app_for, wire, token=TOKEN)
 
 
 @pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])

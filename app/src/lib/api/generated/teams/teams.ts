@@ -22,10 +22,12 @@ import type {
   CreateTeamHeaders,
   CreateTeamRequest,
   DeleteTeamHeaders,
+  DeleteTeamModelsHeaders,
   ForbiddenResponse,
   IdempotencyConflictResponse,
   InvalidRequestResponse,
   InvalidTeamMemberResponse,
+  InvalidTeamModelsResponse,
   InvalidTeamResponse,
   ListTeamMembersParams,
   ListTeamsParams,
@@ -33,11 +35,15 @@ import type {
   PutTeamMemberHeaders,
   PutTeamMemberRequest,
   RemoveTeamMemberHeaders,
+  ReplaceTeamModelsHeaders,
   ServerErrorResponse,
   TeamConflictResponse,
   TeamForbiddenResponse,
   TeamMemberPage,
   TeamMemberResponse,
+  TeamModels,
+  TeamModelsAdminOnlyResponse,
+  TeamModelsInput,
   TeamNotFoundResponse,
   TeamOrPersonNotFoundResponse,
   TeamPage,
@@ -94,7 +100,7 @@ export const getListTeamsUrl = (
 };
 
 /**
- * Return one page of the organization's teams, in the order they were created. Any member of the organization can read it. Each team says the caller's own role in it and whether the caller may manage it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's teams, in the order they were created. Any member of the organization can read it. Each team says the caller's own role in it and whether the caller may manage it. search narrows the list to the teams whose name holds it, ignoring case; it finds only this organization's teams. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List an organization's teams
  */
 export const listTeams = async (
@@ -933,7 +939,7 @@ export const getListTeamMembersUrl = (
 };
 
 /**
- * Return one page of the people in a team, in the order they joined it. Any member of the organization can read it. People who are only in a team beneath this one are not listed. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the people in a team, in the order they joined it. Any member of the organization can read it. People who are only in a team beneath this one are not listed, and nor is anybody who is not a member of the organization now: somebody removed from it is listed again once they are restored. search narrows the list to the people whose address or name holds it, ignoring case. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List a team's members
  */
 export const listTeamMembers = async (
@@ -1486,4 +1492,511 @@ export const useRemoveTeamMember = <
   TContext
 > => {
   return useMutation(getRemoveTeamMemberMutationOptions(options), queryClient);
+};
+export const getGetTeamModelsUrl = (organizationId: string, teamId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/teams/${encodeURIComponent(String(teamId))}/models`;
+};
+
+/**
+ * Return the models a team allows its people to run, or null when the team sets none. A person in teams with lists may run any model one of those lists names (their teams' parents' lists included), within what the organization allows: its model allowlist when that narrows anything, otherwise every model. A team with no list sets nothing, and a person in no team with a list runs what the organization allows. Admins and owners are held to it like anyone else. Any member of the organization can read it. A team of another organization is not found.
+ * @summary Read which models a team's people may run
+ */
+export const getTeamModels = async (
+  organizationId: string,
+  teamId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<TeamModels> => {
+  return apiRequest<TeamModels>(getGetTeamModelsUrl(organizationId, teamId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetTeamModelsQueryKey = (
+  organizationId: string,
+  teamId: string,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/teams/${teamId}/models`,
+  ] as const;
+};
+
+export const getGetTeamModelsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getTeamModels>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | TeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  teamId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getTeamModels>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetTeamModelsQueryKey(organizationId, teamId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getTeamModels>>> = ({
+    signal,
+  }) => getTeamModels(organizationId, teamId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      organizationId !== null &&
+      organizationId !== undefined &&
+      teamId !== null &&
+      teamId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getTeamModels>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetTeamModelsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getTeamModels>>
+>;
+export type GetTeamModelsQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | TeamNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useGetTeamModels<
+  TData = Awaited<ReturnType<typeof getTeamModels>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | TeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  teamId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getTeamModels>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getTeamModels>>,
+          TError,
+          Awaited<ReturnType<typeof getTeamModels>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetTeamModels<
+  TData = Awaited<ReturnType<typeof getTeamModels>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | TeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  teamId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getTeamModels>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getTeamModels>>,
+          TError,
+          Awaited<ReturnType<typeof getTeamModels>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetTeamModels<
+  TData = Awaited<ReturnType<typeof getTeamModels>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | TeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  teamId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getTeamModels>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Read which models a team's people may run
+ */
+
+export function useGetTeamModels<
+  TData = Awaited<ReturnType<typeof getTeamModels>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | TeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  teamId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getTeamModels>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetTeamModelsQueryOptions(
+    organizationId,
+    teamId,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getReplaceTeamModelsUrl = (
+  organizationId: string,
+  teamId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/teams/${encodeURIComponent(String(teamId))}/models`;
+};
+
+/**
+ * Replace the models a team allows its people to run. At least one, each one the organization's model catalogue offers (getModelCatalogue with view=all), named as the organization's model allowlist names models: provider/model. A model the organization's allowlist leaves out may be listed, and runs only once the organization allows it too. From the next request, the team's people (and the people of the teams beneath it) run only models one of their teams allows. Only an owner or an admin of the organization can, for a team made here or one from the company's directory alike. A repeated request with the same Idempotency-Key and body returns the first result.
+ * @summary Set which models a team's people may run
+ */
+export const replaceTeamModels = async (
+  organizationId: string,
+  teamId: string,
+  teamModelsInput: TeamModelsInput,
+  headers: ReplaceTeamModelsHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<TeamModels> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<TeamModels>(
+    getReplaceTeamModelsUrl(organizationId, teamId),
+    {
+      ...options,
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(teamModelsInput),
+    },
+  );
+};
+
+export const getReplaceTeamModelsMutationKey = () =>
+  ["replaceTeamModels"] as const;
+
+export const getReplaceTeamModelsMutationOptions = <
+  TError =
+    | InvalidTeamModelsResponse
+    | UnauthenticatedResponse
+    | TeamModelsAdminOnlyResponse
+    | TeamNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof replaceTeamModels>>,
+    TError,
+    ReplaceTeamModelsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof replaceTeamModels>>,
+  TError,
+  ReplaceTeamModelsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getReplaceTeamModelsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof replaceTeamModels>>,
+    ReplaceTeamModelsMutationVariables
+  > = (props) => {
+    const { organizationId, teamId, data, headers } = props ?? {};
+
+    return replaceTeamModels(
+      organizationId,
+      teamId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReplaceTeamModelsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof replaceTeamModels>>
+>;
+export type ReplaceTeamModelsMutationBody = TeamModelsInput;
+export type ReplaceTeamModelsMutationError =
+  | InvalidTeamModelsResponse
+  | UnauthenticatedResponse
+  | TeamModelsAdminOnlyResponse
+  | TeamNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type ReplaceTeamModelsMutationVariables = {
+  organizationId: string;
+  teamId: string;
+  data: TeamModelsInput;
+  headers: ReplaceTeamModelsHeaders;
+};
+
+/**
+ * @summary Set which models a team's people may run
+ */
+export const useReplaceTeamModels = <
+  TError =
+    | InvalidTeamModelsResponse
+    | UnauthenticatedResponse
+    | TeamModelsAdminOnlyResponse
+    | TeamNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof replaceTeamModels>>,
+      TError,
+      ReplaceTeamModelsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof replaceTeamModels>>,
+  TError,
+  ReplaceTeamModelsMutationVariables,
+  TContext
+> => {
+  return useMutation(getReplaceTeamModelsMutationOptions(options), queryClient);
+};
+export const getDeleteTeamModelsUrl = (
+  organizationId: string,
+  teamId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/teams/${encodeURIComponent(String(teamId))}/models`;
+};
+
+/**
+ * Clear a team's models, so the team sets none again and its people run what their other teams and the organization allow. Only an owner or an admin of the organization can. Clearing a team that sets none changes nothing.
+ * @summary Stop limiting a team's models
+ */
+export const deleteTeamModels = async (
+  organizationId: string,
+  teamId: string,
+  headers: DeleteTeamModelsHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<void> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<void>(getDeleteTeamModelsUrl(organizationId, teamId), {
+    ...options,
+    method: "DELETE",
+    headers: { ...headers, ...getHeaders(options?.headers) },
+  });
+};
+
+export const getDeleteTeamModelsMutationKey = () =>
+  ["deleteTeamModels"] as const;
+
+export const getDeleteTeamModelsMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | TeamModelsAdminOnlyResponse
+    | TeamNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteTeamModels>>,
+    TError,
+    DeleteTeamModelsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteTeamModels>>,
+  TError,
+  DeleteTeamModelsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDeleteTeamModelsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteTeamModels>>,
+    DeleteTeamModelsMutationVariables
+  > = (props) => {
+    const { organizationId, teamId, headers } = props ?? {};
+
+    return deleteTeamModels(organizationId, teamId, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteTeamModelsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteTeamModels>>
+>;
+
+export type DeleteTeamModelsMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | TeamModelsAdminOnlyResponse
+  | TeamNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type DeleteTeamModelsMutationVariables = {
+  organizationId: string;
+  teamId: string;
+  headers: DeleteTeamModelsHeaders;
+};
+
+/**
+ * @summary Stop limiting a team's models
+ */
+export const useDeleteTeamModels = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | TeamModelsAdminOnlyResponse
+    | TeamNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deleteTeamModels>>,
+      TError,
+      DeleteTeamModelsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deleteTeamModels>>,
+  TError,
+  DeleteTeamModelsMutationVariables,
+  TContext
+> => {
+  return useMutation(getDeleteTeamModelsMutationOptions(options), queryClient);
 };

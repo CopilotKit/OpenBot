@@ -46,6 +46,7 @@ import {
   type HostFolderGrant,
   hostAccessQueryOptions,
 } from "@/lib/computers/host-access";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The tool pattern the rule form shows as its example. It has to match real tool names, which start
@@ -350,7 +351,7 @@ export function RuleForm({
             </form>
             {save.error ? (
               <p className="mt-4 text-destructive text-sm" role="alert">
-                {save.error.message}
+                {failureSaid(save.error)}
               </p>
             ) : null}
           </DialogBody>

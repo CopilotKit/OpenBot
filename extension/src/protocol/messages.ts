@@ -335,6 +335,9 @@ export type PageStateResponse = {
     openbotUrl: string;
     user: { name: string; email: string };
     via: RecorderConnectVia;
+    /** The organization it records into, by name: OpenBot's latest answer, else the grant's. Absent from an OpenBot that
+     * keeps every connection in `default`. */
+    organizationName?: string;
   } | null;
   me: RecorderMe | null;
   policy: { openbotUrl: string | null; invalid: boolean };
@@ -354,6 +357,7 @@ export type PageResponse =
     }
   | { ok: true; learning: LearningSpaceState }
   | { ok: true; available: boolean }
+  | { ok: true; organizationName?: string } // an approved Connect, and the organization this browser now records into
   | { ok: true; connected: true } // OpenBot Desktop connected this browser, with no Connect page
   | { ok: true; connected: false; reason: string } // why OpenBot Desktop did not connect this browser, as a code (DesktopConnect)
   | { ok: true; floor: { release: string } | null } // the release to update to while the security floor holds this copy

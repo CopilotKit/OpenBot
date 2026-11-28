@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { type SkillFormValues, skillFormSchema } from "@/lib/skills/form";
 import { cn } from "@/lib/utils";
+import { failureSaid } from "@/lib/load-failure";
 
 const TOOLS_HINT =
   "Using this skill loads these tools for that reply. It doesn't give access. A Bot only uses tools it already has.";
@@ -225,7 +226,7 @@ export function SkillFields({
 
   const failure = error ? (
     <p className="mt-4 text-sm text-destructive" role="alert">
-      {error.message}
+      {failureSaid(error)}
     </p>
   ) : null;
 

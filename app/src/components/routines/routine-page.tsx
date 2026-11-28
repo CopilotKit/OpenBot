@@ -49,6 +49,8 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { deleteQuestion } from "@/lib/delete-question";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { routineDoes } from "@/lib/routines/merged";
 import {
@@ -63,62 +65,14 @@ import {
   routinesQueryOptions,
 } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
+import { lastRunLabel } from "@/lib/routines/words";
 import { queryClient } from "@/query-client";
 
-/** The browser's own time zone, for saying a schedule's only where it differs. */
-export function viewerTimeZone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone;
-  } catch {
-    return "UTC";
-  }
-}
-
-/**
- * When a routine starts, as its row says it: the schedule, with its time zone only where it isn't
- * the reader's own. "Weekdays at 09:00" in Madrid, read in Madrid, needs no zone; read in New York
- * it does. The details always name the zone.
- */
-export function scheduleWords(
-  routine: Pick<RoutineRecord, "schedule" | "timezone">,
-  localZone: string = viewerTimeZone(),
-): string {
-  return routine.timezone === localZone
-    ? routine.schedule
-    : `${routine.schedule} · ${routine.timezone}`;
-}
-
-/**
- * What the last-run cell says, and in what tone.
- *
- * `lastRun === null` and `lastRun.status === null` are different facts, and saying the wrong one
- * invents news: the first is "this routine has never finished a run," the second is "one is open
- * right now" — which is also what a run stuck open after repeated dispatch failures looks like from
- * here. Neither is a failure, so neither gets the destructive tone; only `status: "failed"` does.
- */
-export function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
-  text: string;
-  className: string;
-} {
-  if (lastRun === null)
-    return { text: "Hasn't run yet", className: "text-muted-foreground" };
-  if (lastRun.status === null)
-    return { text: "Running…", className: "text-muted-foreground" };
-  const when = lastRun.at ? relativeTime(lastRun.at) : "recently";
-  if (lastRun.status === "failed")
-    return { text: `Failed ${when}`, className: "text-destructive" };
-  if (lastRun.status === "skipped")
-    return {
-      text: `Skipped ${when}`,
-      className: "text-amber-600 dark:text-amber-500",
-    };
-  if (lastRun.status === "succeeded")
-    return { text: `Ran ${when}`, className: "text-muted-foreground" };
-  // An outcome this DTO doesn't recognise degrades to a neutral label rather than an invented
-  // success: the contract typing makes a fourth outcome a build-time error, and this is the runtime
-  // fallback if that ever slips through.
-  return { text: `Finished ${when}`, className: "text-muted-foreground" };
-}
+export {
+  lastRunLabel,
+  scheduleWords,
+  viewerTimeZone,
+} from "@/lib/routines/words";
 
 /**
  * When it runs next. Enabled only: the store recomputes nextRunAt on a schedule change or
@@ -131,7 +85,7 @@ function nextRunWords(routine: RoutineRecord): {
 } {
   if (!routine.enabled) return { text: "Paused" };
   if (new Date(routine.nextRunAt).getTime() <= Date.now())
-    return { text: "Due", className: "text-amber-600 dark:text-amber-500" };
+    return { text: "Due", className: "text-warning" };
   return { text: relativeTime(routine.nextRunAt) };
 }
 
@@ -142,10 +96,10 @@ const RUN_STATUS: Record<
   running: { text: "Running", className: "" },
   succeeded: {
     text: "Succeeded",
-    className: "text-emerald-600 dark:text-emerald-500",
+    className: "text-success",
   },
   failed: { text: "Failed", className: "text-destructive" },
-  skipped: { text: "Skipped", className: "text-amber-600 dark:text-amber-500" },
+  skipped: { text: "Skipped", className: "text-warning" },
   waiting: { text: "Waiting for you", className: "" },
 };
 
@@ -176,7 +130,7 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
       ) : runs.error ? (
         <div className="mt-4 flex flex-wrap items-center gap-3" role="alert">
           <p className="text-destructive text-sm">
-            Couldn't load its runs. Try again.
+            {loadFailure(runs.error, "Couldn't load its runs. Try again.")}
           </p>
           <Button
             disabled={runs.isFetching}
@@ -388,7 +342,11 @@ export function RoutinePage({
               <button
                 aria-label={`Run the routine scheduled ${routine.schedule} now`}
                 disabled={!routine.enabled || runNow.isPending}
-                onClick={() => runNow.mutate(routine.id)}
+                onClick={() => {
+                  // Bots can't run until a card is added: the dialog says why, in place of a run.
+                  if (stopIfNeedsCard()) return;
+                  runNow.mutate(routine.id);
+                }}
                 type="button"
               />
             }
@@ -398,7 +356,9 @@ export function RoutinePage({
               <IconPlayerPlay />
             </ItemMedia>
             <ItemContent>
-              <ItemTitle>Run now</ItemTitle>
+              <ItemTitle>
+                {runNow.isPending ? "Starting…" : "Run now"}
+              </ItemTitle>
               <ItemDescription>
                 {routine.enabled
                   ? "Runs it now, for real. The Bot does the work and posts in the conversation."
@@ -504,7 +464,29 @@ export function RoutinePage({
         </PageRows>
         {setEnabled.error || runNow.error ? (
           <p className="mt-3 text-destructive text-sm" role="alert">
-            {setEnabled.error?.message ?? runNow.error?.message}
+            {failureSaid(setEnabled.error ?? runNow.error)}
+          </p>
+        ) : null}
+        {/*
+         * The press is answered here, as the check-in page answers its own Run now: it started, and
+         * where to watch it. The link sits outside the Run now row, which is a button.
+         */}
+        {runNow.isSuccess ? (
+          <p className="mt-3 text-sm" role="status">
+            {routine.conversation.gone ? (
+              "Started. It shows under Runs."
+            ) : (
+              <>
+                Started. The Bot posts in the conversation as it works.{" "}
+                <Link
+                  className="underline"
+                  params={{ channelId: routine.conversation.id }}
+                  to="/channel/$channelId"
+                >
+                  Open conversation
+                </Link>
+              </>
+            )}
           </p>
         ) : null}
       </PageSection>
@@ -566,7 +548,7 @@ export function RoutinePage({
           {remove.error ? (
             <DialogBody className="mt-4">
               <p className="text-destructive text-sm" role="alert">
-                {remove.error.message}
+                {failureSaid(remove.error)}
               </p>
             </DialogBody>
           ) : null}

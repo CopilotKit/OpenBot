@@ -82,7 +82,7 @@ async function configuredModelId(botModel: string | undefined) {
       "-e",
       [
         'const { mastra } = await import("./agent-mastra/src/mastra/index.ts");',
-        'const model = mastra.getAgent("openbot").model;',
+        'const model = await mastra.getAgent("openbot").getModel();',
         "console.log(JSON.stringify({ modelId: model.modelId }));",
       ].join("\n"),
     ],
@@ -161,7 +161,7 @@ async function providerStartup(botProvider: string) {
       "-e",
       [
         'const { mastra } = await import("./agent-mastra/src/mastra/index.ts");',
-        'const model = mastra.getAgent("openbot").model;',
+        'const model = await mastra.getAgent("openbot").getModel();',
         "console.log(JSON.stringify({ modelId: model.modelId }));",
       ].join("\n"),
     ],
@@ -564,6 +564,108 @@ describe("OpenBot Mastra provider requests", () => {
         ]);
       } finally {
         await provider.stop(true);
+      }
+    }, 15_000);
+  }
+});
+
+/**
+ * One harness serves every organization of an OpenBot, and the key in its environment is the
+ * deployment's gateway token, which names one organization. A run the server sends its own token
+ * (the `OpenBot model route` context entry) calls OpenBot's model gateway with that token; a run
+ * without one keeps the environment's key.
+ */
+describe("OpenBot Mastra on OpenBot's model gateway", () => {
+  for (const wire of ["openai", "anthropic"] as const) {
+    test(`a run's own token is the key it calls the ${wire} wire with`, async () => {
+      const seen: (string | null)[] = [];
+      const gateway = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        async fetch(request) {
+          const body = await request.json();
+          seen.push(
+            wire === "anthropic"
+              ? request.headers.get("x-api-key")
+              : request.headers.get("authorization"),
+          );
+          if (wire === "anthropic")
+            return Response.json({
+              id: "msg",
+              type: "message",
+              role: "assistant",
+              model: body.model,
+              content: [{ type: "text", text: "hello" }],
+              stop_reason: "end_turn",
+              stop_sequence: null,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            });
+          return Response.json({
+            id: "chat",
+            object: "chat.completion",
+            created: 0,
+            model: body.model,
+            choices: [
+              {
+                index: 0,
+                finish_reason: "stop",
+                message: { role: "assistant", content: "hello" },
+              },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          });
+        },
+      });
+      const base = `${gateway.url.toString().replace(/\/+$/, "")}/api/model-provider${wire === "anthropic" ? "/anthropic" : "/v1"}`;
+      try {
+        const { stdout, stderr, exitCode } = await runProbe(
+          [
+            Bun.argv[0],
+            "--no-env-file",
+            "-e",
+            [
+              // Mastra's own RequestContext, from the harness's packages, as its server builds one.
+              'const { RequestContext } = await import(Bun.resolveSync("@mastra/core/request-context", process.cwd() + "/agent-mastra/src/mastra"));',
+              'const { mastra } = await import("./agent-mastra/src/mastra/index.ts");',
+              "const requestContext = new RequestContext();",
+              'requestContext.set("ag-ui", { context: [{ description: "OpenBot model route", value: JSON.stringify({ via: ' +
+                JSON.stringify(wire) +
+                ', token: "obgw_run-token-org-b" }) }] });',
+              'const agent = mastra.getAgent("openbot");',
+              'const withToken = await agent.generate("Say hello", { requestContext });',
+              'const without = await agent.generate("Say hello");',
+              "console.log(JSON.stringify({ texts: [withToken.text, without.text] }));",
+            ].join("\n"),
+          ],
+          {
+            PATH: process.env.PATH ?? "/opt/homebrew/bin:/usr/bin:/bin",
+            MASTRA_TELEMETRY_DISABLED: "true",
+            DO_NOT_TRACK: "1",
+            NODE_ENV: "test",
+            BOT_PROVIDER: wire,
+            BOT_MODEL: wire === "anthropic" ? "claude-sonnet-5-5" : "gpt-5.5",
+            ANTHROPIC_API_KEY:
+              wire === "anthropic" ? "deployment-gateway-token" : "",
+            OPENAI_API_KEY:
+              wire === "anthropic" ? "" : "deployment-gateway-token",
+            ANTHROPIC_BASE_URL: wire === "anthropic" ? base : "",
+            OPENAI_BASE_URL: wire === "anthropic" ? "" : base,
+          },
+          10_000,
+        );
+        if (exitCode !== 0)
+          throw new Error(
+            `gateway probe exited ${exitCode}\n${stdout}\n${stderr}`,
+          );
+        expect(stdout).toContain('"texts":["hello","hello"]');
+        const expected = (key: string) =>
+          wire === "anthropic" ? key : `Bearer ${key}`;
+        expect(seen).toEqual([
+          expected("obgw_run-token-org-b"),
+          expected("deployment-gateway-token"),
+        ]);
+      } finally {
+        await gateway.stop(true);
       }
     }, 15_000);
   }

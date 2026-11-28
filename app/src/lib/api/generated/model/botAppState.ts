@@ -3,7 +3,7 @@
  */
 
 /**
- * ready: usable now. not_connected and reconnect: waiting on an account the person connects (see accountHolder). shared_not_connected: waiting on the shared account. shared_not_approved: an administrator hasn't approved who may use the shared account through this Bot. disabled: turned off (see unavailable). not_granted: the Bot wasn't given it. owner_grantable: the same, and the person may give it themselves.
+ * ready: usable now. not_connected and reconnect: waiting on an account the person connects (see accountHolder). shared_not_connected: waiting on the shared account. shared_not_approved: an administrator hasn't approved who may use the shared account through this Bot, which happens only where the organization's apps are locked down. disabled: turned off (see unavailable). not_granted: the Bot wasn't given it. owner_grantable: the same, and the person may give it themselves.
  */
 export type BotAppState = (typeof BotAppState)[keyof typeof BotAppState];
 

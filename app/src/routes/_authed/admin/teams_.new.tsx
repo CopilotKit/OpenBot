@@ -1,8 +1,11 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+import { NewTeamPage } from "@/components/teams/new-team-page";
 
-/** Teams moved out of Admin, and New team with them. */
+/** New team, inside Admin: the same page as `/teams/new`, in Admin's frame. */
 export const Route = createFileRoute("/_authed/admin/teams_/new")({
-  beforeLoad: () => {
-    throw redirect({ to: "/teams/new", replace: true });
-  },
+  component: AdminNewTeamPage,
 });
+
+function AdminNewTeamPage() {
+  return <NewTeamPage shell="admin" />;
+}

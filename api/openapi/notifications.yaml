@@ -15,7 +15,8 @@ paths:
       summary: List a person's devices
       description: >-
         Return one page of the phones a person registered for push
-        notifications, the first registered first. Never a device's push
+        notifications in this organization, the first registered first.
+        Never a device's push
         token. Only the person themselves may list them; there is no
         administrator view. A missing cursor starts at the first page and
         nextCursor null ends the list.
@@ -32,6 +33,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -62,14 +65,18 @@ paths:
       summary: Register a device for push notifications
       description: >-
         Register one of the person's phones for push notifications under the
-        id the app made for it, or replace what that id holds. The app sends
+        id the app made for it, or replace what that id holds. A device is
+        registered in one organization, the one the address names, and gets
+        push notifications only from the person's Bots there. A person in
+        several organizations registers the phone in each one they want
+        notifications from, under the same id. The app sends
         its current push token every time it starts, so a token that changed
         replaces the old one and the device is never registered twice.
         Answers 200 whether the id was new or held a registration already.
         A token another account holds moves only once that
         account signed out on the phone. Only the person themselves may
         register their devices, and only where this deployment sends push
-        notifications (listNotificationTransports).
+        notifications to phones (its OpenBot phone app's project is set up).
       security:
         - webSession: []
         - appOAuth: [devices:write]
@@ -94,6 +101,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -120,8 +129,10 @@ paths:
       operationId: deleteDevice
       summary: Stop push notifications to a device
       description: >-
-        Stop sending push notifications to one of the person's phones. The
-        app does this when the person signs out on it, so another account
+        Stop sending push notifications to one of the person's phones from
+        this organization. Its registrations in the person's other
+        organizations stay. The app does this in each organization when the
+        person signs out on it, so another account
         can register the phone after them. Only the person themselves may
         remove their devices. A device already removed is not found, which a
         client can read as done.
@@ -134,6 +145,9 @@ paths:
       responses:
         '204':
           description: The device gets no more push notifications.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -180,6 +194,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -240,6 +256,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -300,6 +318,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -360,6 +380,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -406,6 +428,9 @@ paths:
       responses:
         '204':
           description: The destination was disconnected.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -448,6 +473,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -492,6 +519,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -542,6 +571,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -588,6 +619,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -637,6 +670,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -667,8 +702,10 @@ paths:
       summary: List the ways OpenBot can reach people here
       description: >-
         Return the ways this deployment can reach a person outside OpenBot.
-        One appears only once it is set up where OpenBot runs: push needs the
-        OpenBot phone app's project, Slack and Microsoft Teams need the
+        One appears only once it is set up where OpenBot runs: push is always
+        there for browsers (web push, saveWebPushSubscription) and reaches
+        phones once the OpenBot phone app's project is set up, Slack and
+        Microsoft Teams need the
         OpenTag pairing, and text messages need Twilio. A person's settings
         keep their choice for one that is not, for when it is. A missing
         cursor starts at the first page and nextCursor null ends the list.
@@ -685,6 +722,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -736,7 +775,8 @@ components:
       type: object
       description: >-
         A phone that gets push notifications for the person, from every one
-        of their Bots. Never its push token.
+        of their Bots in the organization it is registered in. Never its
+        push token.
       required: [id, platform, createdAt]
       properties:
         id:
@@ -937,7 +977,7 @@ components:
       enum: [push, slack, teams, sms]
       description: >-
         A way OpenBot reaches a person outside it: push notifications to their
-        phones, Slack, Microsoft Teams, or text messages.
+        phones and browsers, Slack, Microsoft Teams, or text messages.
     DeliveryKind:
       type: string
       enum: [reply, question, approval, attention]
@@ -1104,6 +1144,9 @@ components:
         This deployment hasn't set up that way of reaching people: push
         notifications, the Slack and Teams pairing, or text messages. Or the
         organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1124,6 +1167,9 @@ components:
       description: >-
         Another account has the phone registered and hasn't signed out on it.
         Or the Idempotency-Key was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1155,6 +1201,9 @@ components:
       description: >-
         The person has no such device: it was removed already, or never
         registered. Or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1175,6 +1224,9 @@ components:
       description: >-
         The person has no such destination: it was disconnected already, or
         never connected. Or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1198,6 +1250,9 @@ components:
         used already or its code was wrong, the phone is connected to
         another person, or the Slack account, Teams account or phone is
         connected in another organization.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1240,6 +1295,9 @@ components:
       description: >-
         The text message provider didn't answer, so no code was sent or
         checked. Trying again can work.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1260,6 +1318,9 @@ components:
       description: >-
         The caller asked to link somebody else's account, or an administrator
         hasn't let them add Bots to Slack and Teams.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:

@@ -316,7 +316,7 @@ export const PublishTeamBotResponse = zod.object({
       ),
     })
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 
@@ -461,7 +461,7 @@ export const AssignTeamBotResponse = zod.object({
       ),
     })
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 

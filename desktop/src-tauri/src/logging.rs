@@ -301,7 +301,7 @@ fn took(elapsed: std::time::Duration) -> String {
 
 /// `2026-11-07T14:03:12.345Z`. UTC, so a line means the same moment wherever it is read; the
 /// first line of each launch says the local offset.
-fn timestamp() -> String {
+pub fn timestamp() -> String {
     use time::macros::format_description;
     time::OffsetDateTime::now_utc()
         .format(format_description!(
@@ -520,8 +520,9 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
                 r"|ya29\.[0-9A-Za-z_\-]+",
                 r"|npm_[A-Za-z0-9]{36}",
                 r"|hf_[A-Za-z0-9]{30,}",
-                // OpenBot's own: an app's access token (`oba_`) and refresh token (`obr_`).
-                r"|ob[ar]_[A-Za-z0-9_\-]{8,}",
+                // OpenBot's own: an app's access token (`oba_`) and refresh token (`obr_`), and an
+                // API key (`obk_`).
+                r"|ob[akr]_[A-Za-z0-9_\-]{8,}",
                 r"|eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*",
                 r")",
             ),
@@ -548,8 +549,28 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
 /// Errs towards replacing: a log that lost an identifier is still a log, and one that kept a key
 /// cannot be sent to anybody.
 pub fn redact(text: &str) -> Cow<'_, str> {
+    redact_by(text, &RULES)
+}
+
+/// The last rules in `RULES`, which judge a string by its shape alone: a long hexadecimal string,
+/// and a long random-looking one. An id the server made looks exactly like that.
+const SHAPE_RULES: usize = 2;
+
+/**
+`redact`, except for the rules that judge a string by its shape alone (`SHAPE_RULES`): for what is
+known to be an id and never a credential, such as an API address's path once its query is gone, or
+the account and organization ids an OpenBot answered with. An id the server made is a long random
+string, which the shape rules would replace, and then a failure could not be found in that server's
+logs. Everything named as a credential, a key or token by its provider's prefix, a JWT, a password
+in a URL and an email address are still replaced.
+*/
+pub fn redact_keeping_ids(text: &str) -> Cow<'_, str> {
+    redact_by(text, &RULES[..RULES.len() - SHAPE_RULES])
+}
+
+fn redact_by<'a>(text: &'a str, rules: &[Rule]) -> Cow<'a, str> {
     let mut text = Cow::Borrowed(text);
-    for rule in RULES.iter() {
+    for rule in rules {
         if !rule.pattern.is_match(&text) {
             continue;
         }
@@ -730,6 +751,71 @@ mod tests {
             "OpenBot Desktop 0.3.2 (v0.3.2 (b214c97e)) on macos aarch64",
         ] {
             assert_eq!(redact(line), line);
+        }
+    }
+
+    /// An API path and the ids an OpenBot answers with keep their ids, which `redact` takes for
+    /// random secrets by their shape, and still lose every credential and email address in them.
+    #[test]
+    fn ids_are_kept_where_only_ids_can_be_and_credentials_still_go() {
+        // As Better Auth makes them: 32 letters and digits, both cases.
+        let organization = fake("", "Kd8fJ2pQ", 4);
+        let path = format!("/api/v2/organizations/{organization}/conversations/5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10");
+        assert_ne!(redact(&path), path, "redact takes the id for a secret");
+        assert_eq!(redact_keeping_ids(&path), path);
+        assert_eq!(
+            redact_keeping_ids("req_5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10"),
+            "req_5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10"
+        );
+        let token = fake("oba_", "Zq3Kp8x", 4);
+        let jwt = format!(
+            "eyJ{}.eyJ{}.{}",
+            fake("", "hbGciOi", 3),
+            fake("", "zdWIiOi", 3),
+            "Sfl9xQ"
+        );
+        for (line, secret) in [
+            (format!("/api/v2/people/{token}"), token.clone()),
+            (format!("/api/v2/sessions/{jwt}"), jwt.clone()),
+            (
+                "/api/v2/people/dana.rivera@acme-robotics.io".to_owned(),
+                "dana.rivera@acme-robotics.io".to_owned(),
+            ),
+            (format!("access_token={organization}"), organization.clone()),
+        ] {
+            let kept = redact_keeping_ids(&line);
+            assert!(!kept.contains(secret.as_str()), "{line} -> {kept}");
+        }
+    }
+
+    /// The web app scrubs its own troubleshooting logs with these rules, ported
+    /// (app/src/lib/troubleshooting/redact.ts). Both are held to the same real-world cases, so the
+    /// two can never redact the same line differently.
+    #[test]
+    fn the_web_app_and_this_app_redact_every_shared_case_alike() {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Case {
+            input: String,
+            redacted: String,
+            keeping_ids: String,
+        }
+        let cases: Vec<Case> =
+            serde_json::from_str(include_str!("../../../shared/redaction-cases.json")).unwrap();
+        assert!(cases.len() > 50);
+        for case in &cases {
+            assert_eq!(
+                redact(&case.input),
+                case.redacted,
+                "redact {:?}",
+                case.input
+            );
+            assert_eq!(
+                redact_keeping_ids(&case.input),
+                case.keeping_ids,
+                "redact_keeping_ids {:?}",
+                case.input
+            );
         }
     }
 

@@ -99,7 +99,9 @@ test("a screen that throws shows the error screen and sends one report, through 
       "Cannot read properties of undefined (reading 'title')",
     );
     await waitFor(() =>
-      expect(view.getByText("Something went wrong!")).toBeTruthy(),
+      expect(
+        view.getByRole("heading", { name: "Something went wrong" }),
+      ).toBeTruthy(),
     );
     await waitFor(() => expect(reports).toHaveLength(1));
     await settleReactWork();
