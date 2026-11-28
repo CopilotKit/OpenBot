@@ -69,6 +69,16 @@ export const AI_PROVIDERS: AiProvider[] = [
     mark: "trustedrouter",
   },
   {
+    id: "privatemode",
+    name: "Privatemode",
+    summary:
+      "Use a Privatemode API key for models run in confidential computing.",
+    keySummary:
+      "Use a Privatemode API key for models run in confidential computing.",
+    logins: ["endpoint"],
+    mark: "privatemode",
+  },
+  {
     id: "openai-compatible",
     name: "Any OpenAI-compatible endpoint",
     summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.",
@@ -105,6 +115,12 @@ export const ENDPOINT_PRESETS: Partial<
     model: "anthropic/claude-sonnet-5.5",
     keyUrl: "https://trustedrouter.com/console/api-keys",
     keyLink: "Get a TrustedRouter API key",
+  },
+  privatemode: {
+    baseUrl: "https://proxyless-api.privatemode.ai/v1",
+    model: "glm-latest",
+    keyUrl: "https://portal.privatemode.ai",
+    keyLink: "Get a Privatemode API key",
   },
 };
 
@@ -164,6 +180,26 @@ export function signInRetired(
   connection: { problem?: { code: string } | null } | null | undefined,
 ): boolean {
   return connection?.problem?.code === "sign-in-retired";
+}
+
+/**
+ * A connection saved for a provider OpenBot no longer offers: still listed under the id it was saved
+ * with (one this app may not know, shown by its id), never ready, with nothing listed and the
+ * problem `provider-retired`. Nothing on it fixes it, so no picker offers it and no page offers to
+ * sign in again or replace its key. It is removed on its page, and another AI connected.
+ */
+export const PROVIDER_RETIRED = {
+  title: "No longer offered",
+  /** Where a conversation leads: the connection's page, where it is removed. */
+  remove: "Remove it",
+  connect: "Connect another AI",
+} as const;
+
+/** Whether a connection's provider is one OpenBot no longer offers (PROVIDER_RETIRED). */
+export function providerRetired(
+  connection: { problem?: { code: string } | null } | null | undefined,
+): boolean {
+  return connection?.problem?.code === "provider-retired";
 }
 
 /**

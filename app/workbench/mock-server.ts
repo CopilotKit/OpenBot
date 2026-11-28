@@ -17,6 +17,10 @@
  *   # As a server without the phone app's sign-in hand-off: every /api/auth/shell/* answers 404.
  *   MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 bun app/workbench/mock-server.ts
  *
+ *   # As a server from before /api/auth/shell/enter asked for the OpenBot-Shell header (below), for
+ *   # phone app builds that don't send it yet:
+ *   MOCK_ENTER_NO_HEADER_CHECK=1 bun app/workbench/mock-server.ts
+ *
  * It listens on 127.0.0.1:${SERVER_PORT:-3001}. Besides the API it answers:
  *
  *   GET  /__mock/session                    {"signedIn": boolean}: whether a request with no cookie is
@@ -30,9 +34,13 @@
  *        as test person", to openbotshell://signed-in?ticket=T. T is single use and lasts 60 s.
  *        With auto=1 the page follows its link by itself after 800 ms. 400 without a valid C.
  *   GET  /api/auth/shell/enter?ticket=T&verifier=V&to=/path
- *        Loaded by the web view. With a known, unused, unexpired T whose C is base64url(sha256(V)):
- *        sets the cookie better-auth.session_token=mock and answers 303 to `to` (an own path, else /).
- *        Otherwise 303 to /sign?native-sign-in=failed, setting nothing.
+ *        Loaded by the web view, which sends the header `OpenBot-Shell: ios` (or `android`). With that
+ *        header, a Sec-Fetch-Site that is absent, `none` or `same-origin`, and a known, unused,
+ *        unexpired T whose C is base64url(sha256(V)): sets the cookie better-auth.session_token=mock,
+ *        marks T used and answers 303 to `to` (an own path, else /). Otherwise 303 to
+ *        /sign?native-sign-in=failed, setting nothing; a refusal for the header or Sec-Fetch-Site is
+ *        made before T is looked at, so it leaves T unused. MOCK_ENTER_NO_HEADER_CHECK=1 skips both
+ *        header checks, as the server did before it asked for them.
  *   POST /api/auth/sign-out
  *        Ends the mock's session: its cookie stops counting until the next /enter.
  *
@@ -47,11 +55,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 import type { ServerWebSocket } from "bun";
 import { HttpResponse, http, type RequestHandler } from "msw";
+import type { ApiRoute } from "../../desktop/workbench/appContract";
 import type { Bot, ConversationSummary } from "../src/lib/api/generated/model";
 import { extraHandlers } from "./api/extraHandlers";
 import { installFakeApi } from "./api/fakeApi";
 import { pickAggregators } from "./api/handlers";
-import type { ApiRoute } from "../../desktop/workbench/appContract";
 import { DEFAULT_SESSION, sessionApi } from "./session";
 
 const PORT = Number(process.env.SERVER_PORT ?? 3001);
@@ -64,6 +72,11 @@ const API = `*/api/v2/organizations/:organizationId`;
 export const MOCK_SESSION_COOKIE = "better-auth.session_token";
 const MOCK_SESSION_VALUE = "mock";
 const HANDOFF = process.env.MOCK_NO_HANDOFF !== "1";
+/** Whether /api/auth/shell/enter asks for the phone app's header, as OpenBot's server does. */
+const ENTER_HEADER_CHECK = process.env.MOCK_ENTER_NO_HEADER_CHECK !== "1";
+/** The header the phone app's web view sends on /api/auth/shell/enter, and what it may say. */
+const SHELL_HEADER = "OpenBot-Shell";
+const SHELL_PLATFORMS = new Set(["ios", "android"]);
 // MOCK_REPLY=1: a run answers with one canned sentence (the iOS shell's video). Off by default.
 const REPLY = process.env.MOCK_REPLY === "1";
 const TICKET_MS = 60_000;
@@ -319,11 +332,16 @@ function mockDataHandlers(): RequestHandler[] {
           { type: "RUN_STARTED", threadId, runId },
           ...(REPLY
             ? [
-                { type: "TEXT_MESSAGE_START", messageId: `${runId}-reply`, role: "assistant" },
+                {
+                  type: "TEXT_MESSAGE_START",
+                  messageId: `${runId}-reply`,
+                  role: "assistant",
+                },
                 {
                   type: "TEXT_MESSAGE_CONTENT",
                   messageId: `${runId}-reply`,
-                  delta: "Two of the three cut their entry price; one added a free tier.",
+                  delta:
+                    "Two of the three cut their entry price; one added a free tier.",
                 },
                 { type: "TEXT_MESSAGE_END", messageId: `${runId}-reply` },
               ]
@@ -440,11 +458,19 @@ ${auto ? `<script>setTimeout(function () { window.location.href = document.getEl
   });
 }
 
-function enter(url: URL): Response {
+function enter(url: URL, request: Request): Response {
   const failed = new Response(null, {
     status: 303,
     headers: { location: "/sign?native-sign-in=failed" },
   });
+  if (ENTER_HEADER_CHECK) {
+    // Only the phone app's web view, which says so in a header a link elsewhere can't set, and
+    // never a request another site started.
+    const shell = request.headers.get(SHELL_HEADER)?.toLowerCase() ?? "";
+    const site = request.headers.get("sec-fetch-site")?.toLowerCase();
+    if (!SHELL_PLATFORMS.has(shell)) return failed;
+    if (site === "cross-site" || site === "same-site") return failed;
+  }
   const ticket = tickets.get(url.searchParams.get("ticket") ?? "");
   const verifier = url.searchParams.get("verifier") ?? "";
   if (!ticket || ticket.used || ticket.expires < Date.now() || !verifier)
@@ -529,7 +555,9 @@ async function start() {
         path === "/api/auth/shell/enter"
       ) {
         if (!HANDOFF) return new Response("Not found", { status: 404 });
-        return path.endsWith("/handoff") ? handoffPage(url) : enter(url);
+        return path.endsWith("/handoff")
+          ? handoffPage(url)
+          : enter(url, incoming);
       }
 
       if (incoming.headers.get("upgrade")?.toLowerCase() === "websocket") {

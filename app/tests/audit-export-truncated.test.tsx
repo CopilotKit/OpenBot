@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { agentKeys } from "@/lib/agents/queries";
+import { forgetNativeShellForTests } from "@/lib/native-shell/shell";
 import { Route as AuditRoute } from "@/routes/_authed/admin/audit";
 import { AUDIT_EXPORT_PATH, auditExport } from "./audit-api";
 import { seedAuditPage } from "./seed-audit-page";
@@ -23,17 +24,7 @@ afterEach(() => {
 
 afterAll(() => GlobalRegistrator.unregister());
 
-async function exportWith(truncatedAt?: number) {
-  const asked: URL[] = [];
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = new URL(String(input), "http://127.0.0.1");
-    asked.push(url);
-    if (url.pathname === AUDIT_EXPORT_PATH)
-      return auditExport("id\n", truncatedAt);
-    return Response.json({ error: "not served" }, { status: 404 });
-  }) as unknown as typeof fetch;
-  URL.createObjectURL = () => "blob:audit";
-  URL.revokeObjectURL = () => {};
+function renderAudit() {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
@@ -45,11 +36,25 @@ async function exportWith(truncatedAt?: number) {
     routeTree: createRootRoute({ component: AuditRoute.options.component }),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
-  const view = render(
+  return render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+}
+
+async function exportWith(truncatedAt?: number) {
+  const asked: URL[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://127.0.0.1");
+    asked.push(url);
+    if (url.pathname === AUDIT_EXPORT_PATH)
+      return auditExport("id\n", truncatedAt);
+    return Response.json({ error: "not served" }, { status: 404 });
+  }) as unknown as typeof fetch;
+  URL.createObjectURL = () => "blob:audit";
+  URL.revokeObjectURL = () => {};
+  const view = renderAudit();
   fireEvent.click(await view.findByText("Export CSV"));
   await view.findByText("Export CSV");
   return Object.assign(view, { asked });
@@ -69,4 +74,31 @@ test("a whole export says nothing extra", async () => {
   const exported = view.asked.find((url) => url.pathname === AUDIT_EXPORT_PATH);
   expect(exported?.searchParams.has("cursor")).toBe(false);
   expect(exported?.searchParams.has("format")).toBe(false);
+});
+
+/*
+ * The phone app's web view doesn't take a download yet, and this one is a `blob:` address let go at
+ * once, which it could not fetch later: no Export there.
+ */
+test("inside the phone app's native shell there is no Export", async () => {
+  const page = window as { __OPENBOT_NATIVE_SHELL__?: unknown };
+  page.__OPENBOT_NATIVE_SHELL__ = {
+    platform: "android",
+    version: "0.1",
+    bridge: 1,
+  };
+  forgetNativeShellForTests();
+  globalThis.fetch = (async () =>
+    Response.json(
+      { error: "not served" },
+      { status: 404 },
+    )) as unknown as typeof fetch;
+  try {
+    const view = renderAudit();
+    await view.findByText("Refresh");
+    expect(view.queryByText("Export CSV")).toBeNull();
+  } finally {
+    delete page.__OPENBOT_NATIVE_SHELL__;
+    forgetNativeShellForTests();
+  }
 });
