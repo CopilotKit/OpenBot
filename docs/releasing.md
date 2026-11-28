@@ -1185,7 +1185,8 @@ schedule or by hand on `main`, never on a pull request.
 Each provider needs its key as a repository secret: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 `GEMINI_API_KEY` (Google, also used for Antigravity) and `XAI_API_KEY`. A provider without one is
 reported as skipped, not failed, and the summary names the missing secrets. TrustedRouter, a
-gateway in front of many providers, is excluded from this check.
+gateway in front of many providers, is excluded from this check. So is Privatemode, whose model
+list needs a key.
 
 **When it fails**, read the provider's words in the table:
 

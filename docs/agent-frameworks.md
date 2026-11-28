@@ -10,7 +10,8 @@ Each snippet below was tested end to end against OpenBot, on the framework's off
 with the snippet added and nothing else: the model was told the role and the tool guidance exactly
 once, as instructions, on a new conversation, on every run that carried a turn on after a tool,
 a question to the person or an approval, and after the role was changed. The LangGraph and Mastra
-setups for releases that take run guidance follow those receivers' own guides, linked from each.
+setups for `ag-ui-langgraph` 0.1.0 and `@ag-ui/mastra` 2.1.0, the first releases that take run
+guidance, follow those receivers' own guides, linked from each.
 
 ## What your agent is sent
 
@@ -28,7 +29,9 @@ An endpoint can instead declare that it takes both as AG-UI context, with
 `GET <endpoint>/capabilities`. OpenBot reads that declaration with the Bot's key, if it has one, and
 then sends the endpoint the two as context entries, `OpenBot standing role` and
 `OpenBot granted tools guidance`, on every request, and no system message for either. An endpoint
-that declares nothing gets the system messages above, as it always has.
+that declares nothing gets the system messages above, as it always has. A Mastra server connected
+as **Mastra** serves its declaration at `GET <address>/<agent id>/capabilities`, which OpenBot reads
+through `@ag-ui/mastra` with the Bot's key.
 
 Every snippet below hands your model the system messages its caller sends, as instructions. Keep
 your endpoint for OpenBot alone: set an authorization header on the Bot's **Setup** and have your
@@ -67,15 +70,16 @@ pass both system messages to the model as they ship. Connect them as they are.
 In New Bot, under **Connect a custom agent**, choose **LangChain** (`"harness": "langgraph"` when you
 create the Bot through the API).
 
-### With an `ag-ui-langgraph` release that takes run guidance
+### With `ag-ui-langgraph` 0.1.0 or later
 
-The chat factory `create_langgraph_agent`, served with `add_langgraph_fastapi_endpoint`, takes the
-role and the tool guidance from the run's context and declares that it does at
+Install [`ag-ui-langgraph` 0.1.0](https://pypi.org/project/ag-ui-langgraph/0.1.0/) or later. The
+chat factory `create_langgraph_agent`, served with `add_langgraph_fastapi_endpoint`, takes the role
+and the tool guidance from the run's context and declares that it does at
 `<endpoint>/capabilities`. You add no prompt code
-([ag-ui-langgraph: serve a LangChain chat agent](https://github.com/ag-ui-protocol/ag-ui/blob/83931019857902c8ad8a0a72e21fc61220ca180c/integrations/langgraph/python/README.md#serve-a-langchain-chat-agent-with-fastapi)).
+([ag-ui-langgraph: serve a LangChain chat agent](https://github.com/ag-ui-protocol/ag-ui/blob/96caee88f5e441d4901d626b5d199a3e9de7c667/integrations/langgraph/python/README.md#serve-a-langchain-chat-agent-with-fastapi)).
 A graph you already serve with `LangGraphAgent` keeps its current prompt handling until you add
 `RunGuidanceMiddleware` and `RunGuidanceAgentMixin`
-([run guidance for existing graphs](https://github.com/ag-ui-protocol/ag-ui/blob/83931019857902c8ad8a0a72e21fc61220ca180c/integrations/langgraph/python/README.md#run-guidance-for-existing-graphs)).
+([run guidance for existing graphs](https://github.com/ag-ui-protocol/ag-ui/blob/96caee88f5e441d4901d626b5d199a3e9de7c667/integrations/langgraph/python/README.md#run-guidance-for-existing-graphs)).
 
 Then [give OpenBot a trusted path](#give-openbot-a-trusted-path). The stock FastAPI chat reads two
 settings:
@@ -98,7 +102,7 @@ AG_UI_GUIDANCE_TOKEN='' AG_UI_TRUSTED_INGRESS=true \
 ```
 
 Give the Bot the restricted instance's address, here `http://127.0.0.1:8001/agent/agentic_chat`
-([public and restricted keyless listeners](https://github.com/ag-ui-protocol/ag-ui/blob/83931019857902c8ad8a0a72e21fc61220ca180c/integrations/langgraph/python/examples/README.md#public-and-restricted-keyless-listeners)).
+([public and restricted keyless listeners](https://github.com/ag-ui-protocol/ag-ui/blob/96caee88f5e441d4901d626b5d199a3e9de7c667/integrations/langgraph/python/examples/README.md#public-and-restricted-keyless-listeners)).
 
 ### With an earlier release
 
@@ -172,15 +176,19 @@ New Bot.
 
 ## Mastra
 
-### With an `@ag-ui/mastra` release that takes run guidance
+### With `@ag-ui/mastra` 2.1.0 or later
 
-`@ag-ui/mastra` reads the two context entries itself and declares that it does
-([@ag-ui/mastra: per-run guidance](https://github.com/ag-ui-protocol/ag-ui/blob/d722c87a911e2a3240d8bda98b4c440ddc1ec889/integrations/mastra/typescript/README.md#per-run-guidance)).
+Install [`@ag-ui/mastra` 2.1.0](https://www.npmjs.com/package/@ag-ui/mastra/v/2.1.0) or later. It
+reads the two context entries itself and declares that it does
+([@ag-ui/mastra: per-run guidance](https://github.com/ag-ui-protocol/ag-ui/blob/96caee88f5e441d4901d626b5d199a3e9de7c667/integrations/mastra/typescript/README.md#per-run-guidance)).
 Then [give OpenBot a trusted path](#give-openbot-a-trusted-path).
 
 **A Mastra server, connected as Mastra.** Add `mastraRunGuidanceProcessor` to the agent's
-`inputProcessors`, and mount `registerMastraRunGuidanceCapabilities(agentId)` behind the same
-authentication as its run routes, all from `@ag-ui/mastra/run-guidance`. The native example reads
+`inputProcessors`, run each request through `withMastraRunGuidanceAuthority` once your server has
+authenticated it, and mount `registerMastraRunGuidanceCapabilities(agentId)` behind the same
+authentication as its run routes, all from `@ag-ui/mastra/run-guidance`. OpenBot reads that
+declaration through `@ag-ui/mastra` with the Bot's key, and then sends the role and the tool
+guidance as the two context entries, with no system message for either. The native example reads
 the same two settings as LangGraph's:
 
 - `AG_UI_GUIDANCE_TOKEN`: the token it checks. Put `Bearer <token>` in the Bot's **Key**.
@@ -203,9 +211,7 @@ MASTRA_HOST=127.0.0.1 PORT=4112 AG_UI_GUIDANCE_TOKEN= \
 
 Choose **Mastra** in New Bot and give the restricted instance's base address, here
 `http://127.0.0.1:4112`
-([public and keyless private instances](https://github.com/ag-ui-protocol/ag-ui/blob/d722c87a911e2a3240d8bda98b4c440ddc1ec889/integrations/mastra/typescript/README.md#public-and-keyless-private-instances)).
-OpenBot doesn't read a Mastra server's declaration yet, so a Bot connected as Mastra still gets the
-system messages for now, and the snippet below still applies.
+([public and keyless private instances](https://github.com/ag-ui-protocol/ag-ui/blob/96caee88f5e441d4901d626b5d199a3e9de7c667/integrations/mastra/typescript/README.md#public-and-keyless-private-instances)).
 
 **Your own server, serving a `MastraAgent` over AG-UI.** Pass `runGuidance: { trusted }` to the
 `MastraAgent`, with `trusted` true only when your server checked the caller's key or the request

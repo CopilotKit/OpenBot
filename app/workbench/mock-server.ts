@@ -27,12 +27,14 @@
  *   GET  /api/auth/shell/handoff?challenge=C[&platform=ios][&auto=1]
  *        The page the phone app opens in its sign-in sheet. C is a PKCE S256 challenge (43
  *        characters of base64url). A page titled "Mock sign-in" with one link, #mock-sign-in, "Sign in
- *        as test person", to openbotshell://signed-in?ticket=T. T is single use and lasts 60 s.
+ *        as test person". Following the link issues a single-use ticket that lasts 60 s.
  *        With auto=1 the page follows its link by itself after 800 ms. 400 without a valid C.
  *   GET  /api/auth/shell/enter?ticket=T&verifier=V&to=/path
  *        Loaded by the web view. With a known, unused, unexpired T whose C is base64url(sha256(V)):
  *        sets the cookie better-auth.session_token=mock and answers 303 to `to` (an own path, else /).
  *        Otherwise 303 to /sign?native-sign-in=failed, setting nothing.
+ *   POST /api/auth/sign-out
+ *        Ends the mock's session: its cookie stops counting until the next /enter.
  *
  * Signed in, the API answers as the workbench's app-home scene does (workbench/session.ts,
  * api/extraHandlers.ts and the spec's generated answers), with a fixed person (Sam Rivera, in Acme),
@@ -66,6 +68,8 @@ const TICKET_MS = 60_000;
 
 /** Whether a request with no mock cookie is signed in. */
 let signedInByDefault = process.env.MOCK_SIGNED_OUT !== "1";
+/** The mock's one session was signed out: its cookie no longer counts until the next sign-in. */
+let mockSessionEnded = false;
 
 // The Bots and conversations every signed-in page shows. ---------------------------------------
 
@@ -166,12 +170,17 @@ export const MOCK_CONVERSATIONS: readonly ConversationSummary[] = [
   }),
 ];
 
-/** Each conversation's transcript: what the person asked, and the Bot's answer. */
-function transcript(id: string) {
-  const found = MOCK_CONVERSATIONS.find((one) => one.id === id);
-  if (!found) return [];
+type MockMessage = { id: string; role: string; content: string };
+const conversations = MOCK_CONVERSATIONS.map((row) => ({ ...row }));
+const transcripts = new Map<string, MockMessage[]>();
+
+function transcript(id: string): MockMessage[] {
+  const saved = transcripts.get(id);
+  if (saved) return saved;
+  const found = conversations.find((one) => one.id === id);
+  if (!found?.opening) return [];
   return [
-    { id: `${id}-1`, role: "user", content: found.opening ?? "Hello" },
+    { id: `${id}-1`, role: "user", content: found.opening },
     {
       id: `${id}-2`,
       role: "assistant",
@@ -181,7 +190,7 @@ function transcript(id: string) {
 }
 
 function byThread(threadId: string): ConversationSummary | undefined {
-  return MOCK_CONVERSATIONS.find((one) => one.threadId === threadId);
+  return conversations.find((one) => one.threadId === threadId);
 }
 
 /** One AG-UI stream that replays a transcript and ends. */
@@ -194,6 +203,10 @@ function replay(threadId: string): Response {
     },
     { type: "RUN_FINISHED", threadId, runId: "mock-join" },
   ];
+  return eventStream(events);
+}
+
+function eventStream(events: Record<string, unknown>[]): Response {
   return new Response(
     events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
     {
@@ -224,11 +237,32 @@ function mockDataHandlers(): RequestHandler[] {
             { status: 404 },
           );
     }),
+    http.post(`${API}/conversations/route`, () =>
+      HttpResponse.json({
+        botId: GENERAL_BOT.id,
+        name: GENERAL_BOT.name,
+        reason: "General question",
+        fallback: true,
+        viaMention: false,
+      }),
+    ),
+    http.post(`${API}/conversations`, async ({ request }) => {
+      const { botIds } = (await request.json()) as { botIds: string[] };
+      const created = conversation({
+        id: crypto.randomUUID(),
+        botIds,
+        summary: null,
+        lastMessageAt: null,
+        createdAt: new Date().toISOString(),
+      });
+      conversations.unshift(created);
+      return HttpResponse.json({ conversation: created }, { status: 201 });
+    }),
     http.get(`${API}/conversations`, ({ request }) => {
       const url = new URL(request.url);
       const q = url.searchParams.get("q")?.toLowerCase();
       const botId = url.searchParams.get("botId");
-      const conversations = MOCK_CONVERSATIONS.filter(
+      const matching = conversations.filter(
         (one) =>
           (!botId || one.botIds.includes(botId)) &&
           (!q ||
@@ -236,10 +270,10 @@ function mockDataHandlers(): RequestHandler[] {
               (field) => field?.toLowerCase().includes(q),
             )),
       );
-      return HttpResponse.json({ conversations, nextCursor: null });
+      return HttpResponse.json({ conversations: matching, nextCursor: null });
     }),
     http.get(`${API}/conversations/:conversationId`, ({ params }) => {
-      const found = MOCK_CONVERSATIONS.find(
+      const found = conversations.find(
         (one) => one.id === params.conversationId,
       );
       if (!found)
@@ -300,23 +334,51 @@ function mockDataHandlers(): RequestHandler[] {
         return replay(body.threadId ?? "");
       },
     ),
-    // A run the mock can't answer: it starts and finishes with nothing said.
+    // Exercise the same HTTP turn and AG-UI stream as the app. Keep the answer in this
+    // process so navigating away and back also exercises the transcript request.
     http.post("*/api/copilotkit/agent/:agentId/run", async ({ request }) => {
-      const body = (await request.json().catch(() => ({}))) as {
-        threadId?: string;
-        runId?: string;
+      const { threadId, runId, messages } = (await request.json()) as {
+        threadId: string;
+        runId: string;
+        messages?: MockMessage[];
       };
-      const threadId = body.threadId ?? "";
-      const runId = body.runId ?? "mock-run";
-      return new Response(
-        [
-          { type: "RUN_STARTED", threadId, runId },
-          { type: "RUN_FINISHED", threadId, runId },
-        ]
-          .map((event) => `data: ${JSON.stringify(event)}\n\n`)
-          .join(""),
-        { headers: { "content-type": "text/event-stream" } },
-      );
+      const current = byThread(threadId);
+      const question = messages
+        ?.slice()
+        .reverse()
+        .find((m) => m.role === "user");
+      const events: Record<string, unknown>[] = [
+        { type: "RUN_STARTED", threadId, runId },
+      ];
+      if (current && question && typeof question.content === "string") {
+        const history = transcript(current.id);
+        const messageId = `answer-${question.id}`;
+        const answer = history.find((m) => m.id === messageId) ?? {
+          id: messageId,
+          role: "assistant",
+          content: /pricing/i.test(question.content)
+            ? "All three competitors now charge per seat."
+            : "I received your message.",
+        };
+        if (!history.some((m) => m.id === messageId)) {
+          transcripts.set(current.id, [
+            ...history.filter((m) => m.id !== question.id),
+            question,
+            answer,
+          ]);
+          current.opening ??= question.content;
+          current.summary ??= question.content;
+          current.lastMessage = answer.content;
+          current.lastMessageAt = new Date().toISOString();
+        }
+        events.push(
+          { type: "TEXT_MESSAGE_START", messageId, role: "assistant" },
+          { type: "TEXT_MESSAGE_CONTENT", messageId, delta: answer.content },
+          { type: "TEXT_MESSAGE_END", messageId },
+        );
+      }
+      events.push({ type: "RUN_FINISHED", threadId, runId });
+      return eventStream(events);
     }),
   ];
 }
@@ -336,6 +398,7 @@ async function generatedHandlersFromDisk(): Promise<RequestHandler[]> {
 // Signed in or not, per request. ---------------------------------------------------------------
 
 function hasMockCookie(request: Request): boolean {
+  if (mockSessionEnded) return false;
   const cookies = request.headers.get("cookie") ?? "";
   return cookies
     .split(";")
@@ -390,13 +453,24 @@ function handoffPage(url: URL): Response {
   const challenge = url.searchParams.get("challenge") ?? "";
   if (!CHALLENGE.test(challenge))
     return new Response("A PKCE S256 challenge is required.", { status: 400 });
-  const ticket = base64url(randomBytes(24));
-  tickets.set(ticket, {
-    challenge,
-    expires: Date.now() + TICKET_MS,
-    used: false,
-  });
-  const target = escapeHtml(`openbotshell://signed-in?ticket=${ticket}`);
+  // The real sign-in completes before its ticket is issued. Chrome's first-run screens
+  // and a person reading the confirmation can take longer than the ticket's whole lifetime.
+  if (url.searchParams.get("confirm") === "1") {
+    const ticket = base64url(randomBytes(24));
+    tickets.set(ticket, {
+      challenge,
+      expires: Date.now() + TICKET_MS,
+      used: false,
+    });
+    return new Response(null, {
+      status: 303,
+      headers: {
+        location: `openbotshell://signed-in?ticket=${ticket}`,
+        "cache-control": "no-store",
+      },
+    });
+  }
+  const target = escapeHtml(`?challenge=${challenge}&confirm=1`);
   const auto = url.searchParams.get("auto") === "1";
   const html = `<!doctype html>
 <html lang="en">
@@ -434,6 +508,7 @@ function enter(url: URL): Response {
   const challenge = base64url(createHash("sha256").update(verifier).digest());
   if (challenge !== ticket.challenge) return failed;
   ticket.used = true;
+  mockSessionEnded = false;
   return new Response(null, {
     status: 303,
     headers: {
@@ -524,6 +599,8 @@ async function start() {
       const known = signedIn(incoming);
       if (path === "/api/auth/sign-out" && incoming.method === "POST") {
         signedInByDefault = false;
+        // As a real server does: the session is over, so the same cookie no longer signs anybody in.
+        if (hasMockCookie(incoming)) mockSessionEnded = true;
         return Response.json(
           { success: true },
           {
