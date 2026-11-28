@@ -149,7 +149,7 @@ enum ShellBack: Equatable {
 /// A self-hosted OpenBot's address as a person types it, checked before anything is fetched.
 /// Pure, so the UI test target tests it.
 enum ServerAddress {
-    enum Problem: Equatable {
+    enum Problem: Error, Equatable {
         case empty
         case notAnAddress
         case credentials
