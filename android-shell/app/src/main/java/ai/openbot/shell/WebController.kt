@@ -71,6 +71,9 @@ class WebController(
 
         /** A full page load (or reload) starts: the page has not rendered yet. */
         fun onFullLoad()
+
+        /** A main-frame document starts loading, whoever started it (the page's own navigations too). */
+        fun onDocumentStarted(url: String?)
     }
 
     var delegate: Delegate? = null
@@ -159,6 +162,13 @@ class WebController(
         (function () {
           if (location.origin !== ${jsString(config.origin)}) return;
           window.__OPENBOT_NATIVE_SHELL__ = Object.freeze({ platform: "android", version: ${jsString(config.version)}, bridge: 1 });
+          // The web app styles ::-webkit-scrollbar for desktop; Android's WebView then draws a
+          // permanent scrollbar down the page's edge. Touch apps scroll without one.
+          try {
+            var style = document.createElement("style");
+            style.textContent = "::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}*{scrollbar-width:none!important}";
+            (document.head || document.documentElement).appendChild(style);
+          } catch (e) {}
         })();
     """.trimIndent()
 
@@ -441,6 +451,7 @@ class WebController(
             if (url != null && url != "about:blank") lastRequestedUrl = url
             diagnostics.log("main-frame-start", mapOf("url" to Diagnostics.redact(url)))
             armWatchdog()
+            delegate?.onDocumentStarted(url)
             delegate?.onUrlChanged(url)
         }
 

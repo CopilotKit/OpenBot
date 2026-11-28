@@ -25,7 +25,8 @@ class ProbeTest : ShellTestBase() {
         if (!check(finished, "the probe page never showed 'probe done'")) return
         val summary = lines.firstOrNull { it.startsWith("probe done") } ?: ""
         Log.i("SHELL_PROBE", "PROBE_SUMMARY $summary")
-        val failed = rows.filter { it.contains(": fail ") }
+        // The probe page is iOS's: its user-agent row looks for the iOS mark. The Android mark is a pass.
+        val failed = rows.filter { it.contains(": fail ") && !(it.startsWith("user-agent:") && it.contains("OpenBotShell-Android/")) }
         check(failed.isEmpty(), "probe rows failed: $failed")
         find("openbot_webview")?.swipe(androidx.test.uiautomator.Direction.UP, 0.9f)
         sleep(800)

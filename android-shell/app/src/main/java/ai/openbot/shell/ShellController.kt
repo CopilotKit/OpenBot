@@ -493,6 +493,7 @@ class ShellController(
     override fun onFullLoad() {
         main.removeCallbacks(hideSkeleton)
         main.removeCallbacks(checkContent)
+        contentSince = 0L
         if (!pageLoading) {
             pageLoading = true
             loadingSince = System.currentTimeMillis()
@@ -512,13 +513,32 @@ class ShellController(
         main.postDelayed(hideSkeleton, delay)
     }
 
-    /** Finished and no `ready` came: the skeleton goes, whatever the page shows. */
+    private var contentSince = 0L
+
+    /**
+     * Finished and no `ready` came (a web app without the bridge, or a page that is not the web app,
+     * such as a bot check): the skeleton goes as soon as the page shows text, 8 s at most, so an
+     * interactive page is never kept covered.
+     */
     private fun checkPageContent() {
         if (!pageLoading || web.pageReady) return
+        if (contentSince == 0L) contentSince = System.currentTimeMillis()
         web.evaluateJson("JSON.stringify({n: (document.body && document.body.innerText.trim().length) || 0, t: document.title})") { answer ->
-            pageShown("finished-no-ready", 0)
-            diagnostics.log("page-after-finish", mapOf("textLength" to (answer?.optInt("n", 0) ?: 0), "title" to (answer?.optString("t") ?: "")))
+            val length = answer?.optInt("n", 0) ?: 0
+            val waited = System.currentTimeMillis() - contentSince
+            if (length > 0 || waited >= MAX_TEXT_WAIT_MS) {
+                diagnostics.log("page-after-finish", mapOf("textLength" to length, "title" to (answer?.optString("t") ?: ""), "waitedMs" to waited))
+                pageShown(if (length > 0) "text" else "text-timeout", 0)
+            } else {
+                main.postDelayed(checkContent, 400)
+            }
         }
+    }
+
+    /** Every new document on the app's own origin is covered until it shows something. */
+    override fun onDocumentStarted(url: String?) {
+        if (!config.isOwnOrigin(url) || !webVisible) return
+        onFullLoad()
     }
 
     private fun stopSkeleton() {
@@ -733,7 +753,7 @@ class ShellController(
             // No `ready` within 1.5 s of finishing: a page without the bridge (production today),
             // or one that is not the web app at all (an interactive bot check): never keep it covered.
             main.removeCallbacks(checkContent)
-            main.postDelayed(checkContent, NO_READY_MS)
+            main.postDelayed(checkContent, 300)
         }
     }
 
@@ -746,5 +766,6 @@ class ShellController(
     companion object {
         const val MIN_SKELETON_MS = 300L
         const val NO_READY_MS = 1_500L
+        const val MAX_TEXT_WAIT_MS = 8_000L
     }
 }

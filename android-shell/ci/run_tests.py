@@ -101,6 +101,9 @@ VIDEO_REAL_GOOGLE = [
     "RealBackendDebugTest#testRealGoogleSignInInCustomTab",
 ]
 LOG_TAGS = ("OPENBOT_DIAG", "SHELL_NOTE", "SHELL_PROBE", "TestRunner", "AndroidRuntime", "chromium", "cr_", "WebView")
+PER_TEST_S = 300
+# The whole run's budget (the workflow step is capped at 25 minutes): no test starts after this.
+BUDGET_S = int(os.environ.get("TEST_BUDGET_SECONDS", "1380"))
 STATUS = {"0": "passed", "-1": "failed", "-2": "failed", "-3": "skipped", "-4": "skipped"}
 
 
@@ -128,6 +131,10 @@ class Recorder:
 
     def start(self):
         adb("shell", "rm -f /data/local/tmp/rec-*.mp4")
+        # A clean home screen in the first frame: no launcher menu, no shade.
+        adb("shell", "input keyevent KEYCODE_HOME")
+        adb("shell", "am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS")
+        time.sleep(2)
         self.thread.start()
         time.sleep(2)
 
@@ -247,6 +254,21 @@ class LateStack:
         adb("shell", "rm -f /data/local/tmp/openbot-late-stack")
 
 
+def emulator_alive():
+    try:
+        out = subprocess.run(["adb", "shell", "echo", "alive"], capture_output=True, text=True, timeout=20).stdout
+        return "alive" in out
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def not_run(test_id, results, why):
+    results.append({"id": test_id, "test": test_id.split("#")[-1], "class": test_id.split("#")[0], "status": "failed",
+                    "message": f"not run: {why}", "variant": "releaseTest" if test_id.startswith("RealBackendRelease") else "debug",
+                    "seconds": 0, "private": is_private(test_id), "notes": [], "probe": []})
+    print(f"  not run  {test_id}: {why}", flush=True)
+
+
 def run_one(test_id, results, logs):
     short = test_id.split("#")[-1]
     extra = []
@@ -266,10 +288,11 @@ def run_one(test_id, results, logs):
     started = time.time()
     command = "am instrument -w -r -e class " + PACKAGE + test_id + " " + " ".join(extra) + " " + RUNNER
     try:
-        out = subprocess.run(["adb", "shell", command], capture_output=True, text=True, timeout=1200).stdout
+        out = subprocess.run(["adb", "shell", command], capture_output=True, text=True, timeout=PER_TEST_S).stdout
     except subprocess.TimeoutExpired as error:
         out = (error.stdout or b"").decode() if isinstance(error.stdout, bytes) else (error.stdout or "")
-        out += "\nINSTRUMENTATION_STATUS_CODE: -2\nrunner: timed out after 20 minutes\n"
+        out += f"\nINSTRUMENTATION_STATUS_CODE: -2\nINSTRUMENTATION_STATUS: stack=runner: the test ran past {PER_TEST_S} s and was stopped\nINSTRUMENTATION_STATUS_CODE: -2\n"
+        adb("shell", "am force-stop ai.openbot.shell", timeout=20)
     seconds = round(time.time() - started)
     if late:
         late.stop()
@@ -338,11 +361,19 @@ def main():
         after_release = len(plan)
         plan += SUITE1_DEBUG
         if not REAL_ONLY:
-            plan += PROBE + SUITE2 + DEMO
+            # The demo runs in the video workflow only.
+            plan += PROBE + SUITE2
     results, logs = [], []
     recorders = {}
     recorded_status = "unknown"
+    run_started = time.time()
     for index, test_id in enumerate(plan):
+        if time.time() - run_started > BUDGET_S:
+            not_run(test_id, results, f"the run's {BUDGET_S // 60}-minute budget was spent")
+            continue
+        if not emulator_alive():
+            not_run(test_id, results, "the emulator stopped answering adb")
+            continue
         if index == after_release:
             # Two apps claiming openbotshell:// would make Chrome ask which one: the release-like
             # build leaves before the hand-off tests.

@@ -38,7 +38,7 @@ boot() {
   set_config hw.camera.back none
   set_config hw.camera.front none
   set_config showDeviceFrame no
-  nohup emulator -avd shell -memory 6144 -cores 4 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
+  nohup emulator -avd shell -memory 6144 -cores 4 -feature -Vulkan -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
     -camera-back none -camera-front none -netdelay none -netspeed full > "$ARTIFACTS/emulator.log" 2>&1 &
   adb wait-for-device
   local started=$SECONDS

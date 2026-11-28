@@ -43,7 +43,7 @@ jobs:
     name: Build and test on the Android emulator
     if: github.repository == 'CopilotKit/OpenBot'
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 45
     permissions:
       contents: read
     env:
@@ -66,7 +66,7 @@ jobs:
 
       - name: Build the app, the tests, lint and unit tests
         id: build
-        timeout-minutes: 30
+        timeout-minutes: 15
         working-directory: android-shell
         run: |
           mkdir -p "$ARTIFACTS" "$PRIVATE_ARTIFACTS"
@@ -158,7 +158,7 @@ jobs:
 
       - name: Run the instrumented tests
         id: tests
-        timeout-minutes: 90
+        timeout-minutes: 25
         env:
           OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
           OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}

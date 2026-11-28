@@ -23,6 +23,9 @@ import org.junit.AssumptionViolatedException
 import org.junit.Before
 import org.junit.Rule
 import org.junit.rules.TestName
+import org.junit.rules.TestWatcher
+import org.junit.rules.Timeout
+import org.junit.runner.Description
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -47,6 +50,24 @@ abstract class ShellTestBase {
     @get:Rule
     val testNameRule = TestName()
 
+    /** No test runs past this; every wait inside has its own deadline (60 s at most). */
+    @get:Rule
+    val timeoutRule: Timeout = Timeout.seconds(280)
+
+    /** A failing test leaves a screenshot and the page's visible text. */
+    @get:Rule
+    val failureEvidence = object : TestWatcher() {
+        override fun failed(e: Throwable?, description: Description?) {
+            try {
+                screenshot("failure")
+                note("at failure: foreground ${foregroundPackage()}; state ${debugState()}; page text: " +
+                    pageText().take(300).replace("\n", " | "))
+            } catch (error: Throwable) {
+                // Evidence is best effort.
+            }
+        }
+    }
+
     protected val instrumentation = InstrumentationRegistry.getInstrumentation()
     protected val device: UiDevice = UiDevice.getInstance(instrumentation)
     protected val args: Bundle = InstrumentationRegistry.getArguments()
@@ -63,7 +84,7 @@ abstract class ShellTestBase {
     @Before
     fun baseSetUp() {
         device.wakeUp()
-        shell("input keyevent KEYCODE_MENU")
+        shell("wm dismiss-keyguard")
         dismissSystemDialogs()
         note("variant: $variant ($pkg)")
     }
@@ -159,7 +180,12 @@ abstract class ShellTestBase {
 
     // Elements. ---------------------------------------------------------------------------------
 
-    fun res(id: String): BySelector = By.res(pkg, id)
+    /**
+     * A view by its resource id. The WebView is found by its class: Chromium replaces the WebView's
+     * own accessibility node with its page tree and does not report the view's resource id.
+     */
+    fun res(id: String): BySelector =
+        if (id == "openbot_webview") By.clazz("android.webkit.WebView").pkg(pkg) else By.res(pkg, id)
     fun find(id: String): UiObject2? = device.findObject(res(id))
     fun exists(id: String): Boolean = device.hasObject(res(id))
     fun waitFor(id: String, timeoutMs: Long): UiObject2? = device.wait(Until.findObject(res(id)), timeoutMs)
@@ -516,6 +542,21 @@ abstract class ShellTestBase {
             -1
         }
         if (status <= 0 || status >= 500) skip("my.open.bot is not reachable from this emulator (status $status)")
+    }
+
+    /**
+     * Cloudflare's bot check in front of my.open.bot ("Performing security verification", "Verify
+     * you are human"): the test stops there with a screenshot and never tries to get past it.
+     */
+    fun stopAtBotCheck(moment: String) {
+        val text = if (variant == "debug") pageText() + "\n" + pageString("document.title") else ""
+        val shown = text.contains("Performing security verification") || text.contains("Verify you are human") ||
+            text.contains("Just a moment") || device.hasObject(By.textContains("Performing security verification")) ||
+            device.hasObject(By.textContains("Verify you are human"))
+        if (!shown) return
+        screenshot("$moment-bot-check")
+        note("$moment: Cloudflare's bot check is on screen (my.open.bot answered with its challenge page); stopping here")
+        skip("stopped at Cloudflare's bot check on my.open.bot ($moment); the test never tries to get past it")
     }
 
     fun secret(name: String): String? = args.getString(name)?.takeIf { it.isNotEmpty() }

@@ -31,6 +31,7 @@ class RealBackendDebugTest : ShellTestBase() {
             }
             sleep(2_000)
         }
+        stopAtBotCheck("hosted")
         if (exists("offline_lock")) {
             screenshot("hosted-lock")
             skip("my.open.bot did not load on this runner; the shell showed its lock screen")
@@ -263,14 +264,7 @@ class RealBackendDebugTest : ShellTestBase() {
             return
         }
         sleep(6_000)
-        if (challengeShown()) {
-            // Cloudflare's bot check in front of my.open.bot (see testRealChallengeProbe).
-            screenshot("j0-bot-check")
-            val started = System.currentTimeMillis()
-            while (challengeShown() && System.currentTimeMillis() - started < 60_000) sleep(2_000)
-            note("journey: the bot check showed at the first load; cleared by itself ${!challengeShown()} after ${(System.currentTimeMillis() - started) / 1000} s")
-            sleep(4_000)
-        }
+        stopAtBotCheck("j0-first-load")
         if (exists("sign_in_button") || pageText().contains("Sign in to OpenBot Cloud")) {
             screenshot("session-rejected")
             check(false, "production rejected the session cookie (it may be stale or copied wrong)")
@@ -354,6 +348,7 @@ class RealBackendDebugTest : ShellTestBase() {
             check(waitForTab(Tab.HOME, 20_000) != null, "a cold relaunch did not go straight to the tabs; ${debugState()}")
             check(!exists("sign_in_button"), "a cold relaunch showed the sign-in screen")
             sleep(6_000)
+            stopAtBotCheck("j9-relaunch")
             screenshot("j9-relaunched")
             note("cold relaunch: bot check shown ${challengeShown()}; cookie names ${cookieNames()}")
             note("relaunched: ${debugState()}")

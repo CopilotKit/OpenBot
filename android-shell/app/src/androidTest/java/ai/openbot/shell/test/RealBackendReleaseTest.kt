@@ -43,6 +43,7 @@ class RealBackendReleaseTest : ShellTestBase() {
             return
         }
         val heading = waitWebObject("Sign in to OpenBot Cloud", 30_000)
+        if (heading == null) stopAtBotCheck("web-sign-in")
         check(heading != null, "the real web sign-in did not show")
         sleep(1_500)
         screenshot("2-web-sign-in")
