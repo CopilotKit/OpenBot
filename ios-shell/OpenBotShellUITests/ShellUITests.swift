@@ -90,27 +90,31 @@ final class ShellUITests: ShellTestCase {
     }
 
     func testOfflineShowsRetry() throws {
-        // Nothing listens on 8799 (connection refused: WebKit reports it at once).
+        // Nothing listens on 8799 (connection refused: WebKit reports it at once). A failed load
+        // shows the same lock screen as no network, with Try again.
         let app = launch(base: "http://127.0.0.1:8799/", moment: "refused", plain: true)
         let retry = app.buttons["retry-button"]
         let shown = retry.waitForExistence(timeout: 30)
-        screenshot("load-error-overlay")
-        XCTAssertTrue(shown, "the native error overlay with retry-button did not appear")
+        screenshot("load-failed-lock")
+        XCTAssertTrue(shown, "the lock screen with retry-button did not appear")
+        assertLockScreen(app, reason: "load-failed")
         if shown {
             retry.tap()
+            sleep(2)
             XCTAssertTrue(app.buttons["retry-button"].waitForExistence(timeout: 30),
-                          "after Try again the overlay should come back, since nothing listens")
+                          "after Try again the lock should stay, since nothing listens")
         }
     }
 
     func testWatchdogCatchesSilentLoad() throws {
         // Port 9 is on WebKit's list of restricted ports, and WKWebView reports nothing at all for
-        // it (step 1 found this): only the 20 s watchdog can show the overlay.
+        // it (step 1 found this): only the 20 s watchdog can show the lock screen.
         let app = launch(base: "http://127.0.0.1:9/", moment: "silent", plain: true)
         let retry = app.buttons["retry-button"]
         let shown = retry.waitForExistence(timeout: 40)
-        screenshot("watchdog-overlay")
-        XCTAssertTrue(shown, "the load watchdog did not show the overlay within 40 s")
+        screenshot("watchdog-lock")
+        XCTAssertTrue(shown, "the load watchdog did not show the lock screen within 40 s")
+        assertLockScreen(app, reason: "load-failed")
     }
 
     func testSessionSurvivesRelaunch() throws {

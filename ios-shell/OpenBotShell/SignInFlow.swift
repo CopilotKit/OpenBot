@@ -68,6 +68,16 @@ final class SignInFlow: NSObject, ASWebAuthenticationPresentationContextProvidin
         task.resume()
     }
 
+    /// Whether the server answers at all (any HTTP status), for retrying after a failure.
+    func ping(_ url: URL, completion: @escaping (_ answered: Bool) -> Void) {
+        var request = URLRequest(url: url)
+        request.httpShouldHandleCookies = false
+        probeSession.dataTask(with: request) { _, response, _ in
+            let answered = response is HTTPURLResponse
+            DispatchQueue.main.async { completion(answered) }
+        }.resume()
+    }
+
     /// Presents the system sign-in sheet on `url` and waits for `openbotshell://signed-in?ticket=`.
     func presentSheet(_ url: URL, ephemeral: Bool, completion: @escaping (SheetOutcome) -> Void) {
         session?.cancel()

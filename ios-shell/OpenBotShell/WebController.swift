@@ -15,6 +15,8 @@ protocol WebControllerDelegate: AnyObject {
     func webController(_ controller: WebController, didFailLoad message: String)
     /// A main-frame load committed (a new document).
     func webControllerDidCommit(_ controller: WebController)
+    /// A main-frame load finished.
+    func webControllerDidFinish(_ controller: WebController)
 }
 
 /// Owns the one WKWebView, its navigation and UI delegate, the page bridge and the load watchdog.
@@ -119,6 +121,20 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         armWatchdog(for: url)
         webView.load(URLRequest(url: url))
     }
+
+    /// Loads about:blank (no network) and calls back when it has loaded, or after 3 s.
+    func loadBlank(_ done: @escaping () -> Void) {
+        var called = false
+        let finish = {
+            guard !called else { return }
+            called = true
+            done()
+        }
+        blankDone = finish
+        webView.loadHTMLString("<!doctype html><title></title>", baseURL: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { finish() }
+    }
+    private var blankDone: (() -> Void)?
 
     func load(path: String) {
         load(config.url(path))
@@ -358,7 +374,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        if let url = webView.url {
+        if let url = webView.url, url.absoluteString != "about:blank" {
             lastRequestedURL = url
             diagnostics.log("main-frame-start", ["url": Diagnostics.redact(url)])
         }
@@ -367,6 +383,15 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         disarmWatchdog()
+        // WebKit commits about:blank in place of a load it refuses without an error (a restricted
+        // port, seen in CI): that is a failed load.
+        if webView.url?.absoluteString == "about:blank", blankDone == nil,
+           let requested = lastRequestedURL, ["http", "https"].contains(requested.scheme?.lowercased() ?? "") {
+            diagnostics.log("blocked-load", ["url": Diagnostics.redact(requested)])
+            lastLoadFailed = true
+            delegate?.webController(self, didFailLoad: "blocked")
+            return
+        }
         pageReady = false
         lastLoadFailed = false
         diagnostics.log("main-frame-commit", ["url": webView.url.map(Diagnostics.redact) ?? ""])
@@ -375,6 +400,12 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         disarmWatchdog()
+        if let blank = blankDone, webView.url == nil || webView.url?.absoluteString == "about:blank" {
+            blankDone = nil
+            blank()
+            return
+        }
+        delegate?.webControllerDidFinish(self)
         diagnostics.log("did-finish", ["url": webView.url.map(Diagnostics.redact) ?? ""])
         guard diagnostics.enabled else { return }
         takeSnapshot(reason: "didFinish")

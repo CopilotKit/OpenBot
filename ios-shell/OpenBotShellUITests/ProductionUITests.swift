@@ -32,15 +32,8 @@ final class ProductionUITests: ShellTestCase {
         return value.isEmpty ? nil : value
     }
 
-    /// Labels of everything visible in a tree, for the record (public pages only).
     private func labels(_ element: XCUIElement, limit: Int = 150) -> [String] {
-        var result: [String] = []
-        for child in element.descendants(matching: .any).allElementsBoundByIndex.prefix(500) {
-            let label = child.label.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !label.isEmpty { result.append("\(child.elementType.rawValue): \(label)") }
-            if result.count >= limit { break }
-        }
-        return result
+        labels(in: element, limit: limit)
     }
 
     private func googleButton(in roots: [XCUIElement]) -> XCUIElement? {

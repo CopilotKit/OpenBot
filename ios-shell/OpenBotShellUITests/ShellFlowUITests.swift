@@ -26,16 +26,35 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertFalse(app.webViews.firstMatch.exists)
         screenshot("first-screen-unreachable-server")
 
-        // Sign in there: the hand-off probe fails, so the web sign-in fallback opens, and its load fails.
+        // Sign in there: the hand-off probe gets no answer, so the lock screen shows (load-failed).
         app.buttons["sign-in-button"].tap()
-        let cancel = app.buttons["web-sign-in-cancel"]
-        XCTAssertTrue(cancel.waitForExistence(timeout: 20), "no web sign-in fallback after a failed probe")
-        let retry = app.buttons["retry-button"]
-        XCTAssertTrue(retry.waitForExistence(timeout: 30), "the fallback's failed load showed no overlay")
+        XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 30), "no lock screen after a sign-in with no server")
+        sleep(1)
         screenshot("unreachable-server-after-sign-in")
-        cancel.tap()
-        XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 10), "Cancel did not return")
-        note("unreachable server: state after Cancel \(debugState(app))")
+        assertLockScreen(app, reason: "load-failed")
+        note("unreachable server after Sign in: \(debugState(app))")
+    }
+
+    // The lock screen lifts by itself when OpenBot comes back. CI starts a third stack on 3012
+    // (over mock A's server) 8 s after this test writes the trigger file it names.
+    func testLockLiftsWhenServerComesBack() throws {
+        guard let trigger = ProcessInfo.processInfo.environment["OPENBOT_SHELL_LATE_STACK_TRIGGER"], !trigger.isEmpty else {
+            throw XCTSkip("OPENBOT_SHELL_LATE_STACK_TRIGGER is not set (CI sets it)")
+        }
+        // A session the server does not know: the app starts signed in and loads Home from 3012.
+        let wrote = FileManager.default.createFile(atPath: trigger, contents: Data("go\n".utf8))
+        XCTAssertTrue(wrote, "could not write the trigger file")
+        let app = launch(base: "http://127.0.0.1:3012", moment: "late", extra: ["OPENBOT_SHELL_TEST_STALE_SESSION": "1"])
+        XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 15), "no lock screen while the server is down")
+        sleep(1)
+        screenshot("1-lock-while-server-down")
+        assertLockScreen(app, reason: "load-failed")
+        XCTAssertTrue(lockScreen(app).waitForNonExistence(timeout: 60), "the lock did not lift when the server came up; \(debugState(app))")
+        // The page loads, says nobody is signed in, and the native sign-in comes back.
+        XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 30), "no sign-in screen after recovery; \(debugState(app))")
+        sleep(1)
+        screenshot("2-after-server-came-back")
+        note("after recovery: \(debugState(app))")
     }
 
     // b.
@@ -140,6 +159,12 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertTrue(waitForState(app, "nav=event", timeout: 5), "the Conversations tap was not handled by openbot:open: \(debugState(app))")
         sleep(1)
         screenshot("2-conversations")
+        app.webViews.firstMatch.swipeUp()
+        app.webViews.firstMatch.swipeUp()
+        sleep(1)
+        screenshot("2b-conversations-scrolled-to-end")
+        app.webViews.firstMatch.swipeDown()
+        app.webViews.firstMatch.swipeDown()
         assertNoWebNavigation(app, "conversations")
         XCTAssertTrue(accountButton(app).exists, "no Account button on Conversations")
 
@@ -152,6 +177,14 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertTrue(tab(app, .conversations).isSelected, "opening a conversation moved the tab selection")
         sleep(1)
         screenshot("3-conversation")
+        let messageBox = firstExisting([app.webViews.textViews.firstMatch, app.webViews.textFields.firstMatch], timeout: 10)
+        let bar = app.tabBars.firstMatch
+        XCTAssertNotNil(messageBox, "no message box in the conversation")
+        if let messageBox = messageBox, bar.exists {
+            XCTAssertLessThanOrEqual(messageBox.frame.maxY, bar.frame.minY + 1, "the message box is under the tab bar")
+            XCTAssertTrue(messageBox.isHittable, "the message box cannot be tapped")
+            note("conversation: message box \(messageBox.frame), tab bar \(bar.frame)")
+        }
         assertNoWebNavigation(app, "conversation")
 
         tab(app, .bots).tap()
@@ -217,10 +250,7 @@ final class ShellFlowUITests: ShellTestCase {
         let account = accountButton(app)
         XCTAssertTrue(account.waitForExistence(timeout: 10), "no Account button on Home")
         account.tap()
-        let signOut = firstExisting([
-            app.webViews.menuItems["Sign out"], app.webViews.buttons["Sign out"],
-            app.webViews.links["Sign out"], webText(app, "Sign out"),
-        ], timeout: 10)
+        let signOut = firstExisting([webElement(app, label: "Sign out"), webText(app, "Sign out")], timeout: 10)
         sleep(1)
         screenshot("1-account-menu")
         attachText("1-account-menu-labels", webLabels(app).joined(separator: "\n"))
@@ -279,17 +309,15 @@ final class ShellFlowUITests: ShellTestCase {
     func testOfflineLock() throws {
         var app = launch(base: ShellTestCase.mockA, moment: "forced",
                          extra: ["OPENBOT_SHELL_FORCE_OFFLINE": "1"])
-        let lock = app.descendants(matching: .any)["offline-lock"]
-        XCTAssertTrue(lock.waitForExistence(timeout: 15), "no offline lock")
-        XCTAssertTrue(app.staticTexts["No internet connection"].exists)
-        XCTAssertTrue(app.staticTexts["For security purposes, this application can only be used when connected to the internet. Please connect to the internet to continue."].exists,
-                      "the offline copy is not exactly as specified")
+        XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 15), "no offline lock")
+        assertLockScreen(app, reason: "no-network")
         let button = app.buttons["sign-in-button"]
         XCTAssertFalse(button.exists && button.isHittable, "the Sign in button is reachable under the lock")
         // Tap where the Sign in button sits: nothing may start.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)).tap()
         sleep(2)
         XCTAssertTrue(debugState(app).contains("signIn=idle"), "a tap under the lock started something: \(debugState(app))")
+        XCTAssertTrue(lockScreen(app).exists, "the lock went away")
         screenshot("offline-lock")
         XCUIDevice.shared.appearance = .dark
         sleep(2)
@@ -357,7 +385,7 @@ final class ShellFlowUITests: ShellTestCase {
     // MARK: - Helpers
 
     private func accountButton(_ app: XCUIApplication) -> XCUIElement {
-        app.webViews.buttons["Account"]
+        webElement(app, label: "Account")
     }
 
     private func checkTabBar(_ app: XCUIApplication) {
@@ -369,10 +397,12 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertLessThan(conversations.frame.minX, home.frame.minX, "Conversations is not left of Home")
         XCTAssertLessThan(home.frame.minX, bots.frame.minX, "Home is not left of Bots")
         let web = app.webViews.firstMatch
-        if web.exists {
+        let bar = app.tabBars.firstMatch
+        if web.exists, bar.exists {
             // The web view ends where the tab bar starts.
-            XCTAssertLessThanOrEqual(web.frame.maxY, home.frame.minY + 1, "the web view runs under the tab bar")
-            note("web view frame \(web.frame), home tab frame \(home.frame), window \(app.windows.firstMatch.frame)")
+            XCTAssertLessThanOrEqual(web.frame.maxY, bar.frame.minY + 1, "the web view runs under the tab bar")
+            XCTAssertLessThanOrEqual(web.frame.maxY, home.frame.minY + 1, "the web view runs under the tab buttons")
+            note("web view frame \(web.frame), tab bar \(bar.frame), home tab \(home.frame), window \(app.windows.firstMatch.frame)")
         }
     }
 }

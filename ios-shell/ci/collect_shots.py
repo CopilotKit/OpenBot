@@ -55,11 +55,15 @@ if os.path.isdir(attachments):
         if not match:
             continue
         test, moment, ext = match.groups()
+        # Xcode adds "_<n>_<UUID>" to exported names; XCTest adds its own failure dumps.
+        moment = re.sub(r"_\d+_[0-9A-Fa-f-]{36}$", "", moment)
+        if moment.startswith("Debug-description"):
+            continue
         src = os.path.join(attachments, name)
         secret = is_private_test(test)
         target = private_shots if secret else shots
         if ext == "txt":
-            shutil.copyfile(src, os.path.join(target, name))
+            shutil.copyfile(src, os.path.join(target, f"{test}--{moment}.txt"))
         else:
             downscale(src, os.path.join(target, f"{test}--{moment}.jpg"))
         counts["private" if secret else "public"] += 1

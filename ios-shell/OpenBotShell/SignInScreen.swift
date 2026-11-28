@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The first screen: native, drawn without the network. While the app decides at launch it shows
 /// the name alone; signed out it adds the line and the Sign in button.
@@ -12,6 +13,13 @@ struct SignInScreen: View {
         VStack(spacing: 0) {
             Spacer()
             VStack(spacing: 12) {
+                if let mark = UIImage(named: "OpenBotMark") {
+                    Image(uiImage: mark)
+                        .resizable()
+                        .frame(width: 72, height: 72)
+                        .padding(.bottom, 8)
+                        .accessibilityHidden(true)
+                }
                 Text("OpenBot")
                     .font(.system(size: 40, weight: .semibold))
                     .accessibilityAddTraits(.isHeader)

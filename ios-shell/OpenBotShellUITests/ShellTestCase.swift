@@ -110,20 +110,53 @@ class ShellTestCase: XCTestCase {
     /// The normal mobile web app's own navigation: the sidebar toggle.
     func assertNoWebNavigation(_ app: XCUIApplication, _ moment: String) {
         for label in ["Show sidebar", "Hide sidebar", "Toggle Sidebar"] {
-            XCTAssertFalse(app.webViews.buttons[label].exists, "\(moment): the web app drew its own '\(label)' button")
+            XCTAssertFalse(webElement(app, label: label).exists, "\(moment): the web app drew its own '\(label)' button")
         }
     }
 
-    func webLabels(_ app: XCUIApplication, limit: Int = 120) -> [String] {
-        let web = app.webViews.firstMatch
-        guard web.exists else { return [] }
-        var labels: [String] = []
-        for element in web.descendants(matching: .any).allElementsBoundByIndex.prefix(400) {
-            let label = element.label.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !label.isEmpty { labels.append("\(element.elementType.rawValue): \(label)") }
-            if labels.count >= limit { break }
+    static let lockHeading = "No internet connection"
+    static let lockMessage = "For security purposes, this application can only be used when connected to the internet. Please connect to the internet to continue."
+
+    func lockScreen(_ app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any)["offline-lock"]
+    }
+
+    /// The lock screen is up, with its exact words, Try again, and the expected reason.
+    func assertLockScreen(_ app: XCUIApplication, reason: String) {
+        let lock = lockScreen(app)
+        XCTAssertTrue(lock.exists, "no lock screen")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", ShellTestCase.lockHeading)).firstMatch.exists,
+                      "the lock screen's heading is wrong")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", ShellTestCase.lockMessage)).firstMatch.exists,
+                      "the lock screen's text is not exactly as specified")
+        XCTAssertTrue(app.buttons["retry-button"].exists, "the lock screen has no Try again")
+        XCTAssertEqual(lock.value as? String, reason, "the lock screen's reason")
+        XCTAssertTrue(debugState(app).contains("lock=\(reason)"), "state: \(debugState(app))")
+    }
+
+    /// "Type: label" lines of everything under `element`, read from ONE snapshot (its
+    /// debugDescription), so elements that come and go cannot fail the test.
+    func labels(in element: XCUIElement, limit: Int = 150) -> [String] {
+        guard element.exists else { return [] }
+        let regex = try? NSRegularExpression(pattern: "^\\s*([A-Za-z]+),.*?label: '((?:[^'\\\\]|\\\\.)*)'", options: [.anchorsMatchLines])
+        let text = element.debugDescription
+        var result: [String] = []
+        regex?.enumerateMatches(in: text, range: NSRange(text.startIndex..., in: text)) { match, _, stop in
+            guard let match = match, let type = Range(match.range(at: 1), in: text),
+                  let label = Range(match.range(at: 2), in: text) else { return }
+            result.append("\(text[type]): \(text[label])")
+            if result.count >= limit { stop.pointee = true }
         }
-        return labels
+        return result
+    }
+
+    func webLabels(_ app: XCUIApplication, limit: Int = 120) -> [String] {
+        labels(in: app.webViews.firstMatch, limit: limit)
+    }
+
+    /// Any element in the web view whose label is exactly `label` (a button, a pop-up button, a menu item, a link).
+    func webElement(_ app: XCUIApplication, label: String) -> XCUIElement {
+        app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
     }
 
     // MARK: - Evidence

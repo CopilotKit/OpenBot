@@ -20,6 +20,11 @@ final class ShellController: NSObject, WebControllerDelegate {
     /// Gives up on an enter URL that never leads to a signed-in page.
     private var enterTimeout: DispatchWorkItem?
     private var observers: [NSObjectProtocol] = []
+    /// What failed while the lock is up for a load failure: the web view, or a sign-in step.
+    private enum FailureSource { case web, signIn }
+    private var failureSource: FailureSource?
+    private var autoRetry: DispatchWorkItem?
+    private var retryCount = 0
 
     private var cookieStore: WKHTTPCookieStore { web.webView.configuration.websiteDataStore.httpCookieStore }
 
@@ -110,17 +115,38 @@ final class ShellController: NSObject, WebControllerDelegate {
         run(0)
     }
 
+    /// Signed in when the session cookie is in the store. WebKit can answer "no cookies" at a cold
+    /// launch before it has read its saved cookies (seen in CI): a "no" is asked again after the web
+    /// view has loaded about:blank, which needs no network.
     private func decideLaunchState() {
         SessionCookies.present(in: cookieStore, host: config.baseHost) { [weak self] present, timedOut in
             guard let self = self else { return }
-            self.diagnostics.log("session-cookie", ["present": present, "timedOut": timedOut])
+            self.diagnostics.log("session-cookie", ["present": present, "timedOut": timedOut, "attempt": 1])
             if present {
-                self.model.phase = .signedIn
-                self.web.load(path: "/")
-            } else {
-                self.model.phase = .signedOut
+                self.launchSignedIn()
+                return
+            }
+            self.web.loadBlank { [weak self] in
+                guard let self = self else { return }
+                SessionCookies.present(in: self.cookieStore, host: self.config.baseHost) { [weak self] present, timedOut in
+                    guard let self = self else { return }
+                    self.diagnostics.log("session-cookie", ["present": present, "timedOut": timedOut, "attempt": 2])
+                    if present { self.launchSignedIn() } else { self.model.phase = .signedOut }
+                }
             }
         }
+    }
+
+    private func launchSignedIn() {
+        model.phase = .signedIn
+        web.load(path: "/")
+    }
+
+    func layoutChanged(tabBarHeight: CGFloat, webFrame: CGRect) {
+        diagnostics.log("layout", [
+            "tabBarHeight": Double(tabBarHeight),
+            "webTop": Double(webFrame.minY), "webBottom": Double(webFrame.maxY),
+        ])
     }
 
     // MARK: - Sign in
@@ -155,6 +181,10 @@ final class ShellController: NSObject, WebControllerDelegate {
             case .supported:
                 self.handoffSupported = true
                 self.presentSheet(pair: pair, returnTo: "/")
+            case .unsupported(let status, _) where status == nil:
+                // No answer at all: the lock screen, not the web sign-in.
+                self.model.signIn = .idle
+                self.showLoadFailure(.signIn, detail: "handoff-probe-no-answer")
             case .unsupported:
                 self.handoffSupported = false
                 self.startWebSignIn()
@@ -166,7 +196,7 @@ final class ShellController: NSObject, WebControllerDelegate {
     func cancelWebSignIn() {
         guard model.signIn == .webFallback else { return }
         web.stop()
-        model.loadError = nil
+        clearLoadFailure()
         model.signIn = .idle
     }
 
@@ -240,7 +270,7 @@ final class ShellController: NSObject, WebControllerDelegate {
         renewing = false
         model.signIn = .idle
         model.signInMessage = nil
-        model.loadError = nil
+        clearLoadFailure()
         model.phase = .signedIn
     }
 
@@ -253,7 +283,6 @@ final class ShellController: NSObject, WebControllerDelegate {
         }
         guard model.phase == .signedOut, model.signIn == .entering else { return }
         web.stop()
-        model.loadError = nil
         model.signIn = .idle
         model.signInMessage = message
     }
@@ -265,7 +294,7 @@ final class ShellController: NSObject, WebControllerDelegate {
         renewing = false
         model.phase = .signedOut
         model.signIn = .idle
-        model.loadError = nil
+        clearLoadFailure()
         model.selectedTab = .home
         SessionCookies.delete(in: cookieStore, host: config.baseHost) { [weak self] deleted in
             self?.diagnostics.log("session-cookies-deleted", ["count": deleted])
@@ -298,15 +327,60 @@ final class ShellController: NSObject, WebControllerDelegate {
     private func networkChanged(offline: Bool) {
         diagnostics.log("network", ["offline": offline, "reason": network.lastReason])
         model.offline = offline
-        if !offline, model.webVisible, web.lastLoadFailed || model.loadError != nil {
-            model.loadError = nil
+        guard !offline else { return }
+        if model.loadFailed {
+            retryNow()
+        } else if model.webVisible, web.lastLoadFailed {
             web.retry()
         }
     }
 
-    func retryLoad() {
-        model.loadError = nil
-        web.retry()
+    // MARK: - Load failures
+
+    /// Any failure to load the web app shows the lock screen and retries by itself: every 5 s, then
+    /// every 15 s after 6 tries, and when the network comes back. It lifts when a page commits.
+    private func showLoadFailure(_ source: FailureSource, detail: String) {
+        diagnostics.log("load-failure-lock", ["source": source == .web ? "web" : "sign-in", "detail": detail])
+        failureSource = source
+        model.loadFailed = true
+        scheduleAutoRetry()
+    }
+
+    private func clearLoadFailure() {
+        autoRetry?.cancel()
+        autoRetry = nil
+        retryCount = 0
+        failureSource = nil
+        model.loadFailed = false
+    }
+
+    private func scheduleAutoRetry() {
+        autoRetry?.cancel()
+        let delay: TimeInterval = retryCount < 6 ? 5 : 15
+        let item = DispatchWorkItem { [weak self] in self?.retryNow(automatic: true) }
+        autoRetry = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
+
+    /// The lock screen's Try again, and the automatic retries.
+    func retryNow(automatic: Bool = false) {
+        guard model.loadFailed else { return }
+        retryCount += 1
+        diagnostics.log("retry", ["automatic": automatic, "count": retryCount, "offline": model.offline])
+        if !model.offline {
+            switch failureSource {
+            case .some(.signIn):
+                // Nothing to reload: once OpenBot answers, back to the sign-in screen.
+                signInFlow.ping(config.baseURL) { [weak self] answered in
+                    guard let self = self else { return }
+                    self.diagnostics.log("retry-ping", ["answered": answered])
+                    if answered, self.failureSource == .some(.signIn) { self.clearLoadFailure() }
+                }
+            default:
+                web.retry()
+            }
+        }
+        if model.loadFailed { scheduleAutoRetry() }
     }
 
     private func observeKeyboard() {
@@ -385,15 +459,24 @@ final class ShellController: NSObject, WebControllerDelegate {
     }
 
     func webController(_ controller: WebController, didFailLoad message: String) {
+        // The error's own words stay in diagnostics (WebController logged them).
         if model.phase == .signedOut, model.signIn == .entering {
-            failSignIn("Couldn't reach OpenBot. Try again in a moment.")
+            failSignIn("Sign-in didn't finish. Try again.")
+            showLoadFailure(.signIn, detail: "enter-failed")
             return
         }
-        model.loadError = message
+        guard model.webVisible else { return }
+        if model.loadFailed, failureSource == .some(.web) { return }
+        showLoadFailure(.web, detail: "web-load-failed")
+    }
+
+    func webControllerDidFinish(_ controller: WebController) {
+        // An older web app says nothing over the bridge: read its colours when it has loaded.
+        refreshChrome()
     }
 
     func webControllerDidCommit(_ controller: WebController) {
         model.mainFrameCommits += 1
-        model.loadError = nil
+        if failureSource == .some(.web) || failureSource == nil { clearLoadFailure() }
     }
 }

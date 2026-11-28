@@ -80,8 +80,10 @@ final class AppModel: ObservableObject {
     /// Whether the page is in dark mode; nil until the page has said.
     @Published var pageIsDark: Bool?
     @Published var keyboardVisible = false
-    /// "Connected, but OpenBot did not answer": the overlay with Try again.
-    @Published var loadError: String?
+    /// The web app did not load (connected or not): the same lock screen as offline, retrying.
+    @Published var loadFailed = false {
+        didSet { if loadFailed != oldValue { diagnostics.log("load-failed", ["shown": loadFailed]) } }
+    }
     /// How the last tab tap reached the page: "event" (openbot:open) or "load".
     @Published var lastNavigation = "none"
     @Published var mainFrameCommits = 0
@@ -101,19 +103,24 @@ final class AppModel: ObservableObject {
     var showsTabBar: Bool { phase == .signedIn && !keyboardVisible }
     var showsWebSignInBar: Bool { phase == .signedOut && signIn == .webFallback }
 
+    /// The lock screen covers everything: no network, or the web app did not load.
+    var showsLock: Bool { offline || loadFailed }
+    /// Why the lock is up, for tests and diagnostics.
+    var lockReason: String { offline ? "no-network" : (loadFailed ? "load-failed" : "none") }
+
     /// Whether the status bar and tab bar should be drawn for a dark page; nil: follow the system.
     var chromeIsDark: Bool? {
-        if offline || showsSignInScreen { return nil }
+        if showsLock || showsSignInScreen { return nil }
         return pageIsDark
     }
 
     var chromeBackground: UIColor {
-        if offline || showsSignInScreen { return .systemBackground }
+        if showsLock || showsSignInScreen { return .systemBackground }
         return pageBackground ?? .systemBackground
     }
 
     /// For UI tests (DEBUG only on screen).
     var debugState: String {
-        "phase=\(phase.rawValue) signIn=\(signIn.rawValue) tab=\(selectedTab.rawValue) nav=\(lastNavigation) commits=\(mainFrameCommits) offline=\(offline ? 1 : 0) keyboard=\(keyboardVisible ? 1 : 0) dark=\(pageIsDark.map { $0 ? "1" : "0" } ?? "-")"
+        "phase=\(phase.rawValue) signIn=\(signIn.rawValue) tab=\(selectedTab.rawValue) nav=\(lastNavigation) commits=\(mainFrameCommits) lock=\(lockReason) keyboard=\(keyboardVisible ? 1 : 0) dark=\(pageIsDark.map { $0 ? "1" : "0" } ?? "-")"
     }
 }

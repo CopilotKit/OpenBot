@@ -22,9 +22,11 @@ What is native:
   `route` messages select the tab. The bar hides while the keyboard is up. The web view sits between
   the status bar and the tab bar; the strips around it take the page's background colour and its
   light or dark style.
-- **The offline lock.** No connection (`NWPathMonitor`): a native screen covers everything until it
-  comes back. Connected but no answer: the load-failure overlay with Try again (also after 20 s
-  without any answer from WebKit).
+- **The lock screen.** No connection (`NWPathMonitor`), or the web app did not load (a failed
+  main-frame load, 20 s without any answer from WebKit, or no answer to a sign-in step): one native
+  screen, "No internet connection", covers everything, with Try again. It retries by itself (every
+  5 s, every 15 s after 6 tries, and when the network comes back) and lifts when a page loads. Its
+  accessibility value says which case it is: `no-network` or `load-failed`.
 - **The bridge.** The page gets `window.__OPENBOT_NATIVE_SHELL__ = {platform: "ios", version, bridge: 1}`
   at document start (main frame, own origin only) and posts `ready`, `route` and `signed-out` to
   `window.webkit.messageHandlers.openbotShell` (`app/src/lib/native-shell/`). When the page says

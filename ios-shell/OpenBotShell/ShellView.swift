@@ -3,8 +3,8 @@ import UIKit
 import WebKit
 
 /// The whole app, back to front: the page's background colour (behind the status bar and the tab
-/// bar), the web view between the top safe area and the tab bar, the load-failure overlay, the
-/// native sign-in screen, and the offline lock over everything.
+/// bar), the web view between the top safe area and the tab bar, the native sign-in screen, and the
+/// lock screen (no network, or the web app did not load) over everything.
 struct ShellView: View {
     let shell: ShellController
     @ObservedObject var model: AppModel
@@ -16,7 +16,7 @@ struct ShellView: View {
                 .ignoresSafeArea()
 
             content
-                .accessibilityHidden(model.offline)
+                .accessibilityHidden(model.showsLock)
 
             if model.showsSignInScreen {
                 SignInScreen(
@@ -25,11 +25,11 @@ struct ShellView: View {
                     message: model.signInMessage,
                     signIn: { shell.signIn() }
                 )
-                .accessibilityHidden(model.offline)
+                .accessibilityHidden(model.showsLock)
             }
 
-            if model.offline {
-                OfflineLockScreen()
+            if model.showsLock {
+                OfflineLockScreen(reason: model.lockReason, retry: { shell.retryNow() })
             }
 
             #if DEBUG
@@ -46,32 +46,22 @@ struct ShellView: View {
     private var content: some View {
         if model.phase == .plain {
             // Step 1's bare web view, edge to edge (DEBUG probe mode).
-            ZStack {
-                WebViewHost(webView: shell.web.webView, visible: true)
-                if let message = model.loadError {
-                    LoadErrorOverlay(message: message) { shell.retryLoad() }
-                }
-            }
-            .ignoresSafeArea()
+            WebViewHost(webView: shell.web.webView, visible: true)
+                .ignoresSafeArea()
         } else {
             VStack(spacing: 0) {
                 if model.showsWebSignInBar {
-                    WebSignInBar(cancel: { shell.cancelWebSignIn() })
+                    WebSignInBar(background: Color(uiColor: model.chromeBackground), cancel: { shell.cancelWebSignIn() })
                 }
-                ZStack {
-                    WebViewHost(webView: shell.web.webView, visible: model.webVisible)
-                    if model.webVisible, let message = model.loadError {
-                        LoadErrorOverlay(message: message) { shell.retryLoad() }
-                    }
-                }
-                if model.showsTabBar {
-                    TabBarView(
-                        selected: model.selectedTab,
-                        isDark: model.pageIsDark,
-                        onSelect: { tab in shell.selectTab(tab) }
-                    )
-                    .fixedSize(horizontal: false, vertical: true)
-                }
+                ShellContentHost(
+                    webView: shell.web.webView,
+                    webVisible: model.webVisible,
+                    tabBarVisible: model.showsTabBar,
+                    selected: model.selectedTab,
+                    isDark: model.pageIsDark,
+                    onSelect: { tab in shell.selectTab(tab) },
+                    onLayout: { height, frame in shell.layoutChanged(tabBarHeight: height, webFrame: frame) }
+                )
             }
             // WKWebView moves its own content out of the keyboard's way, as Safari does.
             .ignoresSafeArea(.keyboard)
@@ -79,7 +69,7 @@ struct ShellView: View {
     }
 }
 
-/// Hosts the one WKWebView. Hidden (and so out of the accessibility tree) when it should not show.
+/// Hosts the one WKWebView full screen (the DEBUG plain mode).
 struct WebViewHost: UIViewRepresentable {
     let webView: WKWebView
     let visible: Bool
@@ -89,13 +79,12 @@ struct WebViewHost: UIViewRepresentable {
         return webView
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {
-        if uiView.isHidden == visible { uiView.isHidden = !visible }
-    }
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
 }
 
 /// The web sign-in fallback's top bar: a way back to the native sign-in screen.
 struct WebSignInBar: View {
+    let background: Color
     let cancel: () -> Void
 
     var body: some View {
@@ -106,10 +95,7 @@ struct WebSignInBar: View {
         }
         .padding(.horizontal, 16)
         .frame(height: 44)
-        .background(Color(uiColor: .systemBackground))
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
+        .background(background)
     }
 }
 

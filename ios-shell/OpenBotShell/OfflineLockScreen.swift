@@ -1,7 +1,11 @@
 import SwiftUI
 
-/// Covers the whole app while the device has no connection. Lifts by itself when it comes back.
+/// Covers the whole app while the device has no connection or the web app did not load (`reason`:
+/// "no-network" or "load-failed"). Lifts by itself; Try again retries at once.
 struct OfflineLockScreen: View {
+    let reason: String
+    let retry: () -> Void
+
     static let heading = "No internet connection"
     static let message = "For security purposes, this application can only be used when connected to the internet. Please connect to the internet to continue."
 
@@ -20,6 +24,17 @@ struct OfflineLockScreen: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+            Button(action: retry) {
+                Text("Try again")
+                    .font(.headline)
+                    .padding(.horizontal, 28)
+                    .frame(height: 48)
+                    .foregroundColor(Color(uiColor: .systemBackground))
+                    .background(Color(uiColor: .label), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 8)
+            .accessibilityIdentifier("retry-button")
         }
         .padding(32)
         .frame(maxWidth: 520)
@@ -30,5 +45,6 @@ struct OfflineLockScreen: View {
         .onTapGesture {}
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("offline-lock")
+        .accessibilityValue(reason)
     }
 }

@@ -86,6 +86,15 @@ jobs:
           tail -n 40 artifacts/mock-a.log artifacts/app-a.log artifacts/mock-b.log artifacts/app-b.log
           exit 1
 
+      - name: Arm the late stack
+        run: |
+          # testLockLiftsWhenServerComesBack writes the trigger file, then expects OpenBot to come up
+          # on 3012 (over mock A's server) about 8 s later.
+          trigger="$RUNNER_TEMP/openbot-shell-late-stack"
+          echo "LATE_STACK_TRIGGER=$trigger" >> "$GITHUB_ENV"
+          nohup bash -c 'while [ ! -f "$1" ]; do sleep 1; done; sleep 8; echo "starting the late stack"; APP_PORT=3012 SERVER_PORT=3001 exec bun app/serve.ts' \
+            late-stack "$trigger" > artifacts/app-late.log 2>&1 &
+
       - name: Start the probe server
         run: |
           nohup python3 ios-shell/Probe/serve.py > artifacts/probe-server.log 2>&1 &
@@ -144,6 +153,7 @@ jobs:
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
         run: |
+          export TEST_RUNNER_OPENBOT_SHELL_LATE_STACK_TRIGGER="$LATE_STACK_TRIGGER"
           set -o pipefail
           xcodebuild test-without-building \
             -project ios-shell/OpenBotShell.xcodeproj \
