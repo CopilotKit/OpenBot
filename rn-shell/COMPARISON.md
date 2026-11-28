@@ -55,6 +55,22 @@ Every place the RN shell drops to native code or configuration:
 | Downloads on iOS | `onFileDownload` gives an address only (no cookies, no file) | The share sheet with the address; the native shell downloads the file with the session |
 | A system tab bar | Expo Router's native tabs host a screen per tab; the one web view would have to be re-parented | Tabs drawn by React Native: no iOS 26 glass, not `BottomNavigationView` |
 
+### The senior review's rules: where each one lives in React Native
+
+| Rule | In JavaScript (react-native-webview's API) | Needed native code or a patch | Not possible with react-native-webview as it is |
+| --- | --- | --- | --- |
+| Clear the web view's session and site data before `enter`, and load `enter` only when that has finished | The waiting (the reducer holds `enter` until `siteDataCleared`) | Clearing: WKWebsiteDataStore / CookieManager and WebStorage in the module; react-native-webview's `clearCache` is per view, Android-only for history, and gives no completion | |
+| Is there a session cookie (names only) | | The module (WKHTTPCookieStore, CookieManager) | |
+| An `enter` that ends on `/sign?native-sign-in=failed` is a failure | Yes (the URL is in `onNavigationStateChange`) | | |
+| During a renewal, ignore the outgoing page's `signed-out` and `/sign` | Yes (reducer) | | |
+| Keep the verifier after a fake ticket | Yes (reducer) | Android: the trampoline keeps another app's callback from bringing the app forward | |
+| Downloads only from the own origin | iOS: `onFileDownload` gives the address, so the app decides (share sheet, no cookies) | | Android: react-native-webview hands every download to DownloadManager itself, from any origin (a patch would be needed) |
+| Microphone and camera only for the own origin (scheme, host and port) | Refused for every origin (`mediaCapturePermissionGrantType="deny"`, no Android permission declared) | | Per-origin grant: iOS offers only "same host" (not scheme or port), Android grants by the app's permissions, not the page's origin |
+| `mailto:`, `tel:`, `sms:` from a new window | Yes: `onOpenWindow` gives the address, opened after a recent tap | | Telling a tap from a script: Android's window event carries no gesture flag (the app tracks taps in the page instead) |
+| Bridge from the main frame of the own origin only | The token and origin check | | A frame check: the message event has no frame on Android and the channel is open to all frames |
+| Dialogs: other origins suppressed, own titled OpenBot | Other origins' main-frame dialogs (an injected script) | The patch (frames, title) | |
+| A dead content process recovers | Yes (`onContentProcessDidTerminate`, `onRenderProcessGone`, a remount) | | |
+
 Further friction found while building it:
 
 - **A store build shipped the test hooks until Metro's cache was cleared.** `EXPO_PUBLIC_` values are

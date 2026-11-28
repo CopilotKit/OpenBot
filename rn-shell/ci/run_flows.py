@@ -44,7 +44,8 @@ MOCK = [
     ("handoff-sign-in", "flows/02-handoff-sign-in.yaml", "both", None, 120),
     ("first-screen", "flows/01-first-screen.yaml", "both", None, 120),
     ("tabs", "flows/03-tabs.yaml", "both", None, 120),
-    ("keyboard", "flows/04-keyboard.yaml", "both", None, 120),
+    ("keyboard-home", "flows/04-keyboard.yaml", "both", None, 120),
+    ("keyboard-conversation", "flows/04b-keyboard-conversation.yaml", "both", None, 120),
     ("relaunch-signed-in", "flows/05-relaunch-signed-in.yaml", "both", None, 120),
     ("skeleton", "flows/08-skeleton.yaml", "both", None, 120),
     ("web-fallback", "flows/07-web-fallback.yaml", "both", None, 120),
@@ -72,7 +73,7 @@ DEMO = [
 PRIVATE = {"real-signed-in-journey"}
 # The mock suite in two shards that can run on two machines (each with its own mock stacks): the
 # hand-off journey, which ends with sign-out, and the flows signed in with the mock's cookie.
-SHARD_1 = {"handoff-sign-in", "first-screen", "tabs", "keyboard", "relaunch-signed-in", "skeleton", "web-fallback",
+SHARD_1 = {"handoff-sign-in", "first-screen", "tabs", "keyboard-home", "keyboard-conversation", "relaunch-signed-in", "skeleton", "web-fallback",
            "sign-out", "foreign-callback"}
 
 
@@ -203,9 +204,11 @@ def run(platform, suite, artifacts, private, only, shard=0):
         while True:
             attempts += 1
             status, reason = run_one(args, flow_dir, timeout)
-            log_text = (flow_dir / "maestro.log").read_text() if (flow_dir / "maestro.log").exists() else ""
+            log_text = "".join(
+                (flow_dir / name).read_text() for name in ("maestro.log", "report.xml") if (flow_dir / name).exists()
+            )
             # Maestro's own driver dying (after a killed run) is not the app's failure: once more.
-            if status == "failed" and attempts == 1 and re.search(r"DeviceServerDied|StatusRuntimeException: UNAVAILABLE|XCTestDriver.*(unreachable|failed)", log_text):
+            if status == "failed" and attempts == 1 and re.search(r"DeviceServerDied|StatusRuntimeException: UNAVAILABLE|XCTestDriver.*(unreachable|failed)|<failure>Unknown error</failure>", log_text):
                 print("  Maestro's driver died; running the flow again", flush=True)
                 continue
             break
