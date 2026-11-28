@@ -7,8 +7,7 @@ name: iOS shell video
 #   in the app's web view first (testRealGoogleSignInInWebViewAndJourney); each such run sends ONE
 #   sign-in prompt to the account owner's phone, so it only runs when started by hand.
 # Each recording is cut to its test's own start and end and also comes as a 600-px-wide copy
-# (ci/video_tool.swift, AVFoundation). The two recordings run as parallel jobs; this workflow (and
-# only this one) caches the built web app and Xcode's DerivedData, keyed on their sources.
+# (ci/video_tool.swift, AVFoundation). Linux prepares the demo fixture while macOS builds the native targets.
 on:
   push:
     branches:
@@ -42,13 +41,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare-demo:
+    name: Build the demo workbench
+    if: github.repository == 'CopilotKit/OpenBot' && inputs.which != 'real'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - name: Build the web app and bundle the mock server
+        run: |
+          bun install --frozen-lockfile
+          cp .env.example .env
+          (cd app && bun run build)
+          fixture="$RUNNER_TEMP/ios-demo-workbench"
+          # The mock discovers the generated handlers by their TS paths at runtime.
+          bun build --target=bun --splitting --root=app --outdir="$fixture" --entry-naming='[dir]/[name].ts' \
+            app/serve.ts app/workbench/mock-server.ts app/src/lib/api/generated/*/*.msw.ts
+          cp -R app/dist "$fixture/dist"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-demo-workbench-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-demo-workbench/
+          if-no-files-found: error
+          retention-days: 1
+
   demo:
     name: Record the demo tour (mock)
     if: github.repository == 'CopilotKit/OpenBot' && inputs.which != 'real'
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 13
     permissions:
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -95,40 +126,6 @@ jobs:
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.bun/install/cache
-          key: ios-shell-video-bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-
-      - name: Look for the built web app in the cache
-        id: web-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: app/dist
-          key: ios-shell-video-web-${{ hashFiles('app/src/**', 'app/public/**', 'app/index.html', 'app/package.json', 'app/vite.config.*', 'app/tsconfig*.json', 'shared/**', 'tokens/**', 'bun.lock', 'package.json', '.env.example') }}
-
-      - name: Install, build the web app if needed, start mock stack A
-        timeout-minutes: 15
-        env:
-          WEB_CACHED: ${{ steps.web-cache.outputs.cache-hit }}
-        run: |
-          echo "$(date +%s) web-and-mock" >> "$RUNNER_TEMP/timing"
-          mkdir -p artifacts/video
-          bun install --frozen-lockfile
-          cp .env.example .env
-          if [ "$WEB_CACHED" != "true" ]; then (cd app && bun run build); else echo "web app from the cache"; fi
-          MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun app/workbench/mock-server.ts > artifacts/mock-a.log 2>&1 &
-          APP_PORT=3010 SERVER_PORT=3001 nohup bun app/serve.ts > artifacts/app-a.log 2>&1 &
-          for _ in $(seq 1 60); do
-            if [ "$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3010/api/auth/shell/config?platform=ios' || true)" = 200 ]; then
-              echo "mock stack A is up"
-              exit 0
-            fi
-            sleep 1
-          done
-          tail -n 40 artifacts/mock-a.log artifacts/app-a.log
-          exit 1
-
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
           path: DerivedData-Debug
           key: ios-shell-video-dd-Debug-${{ hashFiles('ios-shell/**') }}
           restore-keys: ios-shell-video-dd-Debug-
@@ -142,6 +139,36 @@ jobs:
             -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath DerivedData-Debug CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee xcodebuild-build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build.log
+
+      - name: Wait for the workbench built by this run
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FIXTURE: ios-demo-workbench-${{ github.run_attempt }}
+        run: |
+          for i in {1..60}; do
+            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+              --jq '.artifacts[].name' | grep -Fxq "$FIXTURE"; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::The demo workbench was not available in time"
+          exit 1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ios-demo-workbench-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-demo-workbench
+      - name: Start the demo workbench
+        working-directory: ${{ runner.temp }}/ios-demo-workbench
+        run: |
+          echo "$(date +%s) web-and-mock" >> "$RUNNER_TEMP/timing"
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/video"
+          MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun --no-install workbench/mock-server.ts > "$GITHUB_WORKSPACE/artifacts/mock-a.log" 2>&1 &
+          APP_PORT=3010 SERVER_PORT=3001 nohup bun --no-install serve.ts > "$GITHUB_WORKSPACE/artifacts/app-a.log" 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS 'http://127.0.0.1:3010/api/auth/shell/config?platform=ios' | grep -q '"handoff":true'; then exit 0; fi
+            sleep 1
+          done
+          exit 1
 
       - name: Record the demo tour
         timeout-minutes: 10
@@ -199,7 +226,7 @@ jobs:
     name: Record the real-backend journey (private)
     if: github.repository == 'CopilotKit/OpenBot' && inputs.which != 'demo'
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 13
     permissions:
       contents: read
     steps:
