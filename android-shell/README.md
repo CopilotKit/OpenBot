@@ -35,8 +35,17 @@ What is native:
   only with a well-formed ticket for the pending sign-in's mode, so another app firing
   `openbotshell://` neither ends the sign-in nor closes the Custom Tab.
   Every step has a timeout and an error line on the native screen; closing the Custom Tab returns
-  quietly. While signed in, the hosted sign-in's renewal (`/api/auth/hosted/sign-in`) runs through the
-  Custom Tab the same way when the server has the hand-off.
+  quietly. The hand-off path is `/api/auth/shell/handoff?challenge=<C>&platform=android&callback=<scheme|https>`
+  (`ShellUrls.kt`, to the letter of the server's `docs/shell-sign-in.md`). The confirmation page's
+  "Open the OpenBot app" link goes to the same callback address, so the trampoline takes it like the
+  automatic return.
+- **Renewing the hosted sign-in.** While signed in, a top-level navigation to exactly
+  `/api/auth/hosted/sign-in` on the OpenBot host is stopped; its `returnTo` (decoded once; off-host or
+  missing: "/") becomes `to`, kept in memory with a new PKCE pair; the Custom Tab opens
+  `<host>/api/auth/hosted/sign-in?returnTo=<the hand-off path as one encoded value>`; the ticket that
+  comes back goes to `enter` with the header and `to` encoded as one value (every character outside
+  `A-Z a-z 0-9 - _ . ~` percent-encoded). Unit-tested against the doc's worked example
+  (`ShellUrlsTest`); the mock has no hosted sign-in route, so there is no end-to-end test of it here.
 - **The bottom bar.** A Material 3 `BottomNavigationView`: Conversations, Home, Bots (`tab_conversations`,
   `tab_home`, `tab_bots`; Home selected at start). A tap (also on the selected tab) asks the page to
   navigate with the `openbot:open` event and loads the page if nobody handled it. The page's `route`
@@ -192,7 +201,7 @@ On a public repository Actions artifacts can be downloaded by any signed-in GitH
   the WebView with no address shown; the web sign-in fallback runs the identity provider there, and
   Google may refuse its OAuth inside a WebView (`disallowed_useragent`). The hand-off (Custom Tab) is
   the design that avoids both; the fallback stays for servers without it.
-- **Renewal of the hosted sign-in** waits for the server's exact URLs.
+- **Renewal of the hosted sign-in** is unit-tested only (the mock has no hosted sign-in).
 - **Cloudflare's bot check** on my.open.bot appears in the WebView from CI (see PRODUCTION-PARITY.md);
   the app shows it, never covers it, and never tries to get past it.
 

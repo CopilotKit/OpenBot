@@ -431,7 +431,7 @@ class ShellFlowTest : ShellTestBase() {
         if (!launchSignedIn()) return
         check(homeRendered(), "Home did not render")
         device.pressHome()
-        sleep(40_000)
+        sleep(25_000)
         bringBack()
         check(waitForTab(Tab.HOME, 10_000) != null, "no tabs after coming back")
         sleep(2_000)

@@ -359,18 +359,14 @@ class ShellController(
         signIn = SignInStep.IDLE
     }
 
-    private fun handoffUrl(challenge: String): String {
-        var query = "challenge=$challenge&platform=android"
-        if (hooks.handoffAuto) query += "&auto=1"
-        return config.url("/api/auth/shell/handoff?$query")
+    private fun handoffPath(challenge: String, mode: HandoffMode): String {
+        var path = ShellUrls.handoffPath(challenge, ShellUrls.callbackName(mode))
+        if (hooks.handoffAuto) path += "&auto=1"
+        return path
     }
 
     private fun enterUrl(ticket: String, verifier: String, to: String): String =
-        Uri.parse(config.url("/api/auth/shell/enter")).buildUpon()
-            .appendQueryParameter("ticket", ticket)
-            .appendQueryParameter("verifier", verifier)
-            .appendQueryParameter("to", to)
-            .build().toString()
+        ShellUrls.enterUrl(config.origin, ticket, verifier, to)
 
     private fun presentTab(pair: PkcePair, mode: HandoffMode, returnTo: String) {
         if (!renewing) signIn = SignInStep.CUSTOM_TAB
@@ -378,7 +374,13 @@ class ShellController(
         tabOpen = true
         callbackArrived = false
         debugTab = false
-        if (!activity.openInCustomTab(Uri.parse(handoffUrl(pair.challenge)), if (renewing) "renewal" else "sign-in")) {
+        // A sign-in opens the hand-off; a renewal opens the hosted sign-in, which returns to it.
+        val address = if (renewing) {
+            ShellUrls.renewalUrl(config.origin, handoffPath(pair.challenge, mode))
+        } else {
+            config.url(handoffPath(pair.challenge, mode))
+        }
+        if (!activity.openInCustomTab(Uri.parse(address), if (renewing) "renewal" else "sign-in")) {
             // No browser can show a Custom Tab: the web sign-in.
             tabOpen = false
             PendingSignIn.clear()
@@ -532,14 +534,34 @@ class ShellController(
     private fun checkPageContent() {
         if (!pageLoading || web.pageReady) return
         if (contentSince == 0L) contentSince = System.currentTimeMillis()
-        web.evaluateJson("JSON.stringify({n: (document.body && document.body.innerText.trim().length) || 0, t: document.title})") { answer ->
+        web.evaluateJson("JSON.stringify({n: (document.body && document.body.innerText.trim().length) || 0, t: document.title, shell: !!document.documentElement.getAttribute('data-native-shell')})") { answer ->
             val length = answer?.optInt("n", 0) ?: 0
             val waited = System.currentTimeMillis() - contentSince
-            if (length > 0 || waited >= MAX_TEXT_WAIT_MS) {
+            // A shell-aware web app (it marks <html data-native-shell>) says `ready` when its first
+            // page has drawn something readable (20 s at most): wait for that, not for any text.
+            val shellAware = answer?.optBoolean("shell", false) == true
+            val limit = if (shellAware) SHELL_READY_WAIT_MS else MAX_TEXT_WAIT_MS
+            if ((!shellAware && length > 0) || waited >= limit) {
                 diagnostics.log("page-after-finish", mapOf("textLength" to length, "title" to (answer?.optString("t") ?: ""), "waitedMs" to waited))
                 pageShown(if (length > 0) "text" else "text-timeout", 0)
             } else {
                 main.postDelayed(checkContent, 400)
+            }
+        }
+    }
+
+    private var readyChecks = 0
+    private val readyContent = Runnable { checkReadyContent() }
+
+    private fun checkReadyContent() {
+        if (!pageLoading) return
+        web.evaluateJson("JSON.stringify({n: ((document.querySelector('main') || document.body || {}).innerText || '').trim().length})") { answer ->
+            val length = answer?.optInt("n", 0) ?: 0
+            readyChecks += 1
+            if (length >= READY_TEXT_CHARS || readyChecks >= 15) {
+                pageShown(if (length >= READY_TEXT_CHARS) "ready-content" else "ready-content-timeout", 150)
+            } else {
+                main.postDelayed(readyContent, 200)
             }
         }
     }
@@ -667,7 +689,11 @@ class ShellController(
         when (message.optString("type")) {
             "ready" -> {
                 bridgeSeen = true
-                pageShown("ready", 200)
+                // `ready` comes when the router mounts, before the page's data: the skeleton waits
+                // for the page's main content to show text (3 s at most), then fades.
+                main.removeCallbacks(readyContent)
+                readyChecks = 0
+                checkReadyContent()
                 refreshChrome()
             }
             "route" -> {
@@ -702,7 +728,7 @@ class ShellController(
         if (handoffSupported == false) return false
         // The hosted sign-in's renewal: do it in the Custom Tab, then come back here.
         renewing = true
-        val returnTo = web.currentPath
+        val returnTo = ShellUrls.renewalTo(url.toString(), config.origin)
         val pair = PkcePair.make()
         diagnostics.log("renewal", mapOf("returnTo" to returnTo, "handoffKnown" to (handoffSupported != null)))
         val known = handoffMode
@@ -810,7 +836,9 @@ class ShellController(
         const val MIN_SKELETON_MS = 300L
         const val NO_READY_MS = 1_500L
         const val MAX_TEXT_WAIT_MS = 8_000L
-        const val SKELETON_AFTER_COMMIT_MS = 10_000L
+        const val SKELETON_AFTER_COMMIT_MS = 21_000L
+        const val SHELL_READY_WAIT_MS = 21_000L
+        const val READY_TEXT_CHARS = 20
         val TICKET = Regex("^[A-Za-z0-9._~-]{16,512}$")
     }
 }

@@ -27,7 +27,9 @@ class DemoTourTest : ShellTestBase() {
     private fun tour() {
         step("launch")
         // The first page load answers 1.5 s late (debug hook), so the loading skeleton reads on video.
-        launch(MOCK_A, "tour", extras = mapOf("openbot.delay_first_load_ms" to "1500"))
+        // Drawn in software for the recording: the emulator's GPU compositing misdraws the Bots page
+        // (RenderingTest); the app itself draws with the GPU.
+        launch(MOCK_A, "tour", extras = mapOf("openbot.delay_first_load_ms" to "1500", "openbot.software_layer" to "1"))
         check(waitFor("sign_in_button", 20_000) != null, "demo: no Sign in button")
         pause(800)
         step("sign in through the Custom Tab")
@@ -100,7 +102,7 @@ class DemoTourTest : ShellTestBase() {
 
         step("lock screen")
         // The lock screen, then the connection comes back.
-        launch(MOCK_A, "tour-offline", reset = false, extras = mapOf("openbot.force_offline_seconds" to "4"))
+        launch(MOCK_A, "tour-offline", reset = false, extras = mapOf("openbot.force_offline_seconds" to "4", "openbot.software_layer" to "1"))
         check(waitFor("offline_lock", 5_000) != null, "demo: no lock screen")
         check(waitGone("offline_lock", 12_000), "demo: the lock did not lift")
         pause(1_500)

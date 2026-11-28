@@ -150,6 +150,8 @@ class WebController(
         // No white flash before the first paint in dark mode.
         view.setBackgroundColor(Color.TRANSPARENT)
         view.isVerticalScrollBarEnabled = false
+        // Debug hook for recordings only (see DebugHooks): the emulator's GPU compositing misdraws.
+        if (config.hooks.softwareLayer) view.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
 
         val ownOrigin = setOf(config.origin)
         // The page learns it is in the shell before its first script runs, on the base origin only.

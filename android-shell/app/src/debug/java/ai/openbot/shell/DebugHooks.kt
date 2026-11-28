@@ -25,6 +25,8 @@ import androidx.appcompat.app.AppCompatDelegate
  * | openbot.force_dark=1             | the whole app, WebView included, in dark mode                   |
  * | openbot.debug_tab_url=URL        | Sign in opens URL in a Custom Tab instead                       |
  * | openbot.delay_first_load_ms=N    | the first page load starts N ms late (to see the skeleton)      |
+ * | openbot.software_layer=1         | the WebView drawn in software (recordings only: the emulator's  |
+ * |                                  | GPU path misdraws some pages; never in a shipped build)         |
  *
  * Also draws an invisible "debug-state" label with the shell's state for the tests.
  */
@@ -44,6 +46,7 @@ object DebugHooks {
             customTabUrl = extras.getString("openbot.debug_tab_url")
                 ?.takeIf { it.startsWith("https://") || it.startsWith("http://") },
             delayFirstLoadMs = extras.getString("openbot.delay_first_load_ms")?.toLongOrNull()?.coerceIn(0, 10_000) ?: 0L,
+            softwareLayer = flag("openbot.software_layer"),
         )
     }
 

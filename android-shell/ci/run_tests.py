@@ -82,6 +82,10 @@ SUITE2 = [
     "ShellFlowTest#testLoadingSkeleton",
     "ShellFlowTest#testLockLiftsWhenServerComesBack",
     "RenderingTest#testBotsPageRendering",
+    "HardeningTest#testLargestFontScale",
+    "HardeningTest#testAccessibilityLabels",
+    "HardeningTest#testTabletSizeAndRotation",
+    "HardeningTest#testRendererKilledRecovers",
 ]
 DEMO = ["DemoTourTest#testDemoTour"]
 # Recordings (video mode only): (first test, last test, file, private?)
@@ -411,10 +415,17 @@ def main():
         # The mock suite first (it matters most and needs no outside network), then the probe,
         # then the real backend. The release-like build leaves before the hand-off tests only if it
         # is installed, so its tests run last.
-        plan = [] if REAL_ONLY else SUITE2 + PROBE
-        plan += SUITE1_DEBUG
+        # SHARD: "mock" (suite 2, rendering, hardening) or "other" (probe, suite 1) on two emulators
+        # in parallel; unset runs everything.
+        shard = os.environ.get("SHARD", "")
+        plan = []
+        if shard in ("", "mock") and not REAL_ONLY:
+            plan += SUITE2
+        if shard in ("", "other"):
+            if not REAL_ONLY:
+                plan += PROBE
+            plan += SUITE1_DEBUG + SUITE1_RELEASE
         after_release = -1
-        plan += SUITE1_RELEASE
     results, logs = [], []
     recorders = {}
     recorded_status = "unknown"

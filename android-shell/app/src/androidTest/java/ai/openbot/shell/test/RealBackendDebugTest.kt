@@ -66,7 +66,7 @@ class RealBackendDebugTest : ShellTestBase() {
         if (challenged) {
             screenshot("$label-challenge")
             val started = System.currentTimeMillis()
-            while (System.currentTimeMillis() - started < 45_000) {
+            while (System.currentTimeMillis() - started < 20_000) {
                 sleep(3_000)
                 if (!challengeShown()) {
                     clearedAfter = ((System.currentTimeMillis() - started) / 1000).toInt()
@@ -76,7 +76,7 @@ class RealBackendDebugTest : ShellTestBase() {
         }
         screenshot(label)
         note("challenge probe, $label: bot check shown $challenged; " +
-            (if (challenged) (if (clearedAfter >= 0) "cleared by itself after ${clearedAfter} s" else "still there after 45 s") else "page '${pageString("document.title")}'") +
+            (if (challenged) (if (clearedAfter >= 0) "cleared by itself after ${clearedAfter} s" else "still there after 20 s") else "page '${pageString("document.title")}'") +
             "; path ${pageString("location.pathname")}; cookie names ${cookieNames()}")
     }
 

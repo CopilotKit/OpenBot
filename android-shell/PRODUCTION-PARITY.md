@@ -16,7 +16,7 @@ https://my.open.bot.
 | The hand-off's custom scheme | Simulated | Unlike iOS, Android must register `openbotshell://` (intent filter on `SignInCallbackActivity`). Any other app can register the same scheme; the app accepts a callback only while its own sign-in is pending, and the ticket is useless without the in-memory PKCE verifier. Chrome follows a tapped `openbotshell://` link to the app; it does not follow the mock's automatic (`auto=1`) redirect without a tap. |
 | App Links (the https callback) | Not tested here | Coded (`autoVerify` filter for `https://my.open.bot/api/auth/shell/callback`; used only when `DomainVerificationManager` reports the domain verified, API 31+). Needs a release signed with the real key and `/.well-known/assetlinks.json` on my.open.bot naming its SHA-256 fingerprint (TODO). Test: an internal-testing Play build once the server ships the hand-off. |
 | WebView version | Real backend (one version) | The emulator's Android System WebView is 124.0.6367.219, frozen in the image. Phones update it through Play (current is far newer); old or unupdated devices (no Play services, some markets) can be much older. The bridge needs `WEB_MESSAGE_LISTENER` and `DOCUMENT_START_SCRIPT` (WebView 86+, feature-checked; without them the user agent still marks the shell). |
-| Cloudflare's bot check on my.open.bot | Real backend: seen | See the section below. |
+| Cloudflare's bot check on my.open.bot | Real backend: seen, often | 403 `cf-mitigated: challenge` in the WebView, never in the Custom Tab. See the section below. |
 | OEM differences | Not tested here | One Google emulator image. Samsung, Xiaomi and others ship their own launchers, keyboards, battery killers and sometimes their own WebView provider settings. Test on a Samsung and a Xiaomi device. |
 | Edge to edge, insets, keyboard | Simulated | Target 36 forces edge to edge; the shell applies the insets itself, measured in CI on a 1080×2400 screen with gesture navigation (`testTabsRouteTheWebView`, `testKeyboardHidesTabBar`, the skeleton test). Three-button navigation, display cutouts of other shapes, foldables and tablets are not tested. |
 | Software keyboard | Simulated | The emulator's Gboard with the hardware keyboard off (`hw.keyboard=no`, `show_ime_with_hard_keyboard`). Text is sent with `input text` while the keyboard is up (key events, not taps on keys). Samsung's keyboard and others are not tested. |
@@ -29,7 +29,42 @@ https://my.open.bot.
 
 ## Cloudflare's bot check
 
-(Filled in from the CI runs; see the final report.)
+my.open.bot is behind Cloudflare. From CI (a GitHub-hosted runner, a data-centre IP, an x86_64
+emulator) the WebView very often gets Cloudflare's challenge instead of OpenBot:
+
+- **What it is.** The main document answers **403** with `cf-mitigated: challenge` and
+  `server: cloudflare`; the page is "Performing security verification … verifies you are not a bot"
+  with a Turnstile "Verify you are human" checkbox. The app shows it (the skeleton ends 1.5 s after the
+  page finishes without the bridge, or as soon as it has text; the watchdog stops at the commit, so the
+  lock screen never covers it; the bottom bar stays). The tests stop there with a screenshot and never
+  try to get past it.
+- **How often.** In run 46122595057 every WebView load of my.open.bot was challenged: a first load in
+  a fresh process, a reload, an in-process relaunch, a cold relaunch, the release-like build's web
+  sign-in and the debug build's plain WebView; none cleared by itself within 45 s. In earlier runs it
+  came and went: run 46106470979 was challenged on the first load, the Turnstile check cleared itself
+  in about 20 s, `cf_clearance` (and `cf_chl_rc_ni`) were stored and flushed, and the cold relaunch
+  was not challenged; run 46119389548's whole signed-in journey (message sent, reply streamed) ran
+  unchallenged until its cold relaunch; runs 46105097597, 46108216848, 46109490937 and 46111171662 were
+  challenged at the cold relaunch, one of them with `cf_clearance` still in the store. One challenge
+  could not complete because a subresource on `challenges.cloudflare.com` failed with
+  `ERR_ADDRESS_UNREACHABLE` inside the emulator.
+- **Not our cookie handling.** The clearance cookie, when Cloudflare set it, was in CookieManager
+  before the kill and after the relaunch (the activity flushes the store when it pauses).
+- **The Custom Tab is not challenged.** In every run, the same address opened in Chrome's Custom Tab
+  on the same emulator, minutes apart, showed OpenBot's page with no challenge. The difference is the
+  client: Chrome 124's own user agent and network stack vs Android WebView 124.0.6367.219, whose user
+  agent carries `; wv)` and `Version/4.0` (exactly: `Mozilla/5.0 (Linux; Android 15;
+  sdk_gphone64_x86_64 Build/AE3A.240806.043; wv) AppleWebKit/537.36 (KHTML, like Gecko)
+  Version/4.0 Chrome/124.0.6367.219 Mobile Safari/537.36 OpenBotShell-Android/0.1.0`). The user agent
+  is not changed to get around it.
+- **iOS never saw it** in any run (WKWebView's Safari-like user agent, a macOS runner).
+- **What is not known.** Whether a phone on a home or mobile network sees it at all: a data-centre
+  IP on an emulator is the kind of client bot protection distrusts most. Whether Cloudflare keys on
+  the WebView's `; wv` mark, on the IP, or on the emulator's fingerprint, cannot be told apart from CI.
+  What would settle it: the same build on a real phone on mobile data and home Wi-Fi, and Cloudflare's
+  security events for the Ray IDs the screenshots show. If WebViews are challenged in the field, the
+  fix is on the Cloudflare side (a rule that does not challenge the app, for example by its
+  `OpenBotShell-Android` mark combined with a signed header), not in the app.
 
 ## Real-device checklist
 
