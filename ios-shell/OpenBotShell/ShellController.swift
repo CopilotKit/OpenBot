@@ -511,9 +511,11 @@ final class ShellController: NSObject, WebControllerDelegate {
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { [weak self] _ in
             self?.model.keyboardVisible = true
+            self?.web.keyboardIsUp = true
         })
         observers.append(center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] _ in
             self?.model.keyboardVisible = false
+            self?.web.keyboardIsUp = false
         })
         // Leaving the app ends editing: no keyboard waiting over a page on the way back.
         observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in

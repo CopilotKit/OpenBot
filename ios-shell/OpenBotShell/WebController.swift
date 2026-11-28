@@ -102,6 +102,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         webView.navigationDelegate = self
         webView.uiDelegate = self
         hideKeyboardAccessory(when: "init")
+        installKeyboardDragDismiss()
         // Also sees the page's own route changes, which no navigation delegate call reports.
         urlObservation = webView.observe(\.url, options: [.new]) { [weak self] webView, _ in
             let url = webView.url
@@ -209,6 +210,55 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     func endEditing() {
         webView.endEditing(true)
         webView.evaluateJavaScript("(function(){var a=document.activeElement; if (a && a.blur) a.blur();})()", completionHandler: nil)
+    }
+
+    // MARK: - Drag down to put the keyboard away
+
+    /// The scroll view's interactive dismissal needs a page that pans, and the web app turns off
+    /// overscroll in the shell, so a page that does not scroll (Home) would never let the keyboard
+    /// go. This recognizer runs beside WebKit's own: a mostly downward drag of `dragDismissPoints`
+    /// that did not start on an editable element ends editing.
+    static let dragDismissPoints: CGFloat = 40
+    private var dragStart: CGPoint?
+    private var dragHandled = false
+    /// Set by the shell from the keyboard notifications.
+    var keyboardIsUp = false
+
+    private func installKeyboardDragDismiss() {
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(keyboardDrag(_:)))
+        pan.cancelsTouchesInView = false
+        pan.delaysTouchesBegan = false
+        pan.delaysTouchesEnded = false
+        pan.delegate = self
+        webView.addGestureRecognizer(pan)
+    }
+
+    @objc private func keyboardDrag(_ pan: UIPanGestureRecognizer) {
+        switch pan.state {
+        case .began:
+            dragStart = pan.location(in: webView)
+            dragHandled = false
+        case .changed:
+            guard keyboardIsUp, !dragHandled, let start = dragStart else { return }
+            let move = pan.translation(in: webView)
+            guard move.y > WebController.dragDismissPoints, move.y > abs(move.x) * 1.5 else { return }
+            dragHandled = true
+            // Where the drag began, in the page's CSS pixels (the shell does not zoom the page).
+            let script = """
+            (function (x, y) {
+              var e = document.elementFromPoint(x, y);
+              return !!(e && e.closest && e.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]'));
+            })(\(Double(start.x)), \(Double(start.y)))
+            """
+            webView.evaluateJavaScript(script) { [weak self] result, _ in
+                guard let self = self else { return }
+                let onEditable = (result as? Bool) ?? false
+                self.diagnostics.log("keyboard-drag", ["onEditable": onEditable])
+                if !onEditable { self.endEditing() }
+            }
+        default:
+            dragStart = nil
+        }
     }
 
     func stop() {
@@ -642,5 +692,13 @@ final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         target?.userContentController(userContentController, didReceive: message)
+    }
+}
+
+extension WebController: UIGestureRecognizerDelegate {
+    /// Beside WebKit's own recognizers: the drag still scrolls the page and taps still land.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
     }
 }

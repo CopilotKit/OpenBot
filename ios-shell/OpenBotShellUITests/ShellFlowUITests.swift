@@ -355,6 +355,10 @@ final class ShellFlowUITests: ShellTestCase {
         // Signed in, offline at launch for 6 s: the tabs and Home come back by themselves.
         app = launchSignedIn(moment: "sign-in")
         sleep(4)
+        // To the background first, as a person leaves an app: WebKit writes cookies to disk
+        // lazily, and a kill seconds after signing in can lose the new session cookie.
+        XCUIDevice.shared.press(.home)
+        sleep(3)
         app.terminate()
         app = launch(base: ShellTestCase.mockA, moment: "signed-in-timed", reset: false,
                      extra: ["OPENBOT_SHELL_FORCE_OFFLINE_SECONDS": "6"])
@@ -426,8 +430,7 @@ final class ShellFlowUITests: ShellTestCase {
         let app = launchSignedIn()
         let composer = app.webViews.textViews.firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 30))
-        composer.tap()
-        _ = app.keyboards.firstMatch.waitForExistence(timeout: 6)
+        XCTAssertTrue(focusComposer(app, composer), "the message box raised no keyboard")
         composer.typeText("Hello there")
         guard let send = firstExisting([webElement(app, label: "Send message")], timeout: 5) else {
             XCTFail("no Send button")
@@ -485,8 +488,7 @@ final class ShellFlowUITests: ShellTestCase {
     private func checkKeyboardRoundTrip(_ app: XCUIApplication, place: String) throws {
         let composer = app.webViews.textViews.firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 10), "\(place): no message box")
-        if !app.keyboards.firstMatch.exists { composer.tap() }
-        guard app.keyboards.firstMatch.waitForExistence(timeout: 8) else {
+        guard focusComposer(app, composer) else {
             throw XCTSkip("the software keyboard did not show under XCUITest")
         }
         sleep(1)
@@ -501,7 +503,7 @@ final class ShellFlowUITests: ShellTestCase {
         note("\(place): keyboard top \(keyboardTop), send \(send.frame), web view \(web.frame)")
         screenshot("\(place)-keyboard-up")
 
-        web.swipeDown()
+        dragPageDown(app)
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "\(place): dragging down did not dismiss the keyboard")
         let bar = app.tabBars.firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 5), "\(place): the tab bar did not come back")

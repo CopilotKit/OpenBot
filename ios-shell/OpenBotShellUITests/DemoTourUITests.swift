@@ -60,9 +60,8 @@ final class DemoTourUITests: ShellTestCase {
 
         // The software keyboard: the tab bar hides, the message box and Send sit on it. Send, the
         // reply (mock stack A runs with MOCK_REPLY=1), then a drag down puts the keyboard away.
-        composer.tap()
         let keyboard = app.keyboards.firstMatch
-        if keyboard.waitForExistence(timeout: 6) {
+        if focusComposer(app, composer) {
             composer.typeText("What changed in competitor pricing?")
             let send = webElement(app, label: "Send message")
             if send.waitForExistence(timeout: 5) {
@@ -76,7 +75,7 @@ final class DemoTourUITests: ShellTestCase {
             XCTAssertTrue(reply.waitForExistence(timeout: 15), "demo: no reply")
             pause(1.5)
             if keyboard.exists {
-                app.webViews.firstMatch.swipeDown()
+                dragPageDown(app)
                 note(keyboard.waitForNonExistence(timeout: 2)
                      ? "demo: the drag down put the keyboard away"
                      : "demo: the drag down left the keyboard up")

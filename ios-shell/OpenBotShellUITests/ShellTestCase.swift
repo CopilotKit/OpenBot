@@ -82,6 +82,28 @@ class ShellTestCase: XCTestCase {
         }
     }
 
+    /// Taps the message box once the skeleton is gone (a tap under it lands on the skeleton) and
+    /// waits for the software keyboard, tapping a second time if the first did not raise it.
+    @discardableResult
+    func focusComposer(_ app: XCUIApplication, _ composer: XCUIElement) -> Bool {
+        _ = app.descendants(matching: .any)["loading-skeleton"].waitForNonExistence(timeout: 10)
+        let keyboard = app.keyboards.firstMatch
+        if keyboard.exists { return true }
+        composer.tap()
+        if keyboard.waitForExistence(timeout: 5) { return true }
+        note("the first tap on the message box raised no keyboard; tapping again")
+        composer.tap()
+        return keyboard.waitForExistence(timeout: 5)
+    }
+
+    /// A person's drag down the page, from the empty top of the web view to near its bottom (a drag
+    /// that starts on the focused message box moves the text, not the page).
+    func dragPageDown(_ app: XCUIApplication) {
+        let web = app.webViews.firstMatch
+        web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08))
+            .press(forDuration: 0.05, thenDragTo: web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
+    }
+
     /// True in the video workflow: scenes are paced for watching and the background step is short.
     var videoMode: Bool { ProcessInfo.processInfo.environment["OPENBOT_SHELL_VIDEO_MODE"] == "1" }
 
