@@ -62,6 +62,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openbot.shell
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # The asset catalog holds only the launch screen's mark and colour: no app icon yet.
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
         # Associated domains, for the hand-off's https callback (only this app can claim
         # https://my.open.bot/api/auth/shell/callback). Takes effect only in a build signed with the
         # team's profile; DEVELOPMENT_TEAM is still empty (TODO), and CI builds unsigned.
