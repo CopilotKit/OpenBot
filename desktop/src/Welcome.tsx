@@ -24,6 +24,9 @@ export { CloudMarks };
 export const SELF_CONTAINED_SUMMARY =
   "Everything runs on this computer, for trying it or personal use.";
 
+export const SELF_CONTAINED_BROWSER_NEXT =
+  "Next, your browser opens so you can sign in and get a free license key.";
+
 /** The way to OpenBot (Self-Contained) at the foot of the first screen, with OpenBot Cloud on. */
 export const SELF_CONTAINED_ASIDE = "Want everything to run on this computer?";
 
@@ -488,7 +491,8 @@ function Install({
   return (
     <>
       <p className="lede">
-        Setup takes 1 to 10 minutes, depending on your internet speed.
+        Setup takes 1 to 10 minutes, depending on your internet speed.{" "}
+        {SELF_CONTAINED_BROWSER_NEXT}
       </p>
       <div className="row">
         <button
