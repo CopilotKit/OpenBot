@@ -27,7 +27,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { connectionName } from "@/lib/ai-connection/describe";
-import { providerById } from "@/lib/ai-connection/providers";
+import { providerById, providerRetired } from "@/lib/ai-connection/providers";
 import { markFor } from "@/lib/marks";
 import {
   canChoose,
@@ -194,14 +194,15 @@ export function ModelPicker({
   const groups = pickerGroups(catalogue);
   const fallback = connectionOf(catalogue, null);
   if (groups.length > 0) {
-    const selectable = groups.filter(({ provider }) => provider !== "unbiased");
+    // A provider OpenBot no longer offers is never offered: nothing on it runs, or fixes it here.
+    const selectable = groups.filter((group) => !providerRetired(group));
     if (selectable.length === 0) return null;
     // Several connections: the pick's own, and nothing selected while there is no default.
     const on = value ? connectionOf(catalogue, value.connection) : undefined;
     // A stopped connection may list nothing: its pick is still named, by its id.
     const selected =
       on?.models.find((model) => model.id === value?.model) ??
-      (on && !on.ready && value
+      (on && !on.ready && value?.model
         ? { id: value.model, label: value.model }
         : undefined);
     return (
@@ -221,7 +222,7 @@ export function ModelPicker({
       />
     );
   }
-  if (!value || fallback?.provider === "unbiased") return null;
+  if (!value) return null;
   const selected =
     catalogue.models.find((model) => model.id === value.model) ??
     catalogue.models.find((model) => model.id === catalogue.default);
