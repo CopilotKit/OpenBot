@@ -49,6 +49,10 @@ final class BackTransition {
     /// taking one when `will-navigate` arrives is too late: the page waits 120 ms at most, and a
     /// snapshot on the simulator took longer, so it showed the new page (run 46165013120).
     private var latest: UIImage?
+    /// When `latest` was asked for, and when the page last reported a route: a picture asked for
+    /// before the last route is of another page and is not used.
+    private var latestAskedAt = Date.distantPast
+    private var lastRouteAt = Date.distantPast
     private var refreshWork: DispatchWorkItem?
 
     func refresh(after seconds: TimeInterval) {
@@ -57,8 +61,11 @@ final class BackTransition {
             guard let self = self, let webView = self.webView, self.under == nil, self.cover == nil else { return }
             let config = WKSnapshotConfiguration()
             config.afterScreenUpdates = false
+            let asked = Date()
             webView.takeSnapshot(with: config) { [weak self] image, _ in
-                if let image = image { self?.latest = image }
+                guard let self = self, let image = image, asked >= self.lastRouteAt else { return }
+                self.latest = image
+                self.latestAskedAt = asked
             }
         }
         refreshWork = item
@@ -69,7 +76,8 @@ final class BackTransition {
     /// at once, so the page can go ahead.
     func willPush(tab: String, completion: @escaping () -> Void) {
         refreshWork?.cancel()
-        stacks[tab, default: []].append(latest)
+        // No fresh picture of this page: no slide for it later (better than the wrong page).
+        stacks[tab, default: []].append(latestAskedAt >= lastRouteAt ? latest : nil)
         latest = nil
         completion()
     }
@@ -77,6 +85,7 @@ final class BackTransition {
     /// A `route` with `depth`: drop or pad snapshots so this tab holds depth - 1 entries.
     func route(tab: String, depth: Int?) {
         currentTab = tab
+        lastRouteAt = Date()
         if let depth = depth {
             var stack = stacks[tab] ?? []
             let wanted = max(0, depth - 1)
@@ -96,7 +105,7 @@ final class BackTransition {
     func begin() {
         guard let webView = webView, let container = webView.superview, under == nil,
               let image = stacks[currentTab]?.last ?? nil else { return }
-        let view = UIView(frame: webView.frame)
+        let view = UIView(frame: restingFrame(webView))
         view.clipsToBounds = true
         let picture = UIImageView(image: image)
         picture.frame = view.bounds
@@ -154,11 +163,17 @@ final class BackTransition {
         end(through: true, back: back)
     }
 
+    /// The web view's frame without the slide's transform.
+    private func restingFrame(_ view: UIView) -> CGRect {
+        CGRect(x: view.center.x - view.bounds.width / 2, y: view.center.y - view.bounds.height / 2,
+               width: view.bounds.width, height: view.bounds.height)
+    }
+
     private func showCover() {
         guard let webView = webView, let container = webView.superview,
               let image = stacks[currentTab]?.last ?? nil else { return }
         let view = UIImageView(image: image)
-        view.frame = webView.frame
+        view.frame = restingFrame(webView)
         view.contentMode = .scaleToFill
         container.insertSubview(view, aboveSubview: webView)
         cover?.removeFromSuperview()

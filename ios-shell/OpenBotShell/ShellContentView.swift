@@ -137,7 +137,12 @@ final class ShellContentView: UIView, UITabBarDelegate {
             webBottom = bounds.height - (showBar ? barHeight : bottomInset)
         }
         let webFrame = CGRect(x: 0, y: 0, width: bounds.width, height: max(webBottom, 0))
-        if webView.frame != webFrame { webView.frame = webFrame }
+        // Bounds and centre, not frame: the slide back moves the web view with a transform, and
+        // setting the frame of a transformed view moves its centre (the page slid the wrong way).
+        let size = CGSize(width: webFrame.width, height: webFrame.height)
+        let center = CGPoint(x: webFrame.midX, y: webFrame.midY)
+        if webView.bounds.size != size { webView.bounds = CGRect(origin: webView.bounds.origin, size: size) }
+        if webView.center != center { webView.center = center }
         if lastReported == nil || lastReported!.0 != barHeight || lastReported!.1 != webFrame {
             lastReported = (barHeight, webFrame)
             let report = onLayout
