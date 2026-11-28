@@ -56,6 +56,18 @@ class ShellActivity : AppCompatActivity() {
     private lateinit var signInProgress: CircularProgressIndicator
     private lateinit var signInLine: TextView
     private lateinit var signInMessage: TextView
+    private lateinit var serverHost: TextView
+    private lateinit var selfHostedToggle: MaterialButton
+    private lateinit var selfHostedPanel: View
+    private lateinit var addressField: com.google.android.material.textfield.TextInputLayout
+    private lateinit var addressInput: android.widget.EditText
+    private lateinit var addressError: TextView
+    private lateinit var addressContinue: MaterialButton
+    private lateinit var lockHost: TextView
+    private lateinit var lockChange: MaterialButton
+    private var serverPanelOpen = false
+    private var checkingServer = false
+    private var serverCheck: SignInFlow? = null
     private lateinit var lock: View
 
     private var lastInsets: WindowInsetsCompat? = null
@@ -76,7 +88,7 @@ class ShellActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        config = ShellConfig.from(intent)
+        config = ShellConfig.from(this, intent)
         DebugHooks.beforeCreate(this, config.hooks)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -95,6 +107,15 @@ class ShellActivity : AppCompatActivity() {
         signInLine = findViewById(R.id.sign_in_line)
         signInMessage = findViewById(R.id.sign_in_message)
         lock = findViewById(R.id.offline_lock)
+        serverHost = findViewById(R.id.server_host)
+        selfHostedToggle = findViewById(R.id.self_hosted_toggle)
+        selfHostedPanel = findViewById(R.id.self_hosted_panel)
+        addressField = findViewById(R.id.self_hosted_field)
+        addressInput = findViewById(R.id.self_hosted_address)
+        addressError = findViewById(R.id.self_hosted_error)
+        addressContinue = findViewById(R.id.self_hosted_continue)
+        lockHost = findViewById(R.id.offline_lock_host)
+        lockChange = findViewById(R.id.lock_change_address)
 
         registerLaunchers()
 
@@ -104,6 +125,7 @@ class ShellActivity : AppCompatActivity() {
         web.delegate = controller
 
         signInButton.setOnClickListener { controller.signIn() }
+        setUpServerPicker()
         findViewById<View>(R.id.web_sign_in_cancel).setOnClickListener { controller.cancelWebSignIn() }
         findViewById<View>(R.id.retry_button).setOnClickListener { controller.retryNow() }
         findViewById<View>(R.id.support_email).setOnClickListener { openSupportMail() }
@@ -133,6 +155,8 @@ class ShellActivity : AppCompatActivity() {
         // A recreated activity (Don't keep activities, a theme flip while the Custom Tab was open)
         // can be started by the callback itself.
         if (intent?.action == ACTION_SIGN_IN_CALLBACK) controller.handleCallback(intent.data)
+        // The lock screen's Change address before a restart, or a server change that asked for it.
+        if (ServerChoice.takeOpenField(this)) openServerPanel(if (config.selfHosted) config.addressForField else "")
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -185,6 +209,9 @@ class ShellActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.offline_lock_heading).setTextColor(ink)
         findViewById<TextView>(R.id.offline_lock_message).setTextColor(secondary)
         findViewById<TextView>(R.id.support_email).setTextColor(ink)
+        for (quiet in listOf(serverHost, selfHostedToggle, lockHost, lockChange, findViewById<TextView>(R.id.self_hosted_cancel))) {
+            quiet.setTextColor(secondary)
+        }
         for (button in listOf(signInButton, findViewById<MaterialButton>(R.id.retry_button))) {
             button.backgroundTintList = ColorStateList.valueOf(ink)
             button.setTextColor(paper)
@@ -233,11 +260,155 @@ class ShellActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        serverCheck?.shutdown()
         if (started) {
             controller.stop()
             web.destroy()
         }
         super.onDestroy()
+    }
+
+    // A self-hosted OpenBot. ------------------------------------------------------------------------
+
+    private fun setUpServerPicker() {
+        selfHostedToggle.setOnClickListener {
+            if (config.selfHosted) switchServer(null) else openServerPanel("")
+        }
+        findViewById<View>(R.id.self_hosted_cancel).setOnClickListener { closeServerPanel() }
+        addressContinue.setOnClickListener { submitAddress() }
+        addressInput.setOnEditorActionListener { _, actionId, event ->
+            val enter = event?.keyCode == android.view.KeyEvent.KEYCODE_ENTER && event.action == android.view.KeyEvent.ACTION_DOWN
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_GO || enter) {
+                submitAddress()
+                true
+            } else {
+                false
+            }
+        }
+        addressInput.doAfterTextChangedCompat { if (!checkingServer) showAddressError(null) }
+        lockChange.setOnClickListener { openServerPanel(config.addressForField, fromLock = true) }
+    }
+
+    private fun android.widget.EditText.doAfterTextChangedCompat(action: () -> Unit) {
+        addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) = action()
+        })
+    }
+
+    /** Expands the field in place: a short fade and slide, none when animations are off. */
+    private fun openServerPanel(prefill: String, fromLock: Boolean = false) {
+        if (fromLock) controller.pickingServer = true
+        beginServerTransition()
+        serverPanelOpen = true
+        addressInput.setText(prefill)
+        addressInput.setSelection(prefill.length)
+        showAddressError(null)
+        render()
+        addressInput.requestFocus()
+        WindowCompat.getInsetsController(window, addressInput).show(WindowInsetsCompat.Type.ime())
+        diagnostics.log("server-picker", mapOf("open" to true, "prefilled" to prefill.isNotEmpty()))
+    }
+
+    private fun closeServerPanel() {
+        beginServerTransition()
+        serverPanelOpen = false
+        serverCheck?.shutdown()
+        serverCheck = null
+        checkingServer = false
+        showAddressError(null)
+        hideKeyboard()
+        controller.pickingServer = false
+        render()
+    }
+
+    private fun beginServerTransition() {
+        if (!android.animation.ValueAnimator.areAnimatorsEnabled()) return
+        android.transition.TransitionManager.beginDelayedTransition(
+            findViewById(R.id.sign_in_column),
+            android.transition.AutoTransition().setDuration(180),
+        )
+    }
+
+    private fun submitAddress() {
+        if (checkingServer) return
+        val parsed = ServerAddress.parse(addressInput.text?.toString() ?: "", allowDevelopmentHttp = BuildConfig.DEBUG)
+        val ok = when (parsed) {
+            is ServerAddress.Result.Refused -> {
+                showAddressError(getString(when (parsed.reason) {
+                    ServerAddress.Reason.EMPTY -> R.string.self_hosted_error_empty
+                    ServerAddress.Reason.INVALID -> R.string.self_hosted_error_invalid
+                    ServerAddress.Reason.CREDENTIALS -> R.string.self_hosted_error_credentials
+                    ServerAddress.Reason.HTTP -> R.string.self_hosted_error_http
+                }))
+                diagnostics.log("server-address", mapOf("result" to parsed.reason.name))
+                return
+            }
+            is ServerAddress.Result.Ok -> parsed
+        }
+        if (Origins.same(ok.origin, config.cloudUrl.toString())) {
+            // OpenBot Cloud typed out: no check needed.
+            switchServer(null)
+            return
+        }
+        checkingServer = true
+        render()
+        val check = SignInFlow(diagnostics)
+        serverCheck = check
+        check.checkServer(ok.origin) { outcome, _ ->
+            if (serverCheck !== check) return@checkServer
+            checkingServer = false
+            if (outcome == ServerCheck.Outcome.OK) {
+                switchServer(ok.origin)
+                return@checkServer
+            }
+            showAddressError(getString(when (outcome) {
+                ServerCheck.Outcome.TOO_OLD -> R.string.self_hosted_error_too_old
+                ServerCheck.Outcome.NOT_FOUND -> R.string.self_hosted_error_not_found
+                ServerCheck.Outcome.CERTIFICATE -> R.string.self_hosted_error_certificate
+                else -> R.string.self_hosted_error_no_answer
+            }, ok.host))
+            render()
+        }
+    }
+
+    private fun showAddressError(message: String?) {
+        addressError.text = message ?: ""
+        addressError.isVisible = message != null
+        addressField.isErrorEnabled = false
+    }
+
+    /**
+     * Changes the app's OpenBot (null: OpenBot Cloud). The web view's site data and any sign-in
+     * attempt go first, awaited; then the activity restarts with the new own origin everywhere.
+     */
+    private fun switchServer(origin: String?) {
+        diagnostics.log("server-change", mapOf("to" to if (origin == null) "cloud" else "self-hosted"))
+        hideKeyboard()
+        controller.prepareServerChange()
+        web.clearAllData {
+            ServerChoice.save(this, origin)
+            CookieManager.getInstance().flush()
+            recreate()
+        }
+    }
+
+    private fun renderServerPicker(launching: Boolean, busy: Boolean) {
+        val idle = !launching && !busy
+        selfHostedPanel.isVisible = serverPanelOpen && !launching
+        selfHostedToggle.isVisible = idle && !serverPanelOpen
+        selfHostedToggle.text = getString(if (config.selfHosted) R.string.self_hosted_use_cloud else R.string.self_hosted_toggle)
+        serverHost.isVisible = config.selfHosted && !launching && !serverPanelOpen
+        serverHost.text = getString(R.string.self_hosted_signs_in_to, config.displayHost)
+        signInButton.isVisible = !launching && !(controller.pickingServer && serverPanelOpen)
+        addressContinue.isEnabled = !checkingServer
+        addressContinue.text = getString(if (checkingServer) R.string.self_hosted_checking else R.string.self_hosted_continue)
+        addressInput.isEnabled = !checkingServer
+        // With the keyboard up the field and its buttons come first: the mark and the line step aside.
+        val compact = serverPanelOpen && controller.keyboardVisible
+        findViewById<View>(R.id.sign_in_mark).isVisible = !compact
+        signInLine.isVisible = !launching && !compact
     }
 
     // Drawing the state. ----------------------------------------------------------------------------
@@ -258,6 +429,7 @@ class ShellActivity : AppCompatActivity() {
         signInProgress.isVisible = !launching && busy
         signInMessage.text = c.signInMessage ?: ""
         signInMessage.isVisible = c.signInMessage != null && !launching
+        renderServerPicker(launching, busy)
 
         web.webView.isVisible = c.webVisible
         webSignInBar.isVisible = c.showsWebSignInBar
@@ -268,6 +440,8 @@ class ShellActivity : AppCompatActivity() {
 
         if (c.showsLock && !lock.isVisible) hideKeyboard()
         lock.isVisible = c.showsLock
+        lockHost.text = getString(R.string.lock_reaching, config.displayHost)
+        lockChange.isVisible = config.selfHosted
         val hidden = if (c.showsLock) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         content.importantForAccessibility = hidden
         signInScreen.importantForAccessibility = hidden

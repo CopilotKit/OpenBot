@@ -134,8 +134,31 @@ class ShellController(
 
     /** The sign-in screen; while entering, the web area (and its skeleton) shows instead. */
     val showsSignInScreen: Boolean
-        get() = phase == Phase.LAUNCHING ||
+        get() = pickingServer || phase == Phase.LAUNCHING ||
             (phase == Phase.SIGNED_OUT && signIn != SignInStep.WEB_FALLBACK && signIn != SignInStep.ENTERING)
+
+    /**
+     * The lock screen's Change address: the first screen, with its address field, over everything
+     * until the person continues (the app restarts for the new server) or cancels.
+     */
+    var pickingServer = false
+        set(value) {
+            if (field == value) return
+            field = value
+            diagnostics.log("server-picker", mapOf("shown" to value))
+            changed()
+        }
+
+    /** Before the server changes: no sign-in attempt survives it. */
+    fun prepareServerChange() {
+        main.removeCallbacks(enterTimeout)
+        PendingSignIn.clear()
+        attempt = null
+        renewing = false
+        tabOpen = false
+        signIn = SignInStep.IDLE
+        web.stop()
+    }
 
     val showsSkeleton: Boolean get() = pageLoading && webVisible && !showsLock && !showsSignInScreen
 
@@ -150,7 +173,7 @@ class ShellController(
     val showsWebSignInBar: Boolean get() = phase == Phase.SIGNED_OUT && signIn == SignInStep.WEB_FALLBACK
 
     /** The lock screen covers everything: no network, or the web app did not load. */
-    val showsLock: Boolean get() = offline || loadFailed
+    val showsLock: Boolean get() = (offline || loadFailed) && !pickingServer
     val lockReason: String get() = if (offline) "no-network" else if (loadFailed) "load-failed" else "none"
 
     /** Whether the system bars and the bottom bar are drawn for a dark page; null: follow the system. */
@@ -384,7 +407,7 @@ class ShellController(
 
     private fun presentTab(pair: PkcePair, mode: HandoffMode, returnTo: String) {
         if (!renewing) signIn = SignInStep.CUSTOM_TAB
-        PendingSignIn.begin(pair, mode, returnTo)
+        PendingSignIn.begin(pair, mode, returnTo, config.origin)
         attempt = SignInAttempt(renewal = renewing)
         tabOpen = true
         callbackArrived = false
@@ -433,6 +456,12 @@ class ShellController(
         diagnostics.log("callback", mapOf("scheme" to uri?.scheme, "host" to uri?.host, "pending" to PendingSignIn.isWaiting(), "tabOpen" to tabOpen))
         if (pair == null || mode == null || !PendingSignIn.isWaiting()) {
             diagnostics.log("callback-ignored", mapOf("reason" to "no-pending-sign-in"))
+            return
+        }
+        if (PendingSignIn.origin != config.origin) {
+            // Started for another OpenBot (the server was changed since): never sent here.
+            diagnostics.log("callback-ignored", mapOf("reason" to "other-server"))
+            PendingSignIn.clear()
             return
         }
         val ticket = HandoffConfig.ticket(uri?.toString(), mode)

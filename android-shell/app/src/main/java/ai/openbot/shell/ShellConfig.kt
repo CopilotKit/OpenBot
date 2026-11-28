@@ -37,7 +37,18 @@ class ShellConfig(
     val diagnosticsEnabled: Boolean,
     val testName: String,
     val hooks: HookValues,
+    /** OpenBot Cloud's origin for this build (my.open.bot; a test's base URL extra). */
+    val cloudUrl: Uri = baseUrl,
 ) {
+    /** A self-hosted OpenBot the person chose (ServerChoice) is the app's own origin. */
+    val selfHosted: Boolean get() = origin != cloudUrl.toString().trimEnd('/')
+
+    /** The host as a person reads it, with a port that is not the default. */
+    val displayHost: String get() = ServerAddress.displayHost(origin)
+
+    /** The address as the field shows it again: the host for https, the whole origin otherwise. */
+    val addressForField: String get() = if (origin.startsWith("https://")) displayHost else origin
+
     val baseHost: String get() = baseUrl.host?.lowercase() ?: ""
     val baseScheme: String get() = baseUrl.scheme?.lowercase() ?: "https"
 
@@ -54,7 +65,7 @@ class ShellConfig(
     fun isOwnOrigin(url: String?): Boolean = Origins.same(url, origin)
 
     companion object {
-        fun from(intent: Intent?): ShellConfig {
+        fun from(context: android.content.Context, intent: Intent?): ShellConfig {
             var baseOverride: String? = null
             var diagnostics = false
             var testName = ""
@@ -64,13 +75,18 @@ class ShellConfig(
                 diagnostics = overrides.diagnostics
                 testName = overrides.testName
             }
+            val hooks = DebugHooks.read(intent)
+            if (hooks.reset) ServerChoice.clear(context)
+            val cloud = resolveBase(baseOverride)
+            val chosen = if (hooks.plainWebView) null else ServerChoice.saved(context)
             return ShellConfig(
-                baseUrl = resolveBase(baseOverride),
+                baseUrl = chosen?.let { Uri.parse(it) } ?: cloud,
                 startUrl = baseOverride,
                 version = BuildConfig.VERSION_NAME,
                 diagnosticsEnabled = diagnostics,
                 testName = testName,
-                hooks = DebugHooks.read(intent),
+                hooks = hooks,
+                cloudUrl = cloud,
             )
         }
 

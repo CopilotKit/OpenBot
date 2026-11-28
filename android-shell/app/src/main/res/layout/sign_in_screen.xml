@@ -1,91 +1,205 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The first screen: native, drawn without the network. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- The first screen: native, drawn without the network. Sign in is the one big action; a quiet
+     line under it opens the field for a self-hosted OpenBot in place. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="?android:attr/colorBackground"
     android:clickable="true"
-    android:focusable="true"
-    android:gravity="center_horizontal"
-    android:orientation="vertical">
+    android:fillViewport="true"
+    android:focusable="true">
 
-    <Space
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
-
-    <ImageView
-        android:id="@+id/sign_in_mark"
-        android:layout_width="72dp"
-        android:layout_height="72dp"
-        android:layout_marginBottom="20dp"
-        android:importantForAccessibility="no"
-        android:src="@drawable/openbot_mark" />
-
-    <TextView
-        android:id="@+id/sign_in_title"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:accessibilityHeading="true"
-        android:text="@string/sign_in_title"
-        android:textAppearance="?attr/textAppearanceDisplaySmall"
-        android:textColor="@color/ink"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/sign_in_line"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="32dp"
-        android:layout_marginTop="12dp"
-        android:gravity="center"
-        android:maxWidth="420dp"
-        android:text="@string/sign_in_line"
-        android:textAppearance="?attr/textAppearanceBodyLarge"
-        android:textColor="@color/ink_secondary" />
-
-    <Space
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
-
-    <TextView
-        android:id="@+id/sign_in_message"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="24dp"
-        android:layout_marginBottom="12dp"
-        android:gravity="center"
-        android:textAppearance="?attr/textAppearanceBodySmall"
-        android:textColor="@color/ink_secondary"
-        android:visibility="gone" />
-
-    <FrameLayout
+    <LinearLayout
+        android:id="@+id/sign_in_column"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginHorizontal="24dp"
-        android:layout_marginBottom="24dp">
+        android:animateLayoutChanges="false"
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/sign_in_button"
+        <Space
+            android:id="@+id/sign_in_top_space"
             android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:text="@string/sign_in"
-            android:textAppearance="?attr/textAppearanceTitleMedium"
-            app:cornerRadius="14dp"
-            xmlns:app="http://schemas.android.com/apk/res-auto" />
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:minHeight="24dp" />
 
-        <com.google.android.material.progressindicator.CircularProgressIndicator
-            android:id="@+id/sign_in_progress"
+        <ImageView
+            android:id="@+id/sign_in_mark"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:layout_marginBottom="20dp"
+            android:importantForAccessibility="no"
+            android:src="@drawable/openbot_mark" />
+
+        <TextView
+            android:id="@+id/sign_in_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:indeterminate="true"
-            android:visibility="gone"
-            app:indicatorColor="@color/paper"
-            app:indicatorSize="24dp"
-            xmlns:app="http://schemas.android.com/apk/res-auto" />
-    </FrameLayout>
-</LinearLayout>
+            android:accessibilityHeading="true"
+            android:text="@string/sign_in_title"
+            android:textAppearance="?attr/textAppearanceDisplaySmall"
+            android:textColor="@color/ink"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/sign_in_line"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="32dp"
+            android:layout_marginTop="12dp"
+            android:gravity="center"
+            android:maxWidth="420dp"
+            android:text="@string/sign_in_line"
+            android:textAppearance="?attr/textAppearanceBodyLarge"
+            android:textColor="@color/ink_secondary" />
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:minHeight="24dp" />
+
+        <TextView
+            android:id="@+id/sign_in_message"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="24dp"
+            android:layout_marginBottom="12dp"
+            android:gravity="center"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="@color/ink_secondary"
+            android:visibility="gone" />
+
+        <FrameLayout
+            android:id="@+id/sign_in_button_box"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="24dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/sign_in_button"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="@string/sign_in"
+                android:textAppearance="?attr/textAppearanceTitleMedium"
+                app:cornerRadius="14dp" />
+
+            <com.google.android.material.progressindicator.CircularProgressIndicator
+                android:id="@+id/sign_in_progress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:indeterminate="true"
+                android:visibility="gone"
+                app:indicatorColor="@color/paper"
+                app:indicatorSize="24dp" />
+        </FrameLayout>
+
+        <!-- Which OpenBot Sign in uses, once a self-hosted one is chosen. -->
+        <TextView
+            android:id="@+id/server_host"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="24dp"
+            android:layout_marginTop="12dp"
+            android:gravity="center"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textColor="@color/ink_secondary"
+            android:visibility="gone" />
+
+        <!-- The quiet way to a self-hosted OpenBot (or back to OpenBot Cloud). -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/self_hosted_toggle"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="@string/self_hosted_toggle"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textColor="@color/ink_secondary" />
+
+        <LinearLayout
+            android:id="@+id/self_hosted_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="24dp"
+            android:layout_marginTop="4dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/self_hosted_field"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="@string/self_hosted_label"
+                app:placeholderText="@string/self_hosted_hint"
+                app:boxCornerRadiusBottomEnd="14dp"
+                app:boxCornerRadiusBottomStart="14dp"
+                app:boxCornerRadiusTopEnd="14dp"
+                app:boxCornerRadiusTopStart="14dp">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/self_hosted_address"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:autofillHints="url"
+                    android:imeOptions="actionGo|flagNoExtractUi"
+                    android:importantForAutofill="no"
+                    android:inputType="textUri|textNoSuggestions"
+                    android:maxLines="1"
+                    android:singleLine="true" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <TextView
+                android:id="@+id/self_hosted_error"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:accessibilityLiveRegion="polite"
+                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:textColor="?attr/colorError"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/self_hosted_cancel"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/self_hosted_cancel"
+                    android:textColor="@color/ink_secondary" />
+
+                <Space
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/self_hosted_continue"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/self_hosted_continue"
+                    app:cornerRadius="12dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="24dp" />
+    </LinearLayout>
+</ScrollView>

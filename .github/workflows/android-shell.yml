@@ -189,27 +189,36 @@ jobs:
           echo $! > /tmp/emulator-boot.pid
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: matrix.shard == 'mock'
         with:
           bun-version: 1.4.3
 
       - name: Build the web app and start the mock stacks
-        if: matrix.shard == 'mock'
         timeout-minutes: 4
+        env:
+          SHARD: ${{ matrix.shard }}
         run: |
           bun install --frozen-lockfile
           cp .env.example .env
           (cd app && bun run build)
-          # A: signed out unless the mock's cookie is sent, with the sign-in hand-off.
+          # A: signed out unless the mock's cookie is sent, with the sign-in hand-off ("OpenBot
+          # Cloud" in the tests).
           MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-a.log" 2>&1 &
           APP_PORT=3010 SERVER_PORT=3001 nohup bun app/serve.ts > "$ARTIFACTS/app-a.log" 2>&1 &
-          # B: the same without the hand-off.
-          MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3002 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-b.log" 2>&1 &
-          APP_PORT=3011 SERVER_PORT=3002 nohup bun app/serve.ts > "$ARTIFACTS/app-b.log" 2>&1 &
+          if [ "$SHARD" = mock ]; then
+            # B: the same without the hand-off.
+            MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3002 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-b.log" 2>&1 &
+            APP_PORT=3011 SERVER_PORT=3002 nohup bun app/serve.ts > "$ARTIFACTS/app-b.log" 2>&1 &
+            second="http://127.0.0.1:3011/api/auth/shell/config?platform=android"; want=404
+          else
+            # C: a self-hosted OpenBot on another origin, with the hand-off.
+            MOCK_SIGNED_OUT=1 SERVER_PORT=3003 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-c.log" 2>&1 &
+            APP_PORT=3013 SERVER_PORT=3003 nohup bun app/serve.ts > "$ARTIFACTS/app-c.log" 2>&1 &
+            second="http://127.0.0.1:3013/api/auth/shell/config?platform=android"; want=200
+          fi
           for _ in $(seq 1 60); do
             a="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3010/ || true)"
-            b="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3011/api/auth/shell/config?platform=android" || true)"
-            if [ "$a" = 200 ] && [ "$b" = 404 ]; then echo "mock stacks are up"; exit 0; fi
+            b="$(curl -s -o /dev/null -w '%{http_code}' "$second" || true)"
+            if [ "$a" = 200 ] && [ "$b" = "$want" ]; then echo "mock stacks are up"; exit 0; fi
             sleep 1
           done
           echo "mock stacks did not start"; tail -n 40 "$ARTIFACTS"/mock-*.log "$ARTIFACTS"/app-*.log; exit 1

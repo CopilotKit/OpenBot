@@ -38,12 +38,17 @@ object PendingSignIn {
         private set
     var returnTo: String = "/"
         private set
+
+    /** The origin whose sign-in started this attempt: its ticket goes there and nowhere else. */
+    var origin: String? = null
+        private set
     private var startedAt = 0L
 
-    fun begin(pair: PkcePair, mode: HandoffMode, returnTo: String) {
+    fun begin(pair: PkcePair, mode: HandoffMode, returnTo: String, origin: String) {
         this.pair = pair
         this.mode = mode
         this.returnTo = returnTo
+        this.origin = origin
         startedAt = System.currentTimeMillis()
     }
 
@@ -53,6 +58,7 @@ object PendingSignIn {
         pair = null
         mode = null
         returnTo = "/"
+        origin = null
         startedAt = 0L
     }
 }

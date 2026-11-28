@@ -345,7 +345,7 @@ class ShellFlowTest : ShellTestBase() {
         sleep(3_000)
         check(device.findObject(By.text(notFinished())) == null, "a callback with no pending sign-in was taken")
         // With an https sign-in pending, it is the callback.
-        PendingSignIn.begin(PkcePair.make(), HandoffMode.Https("my.open.bot", "/api/auth/shell/callback"), "/")
+        PendingSignIn.begin(PkcePair.make(), HandoffMode.Https("my.open.bot", "/api/auth/shell/callback"), "/", MOCK_A)
         instrumentation.targetContext.startActivity(Intent(intent))
         val refused = device.wait(Until.findObject(By.text(notFinished())), 30_000)
         check(refused != null, "the intent was not taken as the callback; ${debugState()}")

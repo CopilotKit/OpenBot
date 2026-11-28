@@ -69,6 +69,10 @@ PROBE = [
     "ProbeTest#testBlankWindowOpenKeepsThePage",
     "ProbeTest#testEnterRequestHeaders",
     "ProbeTest#testBackWithoutCanGoBackUsesHistory",
+    "SelfHostedTest#testFieldOnlyWhenAsked",
+    "SelfHostedTest#testRefusedAddressesStayOnCloud",
+    "SelfHostedTest#testSelfHostedSignInAndBackToCloud",
+    "SelfHostedTest#testLockNamesTheServer",
 ]
 SUITE2 = [
     "ShellFlowTest#testFirstScreenIsNative",

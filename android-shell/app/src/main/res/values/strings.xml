@@ -10,6 +10,25 @@
     <string name="sign_in_too_long">Sign-in took too long. Try again.</string>
     <string name="sign_in_no_browser">No browser to sign in with. Try again.</string>
 
+    <string name="self_hosted_toggle">Or sign in to a self-hosted OpenBot</string>
+    <string name="self_hosted_label">Your OpenBot\'s address</string>
+    <string name="self_hosted_hint" translatable="false">openbot.example.com</string>
+    <string name="self_hosted_continue">Continue</string>
+    <string name="self_hosted_checking">Checking</string>
+    <string name="self_hosted_cancel">Cancel</string>
+    <string name="self_hosted_signs_in_to">Signs in to %1$s</string>
+    <string name="self_hosted_use_cloud">Use OpenBot Cloud</string>
+    <string name="self_hosted_change">Change address</string>
+    <string name="lock_reaching">Trying to reach %1$s</string>
+    <string name="self_hosted_error_empty">Enter your OpenBot\'s address, like openbot.example.com.</string>
+    <string name="self_hosted_error_invalid">That doesn\'t look like an address. Enter one like openbot.example.com.</string>
+    <string name="self_hosted_error_credentials">Leave the user name and password out of the address.</string>
+    <string name="self_hosted_error_http">The app connects only over https. Use an address that starts with https:// or has no prefix.</string>
+    <string name="self_hosted_error_too_old">%1$s isn\'t an OpenBot the phone app can use yet. Ask your admin to update it.</string>
+    <string name="self_hosted_error_not_found">Couldn\'t find %1$s. Check the address.</string>
+    <string name="self_hosted_error_certificate">%1$s\'s certificate isn\'t trusted, so the app won\'t connect. Ask your admin to check it.</string>
+    <string name="self_hosted_error_no_answer">%1$s didn\'t answer. Check the address and your connection, then try again.</string>
+
     <string name="tab_conversations">Chats</string>
     <string name="tab_home">Home</string>
     <string name="tab_bots">Bots</string>

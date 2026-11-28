@@ -65,13 +65,13 @@ class SignInFlow(private val diagnostics: Diagnostics) {
         }
     }
 
-    private fun get(url: String, readBody: Boolean): Pair<Int, String?> {
+    private fun get(url: String, readBody: Boolean, timeoutMs: Long = TIMEOUT_MS): Pair<Int, String?> {
         val connection = URL(url).openConnection() as HttpURLConnection
         try {
             connection.instanceFollowRedirects = false
             connection.useCaches = false
-            connection.connectTimeout = TIMEOUT_MS.toInt()
-            connection.readTimeout = TIMEOUT_MS.toInt()
+            connection.connectTimeout = timeoutMs.toInt()
+            connection.readTimeout = timeoutMs.toInt()
             connection.setRequestProperty("Accept", "application/json")
             val status = connection.responseCode
             var body: String? = null
@@ -85,6 +85,28 @@ class SignInFlow(private val diagnostics: Diagnostics) {
         }
     }
 
+    /** Checks a self-hosted address (ServerCheck): 10 s, no cookies, no redirect followed. */
+    fun checkServer(origin: String, done: (ServerCheck.Outcome, String) -> Unit) {
+        var answered = false
+        fun finish(outcome: ServerCheck.Outcome, detail: String) {
+            main.post {
+                if (answered) return@post
+                answered = true
+                diagnostics.log("server-check", mapOf("outcome" to outcome.name, "detail" to detail))
+                done(outcome, detail)
+            }
+        }
+        main.postDelayed({ finish(ServerCheck.Outcome.NO_ANSWER, "timeout") }, CHECK_TIMEOUT_MS + 2_000)
+        executor.execute {
+            try {
+                val (status, body) = get("$origin/api/auth/shell/config?platform=android", readBody = true, timeoutMs = CHECK_TIMEOUT_MS)
+                finish(ServerCheck.fromAnswer(status, body), "status $status")
+            } catch (error: Exception) {
+                finish(ServerCheck.fromFailure(ServerCheck.failureOf(error)), error.javaClass.simpleName)
+            }
+        }
+    }
+
     fun shutdown() {
         executor.shutdownNow()
         main.removeCallbacksAndMessages(null)
@@ -92,6 +114,7 @@ class SignInFlow(private val diagnostics: Diagnostics) {
 
     companion object {
         const val TIMEOUT_MS = 15_000L
+        const val CHECK_TIMEOUT_MS = 10_000L
     }
 }
 
