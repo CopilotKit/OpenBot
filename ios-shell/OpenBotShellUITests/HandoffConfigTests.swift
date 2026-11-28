@@ -60,6 +60,10 @@ final class HandoffConfigTests: XCTestCase {
         XCTAssertNil(HandoffConfig.ticket(from: URL(string: "openbotshell://signed-in"), mode: .scheme))
         let https = HandoffMode.https(host: "my.open.bot", path: "/api/auth/shell/callback")
         XCTAssertEqual(HandoffConfig.ticket(from: URL(string: "https://my.open.bot/api/auth/shell/callback?ticket=T1"), mode: https), "T1")
+        // The server adds `platform`; only `ticket` is read, wherever it sits in the query.
+        XCTAssertEqual(HandoffConfig.ticket(from: URL(string: "https://my.open.bot/api/auth/shell/callback?ticket=T1&platform=ios"), mode: https), "T1")
+        XCTAssertEqual(HandoffConfig.ticket(from: URL(string: "https://my.open.bot/api/auth/shell/callback?platform=ios&ticket=T2"), mode: https), "T2")
+        XCTAssertNil(HandoffConfig.ticket(from: URL(string: "https://my.open.bot/api/auth/shell/callback?platform=ios"), mode: https))
         XCTAssertNil(HandoffConfig.ticket(from: URL(string: "https://evil.example/api/auth/shell/callback?ticket=T1"), mode: https))
         XCTAssertNil(HandoffConfig.ticket(from: URL(string: "openbotshell://signed-in?ticket=T1"), mode: https))
     }
