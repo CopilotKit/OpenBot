@@ -19,9 +19,11 @@ final class SelfHostedUITests: ShellTestCase {
 
     private func submit(_ app: XCUIApplication, _ text: String) {
         let box = field(app)
-        box.tap()
+        // The caret at the end of what is there (a tap in the middle would leave the tail), then
+        // all of it deleted.
+        box.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
         if let value = box.value as? String, !value.isEmpty, value != "openbot.example.com" {
-            box.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count))
+            box.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count + 2))
         }
         box.typeText(text)
         app.buttons["server-address-continue"].tap()
