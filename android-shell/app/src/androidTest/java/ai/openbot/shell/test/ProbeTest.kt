@@ -33,9 +33,7 @@ class ProbeTest : ShellTestBase() {
         sleep(800)
         screenshot("probe-site-scrolled")
 
-        val button = waitWebObject("Open popup", 10_000)
-        if (!check(button != null, "no Open popup button")) return
-        button!!.click()
+        if (!check(tapWeb("Open popup", cssSelector = "#open-popup"), "no visible Open popup button")) return
         val popupShown = waitPageText("popup page loaded", 20_000)
         screenshot("probe-popup")
         check(popupShown, "window.open did not load the popup page in the same web view")

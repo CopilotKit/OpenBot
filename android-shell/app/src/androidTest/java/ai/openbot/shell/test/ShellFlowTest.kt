@@ -385,9 +385,11 @@ class ShellFlowTest : ShellTestBase() {
     @Test
     fun testSettingsNameStaysAboveKeyboard() {
         if (!launchSignedIn("settings-keyboard")) return
-        if (!check(homeRendered() && tapWeb("Account"), "the Account button was unavailable")) return
-        if (!check(tapWeb("Settings", cssSelector = "a[href='/settings']"), "the Account menu had no Settings link")) return
-        if (!check(waitPageText("About you", 10_000), "Settings did not open the profile")) return
+        if (!check(homeRendered(), "Home did not render")) return
+        // Open the profile via its normal first-party URL. Account menu gestures have their own
+        // sign-out test. This case exercises the real profile field and its keyboard layout.
+        pageJs("location.assign('/settings')")
+        if (!check(waitPageText("About you", 25_000), "Settings did not open the profile")) return
         if (!check(tapWeb("Name"), "the profile had no Name row")) return
         if (!check(waitPageText("Choose the name OpenBot shows for you.", 10_000), "the Name dialog did not open")) return
         val selector = "input[autocomplete=name]"

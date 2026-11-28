@@ -40,8 +40,23 @@ class DemoTourTest : ShellTestBase() {
         if (!check(typeInFocusedEditor(prompt), "demo: the editor did not accept the full prompt with Gboard open")) return
         screenshot("home-keyboard-typed")
         pause(1_200)
-        if (!check(tapWeb("Send message"), "demo: Send is not reachable")) return
-        if (!check(waitPageText("All three competitors now charge per seat.", 20_000), "demo: no reply")) return
+        val sendSelector = "button[data-slot=composer-send]:enabled"
+        // Capture the browser's hit target so a missed touch can be distinguished from a missing
+        // mock reply. The flags contain no page text, and the tour runs only on the workbench.
+        pageJs("""
+            window.__tourSendEvents = {};
+            for (const name of ['pointerdown', 'pointerup', 'click', 'submit']) {
+              document.addEventListener(name, e => {
+                window.__tourSendEvents[name] = name === 'submit' || Boolean(e.target.closest('[data-slot=composer-send]'));
+              }, {once: true, capture: true});
+            }
+        """.trimIndent())
+        if (!check(tapWeb("Send message", cssSelector = sendSelector), "demo: no visible enabled Send button")) return
+        if (!waitPageText("All three competitors now charge per seat.", 20_000)) {
+            note("Send events: ${pageString("JSON.stringify(window.__tourSendEvents || {})")}")
+            check(false, "demo: no reply")
+            return
+        }
         screenshot("conversation-reply")
         pause(1_200)
         dismissKeyboardIfUp()
