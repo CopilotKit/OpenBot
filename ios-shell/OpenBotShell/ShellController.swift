@@ -132,24 +132,15 @@ final class ShellController: NSObject, WebControllerDelegate {
         run(0)
     }
 
-    /// Signed in when the session cookie is in the store. WebKit can answer "no cookies" at a cold
-    /// launch before it has read its saved cookies (seen in CI): a "no" is asked again after the web
-    /// view has loaded about:blank, which needs no network.
+    /// Start WebKit locally before asking for its saved cookies. On a cold launch a read made
+    /// before the web process is ready can time out, delaying the sign-in screen by five seconds.
     private func decideLaunchState() {
-        SessionCookies.present(in: cookieStore, host: config.baseHost) { [weak self] present, timedOut in
-            guard let self = self else { return }
-            self.diagnostics.log("session-cookie", ["present": present, "timedOut": timedOut, "attempt": 1])
-            if present {
-                self.launchSignedIn()
-                return
-            }
-            self.web.loadBlank { [weak self] in
-                guard let self = self else { return }
-                SessionCookies.present(in: self.cookieStore, host: self.config.baseHost) { [weak self] present, timedOut in
-                    guard let self = self else { return }
-                    self.diagnostics.log("session-cookie", ["present": present, "timedOut": timedOut, "attempt": 2])
-                    if present { self.launchSignedIn() } else { self.model.phase = .signedOut }
-                }
+        web.loadBlank { [weak self] in
+            guard let self else { return }
+            SessionCookies.present(in: self.cookieStore, host: self.config.baseHost) { [weak self] present, timedOut in
+                guard let self else { return }
+                self.diagnostics.log("session-cookie", ["present": present, "timedOut": timedOut])
+                if present { self.launchSignedIn() } else { self.model.phase = .signedOut }
             }
         }
     }
