@@ -24,24 +24,32 @@ import { NativeSignedOut } from "@/components/auth/native-signed-out";
 import { ShellAccountMenu } from "@/components/layout/native-shell-account";
 import { PageShell } from "@/components/layout/page-shell";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
+import {
+  NOTIFY_PROMPT_KEY,
+  NotifyPrompt,
+} from "@/components/notifications/notify-prompt";
 import { useDesktopOpenRequests } from "@/lib/desktop/open-requests";
 import {
   forgetReadyForTests,
   useNativeShellRouteReports,
 } from "@/lib/native-shell/route-reports";
 import { forgetNativeShellForTests } from "@/lib/native-shell/shell";
-import { notificationPermission } from "@/lib/notifications/permission";
+import {
+  notificationPermission,
+  refreshNotificationPermission,
+} from "@/lib/notifications/permission";
 import { webPushSupport } from "@/lib/web-push/browser";
+import { queryClient } from "@/query-client";
 import { Route as AppRoute } from "@/routes/_authed/_app";
 import { Route as ConversationsRoute } from "@/routes/_authed/_app/conversations";
 import { signsInNatively } from "@/routes/sign";
+import { ME_PATH, meBody } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import {
   CONVERSATIONS_PATH,
   conversationPage,
   TASKS_PATH,
 } from "./conversations-api";
-import { ME_PATH, meBody } from "./accounts-api";
-import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -445,5 +453,54 @@ describe("what makes no sense in the shell", () => {
     inShell(true);
     expect(webPushSupport()).toBe("unsupported");
     expect(notificationPermission()).toBe("unsupported");
+  });
+
+  /*
+   * A browser with push, as Chrome is: a service worker, the Push API and notifications not yet
+   * asked. The conversation's offer shows there, so the shell's half proves something.
+   */
+  function pushAvailable() {
+    const page = window as unknown as Record<string, unknown>;
+    page.PushManager = class {};
+    page.Notification = { permission: "default" };
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: { getRegistration: async () => undefined },
+    });
+    return () => {
+      delete page.PushManager;
+      delete page.Notification;
+      delete (navigator as unknown as Record<string, unknown>).serviceWorker;
+    };
+  }
+
+  test("a conversation offers notifications in a browser with push, and never in the shell", async () => {
+    const restore = pushAvailable();
+    try {
+      localStorage.removeItem(NOTIFY_PROMPT_KEY);
+      for (const shell of [false, true]) {
+        inShell(shell);
+        refreshNotificationPermission();
+        const view = render(
+          <QueryClientProvider client={queryClient}>
+            <NotifyPrompt />
+          </QueryClientProvider>,
+        );
+        if (shell) {
+          await settleReactWork();
+          expect(view.queryByText("Enable notifications")).toBeNull();
+          expect(
+            view.container.querySelector("[data-notify-prompt]"),
+          ).toBeNull();
+        } else {
+          expect(await view.findByText("Enable notifications")).toBeTruthy();
+        }
+        cleanup();
+        queryClient.clear();
+      }
+    } finally {
+      restore();
+      refreshNotificationPermission();
+    }
   });
 });

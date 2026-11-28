@@ -24,6 +24,7 @@ import {
   removePushDeviceMutationOptions,
 } from "@/lib/delivery";
 import { failureSaid, isHeld } from "@/lib/load-failure";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { queryClient } from "@/query-client";
 
 /**
@@ -92,7 +93,10 @@ export function deliveryLine(
     .join(" · ");
 }
 
-/** The phones that receive push notifications for every one of the person's Bots. */
+/**
+ * The phones that receive push notifications for every one of the person's Bots. Inside the phone
+ * app, which is one of them, no sentence telling the person to go and sign in to it.
+ */
 export function NativeDevices() {
   const devices = useQuery(devicesQueryOptions());
   const remove = useMutation(removePushDeviceMutationOptions(queryClient));
@@ -100,7 +104,11 @@ export function NativeDevices() {
   const error = (saidAbove ? null : devices.error) ?? remove.error;
   return (
     <PageSection
-      description="Sign in to the OpenBot app on your phone and turn on notifications to add it here."
+      description={
+        nativeShell()
+          ? undefined
+          : "Sign in to the OpenBot app on your phone and turn on notifications to add it here."
+      }
       title="Your devices"
     >
       {error ? (
