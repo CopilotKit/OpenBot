@@ -87,6 +87,8 @@ final class AppModel: ObservableObject {
     /// How the last tab tap reached the page: "event" (openbot:open) or "load".
     @Published var lastNavigation = "none"
     @Published var mainFrameCommits = 0
+    /// The first segment of the page's path ("/", "/channel", "/sign"), for tests.
+    @Published var webPathRoot = "-"
 
     var showsSignInScreen: Bool {
         phase == .launching || (phase == .signedOut && signIn != .webFallback)
@@ -121,6 +123,6 @@ final class AppModel: ObservableObject {
 
     /// For UI tests (DEBUG only on screen).
     var debugState: String {
-        "phase=\(phase.rawValue) signIn=\(signIn.rawValue) tab=\(selectedTab.rawValue) nav=\(lastNavigation) commits=\(mainFrameCommits) lock=\(lockReason) keyboard=\(keyboardVisible ? 1 : 0) dark=\(pageIsDark.map { $0 ? "1" : "0" } ?? "-")"
+        "phase=\(phase.rawValue) signIn=\(signIn.rawValue) tab=\(selectedTab.rawValue) nav=\(lastNavigation) commits=\(mainFrameCommits) lock=\(lockReason) keyboard=\(keyboardVisible ? 1 : 0) path=\(webPathRoot) dark=\(pageIsDark.map { $0 ? "1" : "0" } ?? "-")"
     }
 }

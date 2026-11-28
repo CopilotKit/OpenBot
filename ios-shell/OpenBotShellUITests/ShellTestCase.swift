@@ -5,12 +5,10 @@ import XCTest
 /// Servers the tests expect on the Mac that runs the simulator (the CI workflow starts them):
 /// - the probe site (ios-shell/Probe/serve.py) on 8765/8766;
 /// - mock stack A: the built web app on 3010 over app/workbench/mock-server.ts on 3001, signed out
-///   unless the mock's session cookie is sent, with the sign-in hand-off, reached over https at
-///   shell-test.openbot.test (ci/tls-proxy.ts, a CA the simulator trusts), where the mock answers
-///   with production's Secure cookie;
+///   unless the mock's session cookie is sent, with the sign-in hand-off;
 /// - mock stack B: the same on 3011 over 3002, without the hand-off (both /api/auth/shell/* 404).
 class ShellTestCase: XCTestCase {
-    static let mockA = "https://shell-test.openbot.test"
+    static let mockA = "http://127.0.0.1:3010"
     static let mockB = "http://127.0.0.1:3011"
     static let probe = "http://127.0.0.1:8765/"
     static let production = "https://my.open.bot"

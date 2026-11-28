@@ -24,6 +24,8 @@ final class DemoTourUITests: ShellTestCase {
     }
 
     func testDemoTour() throws {
+        note("video-mark start \(Date().timeIntervalSince1970)")
+        defer { note("video-mark end \(Date().timeIntervalSince1970)") }
         var app = launch(base: ShellTestCase.mockA, moment: "tour")
         let signIn = app.buttons["sign-in-button"]
         XCTAssertTrue(signIn.waitForExistence(timeout: 20))

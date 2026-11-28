@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import sys
 
-PRIVATE_TESTS = ("testProductionSignedIn", "testProductionGoogleSignIn", "testProductionGoogleSignInInWebView")
+PRIVATE_TESTS = ("testRealGoogleSignInInWebViewAndJourney", "testRealGoogleSignInInSystemSheet", "testRealSignedInJourneyWithSessionCookie")
 NAMED = re.compile(r"^(test[A-Za-z0-9_]+)--(.+)\.(png|jpe?g|heic|txt)$")
 
 artifacts = os.path.abspath(sys.argv[1])

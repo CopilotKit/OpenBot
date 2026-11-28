@@ -133,44 +133,6 @@ jobs:
           xcrun simctl boot "$udid" || true
           xcrun simctl bootstatus "$udid" -b
 
-      - name: Put https in front of mock stack A
-        run: |
-          # A throwaway CA and a certificate for a production-like name, trusted by the simulator, so
-          # the app meets App Transport Security with no exception, Secure cookies and wss.
-          mkdir -p "$RUNNER_TEMP/tls"
-          cd "$RUNNER_TEMP/tls"
-          openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 30 \
-            -keyout ca.key -out ca.pem -subj "/CN=OpenBot shell CI throwaway CA" \
-            -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign"
-          openssl req -newkey rsa:2048 -nodes -sha256 -keyout leaf.key -out leaf.csr -subj "/CN=shell-test.openbot.test"
-          printf '%s\n' "basicConstraints=CA:FALSE" "keyUsage=critical,digitalSignature,keyEncipherment" \
-            "extendedKeyUsage=serverAuth" "subjectAltName=DNS:shell-test.openbot.test" > leaf.ext
-          openssl x509 -req -in leaf.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 300 -sha256 -extfile leaf.ext -out leaf.pem
-          openssl x509 -in leaf.pem -noout -subject -issuer -dates -ext subjectAltName
-          echo "127.0.0.1 shell-test.openbot.test" | sudo tee -a /etc/hosts
-          sudo dscacheutil -flushcache || true
-          xcrun simctl keychain "$SIM_UDID" add-root-cert ca.pem
-          cd "$GITHUB_WORKSPACE"
-          # 443, as production; then 8444, which starts only when a Release test writes its trigger.
-          sudo nohup bun ios-shell/ci/tls-proxy.ts 443 http://127.0.0.1:3010 "$RUNNER_TEMP/tls/leaf.pem" "$RUNNER_TEMP/tls/leaf.key" > artifacts/tls-proxy.log 2>&1 &
-          trigger="$RUNNER_TEMP/openbot-shell-late-https"
-          echo "LATE_HTTPS_TRIGGER=$trigger" >> "$GITHUB_ENV"
-          nohup bash -c 'while [ ! -f "$1" ]; do sleep 1; done; sleep 8; echo "starting the late https front"; exec bun ios-shell/ci/tls-proxy.ts 8444 http://127.0.0.1:3010 "$2" "$3"' \
-            late-https "$trigger" "$RUNNER_TEMP/tls/leaf.pem" "$RUNNER_TEMP/tls/leaf.key" > artifacts/tls-proxy-late.log 2>&1 &
-          challenge="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-          for _ in $(seq 1 30); do
-            page="$(curl -s --cacert "$RUNNER_TEMP/tls/ca.pem" -o /dev/null -w '%{http_code}' https://shell-test.openbot.test/ || true)"
-            handoff="$(curl -s --cacert "$RUNNER_TEMP/tls/ca.pem" -o /dev/null -w '%{http_code}' "https://shell-test.openbot.test/api/auth/shell/handoff?challenge=$challenge" || true)"
-            if [ "$page" = 200 ] && [ "$handoff" = 200 ]; then
-              echo "https front is up"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "https front did not answer: page $page, hand-off $handoff"
-          cat artifacts/tls-proxy.log
-          exit 1
-
       - name: Build for testing (Debug)
         id: build
         timeout-minutes: 20
@@ -238,7 +200,7 @@ jobs:
             -resultBundlePath TestResults.xcresult \
             -parallel-testing-enabled NO \
             -skip-testing:OpenBotShellUITests/DemoTourUITests \
-            -skip-testing:OpenBotShellUITests/ReleaseUITests \
+            -skip-testing:OpenBotShellUITests/RealBackendUITests \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee xcodebuild.log
 
@@ -247,6 +209,7 @@ jobs:
         timeout-minutes: 12
         run: |
           mkdir -p artifacts/video
+          recording_started="$(python3 -c 'import time; print(time.time())')"
           xcrun simctl io "$SIM_UDID" recordVideo --codec h264 --force artifacts/video/demo-tour.mp4 > artifacts/video-record.log 2>&1 &
           recorder=$!
           sleep 3
@@ -266,15 +229,7 @@ jobs:
           # SIGINT and wait, so the recorder writes a playable file.
           kill -INT "$recorder"
           wait "$recorder"
-          size=$(stat -f %z artifacts/video/demo-tour.mp4 2>/dev/null || echo 0)
-          if [ "$size" -gt 41943040 ]; then
-            if command -v ffmpeg > /dev/null; then
-              ffmpeg -loglevel error -y -i artifacts/video/demo-tour.mp4 -vf scale=720:-2 -c:v libx264 -crf 28 artifacts/video/small.mp4
-            else
-              avconvert --preset PresetHEVC1920x1080 --source artifacts/video/demo-tour.mp4 --output artifacts/video/small.mp4 --replace || true
-            fi
-            if [ -s artifacts/video/small.mp4 ]; then mv artifacts/video/small.mp4 artifacts/video/demo-tour.mp4; fi
-          fi
+          python3 ios-shell/ci/trim_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log "$recording_started" || true
           ls -la artifacts/video
           exit $status
 
@@ -290,21 +245,39 @@ jobs:
             fi
           fi
 
-      - name: Run the UI tests (Release, a fresh install per test)
+      - name: Run the real-backend suite on the Release build (a fresh install per test)
         if: always() && steps.build-release.outcome == 'success'
-        timeout-minutes: 25
+        timeout-minutes: 30
+        env:
+          TEST_RUNNER_OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}
+          TEST_RUNNER_OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
+          TEST_RUNNER_OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
         run: |
-          export TEST_RUNNER_OPENBOT_SHELL_LATE_HTTPS_TRIGGER="$LATE_HTTPS_TRIGGER"
           status=0
           : > xcodebuild-release.log
-          for test in testReleaseFirstScreenIsNative testReleaseJourney testReleaseLockLiftsWhenServerComesBack testReleaseProductionWebFallback; do
+          mkdir -p private-artifacts/video
+          for test in testRealFirstScreenAndWebSignIn testRealLockScreenWhenBackendUnreachable testRealGoogleSignInInWebViewAndJourney; do
             xcrun simctl uninstall "$SIM_UDID" ai.openbot.shell || true
+            recorder=""
+            if [ "$test" = testRealGoogleSignInInWebViewAndJourney ]; then
+              # A real account: this recording goes only to the private artifact.
+              recording_started="$(python3 -c 'import time; print(time.time())')"
+              xcrun simctl io "$SIM_UDID" recordVideo --codec h264 --force private-artifacts/video/real-journey.mp4 > artifacts/video-record-real.log 2>&1 &
+              recorder=$!
+              sleep 3
+            fi
             xcodebuild test-without-building \
               -xctestrun "$RELEASE_XCTESTRUN" \
               -destination "platform=iOS Simulator,id=$SIM_UDID" \
               -resultBundlePath "Release-$test.xcresult" \
-              -only-testing:"OpenBotShellUITests/ReleaseUITests/$test" \
-              >> xcodebuild-release.log 2>&1 || status=1
+              -only-testing:"OpenBotShellUITests/RealBackendUITests/$test" \
+              > "xcodebuild-release-$test.log" 2>&1 || status=1
+            cat "xcodebuild-release-$test.log" >> xcodebuild-release.log
+            if [ -n "$recorder" ]; then
+              kill -INT "$recorder"
+              wait "$recorder"
+              python3 ios-shell/ci/trim_video.py private-artifacts/video/real-journey.mp4 "xcodebuild-release-$test.log" "$recording_started" || true
+            fi
             container="$(xcrun simctl get_app_container "$SIM_UDID" ai.openbot.shell data 2>/dev/null || true)"
             if [ -n "$container" ] && [ -f "$container/Documents/diagnostics.jsonl" ]; then
               cat "$container/Documents/diagnostics.jsonl" >> artifacts/diagnostics.jsonl
@@ -332,6 +305,7 @@ jobs:
         run: |
           bundles="$(ls -d TestResults.xcresult DemoTour.xcresult Release-*.xcresult 2>/dev/null | paste -sd: -)"
           logs="$(ls xcodebuild.log xcodebuild-demo.log xcodebuild-release.log 2>/dev/null | paste -sd: -)"
+          if [ -n "$(ls -A private-artifacts/video 2>/dev/null)" ]; then echo "HAS_PRIVATE=1" >> "$GITHUB_ENV"; fi
           python3 ios-shell/ci/summarize.py artifacts "$bundles" "$logs" || true
           python3 ios-shell/ci/collect_shots.py artifacts || true
           if [ -f artifacts/SUMMARY.md ]; then

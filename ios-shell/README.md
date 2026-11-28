@@ -128,11 +128,6 @@ MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3002 bun app/workbench/mock-serv
 APP_PORT=3011 SERVER_PORT=3002 bun app/serve.ts &                      # B: without it
 ```
 
-In CI, stack A is also reached at `https://shell-test.openbot.test` through `ci/tls-proxy.ts`, with
-a certificate from a throwaway CA the simulator is told to trust (`simctl keychain add-root-cert`)
-and the name mapped to 127.0.0.1 in `/etc/hosts`. Over https the mock sets production's cookie,
-`__Secure-better-auth.session_token` (Secure, HttpOnly, SameSite=Lax, host-only).
-
 ## CI
 
 `.github/workflows/ios-shell.yml` runs on pushes to `ios-webview-shell` that touch this folder,

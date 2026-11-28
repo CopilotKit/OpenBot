@@ -17,6 +17,8 @@ protocol WebControllerDelegate: AnyObject {
     func webControllerDidCommit(_ controller: WebController)
     /// A main-frame load finished.
     func webControllerDidFinish(_ controller: WebController)
+    /// The web view's URL changed, by a load or by the page's own router (pushState).
+    func webController(_ controller: WebController, didChangeURL url: URL?)
 }
 
 /// Owns the one WKWebView, its navigation and UI delegate, the page bridge and the load watchdog.
@@ -39,6 +41,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     private(set) var lastLoadFailed = false
     /// One hosted sign-in URL the shell decided to let through after all.
     private var allowHostedOnce: URL?
+    private var urlObservation: NSKeyValueObservation?
 
     init(config: ShellConfig, diagnostics: Diagnostics) {
         self.config = config
@@ -89,6 +92,14 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
 
         webView.navigationDelegate = self
         webView.uiDelegate = self
+        // Also sees the page's own route changes, which no navigation delegate call reports.
+        urlObservation = webView.observe(\.url, options: [.new]) { [weak self] webView, _ in
+            let url = webView.url
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.delegate?.webController(self, didChangeURL: url)
+            }
+        }
     }
 
     static func shellMarkerScript(config: ShellConfig) -> String {

@@ -470,6 +470,24 @@ final class ShellController: NSObject, WebControllerDelegate {
         showLoadFailure(.web, detail: "web-load-failed")
     }
 
+    func webController(_ controller: WebController, didChangeURL url: URL?) {
+        guard let url = url, config.isOwnOrigin(url) else { return }
+        let path = url.path.isEmpty ? "/" : url.path
+        let first = path.split(separator: "/").first.map { "/" + $0 } ?? "/"
+        if model.webPathRoot != first { model.webPathRoot = first }
+        let onSignPage = path == "/sign" || path.hasPrefix("/sign/")
+        // A web app without the bridge (production today) says nothing: its URL tells.
+        if model.phase == .signedIn, onSignPage, !renewing {
+            sessionEnded(reason: "url-sign")
+        } else if model.phase == .signedOut, model.signIn == .webFallback, !onSignPage, !path.hasPrefix("/api/") {
+            SessionCookies.present(in: cookieStore, host: config.baseHost) { [weak self] present, _ in
+                guard let self = self, present, self.model.signIn == .webFallback else { return }
+                self.diagnostics.log("signed-in-by-url", ["pathRoot": first])
+                self.finishSignIn()
+            }
+        }
+    }
+
     func webControllerDidFinish(_ controller: WebController) {
         // An older web app says nothing over the bridge: read its colours when it has loaded.
         refreshChrome()

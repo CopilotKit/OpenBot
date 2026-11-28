@@ -15,7 +15,7 @@ import sys
 artifacts, xcresult, log_path = sys.argv[1:4]
 # Tests that use a real account: their diagnostics never reach the summary (collect_shots.py moves
 # them out of the general artifact).
-PRIVATE_TESTS = ("testProductionSignedIn", "testProductionGoogleSignIn", "testProductionGoogleSignInInWebView")
+PRIVATE_TESTS = ("testRealGoogleSignInInWebViewAndJourney", "testRealGoogleSignInInSystemSheet", "testRealSignedInJourneyWithSessionCookie")
 
 
 def private_entry(entry):
@@ -61,19 +61,22 @@ lines.append("")
 # 3. Per-test results: xcresulttool first, the log as a fallback.
 results = []
 for bundle in [b for b in xcresult.split(":") if b]:
+    build = "Release" if os.path.basename(bundle).startswith("Release-") else "Debug"
     try:
         raw = subprocess.run(["xcrun", "xcresulttool", "get", "test-results", "tests", "--path", bundle],
                              capture_output=True, text=True, timeout=120)
         if raw.returncode == 0:
-            def walk(node):
+            def walk(node, suite):
+                if node.get("nodeType") == "Test Suite":
+                    suite = node.get("name", suite)
                 if node.get("nodeType") == "Test Case":
                     notes = [c.get("name", "") for c in node.get("children", [])
                              if c.get("nodeType") in ("Failure Message", "Skip Message", "Runtime Warning")]
-                    results.append((node.get("name", "?"), node.get("result", "?"), notes))
+                    results.append((suite, node.get("name", "?"), node.get("result", "?"), notes, build))
                 for child in node.get("children", []):
-                    walk(child)
+                    walk(child, suite)
             for node in json.loads(raw.stdout).get("testNodes", []):
-                walk(node)
+                walk(node, "?")
     except Exception as error:
         print(f"xcresulttool failed on {bundle}: {error}")
 
@@ -83,18 +86,37 @@ for one_log in [p for p in log_path.split(":") if p]:
         with open(one_log, errors="replace") as f:
             log += f.read() + "\n"
 if not results and log:
-    for match in re.finditer(r"Test [Cc]ase '(?:-\[\S+ )?([^\]']+)\]?' (passed|failed|skipped)", log):
-        results.append((match.group(1), match.group(2), []))
+    for match in re.finditer(r"Test [Cc]ase '-\[\S+?\.(\w+) (\w+)\]' (passed|failed|skipped)", log):
+        results.append((match.group(1), match.group(2), match.group(3), [], "?"))
 
+SUITES = [
+    ("Suite 1: real backend (https://my.open.bot as deployed today)",
+     lambda suite, name: suite.startswith("RealBackend") or name.startswith("testLoadsHostedWebApp")),
+    ("Suite 2: not deployed yet (mock stack + this branch's web build: shell mode, /conversations, "
+     "the sign-in hand-off and the Account menu are not on my.open.bot yet; web draft PR 2360 and the "
+     "server hand-off draft PR carry them)",
+     lambda suite, name: suite.startswith("ShellFlow")),
+    ("Web view basics (local probe site)", lambda suite, name: suite.startswith("ShellUITests")),
+    ("Demo recording", lambda suite, name: suite.startswith("DemoTour")),
+]
 lines.append("## Tests\n")
-if results:
-    for name, result, notes in results:
-        lines.append(f"- {name}: **{result}**")
+if not results:
+    lines.append("- no test results found (did the build fail? see xcodebuild.log)")
+placed = set()
+for title, belongs in SUITES + [("Other", lambda suite, name: True)]:
+    rows = [r for r in results if id(r) not in placed and belongs(r[0], r[1])]
+    if not rows:
+        continue
+    for r in rows:
+        placed.add(id(r))
+    passed = sum(1 for r in rows if r[2].lower() == "passed")
+    skipped = sum(1 for r in rows if r[2].lower() == "skipped")
+    lines.append(f"### {title}: {passed} of {len(rows)} passed, {skipped} skipped\n")
+    for suite, name, result, notes, build in rows:
+        lines.append(f"- {suite}.{name} ({build} build): **{result}**")
         for note in notes:
             lines.append(f"  - {note}")
-else:
-    lines.append("- no test results found (did the build fail? see xcodebuild.log)")
-lines.append("")
+    lines.append("")
 
 # 4. Probe and persistence lines that the UI tests print.
 lines.append("## Probe\n")
@@ -154,7 +176,7 @@ if os.path.exists(diag_path):
                 parity.append(f"{short}: websocket {entry.get('event')} {str(entry.get('url', '')).split('?')[0]}")
             if entry.get("kind") == "handoff-probe":
                 probes.append(f"{test}: status {entry.get('status')} supported {entry.get('supported')}")
-            if test.startswith("testProduction") and entry.get("kind") == "navigation-action" and entry.get("mainFrame"):
+            if test.startswith("testReal") and entry.get("kind") == "navigation-action" and entry.get("mainFrame"):
                 url = str(entry.get("url", ""))
                 trail = production_trails.setdefault(test, [])
                 if not trail or trail[-1] != url:

@@ -29,9 +29,7 @@
  *   GET  /api/auth/shell/enter?ticket=T&verifier=V&to=/path
  *        Loaded by the web view. With a known, unused, unexpired T whose C is base64url(sha256(V)):
  *        sets the cookie better-auth.session_token=mock and answers 303 to `to` (an own path, else /).
- *        Otherwise 303 to /sign?native-sign-in=failed, setting nothing. Reached over https through a
- *        proxy that sets X-Forwarded-Proto: https (and X-Forwarded-Host), the cookie is production's
- *        __Secure-better-auth.session_token, Secure, and the redirect is absolute on https.
+ *        Otherwise 303 to /sign?native-sign-in=failed, setting nothing.
  *
  * Signed in, the API answers as the workbench's app-home scene does (workbench/session.ts,
  * api/extraHandlers.ts and the spec's generated answers), with a fixed person (Sam Rivera, in Acme),
@@ -59,8 +57,6 @@ const ORGANIZATION = DEFAULT_SESSION.signedIn
 const API = `*/api/v2/organizations/:organizationId`;
 /** The cookie that makes a request signed in, whatever the session's default. */
 export const MOCK_SESSION_COOKIE = "better-auth.session_token";
-/** The name a production server uses over https, where the cookie is Secure. */
-export const MOCK_SECURE_SESSION_COOKIE = "__Secure-better-auth.session_token";
 const MOCK_SESSION_VALUE = "mock";
 const HANDOFF = process.env.MOCK_NO_HANDOFF !== "1";
 const TICKET_MS = 60_000;
@@ -333,9 +329,7 @@ function hasMockCookie(request: Request): boolean {
   return cookies
     .split(";")
     .some(
-      (pair) =>
-        pair.trim() === `${MOCK_SESSION_COOKIE}=${MOCK_SESSION_VALUE}` ||
-        pair.trim() === `${MOCK_SECURE_SESSION_COOKIE}=${MOCK_SESSION_VALUE}`,
+      (pair) => pair.trim() === `${MOCK_SESSION_COOKIE}=${MOCK_SESSION_VALUE}`,
     );
 }
 
@@ -417,29 +411,10 @@ ${auto ? `<script>setTimeout(function () { window.location.href = document.getEl
   });
 }
 
-/**
- * Reached over https through a TLS proxy (the phone app's CI puts one in front, setting
- * X-Forwarded-Proto and X-Forwarded-Host): the mock then answers as production does there, with
- * the Secure cookie name and attributes and https redirects.
- */
-function httpsOrigin(request: Request): string | null {
-  if (request.headers.get("x-forwarded-proto") !== "https") return null;
-  const host =
-    request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  return host ? `https://${host}` : null;
-}
-
-function sessionCookie(request: Request, value: string, maxAge: number) {
-  return httpsOrigin(request)
-    ? `${MOCK_SECURE_SESSION_COOKIE}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`
-    : `${MOCK_SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
-}
-
-function enter(url: URL, request: Request): Response {
-  const origin = httpsOrigin(request) ?? "";
+function enter(url: URL): Response {
   const failed = new Response(null, {
     status: 303,
-    headers: { location: `${origin}/sign?native-sign-in=failed` },
+    headers: { location: "/sign?native-sign-in=failed" },
   });
   const ticket = tickets.get(url.searchParams.get("ticket") ?? "");
   const verifier = url.searchParams.get("verifier") ?? "";
@@ -451,8 +426,8 @@ function enter(url: URL, request: Request): Response {
   return new Response(null, {
     status: 303,
     headers: {
-      location: `${origin}${ownPath(url.searchParams.get("to"))}`,
-      "set-cookie": sessionCookie(request, MOCK_SESSION_VALUE, 604800),
+      location: ownPath(url.searchParams.get("to")),
+      "set-cookie": `${MOCK_SESSION_COOKIE}=${MOCK_SESSION_VALUE}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`,
     },
   });
 }
@@ -515,7 +490,7 @@ async function start() {
         path === "/api/auth/shell/enter"
       ) {
         if (!HANDOFF) return new Response("Not found", { status: 404 });
-        return path.endsWith("/handoff") ? handoffPage(url) : enter(url, incoming);
+        return path.endsWith("/handoff") ? handoffPage(url) : enter(url);
       }
 
       if (incoming.headers.get("upgrade")?.toLowerCase() === "websocket") {
@@ -533,7 +508,7 @@ async function start() {
           { success: true },
           {
             headers: {
-              "set-cookie": sessionCookie(incoming, "", 0),
+              "set-cookie": `${MOCK_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
             },
           },
         );
