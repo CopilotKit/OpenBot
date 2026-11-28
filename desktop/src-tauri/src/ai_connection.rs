@@ -219,10 +219,9 @@ pub fn intent_for(provider: &str, login: &str) -> Option<ModelIntent> {
         ("openai", "plan") => ModelIntent::ChatGptPlan,
         ("google", "oauth") => ModelIntent::GoogleOauth,
         ("xai", "oauth") => ModelIntent::XaiOauth,
-        (
-            "google" | "xai" | "unbiased" | "trustedrouter" | "privatemode" | "openai-compatible",
-            "endpoint",
-        ) => ModelIntent::CompatibleEndpoint,
+        ("google" | "xai" | "trustedrouter" | "privatemode" | "openai-compatible", "endpoint") => {
+            ModelIntent::CompatibleEndpoint
+        }
         _ => return None,
     })
 }
@@ -818,7 +817,6 @@ mod tests {
             ("xai", "oauth", ModelIntent::XaiOauth),
             ("google", "endpoint", ModelIntent::CompatibleEndpoint),
             ("xai", "endpoint", ModelIntent::CompatibleEndpoint),
-            ("unbiased", "endpoint", ModelIntent::CompatibleEndpoint),
             ("trustedrouter", "endpoint", ModelIntent::CompatibleEndpoint),
             ("privatemode", "endpoint", ModelIntent::CompatibleEndpoint),
             (
@@ -836,7 +834,6 @@ mod tests {
         for (provider, login) in [
             ("openai", "endpoint"),
             ("google", "plan"),
-            ("unbiased", "oauth"),
             ("trustedrouter", "oauth"),
             ("privatemode", "oauth"),
             ("anthropic", "oauth"),
@@ -844,6 +841,61 @@ mod tests {
         ] {
             assert_eq!(intent_for(provider, login), None, "{provider} {login}");
         }
+    }
+
+    /// A connection recorded for a provider OpenBot no longer offers (any id this version doesn't
+    /// name) is still read without a panic, but names no connection here: nothing resumes it as a
+    /// kept one, and settling on it or preparing it is refused in words before anything is written.
+    /// The setup window then sets up another AI, as for any choice it can't resume.
+    #[test]
+    fn a_recorded_connection_for_a_provider_no_longer_offered_resumes_nothing() {
+        let root = root("retired-provider", "", "");
+        for login in ["endpoint", "oauth", "api-key", "plan"] {
+            assert_eq!(intent_for("retired-ai", login), None, "retired-ai {login}");
+        }
+        Settled {
+            provider: "retired-ai".into(),
+            login: "endpoint".into(),
+            model: Some("retired-model".into()),
+            endpoint_host: Some("api.retired-ai.example".into()),
+        }
+        .write(&root)
+        .unwrap();
+        let kept = Settled::read(&root).expect("a recorded connection is still read");
+        for (provider, login) in [
+            ("openai-compatible", "endpoint"),
+            ("retired-ai", "endpoint"),
+            ("openai", "api-key"),
+            ("anthropic", "plan"),
+        ] {
+            assert!(!kept.names(provider, login), "{provider} {login}");
+        }
+        assert_eq!(
+            connection_setting(&ModelCredential::Compatible {
+                base_url: "https://api.retired-ai.example/v1".into(),
+                container_base_url: None,
+                api_key: "sentinel-key".into(),
+                model: "retired-model".into(),
+            })
+            .as_deref(),
+            Some(r#"{"login":"endpoint","provider":"openai-compatible"}"#)
+        );
+
+        let engine = Address::new(crate::engine::Engine::Docker, None);
+        let change = Change {
+            provider: "retired-ai".into(),
+            login: "endpoint".into(),
+            model: Some("retired-model".into()),
+            endpoint_host: Some("api.retired-ai.example".into()),
+        };
+        let refused = settle(&engine, &root, &change).unwrap_err();
+        assert_eq!(refused.said, "OpenBot can't connect that way.");
+        let refused = prepare(&engine, &root, "retired-ai", "endpoint").unwrap_err();
+        assert_eq!(refused.said, "OpenBot can't connect that way.");
+        // Nothing was written over what was recorded.
+        assert_eq!(Settled::read(&root), Some(kept));
+        assert!(!root.join(crate::saved_intent::FILE).exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// The server is told which connection, by provider and way in, and never a key or an address.

@@ -1230,7 +1230,8 @@ test("recorded Claude plan intent survives reopening beside an unrelated saved A
   ).toBeTruthy();
 });
 
-test.each(["https://models.example/v1", "https://api.unbiased.ai/v1"])(
+// The second is the address of a provider OpenBot no longer offers: it resumes as any other endpoint.
+test.each(["https://models.example/v1", "https://api.retired-ai.example/v1"])(
   "a saved compatible endpoint at %s restores public fields and requests its scoped key",
   async (baseUrl) => {
     invokeHandler = async (command) => {

@@ -183,6 +183,26 @@ export function signInRetired(
 }
 
 /**
+ * A connection saved for a provider OpenBot no longer offers: still listed under the id it was saved
+ * with (one this app may not know, shown by its id), never ready, with nothing listed and the
+ * problem `provider-retired`. Nothing on it fixes it, so no picker offers it and no page offers to
+ * sign in again or replace its key. It is removed on its page, and another AI connected.
+ */
+export const PROVIDER_RETIRED = {
+  title: "No longer offered",
+  /** Where a conversation leads: the connection's page, where it is removed. */
+  remove: "Remove it",
+  connect: "Connect another AI",
+} as const;
+
+/** Whether a connection's provider is one OpenBot no longer offers (PROVIDER_RETIRED). */
+export function providerRetired(
+  connection: { problem?: { code: string } | null } | null | undefined,
+): boolean {
+  return connection?.problem?.code === "provider-retired";
+}
+
+/**
  * The ways in for the organization's AI on OpenBot Cloud in a plain browser: the admin's own
  * sign-in first, exactly as Connect your AI offers it, where it can be shared; then the key or
  * address.
