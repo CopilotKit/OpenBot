@@ -89,6 +89,9 @@ class RealBackendTestCase: ShellTestCase {
     }
 
     func googleInputs() throws -> GoogleInputs {
+        guard ProcessInfo.processInfo.environment["OPENBOT_SHELL_RUN_GOOGLE"] == "true" else {
+            throw XCTSkip("the Google sign-in runs only when the workflow is started by hand with google_sign_in: each attempt sends a sign-in prompt to the account's phone")
+        }
         let names = ["OPENBOT_SHELL_GOOGLE_EMAIL", "OPENBOT_SHELL_GOOGLE_PASSWORD", "OPENBOT_SHELL_GOOGLE_TOTP_SECRET"]
         note("secret-inputs: \(names.allSatisfy { secret($0) != nil } ? "present" : "absent")")
         guard let email = secret(names[0]), let password = secret(names[1]), let totpText = secret(names[2]) else {

@@ -28,6 +28,11 @@ What is native:
   address. It retries by itself (every
   5 s, every 15 s after 6 tries, and when the network comes back) and lifts when a page loads. Its
   accessibility value says which case it is: `no-network` or `load-failed`.
+- **The keyboard.** The web view's form-assistant bar (arrows and a check mark above the keyboard)
+  is removed (`KeyboardAccessory.swift`, the react-native-webview technique, on WebKit's private
+  content view: if a future iOS renames it, the bar simply comes back). The keyboard goes away by
+  dragging the page down or tapping outside a field. The system sign-in sheet is Safari's view, so
+  its bar stays there.
 - **The bridge.** The page gets `window.__OPENBOT_NATIVE_SHELL__ = {platform: "ios", version, bridge: 1}`
   at document start (main frame, own origin only) and posts `ready`, `route` and `signed-out` to
   `window.webkit.messageHandlers.openbotShell` (`app/src/lib/native-shell/`). When the page says

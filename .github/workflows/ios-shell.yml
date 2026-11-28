@@ -22,6 +22,11 @@ on:
       - app/src/lib/native-shell/**
       - app/workbench/mock-server.ts
   workflow_dispatch:
+    inputs:
+      google_sign_in:
+        description: Run the Google sign-in tests (each attempt sends a sign-in prompt to the account's phone)
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -188,6 +193,7 @@ jobs:
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
+          TEST_RUNNER_OPENBOT_SHELL_RUN_GOOGLE: ${{ inputs.google_sign_in }}
         run: |
           export TEST_RUNNER_OPENBOT_SHELL_LATE_STACK_TRIGGER="$LATE_STACK_TRIGGER"
           set -o pipefail
@@ -252,6 +258,7 @@ jobs:
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
+          TEST_RUNNER_OPENBOT_SHELL_RUN_GOOGLE: ${{ inputs.google_sign_in }}
         run: |
           status=0
           : > xcodebuild-release.log

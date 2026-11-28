@@ -388,9 +388,13 @@ final class ShellFlowUITests: ShellTestCase {
         screenshot("keyboard-up")
         note("keyboard up: \(debugState(app))")
 
-        webText(app, "Start a conversation").tap()
-        if !app.keyboards.firstMatch.waitForNonExistence(timeout: 5) {
-            app.webViews.firstMatch.swipeDown()
+        // No form-assistant bar (its check mark was a way to close the keyboard): drag the page down.
+        let checkMark = app.buttons.matching(NSPredicate(format: "label == 'Done' OR identifier == 'Done'")).firstMatch
+        note("keyboard: a Done button above it \(checkMark.exists)")
+        app.webViews.firstMatch.swipeDown()
+        if !app.keyboards.firstMatch.waitForNonExistence(timeout: 4) {
+            note("dragging down did not close the keyboard; tapping outside the field")
+            webText(app, "Start a conversation").tap()
         }
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard did not go away")
         XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 5), "the tab bar did not come back")
