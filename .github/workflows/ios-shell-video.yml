@@ -168,6 +168,15 @@ jobs:
           path: DerivedData-Debug/Build/Products
           key: ${{ steps.products.outputs.cache-primary-key }}
 
+      - name: Install the workbench app and UI test runner
+        timeout-minutes: 3
+        run: |
+          for _ in $(seq 1 120); do [ -f "$RUNNER_TEMP/simulator.ready" ] && break; sleep 1; done
+          [ -f "$RUNNER_TEMP/simulator.ready" ] || { cat "$RUNNER_TEMP/boot.log"; exit 1; }
+          apps=DerivedData-Debug/Build/Products/Debug-iphonesimulator
+          xcrun simctl install "$SIM_UDID" "$apps/OpenBotShell.app"
+          xcrun simctl install "$SIM_UDID" "$apps/OpenBotShellUITests-Runner.app"
+
       - name: Wait for the verified workbench
         timeout-minutes: 5
         run: |
@@ -198,8 +207,6 @@ jobs:
         env:
           TEST_RUNNER_OPENBOT_SHELL_VIDEO_MODE: "1"
         run: |
-          for _ in $(seq 1 300); do [ -f "$RUNNER_TEMP/simulator.ready" ] && break; sleep 1; done
-          [ -f "$RUNNER_TEMP/simulator.ready" ] || { cat "$RUNNER_TEMP/boot.log"; exit 1; }
           echo "$(date +%s) record" >> "$RUNNER_TEMP/timing"
           tests=(DerivedData-Debug/Build/Products/*.xctestrun)
           bash ios-shell/ci/record_demo.sh "$SIM_UDID" "${tests[0]}"
