@@ -56,7 +56,11 @@ What is native:
   the page decides (another tab: back where it was left; the current tab: its root). Without
   `canGoBack` (production today) the web view's own back gesture works as before, with the guards
   above.
-- **The slide back** (`BackTransition.swift`; 1 live web view, the web app still owning the stacks):
+- **The slide back** (`BackTransition.swift`; 1 live web view, the web app still owning the stacks).
+  Off by default (Info.plist `OpenBotSlideBack`, a DEBUG build's `OPENBOT_SHELL_SLIDE_BACK=1`):
+  in 5 recorded takes it was never seen working end to end (the wrong direction, a stale picture,
+  no picture, and a slow edge drag taken by WebKit's text selection), so a swipe past a third of
+  the width goes back when it ends, which works and is tested. With it on:
   - For each tab the app keeps a picture of every page under the current one. The picture is taken
     when a finger comes down on the page and again after each route settles, and is filed under the
     page when it says `will-navigate` (direction "push"); a picture taken when `will-navigate`

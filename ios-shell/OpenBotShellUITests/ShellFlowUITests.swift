@@ -796,7 +796,7 @@ final class ShellFlowUITests: ShellTestCase {
     // conversation away over the list's picture and lands on the list at its scroll position, with no
     // blank web view on the way (the frames are checked in the video workflow's recording).
     func testSwipeBackSlidesToTheList() throws {
-        let app = launchSignedIn()
+        let app = launchSignedIn(extra: ["OPENBOT_SHELL_SLIDE_BACK": "1"])
         XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
         tapTab(app, .conversations)
         XCTAssertTrue(chatsList(app).waitForExistence(timeout: 15))

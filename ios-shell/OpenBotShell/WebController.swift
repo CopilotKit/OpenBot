@@ -342,6 +342,16 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
 
     // MARK: - Back
 
+    /// The slide back (BackTransition.swift) is off unless Info.plist's `OpenBotSlideBack` is true (or
+    /// a DEBUG build's OPENBOT_SHELL_SLIDE_BACK=1): until it has been seen working end to end, a swipe
+    /// past a third of the width simply goes back when it ends.
+    static let slideBack: Bool = {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["OPENBOT_SHELL_SLIDE_BACK"] == "1" { return true }
+        #endif
+        return (Bundle.main.object(forInfoDictionaryKey: "OpenBotSlideBack") as? Bool) ?? false
+    }()
+
     /// What the left-edge swipe does now (from the page's last `route`: `ShellBack`).
     private(set) var backMode: ShellBack = .webHistory
     private var backSwipe: UIScreenEdgePanGestureRecognizer?
@@ -390,7 +400,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         let width = max(webView.bounds.width, 1)
         switch edge.state {
         case .began:
-            swipeSlides = backMode == .sendToPage && transition.canSlide
+            swipeSlides = WebController.slideBack && backMode == .sendToPage && transition.canSlide
             if swipeSlides { transition.begin() }
         case .changed:
             if swipeSlides { transition.update(progress: move.x / width) }
@@ -423,7 +433,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         }
         switch direction {
         case "push": transition.willPush(tab: tab, completion: ok)
-        case "back": transition.playBack(back: ok)
+        case "back": if WebController.slideBack { transition.playBack(back: ok) } else { ok() }
         default: ok()
         }
     }
@@ -999,6 +1009,15 @@ extension WebController: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         true
+    }
+
+    /// A drag from the left edge belongs to the swipe back: WebKit's own recognizers (text selection
+    /// took a slow edge drag in take 5) wait until the edge recognizer has failed, which it does at
+    /// once for a touch away from the edge.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === backSwipe, gestureRecognizer.isEnabled else { return false }
+        return !(other is TouchDownRecognizer) && !(other is UIPanGestureRecognizer && other.view === webView)
     }
 }
 

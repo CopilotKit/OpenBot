@@ -47,6 +47,8 @@ targets:
         # false brings back the keyboard's form-assistant bar (KeyboardAccessory.swift swaps a private
         # WebKit class to hide it; turn this off if App Review objects).
         OpenBotHideKeyboardAccessory: true
+        # true turns on the slide back over a picture of the previous page (BackTransition.swift).
+        OpenBotSlideBack: false
         NSMicrophoneUsageDescription: OpenBot uses the microphone when you talk to a Bot.
         NSCameraUsageDescription: OpenBot uses the camera when you share a photo or video with a Bot.
     postBuildScripts:
