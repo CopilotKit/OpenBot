@@ -46,9 +46,7 @@ export function CommandOutput({
         </p>
       ) : null}
       {failed ? (
-        <p className="text-amber-600 text-xs dark:text-amber-500">
-          Exit code {exitCode}.
-        </p>
+        <p className="text-warning text-xs">Exit code {exitCode}.</p>
       ) : null}
     </div>
   );

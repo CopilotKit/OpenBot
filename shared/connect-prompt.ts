@@ -26,20 +26,34 @@ export const CONNECT_APP_MARKER = "[connect-app]";
  * `shared` — a Shared app whose one team account is missing, which only an administrator connects.
  * `access` — the Bot asked what the app is for this person (`show_app_access`), with no refusal
  * behind it: switched off, not granted, or any of the above.
+ * `tools` — the Bot holds the app, and the task needs actions of it the Bot wasn't given
+ * (`show_app_access` with what it needs). `actions` names them and `need` says what they do.
  *
  * A HINT, NOT THE STATE. The card asks the server for the app's state for this person and this Bot
  * when it is drawn, and draws that. The one place the hint wins is an account the vendor has lost
  * whose row still stands — a refusal from before the call that found out started deleting the row —
  * where the live state reads `ready` and only the refusal knows otherwise. See `AppAccessCard`.
  */
-export type ConnectReason = "connect" | "reconnect" | "shared" | "access";
+export type ConnectReason =
+  | "connect"
+  | "reconnect"
+  | "shared"
+  | "access"
+  | "tools";
 
 const REASONS: readonly ConnectReason[] = [
   "connect",
   "reconnect",
   "shared",
   "access",
+  "tools",
 ];
+
+/** At most this many actions ride on one prompt: the card asks the server about each. */
+export const MAX_PROMPT_ACTIONS = 50;
+
+/** At most this many characters of `need`: a short phrase, never a paragraph. */
+export const MAX_PROMPT_NEED = 200;
 
 export type ConnectPrompt = {
   /**
@@ -73,6 +87,17 @@ export type ConnectPrompt = {
    * Absent on a `show_app_access` answer from before it was written, which offers nothing.
    */
   blocked?: boolean;
+  /**
+   * On a `tools` prompt, the actions of the app the Bot needs and wasn't given, written
+   * `<app id>/<action name>`. The card reads the app for exactly these (getBotApp's `actions`) and
+   * its one press gives exactly these.
+   */
+  actions?: string[];
+  /**
+   * On a `tools` prompt, what those actions let the Bot do, in the Bot's own few words ("change an
+   * event's colour"). The card says it; the actions' own names are an admin's words, not a person's.
+   */
+  need?: string;
 };
 
 /**
@@ -92,6 +117,8 @@ export const SHOW_APP_ACCESS_TOOL = "show_app_access";
  */
 export function connectAppRefusal(prompt: ConnectPrompt): string {
   const { serverId, title, message, agentId, reason, at, blocked } = prompt;
+  const actions = cleanActions(prompt.actions);
+  const need = cleanNeed(prompt.need);
   return `${CONNECT_APP_MARKER}${JSON.stringify({
     serverId,
     title,
@@ -99,7 +126,40 @@ export function connectAppRefusal(prompt: ConnectPrompt): string {
     ...(reason ? { reason } : {}),
     ...(at ? { at } : {}),
     ...(blocked !== undefined ? { blocked } : {}),
+    ...(actions ? { actions } : {}),
+    ...(need ? { need } : {}),
   })} ${message}`;
+}
+
+/**
+ * The actions as a prompt may carry them: strings with no brace in them (the marker's JSON ends at
+ * its first `}`), at most {@link MAX_PROMPT_ACTIONS}. Undefined for none, so nothing is written.
+ */
+function cleanActions(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const kept = value
+    .filter(
+      (item): item is string =>
+        typeof item === "string" && item.trim() !== "" && !/[{}]/.test(item),
+    )
+    .slice(0, MAX_PROMPT_ACTIONS);
+  return kept.length > 0 ? kept : undefined;
+}
+
+/**
+ * The need as a prompt may carry it: one line, braces read as brackets (the marker's JSON ends at
+ * its first `}`), at most {@link MAX_PROMPT_NEED} characters. Undefined for none.
+ */
+function cleanNeed(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const line = value
+    .replace(/[{]/g, "(")
+    .replace(/[}]/g, ")")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_PROMPT_NEED)
+    .trim();
+  return line || undefined;
 }
 
 /**
@@ -133,14 +193,19 @@ export function readConnectPrompt(
   try {
     const parsed: unknown = JSON.parse(rest.slice(0, end + 1));
     if (!parsed || typeof parsed !== "object") return null;
-    const { serverId, title, agentId, reason, at, blocked } = parsed as {
-      serverId?: unknown;
-      title?: unknown;
-      agentId?: unknown;
-      reason?: unknown;
-      at?: unknown;
-      blocked?: unknown;
-    };
+    const { serverId, title, agentId, reason, at, blocked, actions, need } =
+      parsed as {
+        serverId?: unknown;
+        title?: unknown;
+        agentId?: unknown;
+        reason?: unknown;
+        at?: unknown;
+        blocked?: unknown;
+        actions?: unknown;
+        need?: unknown;
+      };
+    const keptActions = cleanActions(actions);
+    const keptNeed = cleanNeed(need);
     if (typeof serverId !== "string" || typeof title !== "string") return null;
     if (!serverId || !title) return null;
     /*
@@ -160,6 +225,82 @@ export function readConnectPrompt(
         ? { at }
         : {}),
       ...(typeof blocked === "boolean" ? { blocked } : {}),
+      ...(keptActions ? { actions: keptActions } : {}),
+      ...(keptNeed ? { need: keptNeed } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The first characters of `show_app_access`'s answer when the person asked to connect one more
+ * account at an app they already connected (a personal mailbox beside a work one), immediately
+ * followed by its JSON.
+ *
+ * A MARKER OF ITS OWN, NOT A NEW `ConnectReason`. A front end released before this card reads an
+ * unknown reason as `connect`, and the app's live state is `ready`, so it drew "Gmail is ready now"
+ * over a question about a second Gmail: the job read as done (reported in dogfooding). A marker it
+ * doesn't know draws only the step's line, and the Bot's reply says what to do.
+ */
+export const ANOTHER_ACCOUNT_MARKER = "[connect-another-account]";
+
+/** The card that starts the sign-in for one more account at an app, as the transcript reads it. */
+export type AnotherAccountPrompt = {
+  /** The app, as `ConnectPrompt.serverId` names it: what the card connects and lists accounts of. */
+  serverId: string;
+  /** The app's own name. */
+  title: string;
+  /** What the Bot was told, kept for a reader with no card to draw. */
+  message: string;
+  /** The Bot that asked. */
+  agentId?: string;
+  /**
+   * How many accounts the person held at the app when the Bot asked. More than this listed now is
+   * the account connected from the card, so a card scrolled back to (or drawn after a reload) says
+   * it is connected and never offers the sign-in again. Absent reads as one.
+   */
+  held?: number;
+};
+
+/** `show_app_access`'s answer for one more account at an app: the marker, then what the model reads. */
+export function anotherAccountAnswer(prompt: AnotherAccountPrompt): string {
+  const { serverId, title, message, agentId, held } = prompt;
+  return `${ANOTHER_ACCOUNT_MARKER}${JSON.stringify({
+    serverId,
+    title,
+    ...(agentId ? { agentId } : {}),
+    ...(held !== undefined ? { held } : {}),
+  })} ${message}`;
+}
+
+/** The prompt inside that answer, or null for any other text. Fails to null, as `readConnectPrompt` does. */
+export function readAnotherAccountPrompt(
+  text: string | undefined | null,
+): AnotherAccountPrompt | null {
+  if (!text?.startsWith(ANOTHER_ACCOUNT_MARKER)) return null;
+  const rest = text.slice(ANOTHER_ACCOUNT_MARKER.length);
+  const end = rest.indexOf("}");
+  if (end < 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(rest.slice(0, end + 1));
+    if (!parsed || typeof parsed !== "object") return null;
+    const { serverId, title, agentId, held } = parsed as {
+      serverId?: unknown;
+      title?: unknown;
+      agentId?: unknown;
+      held?: unknown;
+    };
+    if (typeof serverId !== "string" || typeof title !== "string") return null;
+    if (!serverId || !title) return null;
+    return {
+      serverId,
+      title,
+      message: rest.slice(end + 1).trim(),
+      ...(typeof agentId === "string" && agentId ? { agentId } : {}),
+      ...(typeof held === "number" && Number.isInteger(held) && held >= 0
+        ? { held }
+        : {}),
     };
   } catch {
     return null;

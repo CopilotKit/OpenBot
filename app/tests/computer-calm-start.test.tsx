@@ -32,7 +32,7 @@ test("a call turned away by a computer still starting reads as not done yet, not
     />,
   );
   const line = view.getByText("Clicked, not done yet");
-  expect(line.closest(".text-amber-600")).toBeNull();
+  expect(line.closest(".text-warning")).toBeNull();
   expect(line.closest(".text-destructive")).toBeNull();
   expect(view.queryByText(/didn't work/)).toBeNull();
 });

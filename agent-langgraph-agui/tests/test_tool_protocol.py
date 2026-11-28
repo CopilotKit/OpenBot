@@ -113,7 +113,25 @@ def boundary(monkeypatch):
                 [captured["force_call"]] if captured["force_call"] else names
             )
             offered = {t["function"]["name"] for t in body.get("tools", [])}
-            if messages[-1]["role"] == "tool":
+            done = sum(1 for m in messages if m["role"] == "tool")
+            if captured.get("steps") and done < captured["steps"]:
+                # A long task: one more call after each result, until it has taken its steps.
+                delta = {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": f"call-step-{done}",
+                            "type": "function",
+                            "function": {
+                                "name": names[0],
+                                "arguments": json.dumps({"value": f"step {done}"}),
+                            },
+                        }
+                    ],
+                }
+                finish = "tool_calls"
+            elif messages[-1]["role"] == "tool":
                 content = "Observed tool result: " + (
                     " | ".join(m["content"] for m in messages if m["role"] == "tool")
                     if captured.get("all_results")
@@ -656,6 +674,22 @@ async def test_deployment_tool_executes_only_via_signed_callback_and_continues(
     )
     assert "synthetic-run-assertion" not in json.dumps(events)
     assert "synthetic-callback-token" not in json.dumps(events)
+
+
+@pytest.mark.asyncio
+async def test_a_turn_of_many_deployment_tool_steps_runs_to_its_answer(boundary):
+    """No count ends a turn. The deployment's tools are answered here, so a long task is many steps
+    in one run, and LangGraph's 25 graph steps ended it at its twelfth call with an error."""
+    boundary["steps"] = 30
+    events = await run_protocol(
+        run_input(["granted_lookup"], deployment=["granted_lookup"])
+    )
+    assert len(boundary["callback"]) == 30
+    assert len(boundary["model"]) == 31
+    assert any(
+        m.get("role") == "assistant" and "Observed tool result" in (m.get("content") or "")
+        for m in snapshot(events)
+    ), "the turn ends in the model's answer"
 
 
 @pytest.mark.asyncio

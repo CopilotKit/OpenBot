@@ -37,6 +37,7 @@ import {
   type PersonalLearningSharing,
   personalLearningQueryOptions,
 } from "@/lib/learning/queries";
+import { failureSaid, isHeld } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 /** The three choices, each with the one plain line that says who sees what. */
@@ -131,8 +132,14 @@ export function SkillMark({ children }: { children: React.ReactNode }) {
 export function LearningSharing({
   written = [],
   writtenKnown = true,
+  heldAbove = false,
   action,
 }: {
+  /**
+   * The page above has already said OpenBot is holding off (a move, or the database out of reach):
+   * a hold here too is not said a second time.
+   */
+  heldAbove?: boolean;
   /** Rows for the skills the person wrote, drawn above the learned ones in the same list. */
   written?: React.ReactNode[];
   /** False while the page is still reading the written skills, or failed to: an empty `written` then means "not known", not "none". */
@@ -169,9 +176,9 @@ export function LearningSharing({
   if (sharing.isPending || sharing.error) {
     return (
       <PageSection action={action} title="Your skills">
-        {sharing.error ? (
+        {sharing.error && !(heldAbove && isHeld(sharing.error)) ? (
           <p className="text-destructive text-sm" role="alert">
-            {sharing.error.message}
+            {failureSaid(sharing.error)}
           </p>
         ) : null}
         {written.length > 0 ? <PageRows>{writtenRows}</PageRows> : null}
@@ -472,7 +479,7 @@ export function LearningSharing({
       {choiceSection}
       {failure ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {failure.message}
+          {failureSaid(failure)}
         </p>
       ) : null}
     </>

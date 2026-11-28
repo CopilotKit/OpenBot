@@ -89,6 +89,12 @@ export const ListBotsResponse = zod.object({
           .describe(
             "Whether it comes with OpenBot rather than belonging to a person.",
           ),
+        ownerless: zod
+          .boolean()
+          .optional()
+          .describe(
+            "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
+          ),
         packageBotId: zod
           .string()
           .nullish()
@@ -144,6 +150,12 @@ export const ListBotsResponse = zod.object({
           .boolean()
           .describe(
             "Whether an administrator assigned this Bot to the caller.",
+          ),
+        lastConversationAt: zod.iso
+          .datetime({ offset: true })
+          .nullish()
+          .describe(
+            "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
           ),
         builtIn: zod
           .boolean()
@@ -232,7 +244,7 @@ export const createBotBodyNameMax = 80;
 
 export const createBotBodyTitleMax = 120;
 
-export const createBotBodyRoleDescriptionMax = 1000;
+export const createBotBodyRoleDescriptionMax = 5000;
 
 export const createBotBodyEndpointOneMax = 0;
 
@@ -240,7 +252,7 @@ export const createBotBodyEndpointTwoRegExp = new RegExp(
   "^[Hh][Tt][Tt][Pp][Ss]?:/",
 );
 export const createBotBodyAuthHeaderRegExp = new RegExp("^[A-Za-z0-9-]*$");
-export const createBotBodyInstructionsMax = 1000;
+export const createBotBodyInstructionsMax = 5000;
 
 export const CreateBotBody = zod
   .object({
@@ -260,7 +272,7 @@ export const CreateBotBody = zod
       .min(1)
       .max(createBotBodyRoleDescriptionMax)
       .describe(
-        "What it does, 1 to 1000 characters once trimmed. A Bot with no endpoint runs on these words.",
+        "What it does, 1 to 5000 characters once trimmed. A Bot with no endpoint runs on these words.",
       ),
     visibility: zod
       .enum(["public", "private"])
@@ -301,7 +313,7 @@ export const CreateBotBody = zod
       .max(createBotBodyInstructionsMax)
       .optional()
       .describe(
-        "New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.",
+        "New instructions for the starter Bot, 1 to 5000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.",
       ),
     harness: zod
       .enum([
@@ -316,6 +328,7 @@ export const CreateBotBody = zod
         "pydantic-ai",
         "microsoft-agent-framework",
         "claude-agent-sdk",
+        "openai-agents-sdk",
         "strands",
         "ag2",
         "langroid",
@@ -323,7 +336,7 @@ export const CreateBotBody = zod
       ])
       .optional()
       .describe(
-        'The framework an agent somebody runs themselves is built on, by its id in OpenBot\'s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint, with one exception: "langgraph-ts" sent with no endpoint asks for a Bot that runs inside OpenBot on OpenBot\'s own LangGraph (TypeScript) engine, which is what the New Bot sheet sends. The deployment decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, and an administrator may switch new Bots back to the built-in agent.',
+        'The framework an agent somebody runs themselves is built on, by its id in OpenBot\'s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint, with one exception: "langgraph-ts" sent with no endpoint asks for a Bot that runs inside OpenBot on OpenBot\'s own LangGraph (TypeScript) engine, which is what the New Bot sheet sends. The deployment decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, a ChatGPT plan signed in on OpenBot Desktop the OpenAI Agents SDK engine, and an administrator may switch new Bots back to the built-in agent.',
       ),
   })
   .describe(
@@ -355,6 +368,12 @@ export const CreateBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
         ),
       packageBotId: zod
         .string()
@@ -410,6 +429,12 @@ export const CreateBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -505,6 +530,12 @@ export const GetBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
+        ),
       packageBotId: zod
         .string()
         .nullish()
@@ -559,6 +590,12 @@ export const GetBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -644,7 +681,7 @@ export const updateBotBodyOneNameMax = 80;
 
 export const updateBotBodyOneTitleMax = 120;
 
-export const updateBotBodyOneRoleDescriptionMax = 1000;
+export const updateBotBodyOneRoleDescriptionMax = 5000;
 
 export const updateBotBodyOneEndpointOneMax = 0;
 
@@ -652,7 +689,7 @@ export const updateBotBodyOneEndpointTwoRegExp = new RegExp(
   "^[Hh][Tt][Tt][Pp][Ss]?:/",
 );
 export const updateBotBodyOneAuthHeaderRegExp = new RegExp("^[A-Za-z0-9-]*$");
-export const updateBotBodyOneInstructionsMax = 1000;
+export const updateBotBodyOneInstructionsMax = 5000;
 
 export const updateBotBodyOneDefaultModelModelMax = 500;
 
@@ -660,6 +697,11 @@ export const updateBotBodyOneDefaultModelModelRegExp = new RegExp("\\S");
 export const updateBotBodyOneDefaultModelEffortMax = 40;
 
 export const updateBotBodyOneDefaultModelEffortRegExp = new RegExp("\\S");
+export const updateBotBodyOneDefaultModelSourceMax = 40;
+
+export const updateBotBodyOneDefaultModelSourceRegExp = new RegExp(
+  "^[a-z][a-z0-9-]*$",
+);
 
 export const UpdateBotBody = zod
   .object({
@@ -679,7 +721,7 @@ export const UpdateBotBody = zod
       .min(1)
       .max(updateBotBodyOneRoleDescriptionMax)
       .describe(
-        "What it does, 1 to 1000 characters once trimmed. A Bot with no endpoint runs on these words.",
+        "What it does, 1 to 5000 characters once trimmed. A Bot with no endpoint runs on these words.",
       ),
     visibility: zod
       .enum(["public", "private"])
@@ -720,7 +762,7 @@ export const UpdateBotBody = zod
       .max(updateBotBodyOneInstructionsMax)
       .optional()
       .describe(
-        "New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.",
+        "New instructions for the starter Bot, 1 to 5000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.",
       ),
     defaultModel: zod
       .object({
@@ -735,6 +777,15 @@ export const UpdateBotBody = zod
           .max(updateBotBodyOneDefaultModelEffortMax)
           .regex(updateBotBodyOneDefaultModelEffortRegExp)
           .nullable(),
+        source: zod
+          .string()
+          .min(1)
+          .max(updateBotBodyOneDefaultModelSourceMax)
+          .regex(updateBotBodyOneDefaultModelSourceRegExp)
+          .optional()
+          .describe(
+            "Who serves the model, as the catalogue's connections name it (ModelCatalogueConnection source). The default applies for a person with a connection of that kind that can run. Omit for the default connection's.",
+          ),
       })
       .nullish()
       .describe(
@@ -768,6 +819,12 @@ export const UpdateBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
         ),
       packageBotId: zod
         .string()
@@ -823,6 +880,12 @@ export const UpdateBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -886,7 +949,7 @@ export const UpdateBotResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve. While the organization's apps are open (getAppsSetting), nothing needs approving and needsApproval is empty.",
     ),
 });
 
@@ -1060,6 +1123,12 @@ export const DuplicateBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
+        ),
       packageBotId: zod
         .string()
         .nullish()
@@ -1114,6 +1183,12 @@ export const DuplicateBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1221,6 +1296,12 @@ export const HideBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
+        ),
       packageBotId: zod
         .string()
         .nullish()
@@ -1275,6 +1356,12 @@ export const HideBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1382,6 +1469,12 @@ export const UnhideBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
+        ),
       packageBotId: zod
         .string()
         .nullish()
@@ -1436,6 +1529,12 @@ export const UnhideBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1543,6 +1642,12 @@ export const PinBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
+        ),
       packageBotId: zod
         .string()
         .nullish()
@@ -1597,6 +1702,12 @@ export const PinBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1704,6 +1815,12 @@ export const UnpinBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
+        ),
       packageBotId: zod
         .string()
         .nullish()
@@ -1758,6 +1875,12 @@ export const UnpinBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1907,6 +2030,12 @@ export const RevokeBotCallbackTokenResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
+        ),
       packageBotId: zod
         .string()
         .nullish()
@@ -1961,6 +2090,12 @@ export const RevokeBotCallbackTokenResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(

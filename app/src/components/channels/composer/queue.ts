@@ -70,6 +70,12 @@ export type QueuedMessage = {
    * Bot was ready still applies when the message eventually runs.
    */
   attachments: Attachment[];
+  /**
+   * Send now was pressed on it while the Bot still had the turn. The turn is being stopped, and
+   * this message runs on its own the moment it ends, ahead of everything else that is waiting.
+   * The others stay parked and go together after it, as they would have.
+   */
+  next?: true;
 };
 
 export type QueueAction =
@@ -99,7 +105,16 @@ export type QueueAction =
    */
   | { type: "restore"; messages: readonly QueuedMessage[] }
   /** Second thoughts, before it has run. */
-  | { type: "remove"; id: string };
+  | { type: "remove"; id: string }
+  /**
+   * SEND THIS ONE NOW: Claude's "Send now", Replit's "Steer now", LangGraph's `interrupt`.
+   *
+   * Idle (the turn already ended, or a failed drain is holding the queue), it goes out at once on
+   * its own and the rest stay parked. Busy, it is marked `next` and moved to the front; the caller
+   * stops the turn, and `settle` runs the marked messages alone before the rest. The turn's work so
+   * far stays in the conversation: Stop keeps it, and the next turn is sent with all of it.
+   */
+  | { type: "sendNow"; id: string; busy: boolean };
 
 export type QueueTransition = {
   /** The queue afterwards. The same array when nothing moved, so a render can be skipped. */
@@ -161,6 +176,7 @@ export type QueueTransition = {
    * - `submit` joining a non-empty queue — the parked ones only; the live draft is the composer's
    *   to restore.
    * - `submit` with nothing waiting — none, the run IS the live draft.
+   * - `sendNow` on an idle conversation — the one message it sends; busy, none, there is no run.
    * - `remove`, a park, and a `restore` — none, there is no run.
    *
    * THE CALLER IS WHAT ACTS ON IT, and only on failure. See `conversation-view.tsx`, where both
@@ -319,6 +335,21 @@ export function reduceQueue(
         };
       }
       /*
+       * WHAT SEND NOW MARKED GOES ALONE, AND FIRST. The person asked for that message to interrupt
+       * the turn, so it is the next turn by itself; the rest wait for that one to end and then
+       * drain together as they always have.
+       */
+      const next = queue.filter((message) => message.next);
+      if (next.length > 0) {
+        const joined = joinQueued(next, null);
+        return {
+          queue: queue.filter((message) => !message.next),
+          run: joined.draft,
+          droppedAttachments: joined.dropped,
+          restoreIfRunFails: carrying(next, joined.draft.attachments),
+        };
+      }
+      /*
        * Nobody in particular. A drain has no live draft behind it — every message in it was parked
        * minutes ago into a conversation already pinned to one coworker — so there is no mention
        * here to honour and none is invented.
@@ -365,6 +396,47 @@ export function reduceQueue(
         queue: queue.filter((message) => message.id !== action.id),
         run: null,
         droppedAttachments: removed.flatMap((message) => message.attachments),
+        restoreIfRunFails: [],
+      };
+    }
+
+    case "sendNow": {
+      const chosen = queue.find((message) => message.id === action.id);
+      if (!chosen) {
+        // Already drained or taken back: nothing to send, and nothing moves.
+        return {
+          queue,
+          run: null,
+          droppedAttachments: [],
+          restoreIfRunFails: [],
+        };
+      }
+      const rest = queue.filter((message) => message.id !== action.id);
+      if (!action.busy) {
+        // The turn is already over: it simply goes, on its own, and the rest stay where they are.
+        const joined = joinQueued([chosen], null);
+        return {
+          queue: rest,
+          run: joined.draft,
+          droppedAttachments: joined.dropped,
+          restoreIfRunFails: carrying([chosen], joined.draft.attachments),
+        };
+      }
+      if (chosen.next) {
+        return {
+          queue,
+          run: null,
+          droppedAttachments: [],
+          restoreIfRunFails: [],
+        };
+      }
+      // After anything already marked, before everything else: the order Send now was pressed in.
+      const marked = rest.filter((message) => message.next);
+      const waiting = rest.filter((message) => !message.next);
+      return {
+        queue: [...marked, { ...chosen, next: true }, ...waiting],
+        run: null,
+        droppedAttachments: [],
         restoreIfRunFails: [],
       };
     }

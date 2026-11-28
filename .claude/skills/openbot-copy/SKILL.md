@@ -34,6 +34,7 @@ One word for one thing, everywhere a person can see it.
 | **shared account** | An app account the organization connects once, which Bots act as. | team account |
 | **OpenBot** | The product the person is using, and their account with it: "Sign in to OpenBot", "your OpenBot account". | this deployment, the server, the instance, CopilotKit |
 | **OpenBot by CopilotKit** | The company, only where it has to be named: the license agreement's name, a legal or privacy line, the one place setup says who makes OpenBot. | CopilotKit alone |
+| **the CopilotKit account your licence is under** | Managed updates only: the account an admin signs in to on CopilotKit's approval page, named as that page and its sign-in card name it, like GitHub's and Slack's own words. On the same screen, "CopilotKit" alone may say who sees the install's version and health and who the maintenance window is agreed with, in the approval page's own words. | OpenBot by CopilotKit account, your OpenBot account |
 | **turn on / turn off** | An admin switching an app or a feature. | enable / disable (in sentences; a switch may still read "Enabled") |
 | **conversation** | A thread with one or more Bots. | channel, chat (in sentences) |
 | **front end** | The part of OpenBot a person opens in the browser. | the web app, the UI |
@@ -60,6 +61,11 @@ than showing an empty row. `app/src/lib/primitives.ts` holds the names, the orde
 | **Activity** | The record of what a Bot did. | Audit |
 | **Setup** | A Bot's name and instructions. | |
 | **Vault** | Your saved logins and keys. No Bot sees what is in it. | Saved logins, Passwords, Keys, Credentials (as pages) |
+
+**The sidebar strip's short names.** The strip writes each section's name under its icon, in a
+column too narrow for the long ones, so there alone Conversations is **Chats** and Connections is
+**Apps**. The panel or page each opens keeps its full name, and sentences still say "conversation".
+Nowhere else uses these short names.
 
 The scopes are **this Bot** (the Bot's page), **every Bot** (Settings, and Connections for Apps)
 and, in the team edition, **everyone** (Admin). The words in the "Not" column may still appear in a

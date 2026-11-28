@@ -158,6 +158,26 @@ export const taskListQueryOptions = () =>
   });
 
 /**
+ * The conversations a Bot handed work out of that is still working, each once, in order.
+ *
+ * A Bot that hands part of its work to a task (`delegate`) ends its own turn on "On it", and the work
+ * goes on in the task's own conversation, which the roster does not list. Read from the task list,
+ * where the server works out what each task is doing, so the conversation that asked reads as
+ * working for as long as its work is under way, across a reload too.
+ */
+function workingOrigins(tasks: BotTask[]): string[] {
+  const origins = new Set<string>();
+  for (const task of tasks)
+    if (task.status === "working" && task.originChannelId)
+      origins.add(task.originChannelId);
+  return [...origins].sort();
+}
+
+/** The task list, read as the conversations whose delegated work is still working. */
+export const delegatingConversationsQueryOptions = () =>
+  queryOptions({ ...taskListQueryOptions(), select: workingOrigins });
+
+/**
  * One task, as its card in the conversation that asked for it reads it: kept live while it works or
  * waits on the person, and left alone once it is done or couldn't finish.
  */

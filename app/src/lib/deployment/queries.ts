@@ -120,13 +120,29 @@ function showsOpenBotOnThisComputer(): Promise<boolean> {
  * Inside OpenBot Desktop, on the OpenBot on this computer, it is asked with the page's cookies,
  * which that OpenBot needs; the person is in `default` there. Told "not found" all the same, it is
  * asked in one of their own.
+ *
+ * SIGNED OUT, THE TAB STILL KNOWS THE ORGANIZATION IT WORKED IN, and on a hosted OpenBot with many
+ * organizations that one tells nobody it exists. Asked there after Sign out, the sign-in screen was
+ * told "not found" and drew the router's error in its place. Told "not found" in the organization
+ * it knows (signed out since, or no longer in it), it is asked the way it is before signing in.
  */
 export async function readDeployment(options: {
   signal?: AbortSignal;
   fallback: string;
 }): Promise<Deployment> {
   const known = currentOrganizationId();
-  if (known !== undefined) return getDeployment(known, options);
+  if (known !== undefined) {
+    try {
+      return await getDeployment(known, options);
+    } catch (error) {
+      if (!(error instanceof ClientError) || error.status !== 404) throw error;
+      if (await showsOpenBotOnThisComputer()) throw error;
+      return getDeployment(DEPLOYMENT_ORGANIZATION, {
+        ...options,
+        credentials: "omit",
+      });
+    }
+  }
   if (!(await showsOpenBotOnThisComputer()))
     return getDeployment(DEPLOYMENT_ORGANIZATION, {
       ...options,

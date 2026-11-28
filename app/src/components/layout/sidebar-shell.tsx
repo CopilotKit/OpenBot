@@ -1,6 +1,9 @@
 import {
   type CSSProperties,
+  createContext,
   type ReactNode,
+  useCallback,
+  useContext,
   useEffect,
   useMemo,
   useState,
@@ -15,6 +18,7 @@ import {
   parseStoredSidebarOpen,
   SIDEBAR_STORAGE_KEY,
   SIDEBAR_WIDTH_STORAGE_KEY,
+  sidebarWidthStyle,
   storedSidebarWidth,
 } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
@@ -26,6 +30,16 @@ import { cn } from "@/lib/utils";
  */
 const SIDEBAR_GUTTER = "[&_[data-sidebar=menu-button]]:px-2.5";
 
+const PanelAvailableContext = createContext(true);
+
+/**
+ * Whether the open section has a panel to show. Only the app's sidebar of sections ever says no; the
+ * page's "Show sidebar" button asks, so it never offers a panel there is not.
+ */
+export function useSidebarPanelAvailable(): boolean {
+  return useContext(PanelAvailableContext);
+}
+
 /**
  * The frame the three shells — app, admin, settings — hang their sidebar in.
  *
@@ -35,14 +49,22 @@ const SIDEBAR_GUTTER = "[&_[data-sidebar=menu-button]]:px-2.5";
  * dozen lines is three chances for one shell to forget the preference the other two remember.
  *
  * The three shells share one width (`SIDEBAR_WIDTH`), so the sidebar's edge stays put going between
- * them. Dragging it (`SidebarRail`) in any shell changes it for all three.
+ * them. Dragging it (`SidebarRail`) in any shell changes it for all three. Beside a strip that width
+ * is the strip and the panel together. However wide it was left, it takes no more than
+ * `SIDEBAR_MAX_SHARE` of the window, so zooming in never leaves the work a sliver beside it.
+ *
+ * `panel` is for a sidebar of sections (the app's), where the open section may have no panel. Then
+ * the panel is folded away without touching the person's own choice to keep it open or closed, and
+ * asking for it (⌘B, the edge) calls `reveal`, which opens a section that has one.
  */
 export function SidebarShell({
   children,
   className,
+  panel,
 }: {
   children: ReactNode;
   className?: string;
+  panel?: { available: boolean; reveal: () => void };
 }) {
   // Read before the first paint, so a shell somebody left collapsed never flashes open.
   const [open, setOpen] = useState(() =>
@@ -63,6 +85,16 @@ export function SidebarShell({
     [],
   );
 
+  const available = panel?.available ?? true;
+  const reveal = panel?.reveal;
+  const changeOpen = useCallback(
+    (next: boolean) => {
+      if (next && !available) reveal?.();
+      setOpen(next);
+    },
+    [available, reveal],
+  );
+
   useEffect(() => {
     applySidebarOpen(open, {
       setStoredValue: (key, value) => window.localStorage.setItem(key, value),
@@ -73,8 +105,8 @@ export function SidebarShell({
     <SidebarProvider
       className={cn(SIDEBAR_GUTTER, className)}
       data-resizing={resizing ? "" : undefined}
-      onOpenChange={setOpen}
-      open={open}
+      onOpenChange={changeOpen}
+      open={open && available}
       /*
        * `--sidebar-width-mobile` is set for the shape's sake and currently goes unread: the
        * primitive's mobile branch styles its Sheet from a hardcoded 18rem. Below 768px the sidebar
@@ -83,12 +115,16 @@ export function SidebarShell({
        */
       style={
         {
-          "--sidebar-width": width,
+          "--sidebar-width": sidebarWidthStyle(width, {
+            besideStrip: panel !== undefined,
+          }),
           "--sidebar-width-mobile": "20rem",
         } as CSSProperties
       }
     >
-      <SidebarResizeProvider value={resize}>{children}</SidebarResizeProvider>
+      <PanelAvailableContext.Provider value={available}>
+        <SidebarResizeProvider value={resize}>{children}</SidebarResizeProvider>
+      </PanelAvailableContext.Provider>
     </SidebarProvider>
   );
 }

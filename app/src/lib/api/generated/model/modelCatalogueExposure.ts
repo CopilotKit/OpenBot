@@ -3,7 +3,7 @@
  */
 
 /**
- * Who decides what people may pick. all: one person on their own machine, offered every model listed. allowed: a team, offered the models an administrator allowed.
+ * Who decides what people may pick. all: one person on their own machine, offered every model listed. allowed: a team, offered every model listed until an administrator narrows it with the model allowlist (on, with at least one model allowed).
  */
 export type ModelCatalogueExposure =
   (typeof ModelCatalogueExposure)[keyof typeof ModelCatalogueExposure];

@@ -2,6 +2,9 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { PageShell } from "@/components/layout/page-shell";
 import { MemoryList, RememberFact } from "@/components/memory/memories";
 import { deploymentOffersMemory } from "@/lib/deployment/queries";
+import { agentListQueryOptions } from "@/lib/agents/queries";
+import { memoriesQueryOptions, memorySourcesQueryOptions } from "@/lib/memory";
+import { loadFirstScreen } from "@/lib/route-data";
 
 /**
  * Memory: what your Bots remember about you, and facts you add for all of them. The every-Bot page
@@ -16,6 +19,12 @@ export const Route = createFileRoute("/_authed/_app/memory")({
       throw redirect({ to: "/bots", replace: true });
     }
   },
+  loader: ({ context }) =>
+    loadFirstScreen(context.queryClient, [
+      memoriesQueryOptions(),
+      agentListQueryOptions(),
+      memorySourcesQueryOptions(),
+    ]),
   component: MemoryPage,
 });
 
@@ -23,7 +32,7 @@ function MemoryPage() {
   return (
     <PageShell
       className="@container"
-      description="Manage what your Bots remember about you. Facts you add are shared with all Bots; learned facts stay with the Bot that learned them."
+      description="Your Bots remember facts about you, like your role and how you like to work, and use them in every conversation. Facts you add, or ask a Bot to remember, reach all your Bots. A fact a Bot notices by itself stays with that Bot, and you can confirm or forget it here."
       title="Memory"
     >
       <MemoryList action={<RememberFact />} />

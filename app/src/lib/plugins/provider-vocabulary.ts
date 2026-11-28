@@ -1,4 +1,5 @@
 import type { AppSetup } from "@/lib/api/generated/model";
+import { vendorNameOf } from "@/lib/apps/vendor-name";
 
 /**
  * The words an admin Plugins screen uses for the directory's ACTIVE service, and nothing of the
@@ -101,22 +102,40 @@ export function directoryReadFailure(_provider: PluginsProvider): string {
 /**
  * The directory screen's own two sentences: its description and its search section's.
  *
- * Adding an app there connects nobody, in either edition. In the team edition each person connects
- * their own account afterwards; in the personal one, the one person does, on the app's page.
+ * `reader` is the edition, or, in the team edition opened from Connections, what a press does there:
+ * an admin adds the app for everyone and connects their own account (`connect`), and a member asks an
+ * admin for it (`request`). Opened from Admin (`team`), adding connects nobody: each person connects
+ * their own account afterwards.
  */
-export function directoryDescriptions(edition: Edition = "team"): {
+export function directoryDescriptions(
+  reader: Edition | "connect" | "request" = "team",
+): {
   page: string;
   search: string;
 } {
-  return edition === "personal"
-    ? {
-        page: "Add an app and connect your account so your Bots can use it.",
+  const search = "Search by name. Nobody here has reviewed these apps.";
+  switch (reader) {
+    case "personal":
+      return {
+        page: "Connect an app so your Bots can use it.",
         search: "Search by name. OpenBot hasn't reviewed these apps.",
-      }
-    : {
-        page: "Add an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything.",
-        search: "Search by name. Nobody here has reviewed these apps.",
       };
+    case "connect":
+      return {
+        page: "Connect an app to use it yourself. Everyone in your organization can then connect their own account.",
+        search,
+      };
+    case "request":
+      return {
+        page: "Find an app and ask an admin for it. Once it's ready, connect your own account.",
+        search,
+      };
+    default:
+      return {
+        page: "Connect an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything.",
+        search,
+      };
+  }
 }
 
 /**
@@ -144,10 +163,17 @@ export type MoreAppsRow = {
 /** Where the personal edition's one person turns connecting apps on: Settings, Setup. */
 const PERSONAL_SET_UP = "Set it up in Settings under Setup.";
 
+/**
+ * Who sets connecting apps up on a hosted OpenBot (`managePaths().hosted`), where an organization
+ * admin holds no environment: OpenBot by CopilotKit, which runs it.
+ */
+const HOSTED_SET_UP = "OpenBot by CopilotKit sets it up.";
+
 export function moreAppsRow(
   provider: PluginsProvider,
   configured: boolean,
   edition: Edition = "team",
+  hosted = false,
 ): MoreAppsRow {
   const { directoryLabel, envVar } = VOCABULARY[provider];
   if (!configured) {
@@ -156,7 +182,9 @@ export function moreAppsRow(
       description:
         edition === "personal"
           ? `Not set up yet. ${PERSONAL_SET_UP}`
-          : `Not set up. Set ${envVar} on this deployment to browse its apps.`,
+          : hosted
+            ? `Not set up yet. ${HOSTED_SET_UP}`
+            : `Not set up. Set ${envVar} on this deployment to browse its apps.`,
       linked: false,
     };
   }
@@ -181,7 +209,7 @@ export function brokeredConnectionDescription(
     return "Each person connects their own account through OpenBot.";
   if (personal.kind === "no-auth")
     return `${capitalised(personal.title)} works through OpenBot without an account.`;
-  return `Connect your ${personal.title} account through OpenBot.`;
+  return `Connect your ${vendorNameOf(personal.title)} account through OpenBot.`;
 }
 
 /**
@@ -200,6 +228,7 @@ export function brokeredReach(
   _provider: PluginsProvider,
   personal?: BrokeredApp,
   takesKey = false,
+  hosted = false,
 ): {
   description: string;
   badge: string;
@@ -209,7 +238,7 @@ export function brokeredReach(
     return {
       description: takesKey
         ? "Each person connects their own account with a key from the app, and a Bot sees only what that person can see."
-        : "This deployment holds one key for every app like this. Each person connects their own account, and a Bot sees only what that person can see. There is no token to paste.",
+        : `${hosted ? "OpenBot" : "This deployment"} holds one key for every app like this. Each person connects their own account, and a Bot sees only what that person can see. There is no token to paste.`,
       badge,
     };
   }
@@ -219,7 +248,7 @@ export function brokeredReach(
       kind === "consent"
         ? `You sign in to ${title} in your browser. OpenBot never sees your password.`
         : kind === "fields"
-          ? `You connect with a key from your ${title} account. Your Bots use it as you.`
+          ? `You connect with a key from your ${vendorNameOf(title)} account. Your Bots use it as you.`
           : "There's nothing to sign in to.",
     badge,
   };
@@ -244,11 +273,14 @@ export function brokeredKeyMissing(
   provider: PluginsProvider,
   edition: Edition = "team",
   reader: "admin" | "person" = "admin",
+  hosted = false,
 ): string {
   if (edition === "personal")
     return `Connecting apps isn't set up yet, so you can't connect or disconnect this account here. ${PERSONAL_SET_UP}`;
   if (reader === "person")
     return "Connecting apps isn't set up yet, so this account can't be connected or disconnected here. Ask an admin to set it up.";
+  if (hosted)
+    return `Connecting apps isn't set up yet, so this account can't be connected or disconnected here. ${HOSTED_SET_UP} The app stays turned on, and its tool grants still stand.`;
   return `Set ${VOCABULARY[provider].envVar} on this deployment. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.`;
 }
 

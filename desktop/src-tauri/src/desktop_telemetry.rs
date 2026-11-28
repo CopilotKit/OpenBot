@@ -795,6 +795,7 @@ pub fn cli_reason(reason: local_eval::Reason) -> telemetry::CliReason {
         R::Unrecognized => T::Unrecognized,
         // OpenBot's own reading of a failure the CLI reported as this.
         R::StackLost => T::LocalCommandFailed,
+        R::BackendGone => T::LocalCommandFailed,
     }
 }
 
@@ -2245,6 +2246,42 @@ mod tests {
                 .map(|event| event.data)
                 .collect()
         }
+    }
+
+    /// The window says when OpenBot for Business's booker came on screen and when its calendar
+    /// booked a call, by place only. Anything else beside the place is refused.
+    #[test]
+    fn business_telemetry_ipc_accepts_a_place_and_nothing_else() {
+        let fixture = Fixture::new();
+        fixture.invoke(serde_json::json!({
+            "kind": "business_opened",
+            "place": "welcome"
+        }));
+        fixture.invoke(serde_json::json!({
+            "kind": "business_booked",
+            "place": "move_to_cloud"
+        }));
+        fixture.invoke(serde_json::json!({
+            "kind": "business_booked",
+            "place": "welcome",
+            "start_time": "2026-11-25T15:00:00Z"
+        }));
+        fixture.invoke(serde_json::json!({
+            "kind": "business_opened",
+            "place": "account_menu"
+        }));
+
+        assert_eq!(
+            fixture.queued(),
+            vec![
+                telemetry::EventData::BusinessOpened {
+                    place: telemetry::BusinessPlace::Welcome
+                },
+                telemetry::EventData::BusinessBooked {
+                    place: telemetry::BusinessPlace::MoveToCloud
+                },
+            ]
+        );
     }
 
     #[test]

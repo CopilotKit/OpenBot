@@ -70,6 +70,12 @@ pub trait Computer {
     fn stop_backend(&mut self, engine: &Address, root: &Path) -> Result<(), String>;
     /// The backend deleted with the CLI, when OpenBot created it.
     fn delete_backend(&mut self, engine: &Address, root: &Path) -> Result<(), String>;
+    /// The volumes the installation at `root` provably owns (`stack::leftover_volumes`), with the
+    /// stopped containers still holding them, removed. Never a volume of anything else.
+    fn remove_volumes(&mut self, engine: &Address, root: &Path) -> Result<(), String>;
+    /// The images OpenBot pulled for the installation at `root` and its earlier releases, removed
+    /// one reference at a time and never forced. Never an image of anything else.
+    fn remove_images(&mut self, engine: &Address, root: &Path) -> Result<(), String>;
     /// The Podman machine `name`: `None` when there is none (or no Podman), else whether it runs.
     fn machine(&mut self, name: &str) -> Result<Option<bool>, String>;
     fn stop_machine(&mut self, name: &str) -> Result<(), String>;
@@ -132,6 +138,26 @@ pub fn stop_with(
                     "Couldn't remove OpenBot's services.",
                     "the backend's delete",
                     deleted,
+                );
+                // On an engine that isn't OpenBot's own machine (Docker Desktop, or a Podman
+                // machine of the person's), the data and the software stayed there after the
+                // containers went: nothing removes a volume or an image by itself. In OpenBot's
+                // machine they go with the machine too, and asking first changes nothing.
+                say("Removing OpenBot's data.");
+                let volumes = computer.remove_volumes(&engine, root);
+                note(
+                    &mut failures,
+                    "Couldn't remove all of OpenBot's data.",
+                    "removing the installation's volumes",
+                    volumes,
+                );
+                say("Removing OpenBot's software.");
+                let images = computer.remove_images(&engine, root);
+                note(
+                    &mut failures,
+                    "Couldn't remove all of OpenBot's software.",
+                    "removing the installation's images",
+                    images,
                 );
             }
         }
@@ -214,15 +240,45 @@ pub fn stop_with(
     failures
 }
 
-/// A failed step: the person's line, and the engine's own words in the log.
+/// A failed step: the person's line, and the engine's own words in the log. The uninstaller adds
+/// that it goes on anyway (`UNINSTALLING_ANYWAY`); the move to OpenBot Cloud shows the line as is.
 fn note(failures: &mut Vec<String>, sentence: &str, step: &str, result: Result<(), String>) {
     match result {
         Ok(()) => log::info!("[uninstall] {step}: done"),
         Err(error) => {
             log::warn!("[uninstall] {step} failed: {error}");
-            failures.push(format!("{sentence} Uninstalling anyway."));
+            failures.push(sentence.to_owned());
         }
     }
+}
+
+/// What the uninstaller says after each failed step's line: it goes on either way.
+pub const UNINSTALLING_ANYWAY: &str = "Uninstalling anyway.";
+
+/**
+Everything of OpenBot's in the installation folder `root` that `remove_installation` removes, and
+its downloads in the home folder `home`: what the move to OpenBot Cloud measures before and after,
+to say how much space it freed. Nothing when `root` holds no installation OpenBot recorded.
+*/
+pub fn installation_parts(root: &Path, home: Option<&Path>) -> Vec<std::path::PathBuf> {
+    let mut parts = Vec::new();
+    if RECORDS.iter().any(|record| root.join(record).exists()) {
+        if let Ok(entries) = std::fs::read_dir(root) {
+            for entry in entries.flatten() {
+                if openbots(&entry.file_name().to_string_lossy()) {
+                    parts.push(entry.path());
+                }
+            }
+        }
+    }
+    if let Some(home) = home {
+        let downloads = crate::acquire::download_dir(&crate::stack::default_root_in(home));
+        if !parts.iter().any(|part| downloads.starts_with(part)) {
+            parts.push(downloads);
+        }
+    }
+    parts.sort();
+    parts
 }
 
 /// Only OpenBot writes these, so a folder with one of them is an OpenBot installation.
@@ -448,6 +504,12 @@ mod tests {
         fn delete_backend(&mut self, _engine: &Address, root: &Path) -> Result<(), String> {
             self.result(format!("delete backend {}", root.display()))
         }
+        fn remove_volumes(&mut self, _engine: &Address, root: &Path) -> Result<(), String> {
+            self.result(format!("remove volumes {}", root.display()))
+        }
+        fn remove_images(&mut self, _engine: &Address, root: &Path) -> Result<(), String> {
+            self.result(format!("remove images {}", root.display()))
+        }
         fn machine(&mut self, name: &str) -> Result<Option<bool>, String> {
             self.result(format!("machine {name}"))?;
             Ok(self.machine)
@@ -524,6 +586,8 @@ mod tests {
                 "compose down /home/a/OpenBot",
                 "stop backend /home/a/OpenBot",
                 "delete backend /home/a/OpenBot",
+                "remove volumes /home/a/OpenBot",
+                "remove images /home/a/OpenBot",
                 "machine openbot",
                 "stop containers openbot",
                 "stop machine openbot",
@@ -538,6 +602,8 @@ mod tests {
                 "Stopping OpenBot.",
                 "Stopping OpenBot's services.",
                 "Removing OpenBot's services.",
+                "Removing OpenBot's data.",
+                "Removing OpenBot's software.",
                 "Stopping the software OpenBot runs on.",
                 "Removing the software OpenBot runs on.",
                 "Removing OpenBot's files.",
@@ -560,10 +626,7 @@ mod tests {
             computer.calls.last().map(String::as_str),
             Some("remove installation /home/a/OpenBot keeping engine")
         );
-        assert_eq!(
-            failures,
-            ["Couldn't remove the software OpenBot runs on. Uninstalling anyway."]
-        );
+        assert_eq!(failures, ["Couldn't remove the software OpenBot runs on."]);
 
         let mut computer = Recorded {
             failing: vec!["machine openbot"],
@@ -594,7 +657,7 @@ mod tests {
         let mut computer = Recorded::with_machine(true);
         run(&mut computer, DELETE);
         assert_eq!(
-            computer.calls[4..],
+            computer.calls[6..],
             [
                 "machine openbot",
                 "stop containers openbot",
@@ -608,7 +671,7 @@ mod tests {
         computer.failing = vec!["stop containers"];
         let (_, failures) = run(&mut computer, DELETE);
         assert_eq!(
-            computer.calls[4..],
+            computer.calls[6..],
             [
                 "machine openbot",
                 "stop containers openbot",
@@ -644,7 +707,7 @@ mod tests {
         let mut computer = Recorded::with_machine(false);
         run(&mut computer, DELETE);
         assert_eq!(
-            computer.calls[4..],
+            computer.calls[6..],
             [
                 "machine openbot",
                 "remove machine openbot",
@@ -669,6 +732,14 @@ mod tests {
         assert!(computer
             .calls
             .contains(&"compose down /home/a/OpenBot".to_string()));
+        // Docker keeps OpenBot's data and software after its containers go, unless they are
+        // removed too: a new installation found the old one's database and Bots' files there.
+        assert!(computer
+            .calls
+            .contains(&"remove volumes /home/a/OpenBot".to_string()));
+        assert!(computer
+            .calls
+            .contains(&"remove images /home/a/OpenBot".to_string()));
         assert_eq!(
             computer.calls.last().unwrap(),
             "remove installation /home/a/OpenBot"
@@ -722,14 +793,14 @@ mod tests {
         let mut computer = Recorded::with_machine(true);
         computer.failing = vec!["compose down", "stop machine"];
         let (_, failures) = run(&mut computer, DELETE);
-        assert_eq!(computer.calls.len(), 9, "{:?}", computer.calls);
+        assert_eq!(computer.calls.len(), 11, "{:?}", computer.calls);
         // Plain words for the person (box I's details said "computer namespace" and an exit
         // code); the engine's own words go to the log.
         assert_eq!(
             failures,
             [
-                "Couldn't stop OpenBot. Uninstalling anyway.",
-                "Couldn't stop the software OpenBot runs on. Uninstalling anyway.",
+                "Couldn't stop OpenBot.",
+                "Couldn't stop the software OpenBot runs on.",
             ]
         );
     }
@@ -743,12 +814,14 @@ mod tests {
             "compose down",
             "stop backend",
             "delete backend",
+            "remove volumes",
+            "remove images",
             "stop machine",
             "remove machine",
             "remove installation",
         ];
         let (said, failures) = run(&mut computer, DELETE);
-        assert_eq!(failures.len(), 6, "{failures:?}");
+        assert_eq!(failures.len(), 8, "{failures:?}");
         let technical = [
             "podman",
             "engine",

@@ -1,0 +1,299 @@
+# Web push: notifications to the browsers a person turned them on in, through each browser's own push
+# service (the Push API, with the server identifying itself by VAPID, RFC 8292). The browser's side of
+# a person's notifications, beside the phones in notifications.yaml: what is sent, and where each kind
+# of update may go, is the same for both (notification settings, the push transport).
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+paths:
+  /api/v2/organizations/{organizationId}/web-push-key:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Web push]
+      operationId: getWebPushKey
+      summary: Read the key a browser subscribes to push notifications with
+      description: >-
+        Return this OpenBot's public application server key (VAPID, RFC
+        8292), the key a browser passes as applicationServerKey when it
+        subscribes to push notifications, so that only this OpenBot can send
+        to the subscription. It is the same in every organization here and
+        stays the same across restarts and upgrades. A browser holding a
+        subscription made with a different key unsubscribes and subscribes
+        again with this one. Anybody signed in to the organization may read
+        it: it is public by design.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [devices:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebPushKey'
+              examples:
+                key:
+                  $ref: '#/components/examples/WebPushKeyExample'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/web-push-subscriptions/{subscriptionId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/WebPushSubscriptionId'
+    put:
+      tags: [Web push]
+      operationId: saveWebPushSubscription
+      summary: Save this browser's push subscription
+      description: >-
+        Save the push subscription a browser made, under the id the app made
+        for that browser, so the person's Bots send push notifications to it
+        from this organization: replies, questions, approvals and sign-in
+        requests, as the person's notification settings route push. Saving
+        again replaces what the id holds; the app saves on every start, so a
+        subscription the browser renewed replaces the old one. A
+        subscription is saved once in each organization: saving its address
+        under another id, or as another person, moves it there, so a browser
+        that changes hands notifies only whoever saved it last. The address
+        must be a browser push service's (Apple's, Google's, Mozilla's or
+        Microsoft's). A subscription the push service says has ended is
+        removed when the next notification to it is refused. Only the person
+        themselves may save their subscriptions.
+      security:
+        - webSession: []
+        - appOAuth: [devices:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveWebPushSubscriptionRequest'
+            examples:
+              chrome:
+                value:
+                  endpoint: https://fcm.googleapis.com/fcm/send/dQw4w9WgXcQ:APA91bHPRgkF3JUikC4ENAHEeMrd41Zxv3hVZjC9KtT8OvPVGJ-hQMRKRrZuJAEcl7B338qju59zJMjw2DELjzEvxwYv7hH5Ynpc1ODQ0aT4U4OFEeBkpI1ffakVCgWq4CwOI5tHxN3n
+                  keys:
+                    p256dh: BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM
+                    auth: tBHItJI5svbpez7KI4CCXg
+      responses:
+        '200':
+          description: The subscription, saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebPushSubscriptionResponse'
+              examples:
+                saved:
+                  $ref: '#/components/examples/WebPushSubscriptionResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidWebPushSubscription'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Web push]
+      operationId: deleteWebPushSubscription
+      summary: Stop push notifications to this browser
+      description: >-
+        Stop sending push notifications to a browser from this organization.
+        Its subscriptions in the person's other organizations stay. The app
+        does this when the person turns notifications off in that browser and
+        when they sign out of it. Only the person themselves may remove their
+        subscriptions. One already removed is not found, which a client can
+        read as done.
+      security:
+        - webSession: []
+        - appOAuth: [devices:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The browser gets no more push notifications from this organization.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/WebPushSubscriptionNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  parameters:
+    WebPushSubscriptionId:
+      name: subscriptionId
+      in: path
+      required: true
+      description: >-
+        The browser's id: a UUID the app makes once in that browser and
+        keeps, so saving again replaces rather than adds.
+      schema:
+        type: string
+        format: uuid
+      example: 6d0f2a4b-8c1e-4f3a-9b5d-7e2c4a6f8b10
+  schemas:
+    WebPushKey:
+      type: object
+      required: [publicKey]
+      properties:
+        publicKey:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{87}$
+          description: >-
+            The public key: an uncompressed P-256 point (65 bytes), in
+            URL-safe base64 with no padding, as the Push API's
+            applicationServerKey takes it.
+    WebPushSubscriptionKeys:
+      type: object
+      additionalProperties: false
+      required: [p256dh, auth]
+      description: >-
+        The keys the browser encrypts with (RFC 8291), as the subscription's
+        getKey() or toJSON() gives them, in URL-safe base64.
+      properties:
+        p256dh:
+          type: string
+          minLength: 87
+          maxLength: 88
+          pattern: ^[A-Za-z0-9_-]+=?$
+          description: The browser's P-256 public key, uncompressed (65 bytes).
+        auth:
+          type: string
+          minLength: 22
+          maxLength: 24
+          pattern: ^[A-Za-z0-9_-]+={0,2}$
+          description: The authentication secret (16 bytes).
+    SaveWebPushSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      required: [endpoint, keys]
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: ^https://
+          description: >-
+            The subscription's endpoint, the address its push service gave
+            it. It is a credential: OpenBot never sends it back.
+        keys:
+          $ref: '#/components/schemas/WebPushSubscriptionKeys'
+    WebPushSubscription:
+      type: object
+      description: >-
+        A browser that gets push notifications for the person, from every one
+        of their Bots in this organization. Never its endpoint or keys.
+      required: [id, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The id the app made for the browser.
+        createdAt:
+          type: string
+          format: date-time
+          description: When OpenBot first saved a subscription under this id.
+    WebPushSubscriptionResponse:
+      type: object
+      required: [webPushSubscription]
+      properties:
+        webPushSubscription:
+          $ref: '#/components/schemas/WebPushSubscription'
+  responses:
+    InvalidWebPushSubscription:
+      description: >-
+        The request doesn't match the API, or the endpoint is not a browser
+        push service's address.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notAPushService:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: That address isn't a browser push service's, so OpenBot can't send notifications to it.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    WebPushSubscriptionNotFound:
+      description: >-
+        The person has no such subscription in this organization: it was
+        removed already, or never saved. Or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/web-push-subscription-not-found
+                title: Subscription not found.
+                status: 404
+                detail: Subscription not found.
+                code: WEB_PUSH_SUBSCRIPTION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    WebPushKeyExample:
+      summary: This OpenBot's key.
+      value:
+        publicKey: BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U
+    WebPushSubscriptionResponseExample:
+      summary: A browser, saved.
+      value:
+        webPushSubscription:
+          id: 6d0f2a4b-8c1e-4f3a-9b5d-7e2c4a6f8b10
+          createdAt: '2026-11-26T18:04:12.000Z'

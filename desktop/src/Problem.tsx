@@ -187,9 +187,12 @@ export function TroubleshootingLogs({
 export function Failure({
   problem,
   onRetry,
+  retryLabel = "Try again",
 }: {
   problem: Problem;
   onRetry?: () => void;
+  /** What the button that runs `onRetry` says, when Try again isn't what it does. */
+  retryLabel?: string;
 }) {
   if (appTooOld(problem)) return <AppTooOld problem={problem} />;
   return (
@@ -200,7 +203,7 @@ export function Failure({
       {onRetry && (
         <div className="row">
           <button type="button" onClick={onRetry}>
-            Try again
+            {retryLabel}
           </button>
         </div>
       )}

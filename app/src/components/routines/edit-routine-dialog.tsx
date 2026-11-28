@@ -44,6 +44,7 @@ import {
 import { updateRoutineMutationOptions } from "@/lib/routines/mutations";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** The fields this dialog draws, each with the first rule its answer breaks. */
 type Edited = "title" | "instruction" | "time";
@@ -353,7 +354,7 @@ function EditRoutineForm({
         </form>
         {update.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {update.error.message}
+            {failureSaid(update.error)}
           </p>
         ) : null}
       </DialogBody>

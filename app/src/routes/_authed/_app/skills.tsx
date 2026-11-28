@@ -1,6 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import { SkillsSettingsPage } from "@/components/skills/skills-settings-page";
+import { agentListQueryOptions } from "@/lib/agents/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { browserStateQueryOptions } from "@/lib/browser/queries";
+import { loadFirstScreen } from "@/lib/route-data";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 
 /**
  * Skills, the every-Bot page of Skills, in the main menu beside Bots, in both editions. See
@@ -19,6 +24,14 @@ const skillsSearchSchema = z.object({
 
 export const Route = createFileRoute("/_authed/_app/skills")({
   validateSearch: skillsSearchSchema,
+  loader: ({ context }) =>
+    loadFirstScreen(context.queryClient, [
+      skillListQueryOptions(),
+      currentUserQueryOptions(),
+      agentListQueryOptions(),
+      agentListQueryOptions(true),
+      browserStateQueryOptions(),
+    ]),
   component: SkillsRoute,
 });
 

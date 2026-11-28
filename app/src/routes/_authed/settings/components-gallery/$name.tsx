@@ -26,6 +26,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { componentListQueryOptions } from "@/lib/components/queries";
 import { galleryComponent } from "@/lib/copilot/gallery-registry";
+import { loadFailure } from "@/lib/load-failure";
 
 /** The same way back from every state this route can be in. */
 const BACK = {
@@ -79,7 +80,10 @@ function RouteComponent() {
     return (
       <PageShell backButton={BACK} title="Components gallery">
         <p className="mt-8 text-destructive text-sm" role="alert">
-          Couldn't load components. Try again in a moment.
+          {loadFailure(
+            components.error,
+            "Couldn't load components. Try again in a moment.",
+          )}
         </p>
       </PageShell>
     );
