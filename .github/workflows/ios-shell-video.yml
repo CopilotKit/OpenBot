@@ -101,7 +101,7 @@ jobs:
         run: |
           echo "$(date +%s) build-and-web" >> "$RUNNER_TEMP/timing"
           nohup bash -c 'xcodebuild build-for-testing -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell \
-            -configuration Debug -destination "platform=iOS Simulator,id=$1" -derivedDataPath DerivedData-Debug \
+            -configuration Debug -destination "generic/platform=iOS Simulator" -derivedDataPath DerivedData-Debug \
             CODE_SIGNING_ALLOWED=NO > xcodebuild-build.log 2>&1; echo $? > "$2"' build "$SIM_UDID" \
             "$RUNNER_TEMP/build.status" > /dev/null 2>&1 &
 
@@ -109,12 +109,20 @@ jobs:
         with:
           bun-version: 1.4.3
 
+      # From git's own object ids: hashFiles over the workspace timed out once DerivedData was in it.
+      - name: Work out the web app's cache key
+        id: web-key
+        run: |
+          sum="$( (git rev-parse HEAD:app/src HEAD:app/public HEAD:shared HEAD:tokens; \
+            git hash-object app/index.html app/package.json app/vite.config.* app/tsconfig*.json bun.lock package.json .env.example) | shasum | cut -c1-40)"
+          echo "key=ios-shell-web-v2-$sum" >> "$GITHUB_OUTPUT"
+
       - name: Look for the built web app in the cache
         id: web-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: app/dist
-          key: ios-shell-video-web-${{ hashFiles('app/src/**', 'app/public/**', 'app/index.html', 'app/package.json', 'app/vite.config.*', 'app/tsconfig*.json', 'shared/**', 'tokens/**', 'bun.lock', 'package.json', '.env.example') }}
+          key: ${{ steps.web-key.outputs.key }}
 
       - name: Install, build the web app if needed, start mock stack A
         timeout-minutes: 10
@@ -287,7 +295,7 @@ jobs:
           extra=()
           if [ "$CONFIGURATION" = "Release" ]; then extra=(SWIFT_ACTIVE_COMPILATION_CONDITIONS=OPENBOT_TEST_ENVIRONMENT); fi
           xcodebuild build-for-testing -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration "$CONFIGURATION" \
-            -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath "DerivedData-$CONFIGURATION" CODE_SIGNING_ALLOWED=NO \
+            -destination "generic/platform=iOS Simulator" -derivedDataPath "DerivedData-$CONFIGURATION" CODE_SIGNING_ALLOWED=NO \
             "${extra[@]}" \
             2>&1 | tee xcodebuild-build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build.log
