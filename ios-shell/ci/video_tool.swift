@@ -6,11 +6,17 @@ import AVFoundation
 import Foundation
 
 let args = CommandLine.arguments
-if args.count == 3, args[1] == "--duration" {
+if args.count == 3, ["--duration", "--track-info"].contains(args[1]) {
     let asset = AVURLAsset(url: URL(fileURLWithPath: args[2]))
-    guard let duration = asset.tracks(withMediaType: .video).first?.timeRange.duration.seconds,
-          duration.isFinite, duration > 0 else { exit(1) }
-    print(duration)
+    guard let track = asset.tracks(withMediaType: .video).first else { exit(1) }
+    let duration = track.timeRange.duration.seconds
+    guard duration.isFinite, duration > 0 else { exit(1) }
+    if args[1] == "--duration" {
+        print(duration)
+    } else {
+        let size = track.naturalSize.applying(track.preferredTransform)
+        print("\(Int(abs(size.width).rounded())),\(duration)")
+    }
     exit(0)
 }
 guard args.count == 6, let start = Double(args[3]), let length = Double(args[4]), let width = Double(args[5]) else {
@@ -21,7 +27,8 @@ let asset = AVURLAsset(url: URL(fileURLWithPath: args[1]))
 let output = URL(fileURLWithPath: args[2])
 try? FileManager.default.removeItem(at: output)
 // Cutting alone copies the stream (no re-encode); scaling needs one encode.
-let preset = width > 0 ? AVAssetExportPresetMediumQuality : AVAssetExportPresetPassthrough
+// MediumQuality caps the long side at 480 pixels, even when the composition requests a larger frame.
+let preset = width > 0 ? AVAssetExportPresetHighestQuality : AVAssetExportPresetPassthrough
 guard let export = AVAssetExportSession(asset: asset, presetName: preset) else {
     FileHandle.standardError.write("no export session\n".data(using: .utf8)!)
     exit(1)

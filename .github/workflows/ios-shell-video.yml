@@ -221,6 +221,7 @@ jobs:
           python3 ios-shell/ci/trim_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log "$STARTED" || true
           ls -la artifacts/video
           python3 ios-shell/ci/check_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log 30
+          python3 ios-shell/ci/check_video.py artifacts/video/demo-tour-600.mp4 xcodebuild-demo.log 30 600
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
