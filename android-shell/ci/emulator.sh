@@ -17,6 +17,8 @@ export PATH="$SDK/cmdline-tools/latest/bin:$SDK/emulator:$SDK/platform-tools:$PA
 # Where avdmanager writes the AVD and the emulator looks for it (newer tools default elsewhere).
 export ANDROID_AVD_HOME="$HOME/.android/avd"
 mkdir -p "$ARTIFACTS" "$ANDROID_AVD_HOME"
+# adb for the workflow's later steps too.
+if [ -n "${GITHUB_PATH:-}" ]; then echo "$SDK/platform-tools" >> "$GITHUB_PATH"; fi
 
 boot() {
   yes | sdkmanager --licenses > /dev/null 2>&1 || true
