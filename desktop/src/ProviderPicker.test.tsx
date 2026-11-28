@@ -1853,3 +1853,36 @@ test("refreshing the AI connection has no sections and no foot, with nothing beh
   expect(view.queryByRole("list", { name: "Setup" })).toBeNull();
   expect(view.container.querySelector(".rail-foot")).toBeNull();
 });
+
+/*
+ * A pasted API key stays on this computer (vault.rs). The typed-key forms did not say so, so
+ * pasting a paid key meant trusting the dialog blind (#2066).
+ */
+test("API key fields say the key stays on this computer", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return allProviders;
+    if (command === "cancel_chatgpt_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+  const kept = /OpenBot keeps this key on this computer/;
+
+  await pick(view, /^Anthropic/);
+  await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
+  expect(view.getByLabelText("Anthropic API key")).toBeTruthy();
+  expect(view.getByText(kept)).toBeTruthy();
+
+  await pick(view, /^Google Gemini/);
+  expect(view.getByLabelText("Google Gemini API key")).toBeTruthy();
+  expect(view.getByText(kept)).toBeTruthy();
+
+  await pick(view, /^TrustedRouter/);
+  expect(view.getByLabelText("TrustedRouter API key")).toBeTruthy();
+  expect(view.getByText(kept)).toBeTruthy();
+
+  await pick(view, /^OpenAI-compatible/);
+  expect(
+    view.getByLabelText("API key, if the endpoint needs one"),
+  ).toBeTruthy();
+  expect(view.getByText(kept)).toBeTruthy();
+});
