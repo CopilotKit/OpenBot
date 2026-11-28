@@ -8,6 +8,9 @@ import subprocess
 import sys
 
 STATUS = re.compile(r"^Test Case '-\[(?:\w+\.)?(\w+) (\w+)\]' (passed|failed|skipped) \(([\d.]+) seconds\)\.$")
+# Extract only the source location. The remainder of an XCTest assertion can include a page URL
+# or text from a production account.
+ASSERTION = re.compile(r"/OpenBotShellUITests/(\w+\.swift):(\d+): error: -\[(?:\w+\.)?(\w+) (\w+)\]")
 FIXTURE_SUITES = {"ShellFlowUITests", "DemoTourUITests"}
 
 
@@ -16,10 +19,16 @@ def main(output, attachments, logs):
     rows = []
     for log in logs:
         if log.is_file():
+            failures = {}
             for line in log.read_text(errors="replace").splitlines():
+                if issue := ASSERTION.search(line):
+                    filename, number, suite, test = issue.groups()
+                    failures.setdefault((suite, test), set()).add(f"{filename}:{number}")
                 if match := STATUS.fullmatch(line.strip()):
                     suite, test, result, seconds = match.groups()
-                    rows.append(f"- {suite}.{test} — {result} ({seconds} s)")
+                    sources = sorted(failures.pop((suite, test), set()))
+                    where = f" at {', '.join(sources)}" if sources and result == "failed" else ""
+                    rows.append(f"- {suite}.{test} — {result} ({seconds} s){where}")
     summary = "\n".join(rows) or "No completed test cases were recorded."
     (output / "SUMMARY.md").write_text(summary + "\n")
     print(summary)

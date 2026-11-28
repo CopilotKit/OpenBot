@@ -37,19 +37,19 @@ final class ShellFlowUITests: ShellTestCase {
     }
 
     // The lock screen lifts by itself when OpenBot comes back. CI starts a third stack on 3012
-    // (over mock A's server) 8 s after this test writes the trigger file it names.
+    // (over mock A's server) after this test observes the offline screen and writes the trigger file.
     func testLockLiftsWhenServerComesBack() throws {
         guard let trigger = ProcessInfo.processInfo.environment["OPENBOT_SHELL_LATE_STACK_TRIGGER"], !trigger.isEmpty else {
             throw XCTSkip("OPENBOT_SHELL_LATE_STACK_TRIGGER is not set (CI sets it)")
         }
         // A session the server does not know: the app starts signed in and loads Home from 3012.
-        let wrote = FileManager.default.createFile(atPath: trigger, contents: Data("go\n".utf8))
-        XCTAssertTrue(wrote, "could not write the trigger file")
         let app = launch(base: "http://127.0.0.1:3012", moment: "late", extra: ["OPENBOT_SHELL_TEST_STALE_SESSION": "1"])
         XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 15), "no lock screen while the server is down")
         sleep(1)
         screenshot("1-lock-while-server-down")
         assertLockScreen(app, reason: "load-failed")
+        XCTAssertTrue(FileManager.default.createFile(atPath: trigger, contents: Data("go\n".utf8)),
+                      "could not start the recovery server")
         XCTAssertTrue(lockScreen(app).waitForNonExistence(timeout: 60), "the lock did not lift when the server came up; \(debugState(app))")
         // The page loads, says nobody is signed in, and the native sign-in comes back.
         XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 30), "no sign-in screen after recovery; \(debugState(app))")
@@ -570,7 +570,10 @@ final class ShellFlowUITests: ShellTestCase {
     func testLoadingSkeleton() throws {
         var app = launchSignedIn(moment: "sign-in")
         XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
-        sleep(3)
+        // Background the app as the app switcher does before closing it. This gives WebKit
+        // its normal lifecycle transition to persist the freshly issued session.
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10) || app.state == .runningBackgroundSuspended)
         app.terminate()
         for (moment, dark) in [("light", false), ("dark", true)] {
             var extra = ["OPENBOT_SHELL_DELAY_FIRST_LOAD_SECONDS": "3"]

@@ -26,8 +26,20 @@ final class DemoTourUITests: ShellTestCase {
 
     func testDemoTour() throws {
         continueAfterFailure = false
+        let recording = ProcessInfo.processInfo.environment["OPENBOT_SHELL_RECORDING_SIGNAL"]
+        if let recording {
+            try Data().write(to: URL(fileURLWithPath: recording + ".ready"), options: .atomic)
+            let started = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                FileManager.default.fileExists(atPath: recording + ".started")
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [started], timeout: 30), .completed,
+                           "the simulator recorder did not start")
+        }
         note("video-mark start \(Date().timeIntervalSince1970)")
-        defer { note("video-mark end \(Date().timeIntervalSince1970)") }
+        defer {
+            note("video-mark end \(Date().timeIntervalSince1970)")
+            if let recording { FileManager.default.createFile(atPath: recording + ".done", contents: nil) }
+        }
         sceneStart = Date()
 
         // Sign in, not ephemeral: the system's consent alert, as a person sees it.

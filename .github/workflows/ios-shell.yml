@@ -104,11 +104,10 @@ jobs:
 
       - name: Arm the late stack
         run: |
-          # testLockLiftsWhenServerComesBack writes the trigger file, then expects OpenBot to come up
-          # on 3012 (over mock A's server) about 8 s later.
+          # The test signals after it has checked the offline screen. Start the server on demand.
           trigger="$RUNNER_TEMP/openbot-shell-late-stack"
           echo "LATE_STACK_TRIGGER=$trigger" >> "$GITHUB_ENV"
-          nohup bash -c 'while [ ! -f "$1" ]; do sleep 1; done; sleep 8; echo "starting the late stack"; APP_PORT=3012 SERVER_PORT=3001 exec bun app/serve.ts' \
+          nohup bash -c 'while [ ! -f "$1" ]; do sleep 1; done; echo "starting the late stack"; APP_PORT=3012 SERVER_PORT=3001 exec bun app/serve.ts' \
             late-stack "$trigger" > artifacts/app-late.log 2>&1 &
 
       - name: Start the probe server

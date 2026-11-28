@@ -201,26 +201,8 @@ jobs:
           for _ in $(seq 1 300); do [ -f "$RUNNER_TEMP/simulator.ready" ] && break; sleep 1; done
           [ -f "$RUNNER_TEMP/simulator.ready" ] || { cat "$RUNNER_TEMP/boot.log"; exit 1; }
           echo "$(date +%s) record" >> "$RUNNER_TEMP/timing"
-          started="$(python3 -c 'import time; print(time.time())')"
-          echo "STARTED=$started" >> "$GITHUB_ENV"
-          xcrun simctl io "$SIM_UDID" recordVideo --codec h264 --force artifacts/video/demo-tour.mp4 > artifacts/record.log 2>&1 &
-          recorder=$!
-          stop_recording() {
-            kill -INT "$recorder" 2>/dev/null || true
-            wait "$recorder" || true
-          }
-          trap 'stop_recording; exit 130' INT TERM
-          sleep 2
-          set +e
           tests=(DerivedData-Debug/Build/Products/*.xctestrun)
-          xcodebuild test-without-building -xctestrun "${tests[0]}" -destination "platform=iOS Simulator,id=$SIM_UDID" \
-            -parallel-testing-enabled NO -only-testing:OpenBotShellUITests/DemoTourUITests/testDemoTour > xcodebuild-demo.log 2>&1 &
-          wait $!
-          status=$?
-          trap - INT TERM
-          stop_recording
-          grep -E "Test Case|error:|SHELL_NOTE" xcodebuild-demo.log
-          exit $status
+          bash ios-shell/ci/record_demo.sh "$SIM_UDID" "${tests[0]}"
 
       - name: Report mock handoff progress
         if: failure() || cancelled()
