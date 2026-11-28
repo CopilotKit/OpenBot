@@ -102,7 +102,9 @@ export function controlWords(computer: WindowsComputer): {
     : {
         title: "Your Bot is using it",
         description:
-          "Take over to use it from here. Your Bot stops until you hand it back.",
+          computer.control.reason === "idle"
+            ? "It went back to your Bot because you hadn't used it for a while. Take over to use it again."
+            : "Take over to use it from here. Your Bot stops until you hand it back.",
         human: false,
       };
 }

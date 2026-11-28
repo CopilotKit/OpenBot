@@ -287,6 +287,18 @@ test("the words for who is using it and why it can't be used", () => {
       },
     }).description,
   ).toContain("Your Bot stopped when you used the mouse or keyboard");
+  // Handed back by the computer itself after the person stopped using it: said so, not left to be guessed.
+  const idle = controlWords({
+    ...mock,
+    control: {
+      holder: "bot",
+      since: "",
+      reason: "idle",
+      snapshotRequired: true,
+    },
+  });
+  expect(idle.title).toBe("Your Bot is using it");
+  expect(idle.description).toContain("because you hadn't used it for a while");
   expect(
     controlWords({ ...mock, control: null, unavailableReason: "locked" })
       .description,
