@@ -110,9 +110,11 @@ class RealBackendTestCase: ShellTestCase {
     /// (XCTSkip with the reason) at any CAPTCHA, bot check or anything else Google asks for: nothing
     /// here tries to get past one. Screenshots only before a value goes in and after a page is left.
     func googleSteps(app: XCUIApplication, roots: [XCUIApplication], inputs: GoogleInputs, tryAnotherWay: Bool = false) throws {
-        func live() -> [XCUIApplication] { roots.filter { $0.state != .notRunning } }
+        // Asking an app's state lists the running apps, which failed once mid-sign-in ("Failed to get
+        // list of active applications"): only ask when there is more than the app itself.
+        func live() -> [XCUIApplication] { roots.count == 1 ? roots : roots.filter { $0.state != .notRunning } }
         func pageText() -> String {
-            live().flatMap { labels(in: $0, limit: 200) }.joined(separator: "\n").lowercased()
+            live().flatMap { labels(in: $0, limit: 600) }.joined(separator: "\n").lowercased()
         }
         func stopIfChallenged(_ step: String, allowSecondStep: Bool = false) throws {
             let text = pageText()
@@ -204,13 +206,45 @@ class RealBackendTestCase: ShellTestCase {
             screenshot("google-other-ways")
             let options = pageText()
             note("other ways offered: authenticator \(options.contains("authenticator")), backup codes \(options.contains("backup code")), text message \(options.contains("text message") || options.contains("sms"))")
+            // The row, found by any element whose name holds "Authenticator" (no capped dump); if it
+            // is not hittable, scroll; failing that, tap the row under "Tap Yes on your phone or tablet".
             let authenticator = NSPredicate(format: "label CONTAINS[c] 'Authenticator'")
-            guard let option = first({ $0.links.matching(authenticator).firstMatch }, timeout: 5)
-                    ?? first({ $0.buttons.matching(authenticator).firstMatch }, timeout: 2)
-                    ?? first({ $0.staticTexts.matching(authenticator).firstMatch }, timeout: 2) else {
-                throw XCTSkip("the authenticator app is not among Google's other ways")
+            var option: XCUIElement? = nil
+            for root in live() {
+                let found = root.webViews.descendants(matching: .any).matching(authenticator).firstMatch
+                if found.waitForExistence(timeout: 6) { option = found; break }
+                let anywhere = root.descendants(matching: .any).matching(authenticator).firstMatch
+                if anywhere.exists { option = anywhere; break }
             }
-            option.tap()
+            if let found = option, !found.isHittable {
+                app.webViews.firstMatch.swipeUp()
+                sleep(1)
+            }
+            var tapped = false
+            if let found = option, found.exists {
+                if found.isHittable {
+                    found.tap()
+                } else {
+                    let frame = found.frame
+                    app.coordinate(withNormalizedOffset: .zero)
+                        .withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+                }
+                tapped = true
+            } else {
+                let tapYes = app.webViews.descendants(matching: .any)
+                    .matching(NSPredicate(format: "label CONTAINS[c] 'phone or tablet'")).firstMatch
+                if tapYes.exists {
+                    let frame = tapYes.frame
+                    app.coordinate(withNormalizedOffset: .zero)
+                        .withOffset(CGVector(dx: frame.midX, dy: frame.maxY + 55)).tap()
+                    tapped = true
+                    note("tapped the row under 'Tap Yes on your phone or tablet'")
+                }
+            }
+            guard tapped else {
+                attachText("chooser-dump", String(app.webViews.firstMatch.debugDescription.prefix(30000)))
+                throw XCTSkip("the authenticator row was not found on Google's chooser")
+            }
             sleep(6)
             screenshot("google-authenticator-page")
             try stopIfChallenged("authenticator page", allowSecondStep: true)
@@ -326,10 +360,33 @@ class RealBackendTestCase: ShellTestCase {
             note("sign-out skipped: it would end the session the secret holds")
             return
         }
-        // Sign out with the native More button: it ends the session on the server too.
-        let ok = signOutWithMoreButton(app)
-        note("signed out with the native More button: \(ok); state \(debugState(app))")
-        if ok { screenshot("j11-signed-out") }
+        // Sign out from the web app's own menu: on production the drawer (its sidebar toggle), then
+        // the account button at the drawer's bottom, then Sign out. The app notices the URL on /sign.
+        if webElement(app, label: "Show sidebar").waitForExistence(timeout: 5) {
+            webElement(app, label: "Show sidebar").tap()
+            sleep(2)
+        }
+        let screen = app.windows.firstMatch.frame
+        let candidates = (app.webViews.popUpButtons.allElementsBoundByIndex + app.webViews.buttons.allElementsBoundByIndex)
+            .filter { $0.exists && $0.frame.midX < 80 && $0.frame.midY > screen.height * 0.7 && $0.frame.height > 10 }
+            .sorted { $0.frame.midY > $1.frame.midY }
+        var signedOut = false
+        for candidate in candidates.prefix(3) where candidate.isHittable {
+            candidate.tap()
+            let item = webElement(app, label: "Sign out")
+            if item.waitForExistence(timeout: 3) {
+                screenshot("j11-account-menu")
+                item.tap()
+                signedOut = true
+                break
+            }
+        }
+        note("found Sign out in the web app's own menu: \(signedOut)")
+        if signedOut {
+            XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 30),
+                          "the native sign-in did not come back after the web app's Sign out; state \(debugState(app))")
+            screenshot("j12-signed-out")
+        }
     }
 }
 

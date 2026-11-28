@@ -15,8 +15,6 @@ struct ShellContentHost: UIViewRepresentable {
     let isDark: Bool?
     let onSelect: (ShellTab) -> Void
     let onLayout: (_ tabBarHeight: CGFloat, _ webFrame: CGRect) -> Void
-    let onReload: () -> Void
-    let onSignOut: () -> Void
 
     func makeUIView(context: Context) -> ShellContentView {
         let view = ShellContentView(webView: webView)
@@ -31,8 +29,7 @@ struct ShellContentHost: UIViewRepresentable {
     private func update(_ view: ShellContentView) {
         view.onSelect = onSelect
         view.onLayout = onLayout
-        view.onReload = onReload
-        view.onSignOut = onSignOut
+
         view.setWebVisible(webVisible)
         view.setTabBarVisible(tabBarVisible)
         view.select(selected)
@@ -43,14 +40,9 @@ struct ShellContentHost: UIViewRepresentable {
 final class ShellContentView: UIView, UITabBarDelegate {
     let webView: WKWebView
     let tabBar = UITabBar()
-    /// The detached round button beside the tab bar: Reload and Sign out, whatever the web app is.
-    let moreButton = UIButton(type: .system)
-    private let moreBackground = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
     var onSelect: ((ShellTab) -> Void)?
     var onLayout: ((CGFloat, CGRect) -> Void)?
-    var onReload: (() -> Void)?
-    var onSignOut: (() -> Void)?
-    private static let moreSize: CGFloat = 52
+
     private var tabBarVisible = false
     private var lastReported: (CGFloat, CGRect)?
 
@@ -83,29 +75,6 @@ final class ShellContentView: UIView, UITabBarDelegate {
         tabBar.isHidden = true
         addSubview(tabBar)
 
-        moreBackground.isUserInteractionEnabled = false
-        moreBackground.clipsToBounds = true
-        moreBackground.layer.cornerRadius = ShellContentView.moreSize / 2
-        moreBackground.isHidden = true
-        addSubview(moreBackground)
-        moreButton.setImage(UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)), for: .normal)
-        moreButton.tintColor = .label
-        moreButton.layer.cornerRadius = ShellContentView.moreSize / 2
-        moreButton.layer.shadowColor = UIColor.black.cgColor
-        moreButton.layer.shadowOpacity = 0.12
-        moreButton.layer.shadowRadius = 10
-        moreButton.layer.shadowOffset = CGSize(width: 0, height: 3)
-        moreButton.accessibilityLabel = "More"
-        moreButton.accessibilityIdentifier = "more-button"
-        moreButton.showsMenuAsPrimaryAction = true
-        moreButton.menu = UIMenu(children: [
-            UIAction(title: "Reload", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.onReload?() },
-            UIAction(title: "Sign out", image: UIImage(systemName: "rectangle.portrait.and.arrow.right"), attributes: .destructive) { [weak self] _ in
-                self?.onSignOut?()
-            },
-        ])
-        moreButton.isHidden = true
-        addSubview(moreButton)
     }
 
     required init?(coder: NSCoder) {
@@ -123,8 +92,6 @@ final class ShellContentView: UIView, UITabBarDelegate {
         guard visible != tabBarVisible else { return }
         tabBarVisible = visible
         tabBar.isHidden = !visible
-        moreButton.isHidden = !visible
-        moreBackground.isHidden = !visible
         setNeedsLayout()
     }
 
@@ -140,11 +107,7 @@ final class ShellContentView: UIView, UITabBarDelegate {
         case .some(false): style = .light
         case .none: style = .unspecified
         }
-        if tabBar.overrideUserInterfaceStyle != style {
-            tabBar.overrideUserInterfaceStyle = style
-            moreButton.overrideUserInterfaceStyle = style
-            moreBackground.overrideUserInterfaceStyle = style
-        }
+        if tabBar.overrideUserInterfaceStyle != style { tabBar.overrideUserInterfaceStyle = style }
     }
 
     /// This view runs down to the screen's bottom edge. The bar sits at the bottom and takes the
@@ -158,16 +121,7 @@ final class ShellContentView: UIView, UITabBarDelegate {
             let fitted = tabBar.sizeThatFits(CGSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)).height
             barHeight = max(fitted, 49 + bottomInset)
         }
-        // The tab bar leaves room at the trailing end for the round More button, which sits level
-        // with the bar's buttons (iOS 26 draws them as a floating group near the bar's top).
-        let size = ShellContentView.moreSize
-        let trailingRoom = size + 16
-        tabBar.frame = CGRect(x: 0, y: bounds.height - barHeight, width: max(bounds.width - trailingRoom, 0), height: barHeight)
-        // Measured on iOS 26.5: the floating buttons' centre is 31 pt below the bar's top.
-        let buttonsCenterY = tabBar.frame.minY + min(31, barHeight / 2)
-        let moreFrame = CGRect(x: bounds.width - size - 12, y: buttonsCenterY - size / 2, width: size, height: size)
-        moreButton.frame = moreFrame
-        moreBackground.frame = moreFrame
+        tabBar.frame = CGRect(x: 0, y: bounds.height - barHeight, width: bounds.width, height: barHeight)
         let webBottom = bounds.height - (tabBarVisible ? barHeight : bottomInset)
         let webFrame = CGRect(x: 0, y: 0, width: bounds.width, height: max(webBottom, 0))
         if webView.frame != webFrame { webView.frame = webFrame }

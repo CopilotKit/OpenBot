@@ -27,7 +27,8 @@ struct ShellView: View {
                 }
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
-                .transition(.opacity)
+                // On at once (never a frame of empty web view), off with a short fade.
+                .transition(.asymmetric(insertion: .identity, removal: .opacity))
             }
 
             if model.showsSignInScreen {
@@ -73,9 +74,7 @@ struct ShellView: View {
                     selected: model.selectedTab,
                     isDark: model.pageIsDark,
                     onSelect: { tab in shell.selectTab(tab) },
-                    onLayout: { height, frame in shell.layoutChanged(tabBarHeight: height, webFrame: frame) },
-                    onReload: { shell.reloadFromMenu() },
-                    onSignOut: { shell.confirmSignOut() }
+                    onLayout: { height, frame in shell.layoutChanged(tabBarHeight: height, webFrame: frame) }
                 )
                 // Down to the screen's edge: the tab bar takes the home indicator's strip.
                 .ignoresSafeArea(.container, edges: .bottom)

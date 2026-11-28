@@ -17,6 +17,8 @@ protocol WebControllerDelegate: AnyObject {
     func webControllerDidCommit(_ controller: WebController)
     /// A main-frame load finished.
     func webControllerDidFinish(_ controller: WebController)
+    /// WebKit's content process ended and the page is being loaded again.
+    func webControllerContentProcessRestarted(_ controller: WebController)
     /// The web view's URL changed, by a load or by the page's own router (pushState).
     func webController(_ controller: WebController, didChangeURL url: URL?)
 }
@@ -72,6 +74,8 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
+        // Nothing white behind or around an empty page.
+        webView.underPageBackgroundColor = .systemBackground
         // UI tests find the web view by this identifier.
         webView.accessibilityIdentifier = "openbot-webview"
         // No form-assistant bar above the keyboard (KeyboardAccessory.swift), so the keyboard goes
@@ -441,6 +445,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         diagnostics.log("content-process-terminated", [:])
         hideKeyboardAccessory(when: "process-terminated")
+        delegate?.webControllerContentProcessRestarted(self)
         if webView.url == nil {
             load(lastRequestedURL ?? config.baseURL)
         } else {

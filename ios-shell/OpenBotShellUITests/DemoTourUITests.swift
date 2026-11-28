@@ -83,24 +83,16 @@ final class DemoTourUITests: ShellTestCase {
         dismissKeyboardIfUp(app)
         scene("bots")
 
-        // Home, then the native More button: Reload (the skeleton, as long as it really takes) and Sign out.
+        // Home, then Sign out from the web app's own Account menu: the native sign-in screen.
         tab(app, .home).tap()
         _ = composer.waitForExistence(timeout: 10)
-        let more = app.buttons["more-button"]
-        tapWhenThere(more, "More button")
-        pause(0.8)
-        tapWhenThere(app.buttons["Reload"].firstMatch, "Reload", timeout: 5)
-        _ = composer.waitForExistence(timeout: 15)
-        pause(1)
-        tapWhenThere(more, "More button")
-        pause(0.8)
-        tapWhenThere(app.buttons["Sign out"].firstMatch, "Sign out", timeout: 5)
-        pause(1)
-        tapWhenThere(app.alerts["Sign out of OpenBot?"].buttons["Sign out"], "confirmation", timeout: 5)
+        tapWhenThere(webElement(app, label: "Account"), "Account button")
+        pause(1.2)
+        tapWhenThere(webElement(app, label: "Sign out"), "Sign out", timeout: 5)
         XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 20), "demo: Sign out did not return")
         pause(1.5)
         app.terminate()
-        scene("more-menu")
+        scene("sign-out")
 
         // The lock screen, then the connection comes back.
         app = launch(base: ShellTestCase.mockA, moment: "tour-offline", reset: false,

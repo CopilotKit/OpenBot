@@ -420,48 +420,6 @@ final class ShellFlowUITests: ShellTestCase {
         note("after background: \(debugState(app))")
     }
 
-    // The native More button: Reload shows the skeleton, Sign out ends the session on the server.
-    func testMoreMenuReloadAndSignOut() throws {
-        var app = launch(base: ShellTestCase.mockA, moment: "signed-out")
-        XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 15))
-        XCTAssertFalse(app.buttons["more-button"].exists, "the More button shows while signed out")
-        app.terminate()
-
-        app = launchSignedIn()
-        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
-        let more = app.buttons["more-button"]
-        XCTAssertTrue(more.waitForExistence(timeout: 5), "no More button when signed in")
-        sleep(1)
-        screenshot("1-tab-bar-with-more")
-        if more.exists, tab(app, .bots).exists {
-            XCTAssertGreaterThan(more.frame.minX, tab(app, .bots).frame.maxX, "the More button overlaps the tabs")
-            note("more button \(more.frame), bots tab \(tab(app, .bots).frame)")
-        }
-        more.tap()
-        XCTAssertTrue(app.buttons["Reload"].firstMatch.waitForExistence(timeout: 5), "the More menu has no Reload")
-        XCTAssertTrue(app.buttons["Sign out"].firstMatch.exists, "the More menu has no Sign out")
-        screenshot("2-more-menu")
-        app.buttons["Reload"].firstMatch.tap()
-        let skeleton = app.descendants(matching: .any)["loading-skeleton"]
-        let sawSkeleton = skeleton.waitForExistence(timeout: 3)
-        screenshot("3-reloading")
-        XCTAssertTrue(sawSkeleton, "Reload did not show the loading skeleton")
-        XCTAssertTrue(skeleton.waitForNonExistence(timeout: 20), "the skeleton stayed")
-        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 20), "Home did not come back after Reload")
-
-        XCTAssertTrue(signOutWithMoreButton(app))
-        XCTAssertFalse(app.buttons["more-button"].exists, "the More button stayed after signing out")
-        screenshot("4-signed-out")
-        app.terminate()
-
-        // The server ended that session: the same cookie, put back, no longer signs anybody in.
-        app = launch(base: ShellTestCase.mockA, moment: "old-cookie", reset: false,
-                     extra: ["OPENBOT_SHELL_TEST_PLAIN_SESSION_COOKIE": "mock"])
-        XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 30), "the old cookie still signed in: \(debugState(app))")
-        XCTAssertTrue(tab(app, .home).waitForNonExistence(timeout: 10))
-        screenshot("5-old-cookie-refused")
-    }
-
     // The native skeleton while the first page loads (the first load is held back 3 s here).
     func testLoadingSkeleton() throws {
         var app = launchSignedIn(moment: "sign-in")

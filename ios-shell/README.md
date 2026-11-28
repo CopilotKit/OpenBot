@@ -28,16 +28,14 @@ What is native:
   `route` messages select the tab. The bar hides while the keyboard is up. The web view sits between
   the status bar and the tab bar; the strips around it take the page's background colour and its
   light or dark style.
-- **The More button.** A round button beside the tab bar (`more-button`) with Reload and Sign
-  out. Sign out asks first, then ends the session on the server whatever the web app's version:
-  Better Auth's `POST /api/auth/sign-out` from the page and, on a hosted OpenBot, the hosted
-  sign-out in the web view (back to `/sign`); after that (8 s at most, or at once when offline) it
-  deletes the two session cookies and shows the native sign-in screen.
-- **The loading skeleton.** While a page has not drawn yet (launch when signed in, the web sign-in's
-  first load, Reload, a retry), a native skeleton (`loading-skeleton`, "Loading") covers the web
+- **The loading skeleton.** Whenever the web view is put on screen before its page has drawn (launch
+  when signed in, the instant the sign-in sheet returns, the web sign-in's first load, a retry, a
+  restarted web content process), a native skeleton (`loading-skeleton`, "Loading") covers the web
   view with a highlight sweeping left to right (a gentle pulse with Reduce Motion). It goes when the
-  page says `ready`, or when an older web app's document is complete and has content, after at
-  least 0.3 s.
+  page says `ready`, when an older web app's document is complete and has content, or 1.5 s after
+  any page finishes, after at least 0.3 s. It appears without a fade, so no frame shows an empty
+  web view. Signing out is the web app's own: the app notices it from the `signed-out` message or
+  from the URL reaching `/sign`, then deletes the two session cookies.
 - **The lock screen.** No connection (`NWPathMonitor`), or the web app did not load (a failed
   main-frame load, 20 s without any answer from WebKit, or no answer to a sign-in step): one native
   screen, "Cannot reach the OpenBot backend", covers everything, with Try again and the support

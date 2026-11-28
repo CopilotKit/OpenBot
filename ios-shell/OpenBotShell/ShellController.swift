@@ -155,8 +155,8 @@ final class ShellController: NSObject, WebControllerDelegate {
     }
 
     private func launchSignedIn() {
-        model.phase = .signedIn
         beginPageLoad("launch")
+        model.phase = .signedIn
         #if DEBUG
         if let delay = config.delayFirstLoadSeconds {
             diagnostics.log("test-hook", ["hook": "delay-first-load", "seconds": delay])
@@ -207,70 +207,6 @@ final class ShellController: NSObject, WebControllerDelegate {
                 let item = DispatchWorkItem { [weak self] in self?.checkPageDrawn(attempt: attempt + 1) }
                 self.loadingCheck = item
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
-            }
-        }
-    }
-
-    /// The More menu's Reload.
-    func reloadFromMenu() {
-        diagnostics.log("menu", ["item": "reload"])
-        beginPageLoad("reload")
-        web.retry()
-    }
-
-    // MARK: - Native sign-out
-
-    private var signingOut = false
-    private var signOutTimeout: DispatchWorkItem?
-
-    /// The More menu's Sign out: asks first.
-    func confirmSignOut() {
-        guard model.phase == .signedIn else { return }
-        let alert = UIAlertController(title: "Sign out of OpenBot?", message: nil, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Sign out", style: .destructive) { [weak self] _ in self?.signOut() })
-        var presenter = signInFlow.window?.rootViewController
-        while let next = presenter?.presentedViewController { presenter = next }
-        presenter?.present(alert, animated: true)
-    }
-
-    /// Ends the session on the server whatever the web app's version: Better Auth's sign-out from
-    /// the page, then, on a hosted OpenBot, the hosted sign-out in the web view (which also signs the
-    /// web view out of OpenBot by CopilotKit and comes back to /sign). The native sign-in screen
-    /// shows when the page lands on /sign, after 8 s at most, or at once when offline.
-    func signOut() {
-        guard model.phase == .signedIn, !signingOut else { return }
-        signingOut = true
-        diagnostics.log("menu", ["item": "sign-out"])
-        let timeout = DispatchWorkItem { [weak self] in self?.sessionEnded(reason: "sign-out-timeout") }
-        signOutTimeout = timeout
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: timeout)
-        guard !model.offline, let current = web.webView.url, config.isOwnOrigin(current) else {
-            sessionEnded(reason: "sign-out-offline")
-            return
-        }
-        let script = """
-        try {
-          await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'include',
-            headers: { 'content-type': 'application/json' }, body: '{}' });
-        } catch (e) {}
-        try {
-          const r = await fetch('/api/auth/hosted/sign-out?returnTo=' + encodeURIComponent(location.origin + '/sign'),
-            { credentials: 'include', redirect: 'manual' });
-          return r.type === 'opaqueredirect' ? 'hosted' : 'plain';
-        } catch (e) { return 'plain'; }
-        """
-        web.webView.callAsyncJavaScript(script, arguments: [:], in: nil, in: .page) { [weak self] result in
-            guard let self = self, self.signingOut else { return }
-            var kind = "error"
-            if case .success(let value) = result, let text = value as? String { kind = text }
-            self.diagnostics.log("sign-out", ["server": kind])
-            if kind == "hosted" {
-                let back = self.config.baseURL.absoluteString + "/sign"
-                let encoded = back.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? back
-                self.web.load(path: "/api/auth/hosted/sign-out?returnTo=" + encoded)
-            } else {
-                self.sessionEnded(reason: "sign-out")
             }
         }
     }
@@ -384,7 +320,13 @@ final class ShellController: NSObject, WebControllerDelegate {
     }
 
     private func enter(ticket: String, verifier: String, to path: String) {
-        if !renewing { model.signIn = .entering }
+        if !renewing {
+            // In this same turn: the signed-in container with the skeleton already on it, so no
+            // frame shows an empty web view or the sign-in screen between the sheet and the page.
+            beginPageLoad("enter")
+            model.signIn = .entering
+            model.phase = .signedIn
+        }
         diagnostics.log("enter", ["to": path, "renewal": renewing])
         enterTimeout?.cancel()
         let timeout = DispatchWorkItem { [weak self] in
@@ -420,8 +362,10 @@ final class ShellController: NSObject, WebControllerDelegate {
             renewing = false
             return
         }
-        guard model.phase == .signedOut, model.signIn == .entering else { return }
+        guard model.signIn == .entering else { return }
         web.stop()
+        model.pageLoading = false
+        model.phase = .signedOut
         model.signIn = .idle
         model.signInMessage = message
     }
@@ -429,9 +373,6 @@ final class ShellController: NSObject, WebControllerDelegate {
     /// The page says nobody is signed in any more.
     private func sessionEnded(reason: String) {
         diagnostics.log("session-ended", ["reason": reason])
-        signingOut = false
-        signOutTimeout?.cancel()
-        signOutTimeout = nil
         model.pageLoading = false
         enterTimeout?.cancel()
         renewing = false
@@ -553,20 +494,20 @@ final class ShellController: NSObject, WebControllerDelegate {
                 model.selectedTab = tab
             }
             if signedIn {
-                if model.phase != .signedIn || renewing { finishSignIn() }
+                if model.phase != .signedIn || renewing || model.signIn == .entering { finishSignIn() }
             } else if path == "/sign" || path.hasPrefix("/sign/") {
-                if model.phase == .signedIn {
-                    sessionEnded(reason: "route-sign")
-                } else if model.signIn == .entering {
+                if model.signIn == .entering {
                     failSignIn("Sign-in didn't finish. Try again.")
+                } else if model.phase == .signedIn {
+                    sessionEnded(reason: "route-sign")
                 }
             }
             refreshChrome()
         case "signed-out":
-            if model.phase == .signedIn {
-                sessionEnded(reason: "signed-out")
-            } else if model.signIn == .entering {
+            if model.signIn == .entering {
                 failSignIn("Sign-in didn't finish. Try again.")
+            } else if model.phase == .signedIn {
+                sessionEnded(reason: "signed-out")
             }
         default:
             break
@@ -606,7 +547,7 @@ final class ShellController: NSObject, WebControllerDelegate {
 
     func webController(_ controller: WebController, didFailLoad message: String) {
         // The error's own words stay in diagnostics (WebController logged them).
-        if model.phase == .signedOut, model.signIn == .entering {
+        if model.signIn == .entering {
             failSignIn("Sign-in didn't finish. Try again.")
             showLoadFailure(.signIn, detail: "enter-failed")
             return
@@ -623,13 +564,17 @@ final class ShellController: NSObject, WebControllerDelegate {
         if model.webPathRoot != first { model.webPathRoot = first }
         let onSignPage = path == "/sign" || path.hasPrefix("/sign/")
         // A web app without the bridge (production today) says nothing: its URL tells.
-        if model.phase == .signedIn, onSignPage, !renewing {
+        if model.signIn == .entering, onSignPage {
+            failSignIn("Sign-in didn't finish. Try again.")
+        } else if model.phase == .signedIn, onSignPage, !renewing {
             sessionEnded(reason: "url-sign")
         } else if model.phase == .signedOut, model.signIn == .webFallback, !onSignPage, !path.hasPrefix("/api/") {
             SessionCookies.present(in: cookieStore, host: config.baseHost) { [weak self] present, _ in
                 guard let self = self, present, self.model.signIn == .webFallback else { return }
                 self.diagnostics.log("signed-in-by-url", ["pathRoot": first])
+                self.beginPageLoad("signed-in-by-url")
                 self.finishSignIn()
+                self.checkPageDrawn()
             }
         }
     }
@@ -649,6 +594,10 @@ final class ShellController: NSObject, WebControllerDelegate {
             // The identity provider's page: no skeleton over another site.
             endPageLoad("other-site")
         }
+    }
+
+    func webControllerContentProcessRestarted(_ controller: WebController) {
+        if model.webVisible { beginPageLoad("content-process") }
     }
 
     func webControllerDidCommit(_ controller: WebController) {

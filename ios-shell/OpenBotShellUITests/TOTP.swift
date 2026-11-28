@@ -38,10 +38,10 @@ enum TOTP {
         return String(format: "%06u", value % 1_000_000)
     }
 
-    /// A code with at least 5 seconds of its step left: waits for the next step when needed.
+    /// A code with at least 8 seconds of its step left: waits for the next step when needed.
     static func freshCode(secret: Data) -> String {
         let remaining = step - Date().timeIntervalSince1970.truncatingRemainder(dividingBy: step)
-        if remaining < 5 { Thread.sleep(forTimeInterval: remaining + 0.5) }
+        if remaining < 8 { Thread.sleep(forTimeInterval: remaining + 0.5) }
         return code(secret: secret, at: Date())
     }
 }
