@@ -218,16 +218,17 @@ cut to its test and also as a 600-px copy. Started by hand with `real_google_sig
 recording is a Release build signing in with Google in the web view (one prompt to the account's
 phone per run).
 
-Where the video workflow's time goes (each job has a 13-minute limit; the two jobs run side by side):
+Measured times (macOS runners, which vary a lot from run to run):
 
-| Step | Warm cache | Cold (sources changed) |
-| --- | --- | --- |
-| Boot the simulator (in the background, during the rest) | about 20 s | about 20 s |
-| Generate the Xcode project (cached XcodeGen binary) | about 35 s | about 35 s |
-| Build the app and its UI tests (cached DerivedData) | about 45 s | 110 to 150 s |
-| Web app (demo job; cached on its sources) | about 14 s | about 4 min |
-| Record (demo tour / real journey) | about 2 min | about 2 min |
-| Cut and make the 600-px copy | about 25 s | about 25 s |
+- Test workflow, 4 jobs side by side, web app cached: 17m48s wall in run 46132205972 (real 17m43s,
+  flow-a 16m44s, flow-b 15m26s, edges 7m46s). A change under app/ rebuilds the web app in each mock
+  job (6 to 8 minutes) the first time.
+- Video workflow, demo job (13-minute limit): 4m55s with the web app cached (run 46129793283). After
+  a change under app/ the cold web build alone takes 6 to 8 minutes and the job can hit its limit
+  once; the built web app is saved to the cache as soon as it is built, so the next run is warm.
+- Video workflow, real job: the Swift build takes about 5 minutes even with the DerivedData cache
+  (a checkout gives every source a new modification time, so Xcode rebuilds all of it), and the
+  recording about 4 to 6 minutes. It is the job closest to its 13 minutes.
 
 The real-account tests (`testRealSignedInJourneyWithSessionCookie`, and the two Google sign-ins,
 `testRealGoogleSignInInSystemSheet` and `testRealGoogleSignInInWebViewAndJourney`, which also need
