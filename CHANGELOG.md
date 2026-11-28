@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The Recorder records a page's requests at the address the browser sends them to. When Chrome
+  would not let the Recorder use its debugger, it watched requests from inside the page and
+  resolved a relative address against the page's own address, though a browser resolves it against
+  the page's `<base href>`. On a site that sets one, such as many Angular apps, a step's request was
+  recorded at an address that was never called. It is now the address the debugger reports.
+
 - **The API takes Privatemode as an AI connection.** `replaceAiConnection` and the other AI
   connection writes take `provider: privatemode` with `login: endpoint`, an address and a key.
   `AiConnectionProviderAnswer` can name it. `signIns` keeps the values it had, since Privatemode
