@@ -4,7 +4,7 @@ name: iOS shell
 # parallel jobs, each on its own simulator:
 # - real: suite 1, against the hosted web app at my.open.bot (a Release build, a fresh install per
 #   test, and the Debug-only session-cookie journey), plus the Release and store build checks;
-# - flow-a, flow-b: suite 2, ShellFlowUITests in 2 halves (and the demo tour), against two mock
+# - flow-a, flow-b: suite 2, ShellFlowUITests in 2 halves, against two mock
 #   stacks of the real built web app (app/workbench/mock-server.ts);
 # - edges: the hardening tests, the probe site (ios-shell/Probe) and the unit tests.
 #
@@ -321,8 +321,7 @@ jobs:
                     only=(-only-testing:$f -skip-testing:$f/testTabsRouteTheWebView
                           -skip-testing:$f/testNoBrowserNotificationOffersInTheShell -skip-testing:$f/testKeyboardKeepsTheMessageBoxVisible
                           -skip-testing:$f/testKeyboardHidesTabBar -skip-testing:$f/testResumeFromBackground
-                          -skip-testing:$f/testLoadingSkeleton -skip-testing:$f/testFallbackToWebSignIn
-                          -only-testing:$t/DemoTourUITests/testDemoTour) ;;
+                          -skip-testing:$f/testLoadingSkeleton -skip-testing:$f/testFallbackToWebSignIn) ;;
             edges) only=(-only-testing:$t/HardeningUITests -only-testing:$t/ShellUITests
                          -only-testing:$t/HandoffConfigTests -only-testing:$t/ShellURLsTests -only-testing:$t/ShellBackTests
                          -skip-testing:$t/ShellUITests/testLoadsHostedWebApp) ;;

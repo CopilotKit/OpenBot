@@ -761,8 +761,10 @@ final class ShellFlowUITests: ShellTestCase {
         tab(app, .conversations).tap()
         let transcript = firstExisting([webText(app, "Here is the first draft."), webText(app, "Can you draft the quarterly forecast?")], timeout: 15)
         XCTAssertNotNil(transcript, "the conversation left open in Chats was not there on return")
-        XCTAssertTrue(tab(app, .conversations).isSelected)
+        // The conversation takes the focus on return: the keyboard hides the tab bar until it goes.
         dismissKeyboardIfUp(app)
+        XCTAssertTrue(tab(app, .conversations).waitForExistence(timeout: 5))
+        XCTAssertTrue(tab(app, .conversations).isSelected)
         screenshot("1-chats-where-it-was-left")
         tab(app, .conversations).tap()
         XCTAssertTrue(chatsList(app).waitForExistence(timeout: 10), "tapping the current tab did not pop to its list")
