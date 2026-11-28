@@ -59,12 +59,17 @@ class DemoTourTest : ShellTestBase() {
             }
             if (waitKeyboard(true, 4_000)) {
                 pause(400)
-                typeOnKeyboard("pricing update", deadlineMs = 25_000)
+                // The text goes in through the keyboard's input connection (key events): on a busy
+                // emulator tapping each key took 20 s and more, and a stray tap hit the page.
+                shell("input text pricing%supdate")
+                sleep(800)
                 val typed = pageString("document.activeElement ? (document.activeElement.innerText || document.activeElement.value || '') : ''")
                 note("demo: the message box holds ${typed.length} characters after typing")
                 pause(600)
                 // Send (the video workflow's mock answers with a canned reply, MOCK_REPLY=1).
-                webRect("Send message")?.let { tapFast(it.centerX(), it.centerY()) }
+                // Sent by the page's own button, found in the page: a tap at a place read a moment
+                // earlier landed on a banner that had moved into it (run 46161277370).
+                pageJs("(function(){var b=document.querySelector('[aria-label=\"Send message\"]');if(b){b.click();return true}return false})()")
                 waitForState("path=/channel", 10_000)
                 pause(1_500)
                 dismissKeyboardIfUp()
