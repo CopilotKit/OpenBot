@@ -227,6 +227,7 @@ test("an answer may name a provider this client doesn't know, and a switch is re
       apiKey: "sk-example",
     }).success;
   expect(body("trustedrouter")).toBe(true);
+  expect(body("privatemode")).toBe(true);
   expect(body("a-provider-added-later")).toBe(false);
   expect(body("")).toBe(false);
 });
@@ -244,6 +245,7 @@ test("a switch names only a provider OpenBot offers, and a retired one saved bef
     "google",
     "xai",
     "trustedrouter",
+    "privatemode",
     "openai-compatible",
   ]);
   // A connection saved for a provider OpenBot no longer offers is still listed under its saved id,
