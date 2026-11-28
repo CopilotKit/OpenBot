@@ -812,6 +812,7 @@ export function ChooseConnection({
       setWaiting(null);
       setSignedIn(true);
       setSigningIn(false);
+      connectSignedIn();
     } catch (error) {
       if (!current()) return;
       attempt.current = null;
@@ -851,6 +852,7 @@ export function ChooseConnection({
       setWaiting(null);
       setSignInCode("");
       setSignedIn(true);
+      connectSignedIn();
     } catch (error) {
       if (run.current !== mine) return;
       setSignInFailure(failureOf(error, "Couldn't sign in. Try again."));
@@ -871,6 +873,19 @@ export function ChooseConnection({
   function submit() {
     const body = input();
     if (!ready || !body) return;
+    send(body);
+  }
+
+  /**
+   * A sign-in that just succeeded connects at once, with the call Connect makes: a sign-in looked
+   * finished, and a person who left the page then lost it, since nothing is saved until the
+   * connection is. A connect that fails says why under the sign-in, and Connect tries it again.
+   * Sharing the admin's own sign-in with everyone still waits for its own button, which says so.
+   */
+  function connectSignedIn() {
+    if (share) return;
+    const body = input();
+    if (!body || (login === "oauth" && signInModel.length === 0)) return;
     send(body);
   }
 
