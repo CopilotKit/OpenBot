@@ -26,6 +26,7 @@ on:
           - demo
           - real
           - swipe
+          - selfhosted
         default: both
       real_google_sign_in:
         description: Real backend - sign in with Google in the web view first (sends one prompt to the account's phone)
@@ -184,9 +185,16 @@ jobs:
           # which=swipe: only the slide back (its own test), no warm-up, a short clip.
           test_id=OpenBotShellUITests/DemoTourUITests/testDemoTour
           if [ "$WHICH" = "swipe" ]; then test_id=OpenBotShellUITests/ShellFlowUITests/testSwipeBackSlidesToTheList; fi
-          echo "MIN_SECONDS=$([ "$WHICH" = "swipe" ] && echo 3 || echo 30)" >> "$GITHUB_ENV"
+          if [ "$WHICH" = "selfhosted" ]; then
+            # The self-hosted OpenBot: mock stack C on 3014, someone else signed in.
+            test_id=OpenBotShellUITests/SelfHostedUITests/testSelfHostedSignInAndBackToCloud
+            MOCK_PERSON_NAME="Dana Okafor" MOCK_ORG_NAME="Okafor Labs" MOCK_SIGNED_OUT=1 SERVER_PORT=3003 nohup bun app/workbench/mock-server.ts > artifacts/mock-c.log 2>&1 &
+            APP_PORT=3014 SERVER_PORT=3003 nohup bun app/serve.ts > artifacts/app-c.log 2>&1 &
+            sleep 5
+          fi
+          echo "MIN_SECONDS=$([ "$WHICH" = "demo" ] || [ -z "$WHICH" ] && echo 30 || echo 3)" >> "$GITHUB_ENV"
           echo "$(date +%s) warm-up" >> "$RUNNER_TEMP/timing"
-          if [ "$WHICH" != "swipe" ]; then
+          if [ "$WHICH" != "swipe" ] && [ "$WHICH" != "selfhosted" ]; then
           # One unrecorded pass first: a fresh simulator's first sign-in took over a minute.
           xcodebuild test-without-building -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration Debug \
             -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath DerivedData-Debug \
@@ -219,7 +227,7 @@ jobs:
           [ -f artifacts/video/demo-tour.mp4 ] || exit 0
           # The swipe clip is kept whole: its marks are seconds apart and simctl's variable frame
           # rate made the cut miss the swipe once.
-          if [ "$WHICH" != "swipe" ]; then
+          if [ "$WHICH" != "swipe" ] && [ "$WHICH" != "selfhosted" ]; then
             python3 ios-shell/ci/trim_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log "$STARTED" || true
           fi
           ls -la artifacts/video
@@ -246,7 +254,7 @@ jobs:
 
   real:
     name: Record the real-backend journey (private)
-    if: github.repository == 'CopilotKit/OpenBot' && inputs.which != 'demo' && inputs.which != 'swipe'
+    if: github.repository == 'CopilotKit/OpenBot' && inputs.which != 'demo' && inputs.which != 'swipe' && inputs.which != 'selfhosted'
     runs-on: macos-latest
     timeout-minutes: 13
     permissions:

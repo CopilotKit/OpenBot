@@ -348,7 +348,9 @@ final class ShellController: NSObject, WebControllerDelegate {
 
     /// The quiet control (or Change address on the lock screen): the address field opens.
     func openAddress(overLock: Bool) {
-        model.addressText = overLock && config.isSelfHosted ? ServerAddress.display(config.baseURL) : ""
+        // The current address, with its scheme when it is not https (a debug build's local server).
+        let current = (config.baseURL.scheme == "https" ? "" : "\(config.baseURL.scheme ?? "http")://") + ServerAddress.display(config.baseURL)
+        model.addressText = overLock && config.isSelfHosted ? current : ""
         model.addressError = nil
         model.addressOverLock = overLock
         model.addressOpen = true

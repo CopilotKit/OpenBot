@@ -99,7 +99,7 @@ final class SelfHostedUITests: ShellTestCase {
         screenshot("3-lock-with-host")
         app.buttons["change-address"].tap()
         XCTAssertTrue(field(app).waitForExistence(timeout: 5), "Change address did not open the field")
-        XCTAssertEqual(field(app).value as? String, "127.0.0.1:3014", "the field does not hold the current address")
+        XCTAssertEqual(field(app).value as? String, "http://127.0.0.1:3014", "the field does not hold the current address")
         screenshot("4-change-address")
         app.buttons["server-address-cancel"].tap()
         XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 5), "Cancel did not return to the lock screen")
