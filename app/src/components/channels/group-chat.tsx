@@ -1,3 +1,4 @@
+import { nativeShell } from "@/lib/native-shell/shell";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef } from "react";
@@ -266,7 +267,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
           compact
           disabled={bots.length === 0}
           pending={send.isPending || answer.isPending || working}
-          autoFocus
+          autoFocus={!nativeShell()}
           draftKey={`conversation:${channelId}`}
           onSubmit={async (draft) => {
             if (!draft.text) return;
