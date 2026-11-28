@@ -62,6 +62,8 @@ struct ShellView: View {
                     onSelect: { tab in shell.selectTab(tab) },
                     onLayout: { height, frame in shell.layoutChanged(tabBarHeight: height, webFrame: frame) }
                 )
+                // Down to the screen's edge: the tab bar takes the home indicator's strip.
+                .ignoresSafeArea(.container, edges: .bottom)
             }
             // WKWebView moves its own content out of the keyboard's way, as Safari does.
             .ignoresSafeArea(.keyboard)

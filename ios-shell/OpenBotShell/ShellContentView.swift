@@ -4,7 +4,7 @@ import WebKit
 
 /// The signed-in layout, in UIKit so the frames are exact: the web view on top, the native tab bar
 /// (a real UITabBar: Conversations, Home, Bots) under it. The web view ends where the tab bar's
-/// region starts, so nothing of the page sits under the bar; while the bar is hidden (keyboard,
+/// frame starts, so nothing of the page sits under the bar; while the bar is hidden (keyboard,
 /// sign-in) the web view takes the whole height. The bar's own background is clear: the page's
 /// colour, painted behind everything by ShellView, shows through it.
 struct ShellContentHost: UIViewRepresentable {
@@ -107,17 +107,20 @@ final class ShellContentView: UIView, UITabBarDelegate {
         if tabBar.overrideUserInterfaceStyle != style { tabBar.overrideUserInterfaceStyle = style }
     }
 
-    /// The bar's height without any safe-area part (this view already ends above the home indicator).
-    private func tabBarHeight() -> CGFloat {
-        let fitted = tabBar.sizeThatFits(CGSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude))
-        return max(fitted.height - tabBar.safeAreaInsets.bottom, 49)
-    }
-
+    /// This view runs down to the screen's bottom edge. The bar sits at the bottom and takes the
+    /// home indicator's strip into its height, as a tab bar does in UIKit; without the bar the web
+    /// view stops above that strip.
     override func layoutSubviews() {
         super.layoutSubviews()
-        let barHeight: CGFloat = tabBarVisible ? tabBarHeight() : 0
+        let bottomInset = safeAreaInsets.bottom
+        var barHeight: CGFloat = 0
+        if tabBarVisible {
+            let fitted = tabBar.sizeThatFits(CGSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)).height
+            barHeight = max(fitted, 49 + bottomInset)
+        }
         tabBar.frame = CGRect(x: 0, y: bounds.height - barHeight, width: bounds.width, height: barHeight)
-        let webFrame = CGRect(x: 0, y: 0, width: bounds.width, height: max(bounds.height - barHeight, 0))
+        let webBottom = bounds.height - (tabBarVisible ? barHeight : bottomInset)
+        let webFrame = CGRect(x: 0, y: 0, width: bounds.width, height: max(webBottom, 0))
         if webView.frame != webFrame { webView.frame = webFrame }
         if lastReported == nil || lastReported!.0 != barHeight || lastReported!.1 != webFrame {
             lastReported = (barHeight, webFrame)
@@ -125,6 +128,11 @@ final class ShellContentView: UIView, UITabBarDelegate {
             let global = convert(webFrame, to: nil)
             DispatchQueue.main.async { report?(barHeight, global) }
         }
+    }
+
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        setNeedsLayout()
     }
 
     // Called for the selected tab too: tapping it again goes back to the tab's page.

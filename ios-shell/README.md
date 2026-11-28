@@ -24,7 +24,8 @@ What is native:
   light or dark style.
 - **The lock screen.** No connection (`NWPathMonitor`), or the web app did not load (a failed
   main-frame load, 20 s without any answer from WebKit, or no answer to a sign-in step): one native
-  screen, "No internet connection", covers everything, with Try again. It retries by itself (every
+  screen, "Cannot reach the OpenBot backend", covers everything, with Try again and the support
+  address. It retries by itself (every
   5 s, every 15 s after 6 tries, and when the network comes back) and lifts when a page loads. Its
   accessibility value says which case it is: `no-network` or `load-failed`.
 - **The bridge.** The page gets `window.__OPENBOT_NATIVE_SHELL__ = {platform: "ios", version, bridge: 1}`
@@ -84,6 +85,7 @@ ignores them.
 | `OPENBOT_SHELL_DEBUG_SHEET_URL=<url>` | Sign in opens that URL in an ephemeral sheet instead. |
 | `OPENBOT_SHELL_FORCE_OFFLINE=1` | The offline lock, for good. |
 | `OPENBOT_SHELL_FORCE_OFFLINE_SECONDS=<n>` | The offline lock for n seconds, then the real network. |
+| `OPENBOT_SHELL_FORCE_DARK=1` | The whole app, web view included, in dark mode. |
 
 In every build: `OPENBOT_BASE_URL`, `OPENBOT_SHELL_DIAGNOSTICS=1`, `OPENBOT_SHELL_TEST_NAME`, and
 `OPENBOT_SHELL_EPHEMERAL_SIGN_IN=1` (the sign-in sheet shares nothing with Safari, and iOS asks no
@@ -123,7 +125,9 @@ APP_PORT=3011 SERVER_PORT=3002 bun app/serve.ts &                      # B: with
 and by hand. It builds the web app, starts both mock stacks and the probe, boots an iPhone
 simulator, builds once (`build-for-testing`) and runs the UI tests (`test-without-building`). It
 uploads `ios-shell-shots-<run id>` (every screenshot as a small JPEG named `<test>--<moment>.jpg`,
-the text attachments, `SUMMARY.md`, `diagnostics.jsonl`) and `ios-shell-<run id>` (everything else).
+the text attachments, `SUMMARY.md`, `diagnostics.jsonl`), `ios-shell-<run id>` (everything else)
+and `ios-shell-video-<run id>`: a screen recording of `DemoTourUITests/testDemoTour`, a paced tour
+of the app against mock stack A, run on its own after the main suite.
 
 The production tests never fail for network reasons. `testProductionSignedIn` and
 `testProductionGoogleSignIn` use a throwaway account and run only when the repository secrets

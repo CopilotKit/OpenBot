@@ -235,15 +235,19 @@ final class ProductionUITests: ShellTestCase {
             field.tap()
             sleep(1)
             field.press(forDuration: 1.2)
-            let paste = firstExisting([app.menuItems["Paste"], service.menuItems["Paste"],
-                                       app.buttons["Paste"], service.buttons["Paste"]], timeout: 5)
+            let paste = firstExisting([app.menuItems.matching(identifier: "Paste").firstMatch,
+                                       service.menuItems.matching(identifier: "Paste").firstMatch,
+                                       app.buttons.matching(identifier: "Paste").firstMatch,
+                                       service.buttons.matching(identifier: "Paste").firstMatch], timeout: 5)
             if paste == nil { note("\(step): no Paste menu") }
             paste?.tap()
             UIPasteboard.general.string = ""
             return paste != nil
         }
         func next() {
-            if let nextButton = firstExisting([app.buttons["Next"], service.buttons["Next"]], timeout: 5) {
+            if let nextButton = firstExisting([app.webViews.buttons.matching(identifier: "Next").firstMatch,
+                                               service.webViews.buttons.matching(identifier: "Next").firstMatch,
+                                               app.buttons.matching(identifier: "Next").firstMatch], timeout: 5) {
                 nextButton.tap()
             }
         }

@@ -25,6 +25,9 @@ struct ShellConfig {
     var debugSheetURL: URL?
     var forceOffline = false
     var forceOfflineSeconds: Double?
+    /// Draws the whole app, web view included, in dark mode (XCUIDevice's appearance switch does not
+    /// reach the app on the CI simulator).
+    var forceDark = false
 
     static func fromEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> ShellConfig {
         let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0"
@@ -52,6 +55,7 @@ struct ShellConfig {
         if let value = environment["OPENBOT_SHELL_FORCE_OFFLINE_SECONDS"], let seconds = Double(value), seconds > 0 {
             config.forceOfflineSeconds = seconds
         }
+        config.forceDark = environment["OPENBOT_SHELL_FORCE_DARK"] == "1"
         #endif
         return config
     }

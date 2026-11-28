@@ -21,8 +21,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
-        let shell = ShellController(config: ShellConfig.fromEnvironment())
+        let config = ShellConfig.fromEnvironment()
+        let shell = ShellController(config: config)
         let window = UIWindow(windowScene: windowScene)
+        if config.forceDark { window.overrideUserInterfaceStyle = .dark }
         // Shows through before the first paint: the system background, so dark mode never flashes white.
         window.backgroundColor = .systemBackground
         window.rootViewController = ShellHostingController(shell: shell)

@@ -123,6 +123,8 @@ jobs:
           name="$(printf '%s' "$picked" | cut -f2)"
           runtime="$(printf '%s' "$picked" | cut -f3)"
           echo "Using $name ($runtime) $udid"
+          # The software keyboard, as on a phone, for the keyboard test and the demo recording.
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
           {
             echo "SIM_UDID=$udid"
             echo "SIM_NAME=$name"
@@ -132,6 +134,7 @@ jobs:
           xcrun simctl bootstatus "$udid" -b
 
       - name: Build for testing
+        id: build
         timeout-minutes: 20
         run: |
           set -o pipefail
@@ -162,8 +165,40 @@ jobs:
             -derivedDataPath DerivedData \
             -resultBundlePath TestResults.xcresult \
             -parallel-testing-enabled NO \
+            -skip-testing:OpenBotShellUITests/DemoTourUITests \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee xcodebuild.log
+
+      - name: Record the demo tour
+        if: always() && steps.build.outcome == 'success'
+        timeout-minutes: 12
+        run: |
+          mkdir -p artifacts/video
+          xcrun simctl io "$SIM_UDID" recordVideo --codec h264 --force artifacts/video/demo-tour.mp4 > artifacts/video-record.log 2>&1 &
+          recorder=$!
+          sleep 3
+          set +e
+          xcodebuild test-without-building \
+            -project ios-shell/OpenBotShell.xcodeproj \
+            -scheme OpenBotShell \
+            -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -derivedDataPath DerivedData \
+            -resultBundlePath DemoTour.xcresult \
+            -only-testing:OpenBotShellUITests/DemoTourUITests/testDemoTour \
+            CODE_SIGNING_ALLOWED=NO \
+            > xcodebuild-demo.log 2>&1
+          status=$?
+          grep -E "Test Case|error:" xcodebuild-demo.log
+          # SIGINT and wait, so the recorder writes a playable file.
+          kill -INT "$recorder"
+          wait "$recorder"
+          ls -la artifacts/video
+          size=$(stat -f %z artifacts/video/demo-tour.mp4 2>/dev/null || echo 0)
+          if [ "$size" -gt 41943040 ] && command -v ffmpeg > /dev/null; then
+            ffmpeg -loglevel error -y -i artifacts/video/demo-tour.mp4 -vf scale=720:-2 -c:v libx264 -crf 28 artifacts/video/demo-tour-720.mp4 \
+              && mv artifacts/video/demo-tour-720.mp4 artifacts/video/demo-tour.mp4
+          fi
+          exit $status
 
       - name: Export screenshots and attachments
         if: always()
@@ -218,12 +253,22 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
+          name: ios-shell-video-${{ github.run_id }}
+          path: artifacts/video/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
           name: ios-shell-${{ github.run_id }}
           path: |
             artifacts/
             !artifacts/shots/
+            !artifacts/video/
             xcodebuild.log
             xcodebuild-build.log
+            xcodebuild-demo.log
           retention-days: 14
           if-no-files-found: warn
 

@@ -69,8 +69,17 @@ class ShellTestCase: XCTestCase {
         app.buttons["tab-\(tab.rawValue)"]
     }
 
+    /// Text in the web view: a static text, or a link or button whose name holds it (a list row).
     func webText(_ app: XCUIApplication, _ text: String) -> XCUIElement {
-        app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        let predicate = NSPredicate(format: "label CONTAINS %@", text)
+        let web = app.webViews.firstMatch
+        let staticText = web.staticTexts.matching(predicate).firstMatch
+        if staticText.exists { return staticText }
+        let link = web.links.matching(predicate).firstMatch
+        if link.exists { return link }
+        let button = web.buttons.matching(predicate).firstMatch
+        if button.exists { return button }
+        return staticText
     }
 
     func debugState(_ app: XCUIApplication) -> String {
@@ -114,8 +123,8 @@ class ShellTestCase: XCTestCase {
         }
     }
 
-    static let lockHeading = "No internet connection"
-    static let lockMessage = "For security purposes, this application can only be used when connected to the internet. Please connect to the internet to continue."
+    static let lockHeading = "Cannot reach the OpenBot backend"
+    static let lockMessage = "For security purposes, this application can only be used when connected to the OpenBot backend. Please check your internet connection, VPC configuration and network settings to make sure this device can reach the OpenBot backend. Contact your system administrator if you are unable to connect."
 
     func lockScreen(_ app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any)["offline-lock"]
@@ -125,10 +134,13 @@ class ShellTestCase: XCTestCase {
     func assertLockScreen(_ app: XCUIApplication, reason: String) {
         let lock = lockScreen(app)
         XCTAssertTrue(lock.exists, "no lock screen")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", ShellTestCase.lockHeading)).firstMatch.exists,
-                      "the lock screen's heading is wrong")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", ShellTestCase.lockMessage)).firstMatch.exists,
-                      "the lock screen's text is not exactly as specified")
+        let heading = app.staticTexts["offline-lock-heading"]
+        let message = app.staticTexts["offline-lock-message"]
+        XCTAssertTrue(heading.exists, "the lock screen has no heading")
+        XCTAssertEqual(heading.exists ? heading.label : "", ShellTestCase.lockHeading, "the lock screen's heading")
+        XCTAssertTrue(message.exists, "the lock screen has no text")
+        XCTAssertEqual(message.exists ? message.label : "", ShellTestCase.lockMessage, "the lock screen's text")
+        XCTAssertTrue(app.buttons["support-email"].exists, "the lock screen has no support link")
         XCTAssertTrue(app.buttons["retry-button"].exists, "the lock screen has no Try again")
         XCTAssertEqual(lock.value as? String, reason, "the lock screen's reason")
         XCTAssertTrue(debugState(app).contains("lock=\(reason)"), "state: \(debugState(app))")

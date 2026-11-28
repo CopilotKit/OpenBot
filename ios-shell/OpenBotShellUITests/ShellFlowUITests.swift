@@ -13,10 +13,11 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertFalse(app.webViews.firstMatch.exists, "a web view is visible on the first screen")
         XCTAssertFalse(tab(app, .home).exists, "the tab bar shows before signing in")
         screenshot("first-screen")
-        XCUIDevice.shared.appearance = .dark
-        sleep(2)
+        app.terminate()
+        app = launch(base: ShellTestCase.mockA, moment: "dark", extra: ["OPENBOT_SHELL_FORCE_DARK": "1"])
+        XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 15))
+        sleep(1)
         screenshot("first-screen-dark")
-        XCUIDevice.shared.appearance = .light
         app.terminate()
 
         // Nothing listens on 8799: the first screen does not need the server.
@@ -207,14 +208,18 @@ final class ShellFlowUITests: ShellTestCase {
         note("commits start \(commitsAtStart) end \(commitsAtEnd); \(debugState(app))")
 
         // Dark mode: the page follows the system, and the chrome follows the page.
-        XCUIDevice.shared.appearance = .dark
         sleep(3)
+        app.terminate()
+        let dark = launch(base: ShellTestCase.mockA, moment: "dark", reset: false, extra: ["OPENBOT_SHELL_FORCE_DARK": "1"])
+        XCTAssertTrue(tab(dark, .home).waitForExistence(timeout: 20), "no tabs in dark mode")
+        XCTAssertTrue(webText(dark, "Start a conversation").waitForExistence(timeout: 20))
+        sleep(2)
         screenshot("6-home-dark")
-        note("dark: \(debugState(app))")
-        tab(app, .conversations).tap()
+        note("dark: \(debugState(dark))")
+        XCTAssertTrue(waitForState(dark, "dark=1", timeout: 5), "the page did not report dark mode: \(debugState(dark))")
+        tab(dark, .conversations).tap()
         sleep(2)
         screenshot("7-conversations-dark")
-        XCUIDevice.shared.appearance = .light
     }
 
     // d.
@@ -319,10 +324,12 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertTrue(debugState(app).contains("signIn=idle"), "a tap under the lock started something: \(debugState(app))")
         XCTAssertTrue(lockScreen(app).exists, "the lock went away")
         screenshot("offline-lock")
-        XCUIDevice.shared.appearance = .dark
-        sleep(2)
+        app.terminate()
+        app = launch(base: ShellTestCase.mockA, moment: "forced-dark",
+                     extra: ["OPENBOT_SHELL_FORCE_OFFLINE": "1", "OPENBOT_SHELL_FORCE_DARK": "1"])
+        XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 15))
+        sleep(1)
         screenshot("offline-lock-dark")
-        XCUIDevice.shared.appearance = .light
         app.terminate()
 
         // Offline for 6 s, then the real network: the lock lifts and the sign-in screen is back.
