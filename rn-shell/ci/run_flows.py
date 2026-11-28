@@ -208,7 +208,7 @@ def run(platform, suite, artifacts, private, only, shard=0):
                 (flow_dir / name).read_text() for name in ("maestro.log", "report.xml") if (flow_dir / name).exists()
             )
             # Maestro's own driver dying (after a killed run) is not the app's failure: once more.
-            if status == "failed" and attempts == 1 and re.search(r"DeviceServerDied|StatusRuntimeException: UNAVAILABLE|XCTestDriver.*(unreachable|failed)|<failure>Unknown error</failure>", log_text):
+            if status == "failed" and attempts == 1 and re.search(r"DeviceServerDied|StatusRuntimeException: UNAVAILABLE|MaestroDriverStartupException|DriverTimeoutException|XCTestDriver.*(unreachable|failed)", log_text):
                 print("  Maestro's driver died; running the flow again", flush=True)
                 continue
             break

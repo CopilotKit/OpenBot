@@ -1,4 +1,4 @@
-# The keyboard in a conversation: the message box and Send above it, sending keeps it up, a tab tap
+# The keyboard in a conversation: the message box and Send above it, sending keeps it up, a drag down
 # puts it away and the tab bar comes back.
 appId: ai.openbot.rnshell
 # Android: read the web view's content through DevTools (test builds enable web view debugging);
@@ -30,12 +30,17 @@ androidWebViewHierarchy: devtools
     id: "debug-state"
     text: ".*keyboard=1.*"
 - takeScreenshot: conversation-sent
-- tapOn:
-    id: "tab-home"
+# While the keyboard is up the tab bar is hidden (by design); a drag down puts the keyboard away and
+# the tab bar comes back right under the web view.
+- swipe:
+    start: "50%, 30%"
+    end: "50%, 60%"
+    duration: 400
 - extendedWaitUntil:
     visible:
       id: "debug-state"
-      text: ".*keyboard=0.*tab=home.*|.*tab=home.*keyboard=0.*"
+      text: ".*keyboard=0.*"
     timeout: 10000
 - assertVisible:
     id: "tab-bar"
+- takeScreenshot: conversation-keyboard-down
