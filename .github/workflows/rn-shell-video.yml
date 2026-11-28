@@ -1,0 +1,297 @@
+name: RN shell (video)
+
+# Records the React Native shell's demo tour (maestro/demo/tour.yaml) on the mock stack, once on an
+# iPhone simulator and once on an Android emulator, each job within 13 minutes. The app and the APK
+# come from the caches the test workflows fill (keyed on the app's sources), so it is started by hand
+# once the test workflows have built the commit; it builds only if the cache has nothing.
+#
+# Artifacts: rn-shell-video-ios-<run id> and rn-shell-video-android-<run id> (demo-tour.mp4, the
+# flow's screenshots and log).
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: rn-shell-video-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    name: Record the demo tour (iOS)
+    if: github.repository == 'CopilotKit/OpenBot'
+    runs-on: macos-latest
+    timeout-minutes: 13
+    permissions:
+      contents: read
+    env:
+      ARTIFACTS: ${{ github.workspace }}/artifacts
+      USE_CCACHE: "1"
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Start the clock and boot a simulator in the background
+        run: |
+          mkdir -p "$ARTIFACTS/video"
+          echo "$(date +%s) start" > "$RUNNER_TEMP/timing"
+          picked="$(python3 rn-shell/ci/pick_simulator.py)"
+          udid="$(printf '%s' "$picked" | cut -f1)"
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          nohup bash -c 'xcrun simctl boot "$1" || true; xcrun simctl bootstatus "$1" -b \
+            && xcrun simctl spawn "$1" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true; \
+            xcrun simctl spawn "$1" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true; \
+            touch "$2/simulator.ready"' boot "$udid" "$ARTIFACTS" > "$ARTIFACTS/simulator-boot.log" 2>&1 &
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      - name: Key the built web app on its sources from git's index (hashFiles over app timed out on macOS)
+        id: web-key
+        run: |
+          sum="$(git ls-files -s app/src app/public app/index.html app/package.json shared tokens bun.lock package.json .env.example \
+            'app/vite.config.*' 'app/tsconfig*.json' | sha256sum | cut -c1-40)"
+          echo "key=rn-shell-web-$sum" >> "$GITHUB_OUTPUT"
+
+      - name: Look for the built web app in the cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/dist
+          key: ${{ steps.web-key.outputs.key }}
+
+      - name: Start the servers in the background
+        run: nohup rn-shell/ci/start_servers.sh "$ARTIFACTS" > /dev/null 2>&1 &
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: rn-shell/package-lock.json
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Maestro in the background
+        run: |
+          nohup bash -c 'curl -fsSL "https://get.maestro.mobile.dev" | bash && touch "$1/maestro.ready" || touch "$1/maestro.failed"' maestro "$ARTIFACTS" \
+            > "$ARTIFACTS/maestro-install.log" 2>&1 &
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Key the app on its sources from git's index
+        id: app-key
+        run: |
+          sum="$(git ls-files -s rn-shell/src rn-shell/modules rn-shell/plugins rn-shell/patches rn-shell/assets \
+            rn-shell/app.config.ts rn-shell/index.ts rn-shell/package.json rn-shell/package-lock.json | sha256sum | cut -c1-40)"
+          echo "key=rn-shell-ios-app-$sum" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the built app
+        id: app-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rn-shell/build/app
+          key: ${{ steps.app-key.outputs.key }}
+
+      - name: Build the app (only when the test workflow has not)
+        if: steps.app-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 10
+        working-directory: rn-shell
+        env:
+          EXPO_PUBLIC_OPENBOT_TEST_BUILD: "1"
+        run: |
+          echo "$(date +%s) build" >> "$RUNNER_TEMP/timing"
+          npm ci --no-audit --no-fund
+          npx expo prebuild --platform ios --no-install --clean > /dev/null
+          (cd ios && pod install > "$ARTIFACTS/pod-install.log" 2>&1)
+          (cd ios && xcodebuild build -workspace OpenBot.xcworkspace -scheme OpenBot -configuration Release \
+            -sdk iphonesimulator -destination "generic/platform=iOS Simulator" -derivedDataPath ../build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO ONLY_ACTIVE_ARCH=YES > "$ARTIFACTS/xcodebuild.log" 2>&1) || true
+          mkdir -p build/app && ditto build/DerivedData/Build/Products/Release-iphonesimulator/OpenBot.app build/app/OpenBot.app
+
+      - name: Point at the app
+        run: echo "APP_PATH=$GITHUB_WORKSPACE/rn-shell/build/app/OpenBot.app" >> "$GITHUB_ENV"
+
+      - name: Record the demo tour
+        timeout-minutes: 5
+        run: |
+          echo "$(date +%s) record" >> "$RUNNER_TEMP/timing"
+          rn-shell/ci/wait_for.sh "$ARTIFACTS/simulator.ready" - 120 "$ARTIFACTS/simulator-boot.log"
+          rn-shell/ci/wait_for.sh "$ARTIFACTS/servers.ready" "$ARTIFACTS/servers.failed" 240 "$ARTIFACTS/servers.log"
+          rn-shell/ci/wait_for.sh "$ARTIFACTS/maestro.ready" "$ARTIFACTS/maestro.failed" 120 "$ARTIFACTS/maestro-install.log"
+          xcrun simctl install "$SIM_UDID" "$APP_PATH"
+          xcrun simctl io "$SIM_UDID" recordVideo --codec h264 --force "$ARTIFACTS/video/demo-tour.mp4" > "$ARTIFACTS/record.log" 2>&1 &
+          recorder=$!
+          sleep 2
+          status=0
+          python3 rn-shell/ci/run_flows.py --platform ios --suite demo --artifacts "$ARTIFACTS" || status=$?
+          kill -INT "$recorder" || true
+          wait "$recorder" || true
+          ls -la "$ARTIFACTS/video"
+          exit $status
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "$(date +%s) end" >> "$RUNNER_TEMP/timing"
+          {
+            [ -f "$ARTIFACTS/SUMMARY.md" ] && cat "$ARTIFACTS/SUMMARY.md"
+            echo "### Seconds per step (iOS video)"
+            awk 'NR > 1 { printf "- %s: %d s\n", name, $1 - previous } { previous = $1; name = $2 }' "$RUNNER_TEMP/timing"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rn-shell-video-ios-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 14
+          if-no-files-found: warn
+
+  android:
+    name: Record the demo tour (Android)
+    if: github.repository == 'CopilotKit/OpenBot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 13
+    permissions:
+      contents: read
+    env:
+      API_LEVEL: "35"
+      ARTIFACTS: ${{ github.workspace }}/artifacts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Start the clock
+        run: |
+          mkdir -p "$ARTIFACTS/video"
+          echo "$(date +%s) start" > "$RUNNER_TEMP/timing"
+
+      - name: Cache the emulator's system image
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /usr/local/lib/android/sdk/system-images/android-35/google_apis/x86_64
+          key: android-system-image-35-google_apis-x86_64-v1
+
+      - name: Boot the emulator in the background (guest GPU, animations on for the shimmer)
+        env:
+          GPU_MODE: guest
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules > /dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          nohup bash -c 'rn-shell/ci/emulator.sh boot && touch "$1/emulator.booted" || touch "$1/emulator.failed"' boot "$ARTIFACTS" \
+            > "$ARTIFACTS/emulator-boot.log" 2>&1 &
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      - name: Key the built web app on its sources from git's index (hashFiles over app timed out on macOS)
+        id: web-key
+        run: |
+          sum="$(git ls-files -s app/src app/public app/index.html app/package.json shared tokens bun.lock package.json .env.example \
+            'app/vite.config.*' 'app/tsconfig*.json' | sha256sum | cut -c1-40)"
+          echo "key=rn-shell-web-$sum" >> "$GITHUB_OUTPUT"
+
+      - name: Look for the built web app in the cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/dist
+          key: ${{ steps.web-key.outputs.key }}
+
+      - name: Start the servers in the background
+        run: nohup rn-shell/ci/start_servers.sh "$ARTIFACTS" > /dev/null 2>&1 &
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: rn-shell/package-lock.json
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Maestro in the background
+        run: |
+          nohup bash -c 'curl -fsSL "https://get.maestro.mobile.dev" | bash && touch "$1/maestro.ready" || touch "$1/maestro.failed"' maestro "$ARTIFACTS" \
+            > "$ARTIFACTS/maestro-install.log" 2>&1 &
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Key the APK on its sources from git's index
+        id: apk-key
+        run: |
+          sum="$(git ls-files -s rn-shell/src rn-shell/modules rn-shell/plugins rn-shell/patches rn-shell/assets \
+            rn-shell/app.config.ts rn-shell/index.ts rn-shell/package.json rn-shell/package-lock.json | sha256sum | cut -c1-40)"
+          echo "key=rn-shell-android-apk-$sum" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the built APK
+        id: apk-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rn-shell/build/apk
+          key: ${{ steps.apk-key.outputs.key }}
+
+      - name: Build the APK (only when the test workflow has not)
+        if: steps.apk-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 9
+        working-directory: rn-shell
+        env:
+          EXPO_PUBLIC_OPENBOT_TEST_BUILD: "1"
+        run: |
+          echo "$(date +%s) build" >> "$RUNNER_TEMP/timing"
+          npm ci --no-audit --no-fund
+          npx expo prebuild --platform android --no-install --clean > /dev/null
+          (cd android && ./gradlew --no-daemon :app:assembleRelease -PreactNativeArchitectures=x86_64 > "$ARTIFACTS/gradle.log" 2>&1) \
+            || { tail -n 80 "$ARTIFACTS/gradle.log"; exit 1; }
+          mkdir -p build/apk && cp android/app/build/outputs/apk/release/app-release.apk build/apk/
+
+      - name: Record the demo tour
+        timeout-minutes: 6
+        env:
+          ANIMATOR_SCALE: "1"
+          GPU_MODE: guest
+        run: |
+          echo "$(date +%s) record" >> "$RUNNER_TEMP/timing"
+          rn-shell/ci/wait_for.sh "$ARTIFACTS/emulator.booted" "$ARTIFACTS/emulator.failed" 240 "$ARTIFACTS/emulator-boot.log"
+          rn-shell/ci/emulator.sh prepare > /dev/null
+          rn-shell/ci/wait_for.sh "$ARTIFACTS/servers.ready" "$ARTIFACTS/servers.failed" 240 "$ARTIFACTS/servers.log"
+          rn-shell/ci/wait_for.sh "$ARTIFACTS/maestro.ready" "$ARTIFACTS/maestro.failed" 120 "$ARTIFACTS/maestro-install.log"
+          adb install -r -g rn-shell/build/apk/app-release.apk
+          adb shell screenrecord --bit-rate 6000000 --time-limit 175 /sdcard/demo-tour.mp4 &
+          recorder=$!
+          sleep 2
+          status=0
+          python3 rn-shell/ci/run_flows.py --platform android --suite demo --artifacts "$ARTIFACTS" || status=$?
+          adb shell pkill -INT screenrecord || true
+          wait "$recorder" || true
+          sleep 2
+          adb pull /sdcard/demo-tour.mp4 "$ARTIFACTS/video/demo-tour.mp4" || true
+          ls -la "$ARTIFACTS/video"
+          exit $status
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "$(date +%s) end" >> "$RUNNER_TEMP/timing"
+          {
+            [ -f "$ARTIFACTS/SUMMARY.md" ] && cat "$ARTIFACTS/SUMMARY.md"
+            echo "### Seconds per step (Android video)"
+            awk 'NR > 1 { printf "- %s: %d s\n", name, $1 - previous } { previous = $1; name = $2 }' "$RUNNER_TEMP/timing"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rn-shell-video-android-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 14
+          if-no-files-found: warn
