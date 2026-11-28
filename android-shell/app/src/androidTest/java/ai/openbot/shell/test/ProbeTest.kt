@@ -123,6 +123,30 @@ class ProbeTest : ShellTestBase() {
     }
 
     /**
+     * A signed-in page that never says `canGoBack` (no bridge: production today): Back keeps the
+     * WebView's own history, and leaves the app when there is none. The probe site stands in for
+     * it, signed in by a leftover session cookie (debug hook).
+     */
+    @Test
+    fun testBackWithoutCanGoBackUsesHistory() {
+        launch(PROBE, "no-can-go-back", extras = mapOf("openbot.stale_session" to "1"))
+        check(waitForState("phase=signedIn", 20_000), "the probe did not open signed in: ${debugState()}")
+        check(waitPageText("probe done", 60_000), "the probe page never finished")
+        pageJs("location.href = '/popup.html'")
+        check(waitPageText("popup page loaded", 15_000) || waitPageText("window.opener", 2_000), "the second page did not load")
+        check(debugState().contains("canGoBack=-"), "a page without the bridge reported canGoBack: ${debugState()}")
+        screenshot("1-second-page")
+        device.pressBack()
+        check(waitPageText("probe done", 20_000), "Back did not go back in the WebView's history")
+        check(device.currentPackageName == pkg, "Back with history left the app")
+        screenshot("2-back-in-history")
+        sleep(1_000)
+        device.pressBack()
+        sleep(2_000)
+        check(device.currentPackageName != pkg, "Back with no history stayed in the app: ${debugState()}")
+    }
+
+    /**
      * The request headers of `enter`'s exact code path (WebController.loadEnter: a native
      * `loadUrl(url, headers)`), against the probe's header echo: (a) from the signed-out first
      * screen, nothing loaded; (b) while a page is showing, as in a renewal.

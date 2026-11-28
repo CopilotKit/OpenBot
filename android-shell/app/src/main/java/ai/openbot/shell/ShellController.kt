@@ -161,7 +161,7 @@ class ShellController(
         get() = "phase=${phase.label} signIn=${signIn.label} tab=${selectedTab.key} nav=$lastNavigation " +
             "commits=$mainFrameCommits lock=$lockReason keyboard=${if (keyboardVisible) 1 else 0} " +
             "path=$webPathRoot dark=${pageIsDark?.let { if (it) "1" else "0" } ?: "-"} " +
-            "skeleton=${if (showsSkeleton) 1 else 0}"
+            "skeleton=${if (showsSkeleton) 1 else 0} canGoBack=${pageCanGoBack?.let { if (it) "1" else "0" } ?: "-"}"
 
     private fun changed() {
         val visible = webVisible
@@ -787,6 +787,11 @@ class ShellController(
                 val signedIn = message.optBoolean("signedIn", false)
                 if (!message.isNull("tab")) ShellTab.fromKey(message.optString("tab"))?.let { selectedTab = it }
                 pageCanGoBack = if (message.has("canGoBack") && !message.isNull("canGoBack")) message.optBoolean("canGoBack") else null
+                // Where the page is, as it says (its in-app moves replace the history entry).
+                if (path.startsWith("/")) {
+                    val root = path.substringBefore("?").split("/").firstOrNull { it.isNotEmpty() }?.let { "/$it" } ?: "/"
+                    if (root != webPathRoot) webPathRoot = root
+                }
                 changed()
                 if (signedIn) {
                     if ((phase != Phase.SIGNED_IN || renewing) && enterMayFinish) finishSignIn()

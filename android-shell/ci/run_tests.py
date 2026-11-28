@@ -68,6 +68,7 @@ PROBE = [
     "ProbeTest#testSessionSurvivesRelaunch_2_relaunch",
     "ProbeTest#testBlankWindowOpenKeepsThePage",
     "ProbeTest#testEnterRequestHeaders",
+    "ProbeTest#testBackWithoutCanGoBackUsesHistory",
 ]
 SUITE2 = [
     "ShellFlowTest#testFirstScreenIsNative",
@@ -79,6 +80,11 @@ SUITE2 = [
     "ShellFlowTest#testSignInClearsALeftoverSession",
     "ShellFlowTest#testWellFormedForgedTicketDoesNotSignIn",
     "ShellFlowTest#testOpenTheAppIntentIsTheCallback",
+    "NavigationTest#testChatsConversationBackKeepsTheList",
+    "NavigationTest#testBotsConversationKeepsBots",
+    "NavigationTest#testTabsRememberWhereTheyWereLeft",
+    "NavigationTest#testBackAtARootLeavesTheApp",
+    "NavigationTest#testSettingsHasBack",
     "ShellFlowTest#testFallbackToWebSignIn",
     "ShellFlowTest#testOfflineLock",
     "ShellFlowTest#testKeyboardHidesTabBar",

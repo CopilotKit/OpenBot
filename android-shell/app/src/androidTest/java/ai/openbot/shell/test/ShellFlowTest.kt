@@ -179,7 +179,7 @@ class ShellFlowTest : ShellTestBase() {
         }
         assertNoWebNavigation("conversation")
 
-        // System Back goes back in the WebView's history: the list again.
+        // System Back pops the Chats stack (openbot:back): the list again.
         device.pressBack()
         check(waitPageText("Trip to Lisbon", 10_000), "system Back did not return to the conversations list")
         check(waitForState("path=/conversations", 5_000), "system Back did not return to /conversations: ${debugState()}")
