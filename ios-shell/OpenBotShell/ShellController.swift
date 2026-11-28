@@ -583,6 +583,20 @@ final class ShellController: NSObject, WebControllerDelegate {
     /// `enter` only after it.
     private var siteDataClearWaiters: [() -> Void]?
     private func clearSiteData(reason: String, completion: (() -> Void)? = nil) {
+        // Never left waiting: WebKit once did not call back at all (run 46164083101, right after the
+        // app was built again for another server). After 4 s the caller goes ahead.
+        var completion = completion
+        if let inner = completion {
+            var called = false
+            let once = { [weak self] (timedOut: Bool) in
+                guard !called else { return }
+                called = true
+                if timedOut { self?.diagnostics.log("site-data-clear-timeout", ["reason": reason]) }
+                inner()
+            }
+            completion = { once(false) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { once(true) }
+        }
         if siteDataClearWaiters != nil {
             // One clear at a time; a later caller waits for this one and then clears again.
             siteDataClearWaiters?.append { [weak self] in self?.clearSiteData(reason: reason, completion: completion) }

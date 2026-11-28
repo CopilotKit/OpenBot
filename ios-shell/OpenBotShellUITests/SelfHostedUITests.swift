@@ -19,14 +19,15 @@ final class SelfHostedUITests: ShellTestCase {
 
     private func submit(_ app: XCUIApplication, _ text: String) {
         let box = field(app)
-        // The caret at the end of what is there (a tap in the middle would leave the tail), then
-        // all of it deleted.
-        box.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
-        if let value = box.value as? String, !value.isEmpty, value != "openbot.example.com" {
-            box.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count + 2))
-        }
+        box.tap()
         box.typeText(text)
         app.buttons["server-address-continue"].tap()
+    }
+
+    /// Cancel and open again: an empty field for the next address.
+    private func reopen(_ app: XCUIApplication) {
+        app.buttons["server-address-cancel"].tap()
+        open(app)
     }
 
     // At rest no field; open: field and Continue above the keyboard; each kind of bad address has
@@ -52,7 +53,8 @@ final class SelfHostedUITests: ShellTestCase {
             ("http://127.0.0.1:3011", "isn't an OpenBot the phone app can use yet", "5-error-too-old"),
             ("http://127.0.0.1:3999", "didn't answer", "6-error-no-answer"),
         ]
-        for (typed, expected, shot) in cases {
+        for (index, (typed, expected, shot)) in cases.enumerated() {
+            if index > 0 { reopen(app) }
             submit(app, typed)
             XCTAssertTrue(error(app).waitForExistence(timeout: 15), "no error for \(typed)")
             XCTAssertTrue(error(app).label.contains(expected), "'\(typed)': \(error(app).label)")
