@@ -1,4 +1,5 @@
 //! Desktop provider authorization. Tokens stay in the installation's private runtime store.
+use crate::loopback_redirect::{Ended, Listener, Outcome};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,15 @@ mod credential_lock;
 pub const FILE: &str = ".openbot/model-oauth.json";
 const XAI_CLIENT: &str = "b1a00492-073a-47ea-816f-4c329264a828";
 const XAI_SCOPE: &str = "openid profile email offline_access grok-cli:access api:access";
+/*
+ * TrustedRouter's delegated sign-in: RFC 8252 loopback OAuth with PKCE S256 against TrustedRouter's
+ * control plane (`https://trustedrouter.com/v1/auth` and `/v1/auth/keys`), which mints a
+ * user-scoped inference API key for `https://api.trustedrouter.com/v1` with no client secret.
+ */
+const TRUSTEDROUTER_BASE: &str = "https://trustedrouter.com";
+const TRUSTEDROUTER_CALLBACK_PATH: &str = "/oauth/callback";
+const TRUSTEDROUTER_KEY_LABEL: &str = "OpenBot";
+const TRUSTEDROUTER_PATIENCE: Duration = Duration::from_secs(600);
 /*
  * Gemini takes an API key only. Its sign-in ran every person's calls on one shared Google Cloud
  * project's quota, which refused most of them, and Google's own SDK takes no sign-in on the Gemini
@@ -55,11 +65,20 @@ struct Flow {
     canceled: AtomicBool,
     pending: Mutex<Option<Pending>>,
 }
-struct Pending {
-    client_id: String,
-    device_code: String,
-    interval: u64,
-    expires: Instant,
+enum Pending {
+    Xai {
+        client_id: String,
+        device_code: String,
+        interval: u64,
+        expires: Instant,
+    },
+    TrustedRouter {
+        listener: Listener,
+        state: String,
+        verifier: String,
+        token_url: String,
+        patience: Duration,
+    },
 }
 static ACTIVE: OnceLock<Mutex<Option<Arc<Flow>>>> = OnceLock::new();
 fn active() -> &'static Mutex<Option<Arc<Flow>>> {
@@ -137,8 +156,13 @@ pub fn begin(root: &Path, provider: &str) -> Result<Authorization, String> {
     if provider == "google" {
         return Err(GOOGLE_SIGN_IN_ENDED.into());
     }
-    if provider != "xai" {
+    if provider != "xai" && provider != "trustedrouter" {
         return Err("That provider does not support this sign-in flow.".into());
+    }
+    if provider == "trustedrouter" {
+        let base = configured("OPENBOT_TRUSTEDROUTER_OAUTH_BASE_URL")
+            .unwrap_or_else(|| TRUSTEDROUTER_BASE.into());
+        return begin_trustedrouter_at(root, &base, TRUSTEDROUTER_PATIENCE);
     }
     // Reserve before blocking network work so a late response cannot replace a newer sign-in.
     let flow = reserve(root);
@@ -170,7 +194,7 @@ pub fn begin(root: &Path, provider: &str) -> Result<Authorization, String> {
                 .unwrap_or(600)
                 .min(1800),
         );
-    let pending = Pending {
+    let pending = Pending::Xai {
         client_id,
         device_code,
         interval,
@@ -182,6 +206,66 @@ pub fn begin(root: &Path, provider: &str) -> Result<Authorization, String> {
         attempt_id: flow.id.clone(),
         url,
         user_code: Some(user_code),
+    })
+}
+
+fn trustedrouter_base_url(raw: &str) -> Result<reqwest::Url, String> {
+    let invalid = "TrustedRouter sign-in address is invalid.";
+    let parsed = reqwest::Url::parse(raw.trim()).map_err(|_| invalid)?;
+    let loopback = parsed.scheme() == "http"
+        && matches!(parsed.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
+    if (parsed.scheme() != "https" && !loopback)
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(invalid.into());
+    }
+    Ok(parsed)
+}
+
+fn begin_trustedrouter_at(
+    root: &Path,
+    base_url: &str,
+    patience: Duration,
+) -> Result<Authorization, String> {
+    let base = trustedrouter_base_url(base_url)?;
+    let flow = reserve(root);
+    let listener = Listener::on_any_port(TRUSTEDROUTER_CALLBACK_PATH).map_err(|error| {
+        format!("OpenBot couldn't start the sign-in on this computer. Try again. ({error})")
+    })?;
+    let verifier = random();
+    let state = random();
+    let challenge = pkce_challenge(&verifier);
+    let mut callback =
+        reqwest::Url::parse(&listener.redirect_uri_ipv4()).map_err(|e| e.to_string())?;
+    // Carry state inside callback_url so both approval and cancellation preserve it.
+    callback.query_pairs_mut().append_pair("state", &state);
+    let mut authorize = base.clone();
+    authorize.set_path("/v1/auth");
+    authorize.query_pairs_mut().extend_pairs([
+        ("callback_url", callback.as_str()),
+        ("code_challenge", challenge.as_str()),
+        ("code_challenge_method", "S256"),
+        ("key_label", TRUSTEDROUTER_KEY_LABEL),
+    ]);
+    let mut token_url = base;
+    token_url.set_path("/v1/auth/keys");
+    let pending = Pending::TrustedRouter {
+        listener,
+        state,
+        verifier,
+        token_url: token_url.into(),
+        patience,
+    };
+    check(&flow)?;
+    *flow.pending.lock().unwrap() = Some(pending);
+    Ok(Authorization {
+        attempt_id: flow.id.clone(),
+        url: authorize.into(),
+        user_code: None,
     })
 }
 
@@ -232,8 +316,10 @@ fn xai_verification_url(body: &serde_json::Value) -> Result<String, String> {
     Ok(parsed.into())
 }
 
-/// Finish xAI sign-in and save its refreshable session in the private credential file.
-pub fn finish(id: &str) -> Result<(), String> {
+/// Finish the sign-in. xAI leaves a refreshable session in the private credential file and
+/// answers nothing; TrustedRouter answers the API key it minted, which the window carries on
+/// exactly as a typed endpoint key.
+pub fn finish(id: &str) -> Result<Option<String>, String> {
     let flow = active()
         .lock()
         .unwrap()
@@ -292,55 +378,162 @@ pub(crate) fn read_callback_request(
     }
 }
 
-fn finish_flow(flow: &Flow, pending: Pending) -> Result<(), String> {
-    let Pending {
-        client_id,
-        device_code,
-        mut interval,
-        expires,
-    } = pending;
-    let tokens = loop {
-        if Instant::now() >= expires {
-            return Err("xAI sign-in expired. Try signing in again.".into());
-        }
-        wait(flow, Duration::from_secs(interval))?;
-        let response = http()?
-            .post("https://auth.x.ai/oauth2/token")
-            .form(&[
-                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
-                ("client_id", client_id.as_str()),
-                ("device_code", device_code.as_str()),
-            ])
-            .send()
-            .map_err(|e| e.to_string())?;
-        let status = response.status();
-        let body: serde_json::Value = response
-            .json()
-            .map_err(|_| "xAI returned an unreadable sign-in response.")?;
-        if status.is_success() {
-            break body;
-        }
-        match body.get("error").and_then(|v| v.as_str()) {
-            Some("authorization_pending") => continue,
-            Some("slow_down") => {
-                interval = interval.saturating_add(5);
-                continue;
+fn finish_trustedrouter(
+    flow: &Flow,
+    listener: Listener,
+    state: &str,
+    verifier: &str,
+    token_url: &str,
+    patience: Duration,
+) -> Result<String, String> {
+    let (outcome, reply) = listener
+        .wait(state, patience, &|| flow.canceled.load(Ordering::SeqCst))
+        .map_err(|ended| match ended {
+            Ended::Cancelled => "Sign-in was canceled.".to_string(),
+            Ended::TimedOut => "TrustedRouter sign-in expired. Try signing in again.".to_string(),
+            Ended::PortWanted | Ended::Failed(_) => {
+                "TrustedRouter sign-in didn't finish. Try signing in again.".to_string()
             }
-            Some("access_denied") => return Err("xAI sign-in was not approved.".into()),
-            Some("expired_token") => {
-                return Err("xAI sign-in expired. Try signing in again.".into())
+        })?;
+    drop(listener);
+    match outcome {
+        Outcome::Error { error, .. } => {
+            reply.page(
+                "200 OK",
+                "Sign-in didn't finish",
+                &["Go back to OpenBot to try again. You can close this tab."],
+            );
+            Err(if error == "access_denied" {
+                "TrustedRouter sign-in was not approved.".into()
+            } else {
+                "TrustedRouter sign-in failed. Try signing in again.".into()
+            })
+        }
+        Outcome::Code { code, .. } => {
+            if let Err(canceled) = check(flow) {
+                reply.page(
+                    "200 OK",
+                    "Sign-in didn't finish",
+                    &["Go back to OpenBot to try again. You can close this tab."],
+                );
+                return Err(canceled);
             }
-            _ => {
-                return Err(format!(
-                    "xAI sign-in failed ({}). Try signing in again.",
-                    status.as_u16()
-                ))
+            let exchanged = exchange_trustedrouter_code(token_url, &code, verifier)
+                .and_then(|key| check(flow).map(|()| key));
+            match exchanged {
+                Ok(key) => {
+                    reply.page(
+                        "200 OK",
+                        "You're signed in to TrustedRouter",
+                        &["Go back to OpenBot to keep going. You can close this tab."],
+                    );
+                    Ok(key)
+                }
+                Err(error) => {
+                    reply.page(
+                        "200 OK",
+                        "Sign-in didn't finish",
+                        &["Go back to OpenBot to try again. You can close this tab."],
+                    );
+                    Err(error)
+                }
             }
         }
-    };
-    check(flow)?;
-    let credentials = credentials_from_tokens("xai", client_id, XAI_SCOPE, &tokens)?;
-    write(&flow.root, &credentials, || check(flow))
+    }
+}
+
+fn exchange_trustedrouter_code(
+    token_url: &str,
+    code: &str,
+    verifier: &str,
+) -> Result<String, String> {
+    let response = http()?
+        .post(token_url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .json(&serde_json::json!({
+            "code": code,
+            "code_verifier": verifier,
+            "code_challenge_method": "S256",
+        }))
+        .send()
+        .map_err(|_| {
+            "Could not reach TrustedRouter to finish signing in. Check your connection and try again."
+                .to_string()
+        })?;
+    let status = response.status();
+    let body: serde_json::Value = response
+        .json()
+        .map_err(|_| "TrustedRouter returned an unreadable sign-in response.".to_string())?;
+    if !status.is_success() {
+        return Err(format!(
+            "TrustedRouter sign-in failed ({}). Try signing in again.",
+            status.as_u16()
+        ));
+    }
+    required(&body, "key")
+}
+
+fn finish_flow(flow: &Flow, pending: Pending) -> Result<Option<String>, String> {
+    match pending {
+        Pending::TrustedRouter {
+            listener,
+            state,
+            verifier,
+            token_url,
+            patience,
+        } => {
+            finish_trustedrouter(flow, listener, &state, &verifier, &token_url, patience).map(Some)
+        }
+        Pending::Xai {
+            client_id,
+            device_code,
+            mut interval,
+            expires,
+        } => {
+            let tokens = loop {
+                if Instant::now() >= expires {
+                    return Err("xAI sign-in expired. Try signing in again.".into());
+                }
+                wait(flow, Duration::from_secs(interval))?;
+                let response = http()?
+                    .post("https://auth.x.ai/oauth2/token")
+                    .form(&[
+                        ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+                        ("client_id", client_id.as_str()),
+                        ("device_code", device_code.as_str()),
+                    ])
+                    .send()
+                    .map_err(|e| e.to_string())?;
+                let status = response.status();
+                let body: serde_json::Value = response
+                    .json()
+                    .map_err(|_| "xAI returned an unreadable sign-in response.")?;
+                if status.is_success() {
+                    break body;
+                }
+                match body.get("error").and_then(|v| v.as_str()) {
+                    Some("authorization_pending") => continue,
+                    Some("slow_down") => {
+                        interval = interval.saturating_add(5);
+                        continue;
+                    }
+                    Some("access_denied") => return Err("xAI sign-in was not approved.".into()),
+                    Some("expired_token") => {
+                        return Err("xAI sign-in expired. Try signing in again.".into())
+                    }
+                    _ => {
+                        return Err(format!(
+                            "xAI sign-in failed ({}). Try signing in again.",
+                            status.as_u16()
+                        ))
+                    }
+                }
+            };
+            check(flow)?;
+            let credentials = credentials_from_tokens("xai", client_id, XAI_SCOPE, &tokens)?;
+            write(&flow.root, &credentials, || check(flow)).map(|()| None)
+        }
+    }
 }
 fn credentials_from_tokens(
     provider: &str,
@@ -976,5 +1169,250 @@ mod tests {
         assert_eq!(read(&root, "xai").unwrap().session_id, saved.session_id);
         assert!(root.join(format!("{FILE}.lock/owner.lock")).is_file());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn trustedrouter_base_url_rejects_unsafe_addresses() {
+        for bad in [
+            "http://trustedrouter.com",
+            "http://evil.example",
+            "https://user:pass@trustedrouter.com",
+            "https://trustedrouter.com?foo=bar",
+            "https://trustedrouter.com#frag",
+            "javascript:alert(1)",
+            "file:///tmp/tr",
+        ] {
+            assert!(
+                trustedrouter_base_url(bad).is_err(),
+                "accepted invalid TrustedRouter base URL: {bad}"
+            );
+        }
+        for good in [
+            "https://trustedrouter.com",
+            "http://127.0.0.1:4321",
+            "http://localhost:4321",
+        ] {
+            assert!(
+                trustedrouter_base_url(good).is_ok(),
+                "rejected valid TrustedRouter base URL: {good}"
+            );
+        }
+    }
+
+    /// Minimal single-request HTTP server for offline TrustedRouter token exchange tests.
+    fn mock_trustedrouter_exchange(
+        status: &'static str,
+        response_body: &'static str,
+    ) -> (
+        String,
+        std::sync::mpsc::Receiver<serde_json::Value>,
+        std::thread::JoinHandle<()>,
+    ) {
+        let server = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = server.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = server.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut raw = Vec::new();
+            let mut buf = [0u8; 4096];
+            let mut header_end = None;
+            let mut content_len = 0usize;
+            loop {
+                let n = stream.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                raw.extend_from_slice(&buf[..n]);
+                if header_end.is_none() {
+                    if let Some(pos) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                        header_end = Some(pos + 4);
+                        let headers = String::from_utf8_lossy(&raw[..pos]);
+                        for line in headers.lines() {
+                            if let Some((k, v)) = line.split_once(':') {
+                                if k.eq_ignore_ascii_case("content-length") {
+                                    content_len = v.trim().parse().unwrap_or(0);
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(end) = header_end {
+                    if raw.len() >= end + content_len {
+                        let body = &raw[end..end + content_len];
+                        let parsed: serde_json::Value =
+                            serde_json::from_slice(body).unwrap_or(serde_json::Value::Null);
+                        let _ = tx.send(parsed);
+                        break;
+                    }
+                }
+            }
+            let reply = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+                response_body.len()
+            );
+            let _ = stream.write_all(reply.as_bytes());
+        });
+        (format!("http://127.0.0.1:{}", addr.port()), rx, handle)
+    }
+
+    /// Sends one HTTP GET to the loopback callback URL and returns the raw HTTP response.
+    fn hit_loopback(url: &str) -> String {
+        let parsed = reqwest::Url::parse(url).unwrap();
+        let addr = format!(
+            "{}:{}",
+            parsed.host_str().unwrap(),
+            parsed.port_or_known_default().unwrap()
+        );
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let target = match parsed.query() {
+            Some(q) => format!("{}?{q}", parsed.path()),
+            None => parsed.path().to_string(),
+        };
+        let req = format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+        stream.write_all(req.as_bytes()).unwrap();
+        let mut out = String::new();
+        let _ = stream.read_to_string(&mut out);
+        out
+    }
+
+    #[test]
+    fn trustedrouter_loopback_pkce_mints_key_without_writing_oauth_file() {
+        let _slot = ACTIVE_SLOT.lock().unwrap_or_else(|e| e.into_inner());
+        let root = crate::test_support::temp_root("provider-oauth-tr-ok");
+        let (base, rx, server) = mock_trustedrouter_exchange(
+            "200 OK",
+            r#"{"key":"sk-tr-v1-synthetic","user_id":"usr_1"}"#,
+        );
+        let auth = begin_trustedrouter_at(&root, &base, Duration::from_secs(5)).unwrap();
+        assert_eq!(auth.user_code, None);
+
+        let authorize = reqwest::Url::parse(&auth.url).unwrap();
+        assert_eq!(authorize.path(), "/v1/auth");
+        let params: std::collections::HashMap<String, String> = authorize
+            .query_pairs()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        assert_eq!(
+            params.get("code_challenge_method").map(String::as_str),
+            Some("S256")
+        );
+        assert_eq!(params.get("key_label").map(String::as_str), Some("OpenBot"));
+        let challenge = params.get("code_challenge").unwrap().clone();
+        let callback = reqwest::Url::parse(params.get("callback_url").unwrap()).unwrap();
+        assert_eq!(callback.scheme(), "http");
+        assert_eq!(callback.host_str(), Some("127.0.0.1"));
+        assert_eq!(callback.path(), TRUSTEDROUTER_CALLBACK_PATH);
+
+        let attempt_id = auth.attempt_id.clone();
+        let finisher = std::thread::spawn(move || finish(&attempt_id));
+
+        // A stale callback with the wrong state is rejected and the listener keeps waiting.
+        let mut stale = callback.clone();
+        stale.set_query(Some("state=wrong&code=stale-code"));
+        let stale_reply = hit_loopback(stale.as_str());
+        assert!(stale_reply.contains("400 Bad Request"));
+
+        // Matching state + code completes the PKCE exchange and answers the browser tab.
+        let mut approved = callback;
+        approved
+            .query_pairs_mut()
+            .append_pair("code", "auth_code-synthetic")
+            .append_pair("user_id", "usr_1");
+        let ok_reply = hit_loopback(approved.as_str());
+        assert!(ok_reply.contains("200 OK"));
+        assert!(ok_reply.contains("signed in to TrustedRouter"));
+
+        let minted = finisher.join().unwrap().unwrap();
+        assert_eq!(minted.as_deref(), Some("sk-tr-v1-synthetic"));
+        let sent = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(sent["code"], "auth_code-synthetic");
+        assert_eq!(sent["code_challenge_method"], "S256");
+        assert_eq!(
+            pkce_challenge(sent["code_verifier"].as_str().unwrap()),
+            challenge
+        );
+        assert!(!root.join(FILE).exists());
+        server.join().unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn trustedrouter_denial_and_exchange_errors_answer_browser_and_fail_cleanly() {
+        let _slot = ACTIVE_SLOT.lock().unwrap_or_else(|e| e.into_inner());
+        let root = crate::test_support::temp_root("provider-oauth-tr-err");
+
+        // Denial on callback: no token exchange is attempted.
+        let auth =
+            begin_trustedrouter_at(&root, "http://127.0.0.1:9", Duration::from_secs(5)).unwrap();
+        let authorize = reqwest::Url::parse(&auth.url).unwrap();
+        let callback_raw = authorize
+            .query_pairs()
+            .find(|(k, _)| k == "callback_url")
+            .unwrap()
+            .1
+            .into_owned();
+        let attempt_id = auth.attempt_id.clone();
+        let finisher = std::thread::spawn(move || finish(&attempt_id));
+        let mut denied = reqwest::Url::parse(&callback_raw).unwrap();
+        denied
+            .query_pairs_mut()
+            .append_pair("error", "access_denied");
+        let reply = hit_loopback(denied.as_str());
+        assert!(reply.contains("Sign-in didn't finish"));
+        assert_eq!(
+            finisher.join().unwrap().unwrap_err(),
+            "TrustedRouter sign-in was not approved."
+        );
+
+        // Server rejects the code exchange with 403.
+        let (base, _rx, server) = mock_trustedrouter_exchange(
+            "403 Forbidden",
+            r#"{"error":{"message":"Invalid or expired authorization code"}}"#,
+        );
+        let auth = begin_trustedrouter_at(&root, &base, Duration::from_secs(5)).unwrap();
+        let authorize = reqwest::Url::parse(&auth.url).unwrap();
+        let callback_raw = authorize
+            .query_pairs()
+            .find(|(k, _)| k == "callback_url")
+            .unwrap()
+            .1
+            .into_owned();
+        let attempt_id = auth.attempt_id.clone();
+        let finisher = std::thread::spawn(move || finish(&attempt_id));
+        let mut approved = reqwest::Url::parse(&callback_raw).unwrap();
+        approved.query_pairs_mut().append_pair("code", "expired");
+        let reply = hit_loopback(approved.as_str());
+        assert!(reply.contains("Sign-in didn't finish"));
+        assert!(finisher
+            .join()
+            .unwrap()
+            .unwrap_err()
+            .contains("TrustedRouter sign-in failed (403)"));
+        server.join().unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn trustedrouter_cancel_stops_waiting_cleanly() {
+        let _slot = ACTIVE_SLOT.lock().unwrap_or_else(|e| e.into_inner());
+        let root = crate::test_support::temp_root("provider-oauth-tr-cancel");
+        let auth =
+            begin_trustedrouter_at(&root, "http://127.0.0.1:9", Duration::from_secs(10)).unwrap();
+        let attempt_id = auth.attempt_id.clone();
+        let cancel_id = auth.attempt_id.clone();
+        let finisher = std::thread::spawn(move || finish(&attempt_id));
+        std::thread::sleep(Duration::from_millis(80));
+        cancel(&cancel_id);
+        assert_eq!(
+            finisher.join().unwrap().unwrap_err(),
+            "Sign-in was canceled."
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }

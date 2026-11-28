@@ -1,7 +1,9 @@
 # Model provider OAuth
 
-OpenBot Desktop's xAI connection offers provider sign-in alongside an API key.
-The sign-in leaves a refreshable session in a private credential file.
+OpenBot Desktop's xAI and TrustedRouter connections offer provider sign-in
+alongside an API key. xAI's sign-in leaves a refreshable session in a private
+credential file; TrustedRouter's mints an inference API key, which is kept like
+a typed endpoint key.
 
 ## Google Gemini
 
@@ -38,6 +40,28 @@ apply.
 
 References: [xAI's OpenCode integration](https://x.ai/news/grok-opencode) and
 [xAI OAuth discovery](https://auth.x.ai/.well-known/openid-configuration).
+
+## TrustedRouter
+
+TrustedRouter sign-in uses loopback OAuth with PKCE S256 (RFC 8252 section 7.3):
+OpenBot binds an ephemeral loopback listener on `127.0.0.1`, opens
+`https://trustedrouter.com/v1/auth` with a random `state` embedded in
+`callback_url` and the S256 `code_challenge`, and waits for the browser redirect.
+The person can sign in or create a TrustedRouter account, fund credits, and
+choose a spend cap on TrustedRouter's consent screen before approving.
+
+Once approved, OpenBot exchanges the single-use authorization code and PKCE
+`code_verifier` at `POST https://trustedrouter.com/v1/auth/keys` (no client
+secret) for an inference-only API key (`sk-tr-v1-…`). Because the minted key is
+long-lived until revoked in TrustedRouter's console and has no refresh token, it
+is not kept in `.openbot/model-oauth.json`; it travels into OpenBot exactly as a
+typed endpoint key does against `https://api.trustedrouter.com/v1`.
+
+`OPENBOT_TRUSTEDROUTER_OAUTH_BASE_URL` points the flow at another address for
+testing against a local mock (`https://`, or `http://` on loopback only).
+
+References: [Sign in with TrustedRouter](https://github.com/Lore-Hex/quill-router/blob/main/docs/sign-in-with-trustedrouter.md)
+and [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252).
 
 ## Other build-time settings
 

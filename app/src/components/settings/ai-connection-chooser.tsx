@@ -458,6 +458,8 @@ export function ChooseConnection({
    * before it took the port): its sign-in is finished by paste, as in a browser.
    */
   const [pasteBack, setPasteBack] = useState(false);
+  // The key a TrustedRouter sign-in in Desktop mints: held for the one request that sends it, never drawn.
+  const minted = useRef<string | null>(null);
   const attempt = useRef<{
     plan?: Plan;
     attemptId?: string;
@@ -527,6 +529,7 @@ export function ChooseConnection({
     setSignInCode("");
     setChatGptWay(firstChatGptWay);
     setPasteBack(false);
+    minted.current = null;
   }
   chooseLatest.current = choose;
 
@@ -544,6 +547,7 @@ export function ChooseConnection({
     connect.reset();
     setSignedIn(keptSignIn(mode, provider, next) !== null);
     setSignInFailure(null);
+    minted.current = null;
     setLogin(next);
   }
 
@@ -589,13 +593,16 @@ export function ChooseConnection({
 
   /**
    * The model this provider's sign-in already names, in the list or as the connection in use.
+   * TrustedRouter's sign-in is kept as a key for its own address, so its address names it.
    */
   function ownModel(id: AiProvider["id"]): string | null {
+    const signedInBefore = (login: AiConnectionLogin | null) =>
+      login === "oauth" || (id === "trustedrouter" && login === "endpoint");
     const listed = adding?.connected.find(
-      (entry) => entry.provider === id && entry.login === "oauth",
+      (entry) => entry.provider === id && signedInBefore(entry.login),
     );
     if (listed) return listed.model;
-    return connection?.provider === id && connection.login === "oauth"
+    return connection?.provider === id && signedInBefore(connection.login)
       ? connection.model
       : null;
   }
@@ -618,6 +625,34 @@ export function ChooseConnection({
             ? { apiKey: typedKey }
             : {}),
       };
+    /*
+     * TrustedRouter's sign-in, run by the server: its key is kept for the person, for the
+     * provider's own address. A plan or an xAI sign-in the server ran connects as itself, below.
+     */
+    if (
+      login === "oauth" &&
+      serverOwned &&
+      provider.id === "trustedrouter" &&
+      preset
+    )
+      return {
+        provider: provider.id,
+        login: "endpoint",
+        baseUrl: preset.baseUrl,
+        model: signInModel,
+        useSavedKey: true,
+      };
+    // TrustedRouter's sign-in ends in a key for its own address, sent exactly as a typed one is.
+    if (login === "oauth" && provider.id === "trustedrouter" && preset) {
+      if (!minted.current) return null;
+      return {
+        provider: provider.id,
+        login: "endpoint",
+        apiKey: minted.current,
+        baseUrl: preset.baseUrl,
+        model: signInModel,
+      };
+    }
     if (login === "oauth")
       return { provider: provider.id, login, model: signInModel };
     return { provider: provider.id, login };
@@ -755,7 +790,9 @@ export function ChooseConnection({
         // Otherwise the browser comes back to Desktop, and it finishes on its own.
         await finishPlanSignIn(plan);
       } else {
-        const begun = await beginProviderSignIn();
+        const begun = await beginProviderSignIn(
+          provider.id as "xai" | "trustedrouter",
+        );
         if (!current()) {
           void cancelProviderSignIn(begun.attemptId).catch(() => {});
           return;
@@ -767,7 +804,12 @@ export function ChooseConnection({
           attemptId: begun.attemptId,
         });
         window.open(begun.url, "_blank", "noopener");
-        await finishProviderSignIn(begun.attemptId);
+        const finished = await finishProviderSignIn(begun.attemptId);
+        if (!current()) return;
+        minted.current = finished?.apiKey ?? null;
+        if (provider.id === "trustedrouter" && !minted.current) {
+          throw new Error(SIGN_IN_DIDNT_FINISH);
+        }
       }
       if (!current()) return;
       attempt.current = null;
@@ -874,6 +916,7 @@ export function ChooseConnection({
       { input: body, desktop: inDesktop, onPhase: setPhase },
       {
         onSuccess: (connected) => {
+          minted.current = null;
           setApiKey("");
           onConnected(connected);
         },
@@ -1292,6 +1335,8 @@ const SIGN_IN_SAYS: Record<string, string> = {
   openai:
     "OpenAI opens in your browser. It finishes on its own once you approve.",
   xai: "Authorize OpenBot to use models available to your xAI account.",
+  trustedrouter:
+    "Sign in or create a TrustedRouter account in your browser. It finishes on its own once you approve.",
 };
 
 /**

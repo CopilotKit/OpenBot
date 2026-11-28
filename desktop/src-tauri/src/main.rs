@@ -11276,9 +11276,11 @@ async fn begin_model_oauth(
     .map_err(|e| e.to_string())?
 }
 
-/// Finish xAI sign-in and keep the session in the native credential file.
+/// Nothing for a provider whose session stays in the native credential file (xAI); the minted API
+/// key for one whose sign-in produces a key (TrustedRouter), which the window carries on as a typed
+/// one.
 #[tauri::command]
-async fn finish_model_oauth(attempt_id: String) -> Result<(), String> {
+async fn finish_model_oauth(attempt_id: String) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         openbot_desktop_lib::provider_oauth::finish(&attempt_id)
     })
@@ -13716,7 +13718,7 @@ pub(crate) async fn cancel_plan_sign_in_now(
     }
 }
 
-/// Start an xAI sign-in, sending the browser to it.
+/// Start an xAI or TrustedRouter sign-in, sending the browser to it. Google's is refused.
 pub(crate) async fn begin_provider_sign_in_now(
     app: tauri::AppHandle,
     provider: String,

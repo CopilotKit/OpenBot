@@ -102,6 +102,9 @@ const AI_CALLS = new Set([
   "begin_plan_sign_in",
   "finish_plan_sign_in",
   "cancel_plan_sign_in",
+  "begin_provider_sign_in",
+  "finish_provider_sign_in",
+  "cancel_provider_sign_in",
   "prepare_ai_connection",
   "replaceAiConnection",
   "settle_ai_connection",
@@ -117,8 +120,17 @@ async function shellInvoke(command: string, args?: Record<string, unknown>) {
       return [];
     case "begin_plan_sign_in":
       return { url: claudeUrl };
+    case "begin_provider_sign_in":
+      return {
+        attemptId: "tr-attempt",
+        url: "https://trustedrouter.com/v1/auth?callback_url=http%3A%2F%2F127.0.0.1%3A54321%2Foauth%2Fcallback%3Fstate%3Ds&code_challenge=c&code_challenge_method=S256&key_label=OpenBot",
+        userCode: null,
+      };
+    case "finish_provider_sign_in":
+      return { apiKey: "sk-tr-v1-synthetic" };
     case "finish_plan_sign_in":
     case "cancel_plan_sign_in":
+    case "cancel_provider_sign_in":
     case "settle_ai_connection":
       return null;
     case "prepare_ai_connection":
@@ -160,6 +172,11 @@ beforeEach(() => {
         ...OPENAI_KEY,
         provider: input_.provider,
         login: input_.login,
+        model: "model" in input_ ? (input_.model ?? null) : null,
+        endpointHost:
+          "baseUrl" in input_ && input_.baseUrl
+            ? new URL(input_.baseUrl).host
+            : null,
         changedAt: "2026-11-17T23:30:00.000Z",
       };
       return Response.json(GetAiConnectionResponse.parse(connection));
@@ -322,4 +339,50 @@ test("after a switch, the models a person may pick and each conversation's pick 
   // And the row under the dialog reads the new connection.
   await userEvent.click(within(dialog).getByRole("button", { name: "Done" }));
   await view.findByRole("button", { name: /Signed in with your Claude plan/ });
+});
+
+test("TrustedRouter signs in through Desktop, mints a key, and connects at once with nothing else pressed", async () => {
+  const view = renderProviders();
+  await userEvent.click(
+    await view.findByRole("button", { name: /Uses your OpenAI API key/ }),
+  );
+  const dialog = await view.findByRole("dialog");
+  await userEvent.click(within(dialog).getByRole("button", { name: "Change" }));
+  await userEvent.click(
+    await within(dialog).findByRole("button", { name: /^TrustedRouter/ }),
+  );
+  expect(
+    within(dialog)
+      .getByRole("tab", { name: "Sign in" })
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  await userEvent.click(
+    within(dialog).getByRole("button", { name: "Sign in with TrustedRouter" }),
+  );
+  await within(dialog).findByText("Connected to TrustedRouter");
+  expect(dialog.textContent).not.toContain("sk-tr-v1-synthetic");
+
+  const asked = aiCalls();
+  expect(asked.map((call) => call.what)).toEqual([
+    "ai_providers",
+    "begin_provider_sign_in",
+    "finish_provider_sign_in",
+    "replaceAiConnection",
+    "settle_ai_connection",
+  ]);
+  expect(asked[1]?.args).toEqual({ provider: "trustedrouter" });
+  expect(asked[2]?.args).toEqual({ attemptId: "tr-attempt" });
+  expect(asked[3]?.args).toEqual({
+    provider: "trustedrouter",
+    login: "endpoint",
+    apiKey: "sk-tr-v1-synthetic",
+    baseUrl: "https://api.trustedrouter.com/v1",
+    model: "anthropic/claude-sonnet-5.5",
+  });
+  expect(asked[4]?.args).toEqual({
+    provider: "trustedrouter",
+    login: "endpoint",
+    model: "anthropic/claude-sonnet-5.5",
+    endpointHost: "api.trustedrouter.com",
+  });
 });

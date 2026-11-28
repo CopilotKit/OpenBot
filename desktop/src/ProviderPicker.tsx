@@ -113,6 +113,8 @@ const endpointPresets: Record<
 /** What approving in the browser does, for each provider that signs in that way. */
 const oauthExplanation: Record<string, string> = {
   xai: "Authorize OpenBot to use models available to your xAI account.",
+  trustedrouter:
+    "Sign in or create a TrustedRouter account in your browser and approve access. OpenBot receives an API key and keeps it on this computer.",
 };
 
 /** Stop a plan's sign-in still waiting for the browser: Claude's, or ChatGPT's. */
@@ -388,11 +390,20 @@ export function ProviderPicker({
       } catch (error) {
         if (current()) setFailure(asProblem(error));
       }
-      await invoke<void>("finish_model_oauth", {
+      // Nothing for a session the native side keeps for itself (xAI); the minted API key for a
+      // sign-in that produces one (TrustedRouter), held here the way a plan's token is and never shown.
+      const minted = await invoke<string | null>("finish_model_oauth", {
         attemptId: authorization.attemptId,
       });
       if (current()) {
+        if (providerId === "trustedrouter" && !minted) {
+          throw new Error(
+            "TrustedRouter sign-in did not return an API key. Try signing in again.",
+          );
+        }
         continueAfterSignIn.current = true;
+        if (minted)
+          setTokens((previous) => ({ ...previous, [providerId]: minted }));
         setOauthSignedIn(providerId);
         setSignInUrl(null);
         setOauthCode(null);
@@ -561,6 +572,21 @@ export function ProviderPicker({
     const trimmedBaseUrl = baseUrl.trim();
     const trimmedModel = model.trim();
     const trimmedContainerBaseUrl = containerBaseUrl.trim();
+    /*
+     * A sign-in that minted an API key for a named endpoint (TrustedRouter) is that endpoint's
+     * key, and it goes on exactly as a typed one does: the same address, the same model, the same
+     * credential shape. Nothing after this screen has to know how the key was obtained.
+     */
+    if (login === "oauth" && trimmedToken && preset) {
+      onChoose({
+        provider: "openai-compatible",
+        login: "endpoint",
+        apiKey: trimmedToken,
+        baseUrl: preset.baseUrl,
+        ...(trimmedModel ? { model: trimmedModel } : {}),
+      });
+      return;
+    }
     onChoose({
       provider: login === "endpoint" ? "openai-compatible" : row.id,
       login,

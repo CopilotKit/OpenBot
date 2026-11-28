@@ -69,7 +69,7 @@ const cloudProviders = [
   },
 ];
 
-/** Signs in through a device authorization that mints an API key, then uses it like a typed one. */
+/** Signs in through loopback PKCE OAuth that mints an API key, then uses it like a typed one. */
 const trustedRouter = {
   id: "trustedrouter",
   name: "TrustedRouter",
@@ -1703,6 +1703,68 @@ for (const provider of [...cloudProviders, trustedRouter, privatemode]) {
     });
   });
 }
+
+test("a TrustedRouter sign-in mints an API key that goes on as its endpoint credential", async () => {
+  let resolveFinish!: (key: string) => void;
+  const finish = new Promise<string>((resolve) => {
+    resolveFinish = resolve;
+  });
+  invokeHandler = async (command) => {
+    if (command === "providers")
+      return allProviders.map((row) =>
+        row.id === "trustedrouter"
+          ? { ...row, logins: ["oauth", "endpoint"] }
+          : row,
+      );
+    if (command === "begin_model_oauth")
+      return {
+        attemptId: "trustedrouter-attempt",
+        url: "https://trustedrouter.com/v1/auth?callback_url=http%3A%2F%2F127.0.0.1%3A54321%2Foauth%2Fcallback%3Fstate%3Ds&code_challenge=c&code_challenge_method=S256&key_label=OpenBot",
+        userCode: null,
+      };
+    if (command === "plugin:opener|open_url") return null;
+    if (command === "finish_model_oauth") return finish;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const choices: unknown[] = [];
+  const view = await renderPicker((choice) => choices.push(choice));
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(await view.findByRole("radio", { name: /TrustedRouter/ }));
+  // Sign-in is the default way in, with TrustedRouter's default model already filled.
+  expect(
+    view.getByRole("tab", { name: "Sign in" }).getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(view.getByLabelText("Model name")).toHaveProperty(
+    "value",
+    "anthropic/claude-sonnet-5.5",
+  );
+  await user.click(
+    view.getByRole("button", { name: "Sign in with TrustedRouter" }),
+  );
+  // Loopback sign-in shows no device verification code, only the waiting link and cancel button.
+  await view.findByRole("link", { name: "Open sign-in page" });
+  expect(view.queryByText(/Verification code/)).toBeNull();
+  expect(invokeCalls).toContainEqual({
+    command: "begin_model_oauth",
+    args: { root: "/tmp/openbot-provider-root", provider: "trustedrouter" },
+  });
+  await act(async () => {
+    resolveFinish("sk-tr-v1-synthetic");
+  });
+  await view.findByText("Signed in to TrustedRouter.");
+  // The minted key is never drawn on screen.
+  expect(view.container.textContent).not.toContain("sk-tr-v1-synthetic");
+  await user.click(view.getByRole("button", { name: "Continue" }));
+  expect(choices).toEqual([
+    {
+      provider: "openai-compatible",
+      login: "endpoint",
+      apiKey: "sk-tr-v1-synthetic",
+      baseUrl: "https://api.trustedrouter.com/v1",
+      model: "anthropic/claude-sonnet-5.5",
+    },
+  ]);
+});
 
 test("a chosen provider stands alone, and Change or Escape shows them all again", async () => {
   invokeHandler = async (command) => {
