@@ -333,11 +333,12 @@ abstract class ShellTestBase {
                     "(function(t){var best=null;var all=document.querySelectorAll('a,button,[role=button],[role=link],[role=menuitem],li,div,span,p,h1,h2,h3');" +
                         "for(var i=0;i<all.length;i++){var e=all[i];var s=(e.innerText||e.getAttribute('aria-label')||'').trim();" +
                         "if(s===t||s.indexOf(t)===0){var r=e.getBoundingClientRect();" +
-                        "if(r.width>0&&r.height>0&&r.bottom>0&&r.top<window.innerHeight&&(!best||r.width*r.height<best.a))" +
-                        "best={a:r.width*r.height,l:r.left,t:r.top,r:r.right,b:r.bottom};}}" +
-                        "if(!best)return 'null';best.d=window.devicePixelRatio;return JSON.stringify(best);})(" +
+                        "if(r.width>0&&r.height>0&&(!best||r.width*r.height<best.a))best={a:r.width*r.height,e:e};}}" +
+                        "if(!best)return 'null';best.e.scrollIntoView({block:'center'});var q=best.e.getBoundingClientRect();" +
+                        "return JSON.stringify({l:q.left,t:q.top,r:q.right,b:q.bottom,d:window.devicePixelRatio});})(" +
                         org.json.JSONObject.quote(text) + ")",
                 )
+                sleep(300)
                 val web = bounds(find("openbot_webview"))
                 if (raw != "null" && raw.isNotEmpty() && web != null) {
                     try {
@@ -379,6 +380,66 @@ abstract class ShellTestBase {
             (web.left + json.optDouble("l") * d).toInt(), (web.top + json.optDouble("t") * d).toInt(),
             (web.left + json.optDouble("r") * d).toInt(), (web.top + json.optDouble("b") * d).toInt(),
         )
+    }
+
+    /**
+     * Types `text` on the real software keyboard by tapping its keys at points computed once from
+     * the keyboard window's bounds (Gboard's QWERTY grid: a toolbar strip, four key rows, the
+     * navigation strip), 150 ms a key. Letters and spaces only through the grid; anything else, and
+     * whatever the grid did not land, goes through `input text`. Answers which path was used.
+     */
+    fun typeOnKeyboard(text: String, deadlineMs: Long = 15_000): String {
+        val started = SystemClock.uptimeMillis()
+        val ime = device.findObjects(By.pkg("com.google.android.inputmethod.latin"))
+            .mapNotNull { bounds(it) }.maxByOrNull { it.width() * it.height() }
+        val unplaced = StringBuilder()
+        var path = "keys"
+        if (ime == null || ime.height() < 200) {
+            path = "input-text (no keyboard window found)"
+            shell("input text " + text.replace(" ", "%s"))
+            return path
+        }
+        val h = ime.height().toFloat()
+        val top = ime.top + h * 0.15f
+        val rowH = h * 0.75f / 4f
+        val keyW = ime.width() / 10f
+        val rows = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+        fun point(c: Char): Pair<Int, Int>? {
+            if (c == ' ') return Pair((ime.left + ime.width() * 0.5f).toInt(), (top + rowH * 3.5f).toInt())
+            for ((r, keys) in rows.withIndex()) {
+                val i = keys.indexOf(c.lowercaseChar())
+                if (i >= 0) {
+                    val offset = when (r) { 0 -> 0f; 1 -> 0.5f; else -> 1.5f }
+                    return Pair((ime.left + keyW * (i + offset + 0.5f)).toInt(), (top + rowH * (r + 0.5f)).toInt())
+                }
+            }
+            return null
+        }
+        for (c in text) {
+            if (SystemClock.uptimeMillis() - started > deadlineMs) {
+                screenshot("typing-deadline")
+                check(false, "typing took longer than ${deadlineMs / 1000} s")
+                return "$path (stopped at the deadline)"
+            }
+            val p = point(c)
+            if (p == null) {
+                unplaced.append(c)
+                continue
+            }
+            if (unplaced.isNotEmpty()) {
+                shell("input text " + unplaced.toString().replace(" ", "%s"))
+                unplaced.clear()
+                path = "keys + input-text"
+            }
+            device.click(p.first, p.second)
+            sleep(150)
+        }
+        if (unplaced.isNotEmpty()) {
+            shell("input text " + unplaced.toString().replace(" ", "%s"))
+            path = "keys + input-text"
+        }
+        note("typed ${text.length} characters on the software keyboard in ${(SystemClock.uptimeMillis() - started) / 1000.0} s ($path)")
+        return path
     }
 
     /** Taps the message box near its top (where the text line is). */

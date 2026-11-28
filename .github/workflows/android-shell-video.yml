@@ -123,6 +123,9 @@ jobs:
         timeout-minutes: 4
         env:
           ANIMATOR_SCALE: "1"
+          # The host-side software renderer for the recordings: smooth enough to type and scroll
+          # on camera. The test workflow keeps the guest renderer, which never froze.
+          GPU_MODE: swiftshader_indirect
         run: android-shell/ci/emulator.sh all
 
       - name: Install the apps
