@@ -40,8 +40,7 @@ import { still } from "./page-still";
  * - Somebody who finished onboarding before the step existed is sent to it as their only step, and
  *   its button takes them in without finishing onboarding again.
  * - Every provider the server signs in to offers its sign-in first and a key as the alternative,
- *   as the setup window does. xAI and Unbiased AI sign in on their own pages and are read
- *   until approved; Google Gemini takes an API key only, whatever the server lists; a Claude
+ *   as the setup window does. xAI sign-in is read until approved; Google Gemini takes an API key only, whatever the server lists; a Claude
  *   plan finishes with the code Claude's page shows. A ChatGPT plan signs in with a code first,
  *   read until approved like xAI's, with the ChatGPT setting it needs and its link said before it starts, and again when ChatGPT gives no code. The other way, below
  *   it, finishes with the address ChatGPT sends the browser to.
@@ -155,8 +154,8 @@ type SignIn = {
 
 /**
  * A sign-in as the server starts it for each provider: the spec's own examples for ChatGPT (in the
- * browser, or with a code when `method` is device), Claude and Unbiased AI, and for xAI the shape
- * of ChatGPT's code sign-in with what its page gives. It finishes by itself (poll): xAI's device
+ * browser, or with a code when `method` is device) and Claude. xAI follows the shape of ChatGPT's
+ * code sign-in and finishes by itself (poll): xAI's device
  * page asks for the code shown here.
  */
 function signInStarted(
@@ -273,7 +272,6 @@ const SIGN_IN_NAMES: Record<string, string> = {
   google: "Google",
   openai: "ChatGPT",
   xai: "xAI",
-  unbiased: "Unbiased AI",
 };
 
 /** Where a sign-in stands, in the spec's shape, with the server's sentence when it is over. */
@@ -1497,7 +1495,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
     }, 60_000);
 
   for (const engine of engines)
-    test(`inside OpenBot Desktop: the plan and Unbiased AI sign in through the server, in ${engine}`, async () => {
+    test(`inside OpenBot Desktop: the ChatGPT plan signs in through the server, in ${engine}`, async () => {
       const server = new FakeServer("none", true);
       const page = await open(
         "/onboarding?step=ai",
@@ -1529,41 +1527,6 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         expect(server.finishes).toEqual([]);
         expect(server.replaces).toEqual([
           { provider: "openai", login: "plan" },
-        ]);
-        await chooser.getByRole("button", { name: "Change" }).click();
-        server.signIns = [];
-        server.replaces = [];
-
-        await chooser.getByRole("button", { name: /^Unbiased AI/ }).click();
-        // Sign-in first, a key as the alternative.
-        expect(await chooser.getByRole("tab").allTextContents()).toEqual([
-          "Sign in",
-          "Use an API key",
-        ]);
-        await chooser
-          .getByRole("button", {
-            name: "Sign in with Unbiased AI",
-            exact: true,
-          })
-          .click();
-        await chooser.getByText("BCDF-GHJK").waitFor();
-        await chooser
-          .getByRole("link", { name: "Open the sign-in page" })
-          .waitFor();
-        await shoot(page, "sign-in-waiting", engine, "light", WIDE);
-        await chooser
-          .getByRole("status")
-          .filter({ hasText: "Unbiased AI" })
-          .waitFor();
-        expect(server.signIns).toEqual([{ provider: "unbiased" }]);
-        expect(server.replaces).toEqual([
-          {
-            provider: "unbiased",
-            login: "endpoint",
-            baseUrl: "https://api.unbiased.ai/v1",
-            model: "pareto",
-            useSavedKey: true,
-          },
         ]);
         expect(await primary(page).isDisabled()).toBe(false);
       } finally {
@@ -3181,17 +3144,6 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
             apiKey: "sk-typed-key",
           },
         ],
-        [
-          /^Unbiased AI/,
-          "Unbiased AI API key",
-          {
-            provider: "unbiased",
-            login: "endpoint",
-            baseUrl: "https://api.unbiased.ai/v1",
-            model: "pareto",
-            apiKey: "sk-typed-key",
-          },
-        ],
       ];
       for (const [row, label, body] of keys) {
         const server = new FakeServer("none", true);
@@ -3245,15 +3197,13 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
               expect(await measured(page)).toEqual(FINE);
               await shoot(page, "step", engine, theme, window);
               const chooser = page.locator("[data-ai-chooser]");
-              await chooser
-                .getByRole("button", { name: /^Unbiased AI/ })
-                .click();
+              await chooser.getByRole("button", { name: /^xAI/ }).click();
               expect(await measured(page)).toEqual(FINE);
-              await shoot(page, "step-unbiased", engine, theme, window);
+              await shoot(page, "step-xai", engine, theme, window);
               await chooser
                 .getByRole("tab", { name: "Use an API key" })
                 .click();
-              await chooser.getByLabel("Unbiased AI API key").fill("ub-key");
+              await chooser.getByLabel("xAI API key").fill("xai-key");
               await chooser.getByRole("button", { name: "Connect" }).click();
               await chooser.getByRole("status").waitFor();
               expect(await measured(page)).toEqual(FINE);
@@ -3293,7 +3243,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
                 .click();
               await settings
                 .getByRole("dialog")
-                .getByRole("button", { name: /^Unbiased AI/ })
+                .getByRole("button", { name: /^xAI/ })
                 .waitFor();
               await shoot(settings, "settings-chooser", engine, theme, window);
               await settings.keyboard.press("Escape");

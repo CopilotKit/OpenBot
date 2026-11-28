@@ -33,7 +33,7 @@ Start with [How OpenBot works](how-openbot-works.md): what a Bot has, and where 
 - [Windows desktop signing](windows-signing.md): protected Azure Key Vault signing and verification of the app and NSIS installer.
 - [Desktop install](desktop-install.md): the desktop app's setup flow, who owns each step, and the decisions behind it.
 - [Desktop updates](desktop-updates.md): how OpenBot Desktop updates itself, and how the installation follows it.
-- [Desktop provider OAuth](../desktop/PROVIDER_OAUTH.md): the Google, xAI and Unbiased AI model sign-ins, and what a distributor configures for them in a desktop build.
+- [Desktop provider OAuth](../desktop/PROVIDER_OAUTH.md): xAI model sign-in and what a distributor configures for it in a desktop build.
 - [Desktop telemetry](../desktop/TELEMETRY.md): every event the desktop app sends, and what it carries.
 - [Product telemetry](TELEMETRY.md): the server's usage events, what they carry, and how to turn them off, with example PostHog queries in [telemetry-queries.sql](telemetry-queries.sql). It also notes the management connection a Kubernetes team install makes by default.
 - [First-use starter tasks](testing/first-use-tour.md): the starter tour offered before a first conversation, and how it was tested.

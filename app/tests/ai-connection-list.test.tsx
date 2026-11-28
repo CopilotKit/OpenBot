@@ -765,12 +765,6 @@ const SIGN_INS: {
     button: "Sign in with xAI",
     sent: { provider: "xai", login: "oauth" },
   },
-  {
-    provider: "unbiased",
-    row: /^Unbiased AI/,
-    button: "Sign in with Unbiased AI",
-    sent: { provider: "unbiased", login: "endpoint", useSavedKey: true },
-  },
 ];
 
 for (const scope of ["organization", "personal"] as const)
@@ -871,7 +865,6 @@ test("every provider connected hides Connect another AI", async () => {
       "anthropic",
       "google",
       "xai",
-      "unbiased",
       "trustedrouter",
       "openai-compatible",
     ] as const
