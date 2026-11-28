@@ -92,6 +92,11 @@ jobs:
       - name: Start the clock
         run: echo "$(date +%s) start" > "$RUNNER_TEMP/timing"
 
+      - name: Start fetching this run's demo workbench
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: nohup bash ios-shell/ci/fetch_demo_workbench.sh > "$RUNNER_TEMP/fixture-fetch.log" 2>&1 &
+
       - name: Boot a simulator in the background
         run: |
           picked="$(python3 ios-shell/ci/pick_simulator.py)"
@@ -163,23 +168,16 @@ jobs:
           path: DerivedData-Debug/Build/Products
           key: ${{ steps.products.outputs.cache-primary-key }}
 
-      - name: Wait for the workbench built by this run
+      - name: Wait for the verified workbench
         timeout-minutes: 5
-        env:
-          GH_TOKEN: ${{ github.token }}
-          FIXTURE: ios-demo-workbench-${{ github.run_attempt }}
         run: |
-          for i in {1..60}; do
-            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
-              --jq '.artifacts[].name' | grep -Fxq "$FIXTURE"; then exit 0; fi
-            sleep 5
+          for i in {1..145}; do
+            if [ -f "$RUNNER_TEMP/fixture.ready" ]; then exit 0; fi
+            if [ -f "$RUNNER_TEMP/fixture.failed" ]; then break; fi
+            sleep 2
           done
-          echo "::error::The demo workbench was not available in time"
+          cat "$RUNNER_TEMP/fixture-fetch.log"
           exit 1
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: ios-demo-workbench-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios-demo-workbench
       - name: Start the demo workbench
         working-directory: ${{ runner.temp }}/ios-demo-workbench
         run: |
