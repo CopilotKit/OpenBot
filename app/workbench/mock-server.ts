@@ -14,7 +14,7 @@
  *   # /api/auth/shell/enter. Everybody else is answered 401, like the workbench's app-signed-out scene.
  *   MOCK_SIGNED_OUT=1 bun app/workbench/mock-server.ts
  *
- *   # As a server without the phone app's sign-in hand-off: both /api/auth/shell/* answer 404.
+ *   # As a server without the phone app's sign-in hand-off: every /api/auth/shell/* answers 404.
  *   MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 bun app/workbench/mock-server.ts
  *
  *   # As a server from before /api/auth/shell/enter asked for the OpenBot-Shell header (below), for
@@ -25,7 +25,10 @@
  *
  *   GET  /__mock/session                    {"signedIn": boolean}: whether a request with no cookie is
  *   POST /__mock/session {"signedIn": bool}   signed in, and to change it at run time.
- *   GET  /api/auth/shell/handoff?challenge=C[&auto=1]
+ *   GET  /api/auth/shell/config?platform=ios
+ *        What the phone app asks before signing in: {"handoff":true,"callback":"scheme",
+ *        "callbackUrl":"openbotshell://signed-in"}. 404 under MOCK_NO_HANDOFF.
+ *   GET  /api/auth/shell/handoff?challenge=C[&platform=ios][&auto=1]
  *        The page the phone app opens in its sign-in sheet. C is a PKCE S256 challenge (43
  *        characters of base64url). A page titled "Mock sign-in" with one link, #mock-sign-in, "Sign in
  *        as test person", to openbotshell://signed-in?ticket=T. T is single use and lasts 60 s.
@@ -38,6 +41,8 @@
  *        /sign?native-sign-in=failed, setting nothing; a refusal for the header or Sec-Fetch-Site is
  *        made before T is looked at, so it leaves T unused. MOCK_ENTER_NO_HEADER_CHECK=1 skips both
  *        header checks, as the server did before it asked for them.
+ *   POST /api/auth/sign-out
+ *        Ends the mock's session: its cookie stops counting until the next /enter.
  *
  * Signed in, the API answers as the workbench's app-home scene does (workbench/session.ts,
  * api/extraHandlers.ts and the spec's generated answers), with a fixed person (Sam Rivera, in Acme),
@@ -72,10 +77,14 @@ const ENTER_HEADER_CHECK = process.env.MOCK_ENTER_NO_HEADER_CHECK !== "1";
 /** The header the phone app's web view sends on /api/auth/shell/enter, and what it may say. */
 const SHELL_HEADER = "OpenBot-Shell";
 const SHELL_PLATFORMS = new Set(["ios", "android"]);
+// MOCK_REPLY=1: a run answers with one canned sentence (the iOS shell's video). Off by default.
+const REPLY = process.env.MOCK_REPLY === "1";
 const TICKET_MS = 60_000;
 
 /** Whether a request with no mock cookie is signed in. */
 let signedInByDefault = process.env.MOCK_SIGNED_OUT !== "1";
+/** The mock's one session was signed out: its cookie no longer counts until the next sign-in. */
+let mockSessionEnded = false;
 
 // The Bots and conversations every signed-in page shows. ---------------------------------------
 
@@ -321,6 +330,22 @@ function mockDataHandlers(): RequestHandler[] {
       return new Response(
         [
           { type: "RUN_STARTED", threadId, runId },
+          ...(REPLY
+            ? [
+                {
+                  type: "TEXT_MESSAGE_START",
+                  messageId: `${runId}-reply`,
+                  role: "assistant",
+                },
+                {
+                  type: "TEXT_MESSAGE_CONTENT",
+                  messageId: `${runId}-reply`,
+                  delta:
+                    "Two of the three cut their entry price; one added a free tier.",
+                },
+                { type: "TEXT_MESSAGE_END", messageId: `${runId}-reply` },
+              ]
+            : []),
           { type: "RUN_FINISHED", threadId, runId },
         ]
           .map((event) => `data: ${JSON.stringify(event)}\n\n`)
@@ -346,6 +371,7 @@ async function generatedHandlersFromDisk(): Promise<RequestHandler[]> {
 // Signed in or not, per request. ---------------------------------------------------------------
 
 function hasMockCookie(request: Request): boolean {
+  if (mockSessionEnded) return false;
   const cookies = request.headers.get("cookie") ?? "";
   return cookies
     .split(";")
@@ -452,6 +478,7 @@ function enter(url: URL, request: Request): Response {
   const challenge = base64url(createHash("sha256").update(verifier).digest());
   if (challenge !== ticket.challenge) return failed;
   ticket.used = true;
+  mockSessionEnded = false;
   return new Response(null, {
     status: 303,
     headers: {
@@ -514,6 +541,15 @@ async function start() {
         return Response.json({ signedIn: signedInByDefault });
       }
 
+      if (path === "/api/auth/shell/config") {
+        if (!HANDOFF) return new Response("Not found", { status: 404 });
+        return Response.json({
+          handoff: true,
+          callback: "scheme",
+          callbackUrl: "openbotshell://signed-in",
+        });
+      }
+
       if (
         path === "/api/auth/shell/handoff" ||
         path === "/api/auth/shell/enter"
@@ -535,6 +571,8 @@ async function start() {
       const known = signedIn(incoming);
       if (path === "/api/auth/sign-out" && incoming.method === "POST") {
         signedInByDefault = false;
+        // As a real server does: the session is over, so the same cookie no longer signs anybody in.
+        if (hasMockCookie(incoming)) mockSessionEnded = true;
         return Response.json(
           { success: true },
           {
