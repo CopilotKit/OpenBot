@@ -287,3 +287,22 @@ describe("telling the shell", () => {
     ).not.toThrow();
   });
 });
+
+describe("the shell's fields", () => {
+  const styles = readFileSync(
+    join(import.meta.dir, "..", "src", "styles.css"),
+    "utf8",
+  );
+  const rule = (selector: string) => {
+    const at = styles.indexOf(selector);
+    expect(at).toBeGreaterThan(-1);
+    return styles.slice(at, styles.indexOf("}", at));
+  };
+
+  // iOS zooms the page into any field under 16px when it is focused.
+  test("every field a person types in is 16px, so iOS does not zoom in on it", () => {
+    const fields = rule("html[data-native-shell]\n:is(\n  input:not(");
+    expect(fields).toContain("textarea");
+    expect(fields).toContain("font-size: 1rem;");
+  });
+});

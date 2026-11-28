@@ -580,3 +580,35 @@ html[data-native-shell],
 html[data-native-shell] body {
   overscroll-behavior: none;
 }
+
+/*
+ * A field under 16px makes iOS zoom the page in when it is focused, and the page stays zoomed after.
+ * In the shell every field a person types in is 16px, whatever its own class says; none in the app
+ * is drawn larger. A placeholder too long for a narrow phone ends in an ellipsis rather than
+ * mid-word, and the To field's long one keeps the smaller size it had: a placeholder's size does not
+ * make iOS zoom, only the field's own.
+ *
+ * This is on purpose the kind of rule theme.css warns about ("THERE IS DELIBERATELY NO `button,
+ * input, textarea, select { font: inherit }` HERE"): unlayered, on input, textarea and select, so it
+ * outranks every `text-*` on a field. There such a rule disabled the sizes by accident, everywhere.
+ * Here it is meant, and only under `html[data-native-shell]`, where one size for every field is the
+ * point.
+ */
+html[data-native-shell]
+:is(
+  input:not(
+    [type="checkbox"],
+    [type="radio"],
+    [type="range"],
+    [type="color"],
+    [type="file"]
+  ),
+  textarea,
+  select
+) {
+  font-size: 1rem;
+  text-overflow: ellipsis;
+}
+html[data-native-shell] [data-slot="combobox-chip-input"]::placeholder {
+  font-size: 0.875rem;
+}
