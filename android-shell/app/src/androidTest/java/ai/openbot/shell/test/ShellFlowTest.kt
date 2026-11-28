@@ -6,6 +6,7 @@ import ai.openbot.shell.R
 import androidx.test.filters.SdkSuppress
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Until
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -390,8 +391,9 @@ class ShellFlowTest : ShellTestBase() {
         }
         if (!check(waitKeyboard(true, 8_000), "the software keyboard did not open on the name field")) return
         instrumentation.sendStringSync("Sample")
-        if (!check(pageString("document.querySelector('$selector')?.value || ''").contains("Sample"),
-                "the name field did not receive the text")) return
+        // Android dispatches key events before Chromium publishes the new field value.
+        val typedName = By.clazz("android.widget.EditText").textContains("Sample")
+        if (!check(device.wait(Until.hasObject(typedName), 5_000), "the name field did not receive the text")) return
         check(pageString("""
             (() => {
               const r = document.activeElement.getBoundingClientRect();

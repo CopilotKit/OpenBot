@@ -126,8 +126,8 @@ jobs:
         run: |
           android-shell/ci/emulator.sh all
           # Preserve the handset layout at 411 dp while reducing the guest's video encoding load.
-          adb shell wm size 720x1600
-          adb shell wm density 280
+          "$ANDROID_HOME/platform-tools/adb" shell wm size 720x1600
+          "$ANDROID_HOME/platform-tools/adb" shell wm density 280
 
       - name: Install the apps
         run: |
