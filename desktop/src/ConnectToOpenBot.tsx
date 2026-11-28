@@ -197,11 +197,32 @@ export function useConnectToOpenBot({
   };
 }
 
+/** The address field's label, in the person's words: where their company's OpenBot is. */
+export const ADDRESS_LABEL = "Your company's OpenBot address";
+
+/** Who has the address. */
+export const ADDRESS_HELP =
+  "Ask your IT team or whoever set up OpenBot at your company for this address.";
+
+/** What Connect does next: the browser, then straight back to this app. */
+export const CONNECT_HAND_OFF =
+  "You'll sign in to it in your browser, then come straight back here.";
+
 /**
  * The first screen's lower half when OpenBot runs elsewhere: one field for its address, what
  * happens next, and Connect. While the browser is waited on, Cancel is the only control.
+ *
+ * Back goes back to the choice of where OpenBot runs, leaving any saved connection
+ * (`connecting.leave`). Every choice there uses this app on this computer, so it is Back, not a way
+ * to "use OpenBot on this computer". `onBack` is the screen's own way back, where it has one.
  */
-export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
+export function ConnectToOpenBot({
+  connecting,
+  onBack,
+}: {
+  connecting: Connecting;
+  onBack?: () => void;
+}) {
   const id = useId();
   const { address, phase, trouble, busy } = connecting;
   const underField = trouble?.offer === "field";
@@ -215,7 +236,7 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
       }}
     >
       <div className="field">
-        <label htmlFor={`${id}-address`}>OpenBot address</label>
+        <label htmlFor={`${id}-address`}>{ADDRESS_LABEL}</label>
         <input
           id={`${id}-address`}
           ref={connecting.field}
@@ -231,9 +252,16 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
           // Held, not greyed out: the address being signed in to stays readable while it waits.
           readOnly={busy}
           aria-invalid={underField || undefined}
-          aria-describedby={underField ? `${id}-problem` : `${id}-next`}
+          aria-describedby={
+            underField ? `${id}-problem` : `${id}-help ${id}-next`
+          }
           onChange={(event) => connecting.change(event.target.value)}
         />
+        {!underField && (
+          <p id={`${id}-help`} className="footnote address-help">
+            {ADDRESS_HELP}
+          </p>
+        )}
         {trouble && underField && (
           <p
             id={`${id}-problem`}
@@ -262,8 +290,7 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
       ) : (
         <>
           <p id={`${id}-next`} className="footnote">
-            You'll sign in to it in your browser. Nothing is installed on this
-            computer.
+            {CONNECT_HAND_OFF}
           </p>
           {trouble && !underField && trouble.offer !== "update" && (
             <Trouble trouble={trouble} />
@@ -303,9 +330,9 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
             type="button"
             className="text-link"
             disabled={busy}
-            onClick={() => void connecting.leave()}
+            onClick={() => (onBack ? onBack() : void connecting.leave())}
           >
-            Use OpenBot on this computer instead
+            Back
           </button>
         </>
       )}

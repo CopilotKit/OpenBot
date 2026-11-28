@@ -244,7 +244,7 @@ test("a check-in is turned on, changed, run and removed, and an item started or 
     { line: `PATCH ${ORG}/check-ins/p1`, body: { enabled: false } },
     { line: `POST ${ORG}/check-ins/p1/run`, body: undefined },
     { line: `DELETE ${ORG}/check-ins/p1`, body: undefined },
-    { line: `POST ${ORG}/check-in-items/s1/start`, body: undefined },
+    { line: `POST ${ORG}/check-in-items/s1/work-on`, body: undefined },
     { line: `POST ${ORG}/check-in-items/s1/dismiss`, body: undefined },
   ]);
 });

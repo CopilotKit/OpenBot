@@ -26,6 +26,7 @@ import type {
   CreateOrganizationInvitationRequest,
   CreateOrganizationRequest,
   DeclineInvitationHeaders,
+  DeleteOrganizationHeaders,
   ForbiddenResponse,
   IdempotencyConflictResponse,
   InvalidOrganizationInvitationResponse,
@@ -46,14 +47,20 @@ import type {
   OrganizationInvitationResponse,
   OrganizationMemberPage,
   OrganizationMemberResponse,
+  OrganizationNotAllowedResponse,
   OrganizationNotCreatedResponse,
+  OrganizationNotDeletedResponse,
   OrganizationNotFoundResponse,
   OrganizationOrInvitationNotFoundResponse,
   OrganizationPage,
+  OrganizationPlan,
   OrganizationResponse,
+  OrganizationStaysResponse,
+  OwnerOnlyResponse,
   OwnerStaysResponse,
   PersonNotFoundResponse,
   RemoveOrganizationMemberHeaders,
+  SeatRequiredResponse,
   ServerErrorResponse,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
@@ -106,7 +113,7 @@ export const getListOrganizationsUrl = (params?: ListOrganizationsParams) => {
 };
 
 /**
- * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role in it. active marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app's token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller's own when it sends none. The header is checked against the caller's membership, as on every address that names no organization, so one they are not in answers not found. A session and an API key ignore it. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). Made with an app's token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role in it. active marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app's token has no session either: for it, active marks the organization its OpenBot-Organization header names; when it sends none, the one the token was signed in to, while the caller is a member of it, else the caller's own. The header is checked against the caller's membership, as on every address that names no organization, so one they are not in answers not found. A session and an API key ignore it. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). Made with an app's token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the caller's organizations
  */
 export const listOrganizations = async (
@@ -345,7 +352,7 @@ export const getCreateOrganizationUrl = () => {
 };
 
 /**
- * Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Anybody signed in may make one where OpenBot keeps more than one organization. Where OpenBot gives everybody an organization of their own when they first sign in, as OpenBot Cloud does, this makes another; on a self-hosted install everybody already shares `default`, and this makes a further one beside it. An OpenBot may limit how many organizations one person owns, any of their own included: at the limit the request is refused with 403 and a detail saying so, and nothing is made. Deleting one they created makes room. While another of the caller's requests is creating one, the request is refused with 409; send it again once that one has answered. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Create an organization
  */
 export const createOrganization = async (
@@ -393,7 +400,7 @@ export const getCreateOrganizationMutationOptions = <
   TError =
     | InvalidOrganizationResponse
     | UnauthenticatedResponse
-    | ForbiddenResponse
+    | OrganizationNotAllowedResponse
     | OrganizationConflictResponse
     | ServerErrorResponse
     | OrganizationNotCreatedResponse
@@ -441,7 +448,7 @@ export type CreateOrganizationMutationBody = CreateOrganizationRequest;
 export type CreateOrganizationMutationError =
   | InvalidOrganizationResponse
   | UnauthenticatedResponse
-  | ForbiddenResponse
+  | OrganizationNotAllowedResponse
   | OrganizationConflictResponse
   | ServerErrorResponse
   | OrganizationNotCreatedResponse
@@ -458,7 +465,7 @@ export const useCreateOrganization = <
   TError =
     | InvalidOrganizationResponse
     | UnauthenticatedResponse
-    | ForbiddenResponse
+    | OrganizationNotAllowedResponse
     | OrganizationConflictResponse
     | ServerErrorResponse
     | OrganizationNotCreatedResponse
@@ -506,7 +513,7 @@ export const getListOrganizationMembersUrl = (
 };
 
 /**
- * Return one page of the organization's members, in the order they joined. Any member can read it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's members, in the order they joined. Any member can read it. search narrows the list to the members whose name or address matches it, ignoring case, best matches first: those whose name, a word of their name (a first or a last name) or their address starts with it, then those whose name or address holds it, each group in alphabetical order of name, then address. A search finds only this organization's current members: never somebody it removed, somebody turned away from this OpenBot, or a member of another organization only. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List an organization's members
  */
 export const listOrganizationMembers = async (
@@ -882,6 +889,150 @@ export const useUpdateOrganization = <
     queryClient,
   );
 };
+export const getDeleteOrganizationUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/profile`;
+};
+
+/**
+ * Delete the organization and what is in it. Nobody can work in it again: its Bots stop, its computers are removed, the API keys made in it stop working, and it leaves every member's list of organizations. Its members keep their accounts and their other organizations. Only an owner of this organization can. A person's own organization and `default` stay, and are refused. A repeated request with the same Idempotency-Key returns the first result.
+ * @summary Delete an organization
+ */
+export const deleteOrganization = async (
+  organizationId: string,
+  headers: DeleteOrganizationHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<void> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<void>(getDeleteOrganizationUrl(organizationId), {
+    ...options,
+    method: "DELETE",
+    headers: { ...headers, ...getHeaders(options?.headers) },
+  });
+};
+
+export const getDeleteOrganizationMutationKey = () =>
+  ["deleteOrganization"] as const;
+
+export const getDeleteOrganizationMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnerOnlyResponse
+    | OrganizationNotFoundResponse
+    | OrganizationStaysResponse
+    | ServerErrorResponse
+    | OrganizationNotDeletedResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteOrganization>>,
+    TError,
+    DeleteOrganizationMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteOrganization>>,
+  TError,
+  DeleteOrganizationMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDeleteOrganizationMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteOrganization>>,
+    DeleteOrganizationMutationVariables
+  > = (props) => {
+    const { organizationId, headers } = props ?? {};
+
+    return deleteOrganization(organizationId, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteOrganizationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteOrganization>>
+>;
+
+export type DeleteOrganizationMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | OwnerOnlyResponse
+  | OrganizationNotFoundResponse
+  | OrganizationStaysResponse
+  | ServerErrorResponse
+  | OrganizationNotDeletedResponse
+  | UnexpectedErrorResponse;
+export type DeleteOrganizationMutationVariables = {
+  organizationId: string;
+  headers: DeleteOrganizationHeaders;
+};
+
+/**
+ * @summary Delete an organization
+ */
+export const useDeleteOrganization = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnerOnlyResponse
+    | OrganizationNotFoundResponse
+    | OrganizationStaysResponse
+    | ServerErrorResponse
+    | OrganizationNotDeletedResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deleteOrganization>>,
+      TError,
+      DeleteOrganizationMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deleteOrganization>>,
+  TError,
+  DeleteOrganizationMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getDeleteOrganizationMutationOptions(options),
+    queryClient,
+  );
+};
 export const getUpdateOrganizationMemberUrl = (
   organizationId: string,
   personId: string,
@@ -1219,7 +1370,7 @@ export const getListOrganizationInvitationsUrl = (
 };
 
 /**
- * Return one page of the organization's invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. search narrows the list to the invitations whose address holds it, ignoring case; it finds only this organization's invitations. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List the invitations an organization has sent
  */
 export const listOrganizationInvitations = async (
@@ -1449,7 +1600,7 @@ export const getCreateOrganizationInvitationUrl = (organizationId: string) => {
 };
 
 /**
- * Invite the person with this email address to join the organization with a role. They need no account yet: the invitation waits for whoever signs in with that address, and they see it in OpenBot then. Where OpenBot can send email, it also emails them; delivery says which happened, so the inviter knows whether to pass the link on themselves. The invitation lasts seven days. Inviting an address again after its invitation expired or was declined starts a new one. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Invite the person with this email address to join the organization with a role. They need no account yet: the invitation waits for whoever signs in with that address, and they see it in OpenBot then. Where OpenBot can send email, it also emails them; delivery says which happened, so the inviter knows whether to pass the link on themselves. The invitation lasts seven days. Inviting an address again after its invitation expired or was declined starts a new one. Only an owner or an admin of this organization can. An organization that pays for each member needs a free seat for the person: with none, the invitation is refused with SEAT_REQUIRED and addSeatUrl, and nothing is invited. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Invite somebody to an organization
  */
 export const createOrganizationInvitation = async (
@@ -1501,6 +1652,7 @@ export const getCreateOrganizationInvitationMutationOptions = <
   TError =
     | InvalidOrganizationInvitationResponse
     | UnauthenticatedResponse
+    | SeatRequiredResponse
     | AdminOnlyResponse
     | OrganizationNotFoundResponse
     | OrganizationInvitationConflictResponse
@@ -1555,6 +1707,7 @@ export type CreateOrganizationInvitationMutationBody =
 export type CreateOrganizationInvitationMutationError =
   | InvalidOrganizationInvitationResponse
   | UnauthenticatedResponse
+  | SeatRequiredResponse
   | AdminOnlyResponse
   | OrganizationNotFoundResponse
   | OrganizationInvitationConflictResponse
@@ -1573,6 +1726,7 @@ export const useCreateOrganizationInvitation = <
   TError =
     | InvalidOrganizationInvitationResponse
     | UnauthenticatedResponse
+    | SeatRequiredResponse
     | AdminOnlyResponse
     | OrganizationNotFoundResponse
     | OrganizationInvitationConflictResponse
@@ -1752,6 +1906,219 @@ export const useCancelOrganizationInvitation = <
     queryClient,
   );
 };
+export const getGetOrganizationPlanUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/plan`;
+};
+
+/**
+ * Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands for the caller: on the free allowance with runs left, on the plan, behind on a payment, or needing a card. The free allowance is a number of runs each person gets, across every organization they are in, so freeRunsUsedPercent is the caller's own. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.
+ * @summary Read an organization's plan
+ */
+export const getOrganizationPlan = async (
+  organizationId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<OrganizationPlan> => {
+  return apiRequest<OrganizationPlan>(
+    getGetOrganizationPlanUrl(organizationId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetOrganizationPlanQueryKey = (organizationId: string) => {
+  return [`/api/v2/organizations/${organizationId}/plan`] as const;
+};
+
+export const getGetOrganizationPlanQueryOptions = <
+  TData = Awaited<ReturnType<typeof getOrganizationPlan>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getOrganizationPlan>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetOrganizationPlanQueryKey(organizationId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getOrganizationPlan>>
+  > = ({ signal }) =>
+    getOrganizationPlan(organizationId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: organizationId !== null && organizationId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getOrganizationPlan>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetOrganizationPlanQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getOrganizationPlan>>
+>;
+export type GetOrganizationPlanQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | OrganizationNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useGetOrganizationPlan<
+  TData = Awaited<ReturnType<typeof getOrganizationPlan>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getOrganizationPlan>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOrganizationPlan>>,
+          TError,
+          Awaited<ReturnType<typeof getOrganizationPlan>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetOrganizationPlan<
+  TData = Awaited<ReturnType<typeof getOrganizationPlan>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getOrganizationPlan>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOrganizationPlan>>,
+          TError,
+          Awaited<ReturnType<typeof getOrganizationPlan>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetOrganizationPlan<
+  TData = Awaited<ReturnType<typeof getOrganizationPlan>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getOrganizationPlan>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Read an organization's plan
+ */
+
+export function useGetOrganizationPlan<
+  TData = Awaited<ReturnType<typeof getOrganizationPlan>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getOrganizationPlan>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetOrganizationPlanQueryOptions(
+    organizationId,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getListInvitationsUrl = (params?: ListInvitationsParams) => {
   const normalizedParams = new URLSearchParams();
 

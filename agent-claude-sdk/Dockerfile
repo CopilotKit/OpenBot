@@ -9,6 +9,8 @@ COPY agent-claude-sdk/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY agent-claude-sdk/src ./src
+# A run's own key to OpenBot's model gateway, shared by every Python harness (src/run_model_proxy.py).
+COPY shared/run_model_key.py /shared/
 
 ENV PORT=4212
 EXPOSE 4212

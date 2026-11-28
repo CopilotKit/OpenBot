@@ -6,24 +6,21 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import type { CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AccountMenu,
+  AccountRow,
   accountMenuClassName,
   accountMenuItemClassName,
 } from "@/components/app-sidebar/account-label";
+import { Strip } from "@/components/layout/strip";
 import { OrganizationMenuItems } from "@/components/organizations/organization-menu";
 import {
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import {
-  SidebarFooter,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarProvider,
-} from "@/components/ui/sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   type AuthenticatedUser,
@@ -41,14 +38,14 @@ import {
 import { queryClient } from "@/query-client";
 
 /**
- * The default sidebar's account menu, as a page of its own for organization-menu-names.test.tsx to
- * bundle and load in a browser: the real account row and the real organization rows, with the
- * menu's own spacing as the sidebar draws it, in a sidebar `?width=<px>` wide. The person works in
- * "Acme", their own organization is `?organization=<name>` below it, and each `?also=<name>` is one
- * more they share.
+ * The account menu as the sidebar's strip opens it, as a page of its own for
+ * organization-menu-names.test.tsx to bundle and load in a browser: the strip at the window's left
+ * edge with the account's avatar at its foot, and the menu it opens to its right, with the real
+ * account row, the real organization rows and the menu's own spacing (`StripAccount` in
+ * components/app-sidebar/section-strip.tsx). The person works in "Acme", their own organization is
+ * `?organization=<name>` below it, and each `?also=<name>` is one more they share.
  */
 const params = new URLSearchParams(location.search);
-const width = Number(params.get("width") ?? 340);
 const own = params.get("organization") ?? "Sam Rivera's organization";
 const shared = params.getAll("also");
 
@@ -82,63 +79,58 @@ queryClient.setQueryData(currentUserQueryOptions().queryKey, {
   openbotVersion: "v1.0.2",
 } as AuthenticatedUser);
 
-function Footer() {
+function StripWithAccount() {
   return (
     <TooltipProvider>
-      <SidebarProvider
-        className="[&_[data-sidebar=menu-button]]:px-2.5"
-        style={{ "--sidebar-width": `${width}px` } as CSSProperties}
-      >
-        <div
-          className="flex h-svh flex-col justify-end bg-sidebar"
-          data-sidebar-column=""
-          style={{ width }}
+      <SidebarProvider className="min-h-svh bg-sidebar">
+        <Strip
+          // The window's height, so the account sits at its foot as it does in the app.
+          className="h-svh"
+          footer={
+            <AccountMenu>
+              <DropdownMenuContent
+                align="end"
+                className={accountMenuClassName}
+                side="right"
+                sideOffset={8}
+              >
+                <AccountRow />
+                <DropdownMenuSeparator />
+                <OrganizationMenuItems
+                  choices={
+                    queryClient.getQueryData(
+                      ownOrganizationsQueryOptions().queryKey,
+                    ) as OwnOrganizations
+                  }
+                  invitationsWaiting={0}
+                  itemClassName={accountMenuItemClassName}
+                  onNew={() => {}}
+                  switching={{ pending: false, run: () => {} }}
+                />
+                <DropdownMenuItem className={accountMenuItemClassName}>
+                  <IconSettings />
+                  Settings
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={accountMenuItemClassName}
+                  variant="destructive"
+                >
+                  <IconLogout />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </AccountMenu>
+          }
         >
-          <SidebarFooter>
-            <SidebarMenu className="gap-px">
-              <SidebarMenuItem>
-                <AccountMenu>
-                  <DropdownMenuContent
-                    align="start"
-                    className={accountMenuClassName}
-                    side="top"
-                    sideOffset={8}
-                  >
-                    <OrganizationMenuItems
-                      choices={
-                        queryClient.getQueryData(
-                          ownOrganizationsQueryOptions().queryKey,
-                        ) as OwnOrganizations
-                      }
-                      invitationsWaiting={0}
-                      itemClassName={accountMenuItemClassName}
-                      onNew={() => {}}
-                      switching={{ pending: false, run: () => {} }}
-                    />
-                    <DropdownMenuItem className={accountMenuItemClassName}>
-                      <IconSettings />
-                      Settings
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className={accountMenuItemClassName}
-                      variant="destructive"
-                    >
-                      <IconLogout />
-                      Sign out
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </AccountMenu>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarFooter>
-        </div>
+          {null}
+        </Strip>
       </SidebarProvider>
     </TooltipProvider>
   );
 }
 
 const router = createRouter({
-  routeTree: createRootRoute({ component: Footer }),
+  routeTree: createRootRoute({ component: StripWithAccount }),
   history: createMemoryHistory({ initialEntries: ["/"] }),
 });
 

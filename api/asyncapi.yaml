@@ -62,7 +62,9 @@ servers:
       Where Intelligence runs beside an OpenBot, that address is OpenBot's
       own, so a client dials one host: either /api/intelligence/client, which
       OpenBot relays, or /client, which the deployment's edge sends straight
-      to the gateway. The relayed address also asks who is connecting, with
+      to the gateway. OpenBot also relays it at an address that names the
+      organization, /api/v2/organizations/{organizationId}/realtime, which
+      the channels that start with "organization" describe. The relayed address also asks who is connecting, with
       the same credential that made the join token: the web app's session, an
       app's access token (conversations:read) or an API key, the last two as
       Authorization: Bearer on the request that opens the socket, or a key in
@@ -105,6 +107,18 @@ channels:
     bindings:
       ws:
         method: GET
+        query:
+          type: object
+          properties:
+            capabilities:
+              type: string
+              maxLength: 1024
+              description: >-
+                Which newer messages the app understands, as the
+                OpenBot-Capabilities header lists them on a request: lowercase
+                tokens separated by spaces. A browser can't set a header on a
+                WebSocket, so it is sent here. Optional: a socket opened
+                without it is sent what every release reads.
         bindingVersion: 0.1.0
     messages:
       conversationActivity:
@@ -145,6 +159,8 @@ channels:
         $ref: "#/components/messages/ScreenInputError"
       screenFrameReceived:
         $ref: "#/components/messages/ScreenFrameReceived"
+      screenViewSize:
+        $ref: "#/components/messages/ScreenViewSize"
       screenMouse:
         $ref: "#/components/messages/ScreenMouse"
       screenWheel:
@@ -299,6 +315,111 @@ channels:
         $ref: "#/components/messages/TrajectoryEvents"
       trajectoryReply:
         $ref: "#/components/messages/TrajectoryReply"
+  organizationThreadStream:
+    address: /api/v2/organizations/{organizationId}/realtime/websocket
+    title: A conversation's runs, at the organization's address
+    description: >-
+      The gateway's socket for clients, relayed by OpenBot at an address that
+      names the organization, like every other address under /api/v2. It
+      carries exactly what a conversation's runs carry on the gateway's own
+      address: the same Phoenix Channels frames, topics, join tokens and
+      replay. A REST answer whose realtime.clientUrl is
+      /api/v2/organizations/{organizationId}/realtime on this server is
+      dialled here, with /websocket added as on the gateway. It is opened as
+      the relayed address is, by the web app's session, an app's access
+      token (conversations:read) or an API key, and the caller must be a
+      member of the organization the address names. One they are not in is
+      refused before the socket opens, as one that does not exist. The
+      organization's gateway is the one the socket reaches.
+    servers:
+      - $ref: "#/servers/openbot"
+    parameters:
+      organizationId:
+        $ref: "#/components/parameters/organizationId"
+    bindings:
+      ws:
+        method: GET
+        query:
+          type: object
+          required:
+            - join_token
+            - vsn
+          properties:
+            join_token:
+              type: string
+              description: >-
+                The join token from the REST answer. It works once and for
+                about half a minute, so every connection, and every
+                reconnection, starts with a new one.
+            vsn:
+              type: string
+              const: 2.0.0
+              description: The Phoenix Channels protocol version.
+        bindingVersion: 0.1.0
+    messages:
+      threadJoin:
+        $ref: "#/components/messages/ThreadJoin"
+      threadReply:
+        $ref: "#/components/messages/ThreadReply"
+      threadHeartbeat:
+        $ref: "#/components/messages/ThreadHeartbeat"
+      threadConnected:
+        $ref: "#/components/messages/ThreadConnected"
+      threadAgUiEvent:
+        $ref: "#/components/messages/ThreadAgUiEvent"
+      threadReplayComplete:
+        $ref: "#/components/messages/ThreadReplayComplete"
+      threadStreamIdle:
+        $ref: "#/components/messages/ThreadStreamIdle"
+      threadReplayFailed:
+        $ref: "#/components/messages/ThreadReplayFailed"
+      threadExpired:
+        $ref: "#/components/messages/ThreadExpired"
+      threadStopRun:
+        $ref: "#/components/messages/ThreadStopRun"
+      threadLeave:
+        $ref: "#/components/messages/ThreadLeave"
+      threadClose:
+        $ref: "#/components/messages/ThreadClose"
+      threadError:
+        $ref: "#/components/messages/ThreadError"
+  organizationTrajectoryCapture:
+    address: /api/v2/organizations/{organizationId}/realtime/websocket
+    title: What the Recorder captures, at the organization's address
+    description: >-
+      The same socket as a conversation's runs at the organization's address,
+      on the topic trajectory:{trajectoryId}: what the Recorder captures,
+      exactly as it travels on the gateway's own address. The Recorder dials
+      it when its pass's realtime.clientUrl names this address.
+    servers:
+      - $ref: "#/servers/openbot"
+    parameters:
+      organizationId:
+        $ref: "#/components/parameters/organizationId"
+    bindings:
+      ws:
+        method: GET
+        query:
+          type: object
+          required:
+            - join_token
+            - vsn
+          properties:
+            join_token:
+              type: string
+              description: The join token from the Recorder's pass. It works once.
+            vsn:
+              type: string
+              const: 2.0.0
+              description: The Phoenix Channels protocol version.
+        bindingVersion: 0.1.0
+    messages:
+      trajectoryJoin:
+        $ref: "#/components/messages/TrajectoryJoin"
+      trajectoryEvents:
+        $ref: "#/components/messages/TrajectoryEvents"
+      trajectoryReply:
+        $ref: "#/components/messages/TrajectoryReply"
   voiceCall:
     address: /
     title: A voice call
@@ -375,6 +496,7 @@ operations:
       $ref: "#/channels/botScreen"
     messages:
       - $ref: "#/channels/botScreen/messages/screenFrameReceived"
+      - $ref: "#/channels/botScreen/messages/screenViewSize"
       - $ref: "#/channels/botScreen/messages/screenMouse"
       - $ref: "#/channels/botScreen/messages/screenWheel"
       - $ref: "#/channels/botScreen/messages/screenKey"
@@ -452,6 +574,58 @@ operations:
       $ref: "#/channels/trajectoryCapture"
     messages:
       - $ref: "#/channels/trajectoryCapture/messages/trajectoryReply"
+  sendOrganizationThreadStream:
+    action: send
+    title: Stream a conversation's runs, at the organization's address
+    summary: The thread's AG-UI events, replayed and then live, with the markers between.
+    security:
+      - $ref: "#/components/securitySchemes/webSession"
+      - $ref: "#/components/securitySchemes/apiKey"
+      - $ref: "#/components/securitySchemes/conversationsRead"
+    channel:
+      $ref: "#/channels/organizationThreadStream"
+    messages:
+      - $ref: "#/channels/organizationThreadStream/messages/threadReply"
+      - $ref: "#/channels/organizationThreadStream/messages/threadConnected"
+      - $ref: "#/channels/organizationThreadStream/messages/threadAgUiEvent"
+      - $ref: "#/channels/organizationThreadStream/messages/threadReplayComplete"
+      - $ref: "#/channels/organizationThreadStream/messages/threadStreamIdle"
+      - $ref: "#/channels/organizationThreadStream/messages/threadReplayFailed"
+      - $ref: "#/channels/organizationThreadStream/messages/threadExpired"
+      - $ref: "#/channels/organizationThreadStream/messages/threadClose"
+      - $ref: "#/channels/organizationThreadStream/messages/threadError"
+  receiveOrganizationThreadCommands:
+    action: receive
+    title: Join a thread, keep the socket alive, stop a run, leave, at the organization's address
+    summary: What a client sends on the organization's relayed socket.
+    security:
+      - $ref: "#/components/securitySchemes/webSession"
+      - $ref: "#/components/securitySchemes/apiKey"
+      - $ref: "#/components/securitySchemes/conversationsRead"
+    channel:
+      $ref: "#/channels/organizationThreadStream"
+    messages:
+      - $ref: "#/channels/organizationThreadStream/messages/threadJoin"
+      - $ref: "#/channels/organizationThreadStream/messages/threadHeartbeat"
+      - $ref: "#/channels/organizationThreadStream/messages/threadStopRun"
+      - $ref: "#/channels/organizationThreadStream/messages/threadLeave"
+  receiveOrganizationTrajectoryEvents:
+    action: receive
+    title: Take what the Recorder captured, at the organization's address
+    summary: The Recorder joins a trajectory's topic and sends its events in batches.
+    channel:
+      $ref: "#/channels/organizationTrajectoryCapture"
+    messages:
+      - $ref: "#/channels/organizationTrajectoryCapture/messages/trajectoryJoin"
+      - $ref: "#/channels/organizationTrajectoryCapture/messages/trajectoryEvents"
+  sendOrganizationTrajectoryReplies:
+    action: send
+    title: Answer the Recorder, at the organization's address
+    summary: The gateway's answer to a join and to each batch.
+    channel:
+      $ref: "#/channels/organizationTrajectoryCapture"
+    messages:
+      - $ref: "#/channels/organizationTrajectoryCapture/messages/trajectoryReply"
   receiveVoiceCall:
     action: receive
     title: Take a person's side of a call
@@ -604,6 +778,15 @@ components:
         when hello said frames are confirmed.
       payload:
         $ref: "#/components/schemas/ScreenFrameReceived"
+    ScreenViewSize:
+      name: screenViewSize
+      title: View size
+      summary: >-
+        How large the viewer draws the screen, so frames come sharp at that
+        size and no larger. Sent only when hello said viewSize, again whenever
+        the size changes. A viewer that only watches may send it too.
+      payload:
+        $ref: "#/components/schemas/ScreenViewSize"
     ScreenMouse:
       name: screenMouse
       title: Mouse
@@ -796,6 +979,12 @@ components:
         channelId:
           type: string
           description: The conversation.
+        organizationId:
+          type: string
+          description: >-
+            The organization the conversation is in. A client ignores a
+            message for an organization other than the one it shows. Absent
+            from a server that sends only the socket's own organization's.
         memberIds:
           type: array
           description: The people this message was sent to.
@@ -837,7 +1026,11 @@ components:
           description: This person pinned or unpinned the conversation.
         busy:
           type: boolean
-          description: A turn started (true) or ended (false) in the conversation.
+          description: >-
+            A turn started (true) or ended (false) in the conversation. Also
+            true, for a socket opened without the capability
+            conversation-work-turn, while the server is carrying a turn
+            there.
         work:
           type: array
           description: >-
@@ -863,16 +1056,24 @@ components:
       properties:
         kind:
           type: string
-          enum:
+          x-extensible-enum:
             - handoff
             - routine
-          description: A Bot that was asked and has not answered yet, or a routine that is running.
+            - turn
+          description: >-
+            A Bot that was asked and has not answered yet (handoff), a routine
+            that is running (routine), or the person's own turn, which the
+            server is carrying on with no page open (turn), between one run and
+            the next too. A kind the app doesn't know is still work. turn is
+            sent only to a socket opened with the capability
+            conversation-work-turn; any other is sent work without it, and
+            busy true while the turn goes on.
         key:
           type: string
           description: Stable for this piece of work, so two asks of one Bot are two entries.
         botId:
           type: string
-          description: The Bot that was asked, or the Bot the routine runs as.
+          description: The Bot that was asked, the Bot the routine runs as, or the Bot answering the turn.
         botName:
           type:
             - string
@@ -884,7 +1085,7 @@ components:
         since:
           type: string
           format: date-time
-          description: When the work started.
+          description: When the work started. For a turn, when the server took it on.
     ConversationResync:
       type: object
       required:
@@ -908,6 +1109,14 @@ components:
           description: >-
             When true, the next frame is sent only after the viewer says it
             received the last.
+        viewSize:
+          type: boolean
+          description: >-
+            When true, the viewer may say how large it draws the screen
+            (view-size), and frames are sent at that size, up to the most
+            detail the screen has. Absent or false, frames come at the
+            screen's own width and height in pixels, and a view-size is not
+            sent.
     ScreenFrame:
       type: object
       required:
@@ -923,7 +1132,10 @@ components:
           type: string
           contentEncoding: base64
           contentMediaType: image/jpeg
-          description: The picture, a JPEG in base64.
+          description: >-
+            The picture, a JPEG in base64. It can have more pixels than width
+            and height, when the viewer asked for a sharper picture
+            (view-size); it always shows the whole screen.
         width:
           type: number
           description: The screen's width in pixels, which mouse positions are measured in.
@@ -963,6 +1175,27 @@ components:
         type:
           type: string
           const: frame-received
+    ScreenViewSize:
+      type: object
+      required:
+        - type
+        - width
+        - height
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          const: view-size
+        width:
+          type: number
+          exclusiveMinimum: 0
+          description: >-
+            How wide the viewer draws the screen, in the viewer's own device
+            pixels: its width on the page times the display's pixel ratio.
+        height:
+          type: number
+          exclusiveMinimum: 0
+          description: How tall the viewer draws the screen, in the same pixels.
     ScreenMouse:
       type: object
       required:

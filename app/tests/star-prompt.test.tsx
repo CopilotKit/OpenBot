@@ -335,7 +335,7 @@ test("never right after an error, even when the server says it is due", () => {
   server.last = "win";
   loadAppShell();
   const failed = conversation({
-    stopped: "The Bot stopped before it finished answering.",
+    stopped: { message: "The Bot stopped before it finished answering." },
   });
   expect(card(failed)).toBeNull();
 });

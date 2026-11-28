@@ -56,6 +56,9 @@ export interface PromotionJournal {
    * suspended by this operation, and only those are put back. */
   pausedCronJobs?: { name: string; wasSuspended: boolean }[];
   error?: string;
+  /** What the operation went ahead despite, for a person to read (the agent's backup target check
+   * skipped for a server that predates it, say). */
+  warnings?: string[];
   recovery: string;
 }
 
@@ -65,7 +68,10 @@ export interface Deployment {
     replicas?: number;
     template: {
       metadata?: { annotations?: Record<string, string> };
-      spec: { containers: { name: string; image: string }[] };
+      spec: {
+        containers: { name: string; image: string }[];
+        terminationGracePeriodSeconds?: number;
+      };
     };
   };
 }
@@ -140,6 +146,26 @@ export function needsMaintenance(candidate: ReleaseManifest) {
     candidate.upgrade.requiresDowntime ||
     !candidate.compatibility.database.rollbackCompatible
   );
+}
+
+/** Kubernetes' termination grace period for a pod template that sets none. */
+const DEFAULT_GRACE_SECONDS = 30;
+/** Past the grace period, for the kubelet to stop the pod and its deletion to reach the API. */
+const DELETION_MARGIN_SECONDS = 60;
+/**
+ * How long to wait for the server's pods to be gone once it is scaled to zero. A stopping server
+ * keeps serving, then drains its in-flight runs for up to its termination grace period, which an
+ * install may set far above the promotion timeout. The wait covers that grace period, so a drain is
+ * never cut short or taken for a failure; the promotion timeout stays the least it waits.
+ */
+export function serverStopSeconds(
+  deployment: Deployment,
+  timeoutSeconds: number,
+) {
+  const grace =
+    deployment.spec.template.spec.terminationGracePeriodSeconds ??
+    DEFAULT_GRACE_SECONDS;
+  return Math.max(timeoutSeconds, grace + DELETION_MARGIN_SECONDS);
 }
 
 export function serverSelector(release: string) {
@@ -297,6 +323,13 @@ export interface ReleaseIdentity {
     | { name: string; hash?: string; createdAt?: string | number }
     | string
     | null;
+  /** The database the server is connected to, on servers that report it: its host name (or
+   * address), and the Cloud SQL instance connection name when it connects through a Cloud SQL
+   * socket. Never credentials or the connection URL. */
+  database?: {
+    host?: string | null;
+    instanceConnectionName?: string | null;
+  } | null;
 }
 /** The name of the last migration a server reports, whichever shape it reports it in. */
 export function lastMigrationName(identity: ReleaseIdentity | null) {
@@ -418,6 +451,11 @@ export async function runPromotion(
             { cwd: target.cwd },
           );
       }
+      // The grace period the server's pods are stopped with, read as the server stands now.
+      const stopSeconds = serverStopSeconds(
+        await serverDeployment(target, run),
+        target.timeoutSeconds,
+      );
       scaledDown = true;
       await scaleServer(target, run, 0);
       await run(
@@ -430,7 +468,7 @@ export async function runPromotion(
           "pod",
           "--selector",
           serverSelector(target.release),
-          `--timeout=${timeout}`,
+          `--timeout=${stopSeconds}s`,
         ],
         { cwd: target.cwd },
       );

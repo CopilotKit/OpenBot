@@ -27,6 +27,15 @@ import {
   getListApiKeysMockHandler,
   getListApiKeysResponseMock,
 } from "@/lib/api/generated/api-keys/api-keys.msw";
+import {
+  CreateApiKeyBody,
+  ListApiKeysResponse,
+} from "@/lib/api/generated/api-keys/api-keys.zod";
+import {
+  getGetDeploymentMockHandler,
+  getGetDeploymentResponseMock,
+} from "@/lib/api/generated/organization-settings/organization-settings.msw";
+import { getListOrganizationsMockHandler } from "@/lib/api/generated/organizations/organizations.msw";
 import type { ApiKey } from "@/lib/api/generated/model";
 import { queryClient as appQueryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
@@ -406,4 +415,95 @@ test("refused in OpenBot Desktop, a link opens this page at the OpenBot it is co
     "https://openbot.northwind.example/settings/api-keys",
   );
   expect(link.getAttribute("target")).toBe("_blank");
+});
+
+/**
+ * A person in several organizations: a key acts only in the organization it was made in (`ApiKey.organizationId`),
+ * so each row names it, and a key made before keys were bound to one (null) acts in `default` and is shown as that
+ * one. Creating a key says where it will work, and sends only its name: the address names the organization.
+ */
+function inSeveralOrganizations() {
+  server.use(
+    getGetDeploymentMockHandler({
+      ...getGetDeploymentResponseMock(),
+      edition: "team",
+    }),
+    getListOrganizationsMockHandler({
+      organizations: [
+        {
+          id: "default",
+          slug: "acme",
+          name: "Acme",
+          role: "owner",
+          active: true,
+          personal: false,
+        },
+        {
+          id: "org_research",
+          slug: "acme-research",
+          name: "Acme Research",
+          role: "member",
+          active: false,
+          personal: false,
+        },
+      ],
+      canCreate: true,
+      nextCursor: null,
+    }),
+  );
+}
+
+test("in several organizations each key's row names the organization it acts in, a key from before binding as default's", async () => {
+  inSeveralOrganizations();
+  const [example] = getListApiKeysResponseMock().apiKeys;
+  const keys: ApiKey[] = [
+    {
+      ...example,
+      id: "k1",
+      name: "Research export",
+      organizationId: "org_research",
+    },
+    { ...example, id: "k2", name: "Old script", organizationId: null },
+    { ...example, id: "k3", name: "Acme sync", organizationId: "default" },
+  ];
+  // The fake answers as the spec says it may: checked against the generated schema.
+  const page = ListApiKeysResponse.parse({ apiKeys: keys, nextCursor: null });
+  server.use(getListApiKeysMockHandler(page));
+  const view = draw();
+
+  // The organization reads beside the key's name, in its title.
+  const title = (name: string) =>
+    view.getByText(name).closest('[data-slot="item-title"]')?.textContent ?? "";
+  await view.findByText("Research export");
+  await waitFor(() =>
+    expect(title("Research export")).toBe("Research exportAcme Research"),
+  );
+  expect(title("Old script")).toBe("Old scriptAcme");
+  expect(title("Acme sync")).toBe("Acme syncAcme");
+});
+
+test("creating a key in one of several organizations says it works there only, and sends only its name", async () => {
+  inSeveralOrganizations();
+  const bodies: unknown[] = [];
+  server.use(
+    getCreateApiKeyMockHandler(async ({ request }) => {
+      bodies.push(await request.json());
+      return getCreateApiKeyResponseMock();
+    }),
+  );
+  const view = draw();
+  await view.findByText("Nightly report");
+
+  fireEvent.click(view.getByRole("button", { name: "Create key" }));
+  const dialog = await view.findByRole("dialog");
+  await waitFor(() =>
+    expect(dialog.textContent).toContain("It works in Acme only."),
+  );
+  const name = await view.findByLabelText("Name");
+  await userEvent.type(name, "Deploy script");
+  fireEvent.submit(name.closest("form") as HTMLFormElement);
+  await view.findByText(getCreateApiKeyResponseMock().key);
+  expect(bodies).toEqual([{ name: "Deploy script" }]);
+  expect(CreateApiKeyBody.parse(bodies[0])).toEqual({ name: "Deploy script" });
+  expect(requests).toContain(`POST ${KEYS}`);
 });

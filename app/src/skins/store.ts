@@ -1,6 +1,3 @@
-import { useSyncExternalStore } from "react";
-import { currentSkinId, DEFAULT_SKIN, type SkinId } from "./types";
-
 /*
  * The skin is saved on the person's account (`skin` in their preferences), so it follows them to
  * every device they sign in from. This store is the browser's copy of it, and the one thing every
@@ -12,9 +9,11 @@ import { currentSkinId, DEFAULT_SKIN, type SkinId } from "./types";
  * the account always wins. Signing out clears the cache, so the next person on a shared machine
  * starts from the default.
  */
-export const SKIN_STORAGE_KEY = "openbot-skin";
+import { SKIN_STORAGE_KEY } from "@openbot/shared/app-storage-keys";
+import { useSyncExternalStore } from "react";
+import { currentSkinId, DEFAULT_SKIN, type SkinId } from "./types";
 
-export { DEFAULT_SKIN };
+export { DEFAULT_SKIN, SKIN_STORAGE_KEY };
 
 /** A skin saved under the id it was renamed from is read as its new id. */
 export function parseStoredSkin(value: string | null | undefined): SkinId {

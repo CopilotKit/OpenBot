@@ -8,7 +8,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { sidebarToggleShown } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
+import { useSidebarPanelAvailable } from "./sidebar-shell";
 
 /**
  * ⌘ on Apple platforms, Ctrl everywhere else. The primitive's listener accepts either modifier, so
@@ -28,6 +30,8 @@ const SHORTCUT_LABEL = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent)
  */
 export function useSidebarToggleVisible(): boolean {
   const sidebar = useOptionalSidebar();
+  // On a section with no panel there is nothing to show; the strip is the way to Conversations.
+  const panelAvailable = useSidebarPanelAvailable();
   if (!sidebar) return false;
   /*
    * Below 768px the sidebar is an overlay Sheet with its own open state, and `open` describes the
@@ -47,7 +51,11 @@ export function useSidebarToggleVisible(): boolean {
    * ⌘B once with every channel behind a shortcut nobody told them about. On mobile it always draws:
    * the Sheet starts closed, so hiding it there would mean the roster could never be opened at all.
    */
-  return sidebar.isMobile || !isOpen;
+  return sidebarToggleShown({
+    isMobile: sidebar.isMobile,
+    open: isOpen,
+    panelAvailable,
+  });
 }
 
 /**

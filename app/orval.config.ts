@@ -41,6 +41,10 @@ export default defineConfig({
         mutator: { path: "src/lib/api/request.ts", name: "apiRequest" },
         fetch: { includeHttpResponseReturnType: false },
         query: { signal: true },
+        operations: {
+          // A part of a move's bundle is bytes, which no example in the spec can be: an empty one.
+          downloadExportPart: { mock: { data: new Blob([]) } },
+        },
       },
     },
     hooks: { afterAllFilesWrite: "bunx biome format --write" },

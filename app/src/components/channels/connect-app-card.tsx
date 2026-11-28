@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
 import { Button } from "@/components/ui/button";
 import { type CardPlace, useCarryOn } from "@/lib/copilot/carry-on";
+import { failureSaid } from "@/lib/load-failure";
 import {
   connectionsQueryOptions,
   personalConnections,
@@ -66,7 +67,7 @@ export function ConnectAppCard({
     connections.data?.connections ?? [],
   ).some((row) => row.serverId === serverId && row.revoked !== true);
   // Every card drawn here is a refusal, so the app was blocked when the Bot asked.
-  const { carried, offer } = useCarryOn({
+  const { carried, inHand, offer } = useCarryOn({
     place,
     ready: connections.data ? connected : null,
     blockedWhenAsked: true,
@@ -100,7 +101,7 @@ export function ConnectAppCard({
       {connected ? (
         <div className="flex flex-wrap items-center gap-3">
           <p className="text-sm" role="status">
-            {carried || offer
+            {carried || inHand || offer
               ? `${title} is connected.`
               : `${title} is connected. Ask again and the Bot can use it.`}
           </p>
@@ -149,7 +150,7 @@ export function ConnectAppCard({
           ) : null}
           {error ? (
             <p className="break-words text-destructive text-sm" role="status">
-              {error}
+              {failureSaid(error)}
             </p>
           ) : null}
         </div>

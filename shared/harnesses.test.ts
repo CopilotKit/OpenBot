@@ -21,12 +21,32 @@ test("carries every row the desktop picker offers, in its order", () => {
     "pydantic-ai",
     "microsoft-agent-framework",
     "claude-agent-sdk",
+    "openai-agents-sdk",
     "strands",
     "ag2",
     "langroid",
     "mastra",
     "byo-url",
   ]);
+});
+
+/*
+ * A ChatGPT plan's Bot on OpenBot Desktop: OpenAI's Agents SDK, run on the plan's Sign in with
+ * ChatGPT sign-in. It runs only on that sign-in, so the web dialog, which makes Bots on whatever key
+ * the deployment holds, never offers it.
+ */
+test("runs a ChatGPT plan on the OpenAI Agents SDK, a row the web dialog never offers", () => {
+  const engine = HARNESSES.find((h) => h.id === "openai-agents-sdk");
+  expect(engine).toMatchObject({
+    name: "OpenAI Agents SDK",
+    image: "agent-openai-agents",
+    port: 4216,
+    healthPath: "/health",
+    runPath: "",
+    credential: "chatgpt-plan",
+    webCreate: false,
+  });
+  expect(WEB_HARNESSES.map((h) => h.id)).not.toContain("openai-agents-sdk");
 });
 
 test("leads the web list with the partners people look for, keeping the rest in order", () => {
@@ -63,7 +83,8 @@ test("the brands with no usable mark carry none", () => {
  */
 test("offers Mastra on the web, reached through Mastra's own API", () => {
   const notOfferable = HARNESSES.filter((h) => !h.webCreate).map((h) => h.id);
-  expect(notOfferable).toEqual([]);
+  // Only the ChatGPT plan's engine, which runs on nothing but that plan's sign-in.
+  expect(notOfferable).toEqual(["openai-agents-sdk"]);
   expect(
     HARNESSES.filter((h) => reachedThroughMastra(h.id)).map((h) => h.id),
   ).toEqual(["mastra"]);
@@ -144,7 +165,13 @@ test("marks Antigravity as needing Google's key rather than any provider's", () 
 });
 
 test("gives every row a credential the type actually names", () => {
-  const known = ["any-provider", "anthropic", "google", "their-endpoint"];
+  const known = [
+    "any-provider",
+    "anthropic",
+    "chatgpt-plan",
+    "google",
+    "their-endpoint",
+  ];
   for (const harness of HARNESSES) {
     expect(known).toContain(harness.credential);
   }

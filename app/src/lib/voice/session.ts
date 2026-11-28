@@ -1,4 +1,5 @@
 import type { SaveVoiceSessionInput } from "@openbot/shared/voice-session";
+import { type Failure, failureOf } from "@/lib/load-failure";
 import { closingOf, openingOf } from "./cut";
 import { VOICE_CONTEXT_ITEM_ID, VoiceTranscript } from "./transcript";
 import type { ConnectVoice, VoiceConnection, VoiceEvent } from "./types";
@@ -12,7 +13,8 @@ export type VoiceState = {
   seconds: number;
   transcript: string;
   reply: string;
-  error?: string;
+  /** Why the call ended, kept whole so a hold is said calmly (lib/load-failure.tsx). */
+  error?: Failure;
   stream?: MediaStream;
   output?: MediaStream;
 };
@@ -101,9 +103,12 @@ export class VoiceSession {
       });
   };
 
-  private fail(message: string) {
+  private fail(failure: Failure | string) {
     this.end();
-    this.update({ phase: "error", error: message });
+    this.update({
+      phase: "error",
+      error: typeof failure === "string" ? { message: failure } : failure,
+    });
   }
 
   start = async () => {
@@ -131,7 +136,7 @@ export class VoiceSession {
           if (current()) this.event(event, generation);
         },
         onError: (error) => {
-          if (current()) this.fail(error.message);
+          if (current()) this.fail(error);
         },
         onOutput: (output) => {
           if (current()) this.update({ output });
@@ -183,11 +188,7 @@ export class VoiceSession {
       }, 1000);
     } catch (error) {
       if (current())
-        this.fail(
-          error instanceof Error
-            ? error.message
-            : "Could not start the voice call.",
-        );
+        this.fail(failureOf(error, "Could not start the voice call."));
     }
   };
 
@@ -208,11 +209,7 @@ export class VoiceSession {
       this.connection.send(event);
       return true;
     } catch (error) {
-      this.fail(
-        error instanceof Error
-          ? error.message
-          : "The voice connection was lost.",
-      );
+      this.fail(failureOf(error, "The voice connection was lost."));
       return false;
     }
   }

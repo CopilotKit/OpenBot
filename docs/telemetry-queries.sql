@@ -3,6 +3,9 @@
 -- Deduplicate stable properties.event_id in PostHog. distinct_id is transport
 -- identity, not a person. Use known (deployment_id,user_id) scope for user metrics.
 -- Unknown identity remains visible in A; no internal/external classification exists.
+-- Production: environment='production', plus events sent before environment was
+-- decided by the build (all 'unknown') whose openbot_version is not 'unknown'.
+-- Events with no openbot_version at all predate it and are left out.
 
 -- A. Received event copies, stable-ID duplicates, identity and freshness coverage.
 SELECT event, properties.environment AS environment,
@@ -26,10 +29,13 @@ WITH records AS (
         any(properties.user_id) AS user_id,any(properties.thread_id) AS thread_id,
         any(properties.run_id) AS run_id,any(properties.trigger) AS trigger,
         any(properties.outcome) AS outcome,
-        min(parseDateTimeBestEffort(properties.occurred_at)) AS observed_utc
+        min(toDateTime(properties.occurred_at)) AS observed_utc
  FROM events
  WHERE event IN ('oss.runtime.openbot.run_accepted','oss.runtime.openbot.run_terminal')
-   AND properties.environment='production' AND properties.event_id IS NOT NULL
+   AND (properties.environment='production'
+        OR (properties.environment='unknown'
+            AND coalesce(properties.openbot_version,'unknown')!='unknown'))
+   AND properties.event_id IS NOT NULL
    AND timestamp >= toDateTime('2026-11-03 00:00:00', 'UTC')
  GROUP BY event_id
 )
@@ -51,12 +57,15 @@ WITH successes AS (
  SELECT properties.event_id AS event_id,
         any(properties.deployment_id) AS deployment_id,
         any(properties.user_id) AS user_id,
-        min(parseDateTimeBestEffort(properties.occurred_at)) AS observed_utc
+        min(toDateTime(properties.occurred_at)) AS observed_utc
  FROM events
  WHERE event='oss.runtime.openbot.run_terminal'
    AND properties.trigger='human' AND properties.purpose='ordinary'
    AND properties.is_root=true AND properties.outcome='success'
-   AND properties.environment='production' AND properties.event_id IS NOT NULL
+   AND (properties.environment='production'
+        OR (properties.environment='unknown'
+            AND coalesce(properties.openbot_version,'unknown')!='unknown'))
+   AND properties.event_id IS NOT NULL
    AND properties.deployment_id IS NOT NULL AND properties.deployment_id!='unknown'
    AND properties.user_id IS NOT NULL
    AND timestamp >= toDateTime('2026-11-03 00:00:00', 'UTC')
@@ -75,7 +84,10 @@ WITH capability AS (
         any(properties.outcome) AS outcome,any(properties.source_event) AS source_event
  FROM events
  WHERE event='oss.runtime.openbot.capability'
-   AND properties.environment='production' AND properties.event_id IS NOT NULL
+   AND (properties.environment='production'
+        OR (properties.environment='unknown'
+            AND coalesce(properties.openbot_version,'unknown')!='unknown'))
+   AND properties.event_id IS NOT NULL
    AND timestamp >= toDateTime('2026-11-03 00:00:00', 'UTC')
    AND timestamp < toDateTime('2026-11-04 00:00:00', 'UTC')
  GROUP BY event_id
@@ -95,7 +107,10 @@ WITH terminals AS (
         any(properties.result_message_ids) AS result_message_ids
  FROM events
  WHERE event='oss.runtime.openbot.run_terminal'
-   AND properties.environment='production' AND properties.event_id IS NOT NULL
+   AND (properties.environment='production'
+        OR (properties.environment='unknown'
+            AND coalesce(properties.openbot_version,'unknown')!='unknown'))
+   AND properties.event_id IS NOT NULL
    AND timestamp >= toDateTime('2026-11-03 00:00:00', 'UTC')
  GROUP BY event_id
 ), result_messages AS (
@@ -108,10 +123,13 @@ WITH terminals AS (
         any(properties.user_id) AS user_id,any(properties.thread_id) AS thread_id,
         any(properties.message_id) AS message_id,
         any(properties.consumption_surface) AS surface,
-        min(parseDateTimeBestEffort(properties.occurred_at)) AS observed_utc
+        min(toDateTime(properties.occurred_at)) AS observed_utc
  FROM events
  WHERE event IN ('oss.runtime.openbot.result_viewed','oss.runtime.openbot.result_copied')
-   AND properties.environment='production' AND properties.event_id IS NOT NULL
+   AND (properties.environment='production'
+        OR (properties.environment='unknown'
+            AND coalesce(properties.openbot_version,'unknown')!='unknown'))
+   AND properties.event_id IS NOT NULL
    AND timestamp >= toDateTime('2026-11-03 00:00:00', 'UTC')
  GROUP BY event_id
 )
@@ -143,6 +161,9 @@ FROM events
 WHERE event IN ('oss.runtime.openbot.nudge_shown',
                 'oss.runtime.openbot.nudge_clicked',
                 'oss.runtime.openbot.nudge_dismissed')
-  AND properties.app_id='openbot' AND properties.environment='production'
+  AND properties.app_id='openbot'
+  AND (properties.environment='production'
+       OR (properties.environment='unknown'
+           AND coalesce(properties.openbot_version,'unknown')!='unknown'))
   AND properties.event_id IS NOT NULL
 GROUP BY nudge, place, moment;

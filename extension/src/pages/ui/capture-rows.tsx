@@ -242,7 +242,7 @@ export function VoiceRow({
               {/* Decorative: the word beside it says it is live. */}
               <span
                 aria-hidden="true"
-                className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500"
+                className="size-1.5 shrink-0 animate-pulse rounded-full bg-success"
               />
               {voiceLine(voice)}
             </span>

@@ -14,12 +14,13 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { agentKeys } from "@/lib/agents/queries";
-import { authKeys } from "@/lib/auth/queries";
-import { readThreadMessages } from "@/lib/copilot/thread-messages";
+import { ListIdentityProvidersResponse } from "@/lib/api/generated/identity-providers/identity-providers.zod";
+import { authKeys, signedInUser } from "@/lib/auth/queries";
 import { CopilotProvider } from "@/lib/copilot/provider";
+import { readThreadMessages } from "@/lib/copilot/thread-messages";
 import {
   deploymentCapabilitiesQueryOptions,
   deploymentKeys,
@@ -37,8 +38,9 @@ import { settleReactWork } from "./settle-react-work";
  * Harbor Legal is an organization of its own beside the deployment's first, `default`, and Ines
  * runs it. Each test answers the requests the page makes the way the server does.
  *
- * - Identity providers are the deployment's, so the server refuses Harbor's admin the list
- *   (`PERMISSION_DENIED`). The page says so plainly, with nothing to press that would be refused.
+ * - Harbor's identity providers are Harbor's own, which its admin registers, and they sign in its members. Only
+ *   `default`'s are the deployment's, refused to an admin there who doesn't run OpenBot (`PERMISSION_DENIED`). The
+ *   page says so plainly, with nothing to press that would be refused.
  * - What the deployment offers is answered in an organization the person is in, and not found at
  *   `default` when they are not in it. The app still learns it, from one of their own.
  * - A tab still drawn in Harbor after a switch elsewhere names Harbor on every runtime request, so
@@ -51,7 +53,7 @@ const INES = { id: "ines", email: "ines@harbor.test" };
 const MALLORY = { id: "mallory", email: "mallory@harbor.test" };
 const BOT = "agent_harbor_contracts";
 
-/** The deployment's refusal of an admin of any organization but `default` (organizations/request.ts). */
+/** The deployment's refusal, in `default`, of an admin there who doesn't run OpenBot. */
 const DEPLOYMENT_ADMINS_ONLY = {
   type: "https://open.bot/errors/permission-denied",
   title: "Permission denied.",
@@ -85,15 +87,28 @@ const problem = (body: { status: number }) =>
     headers: { "content-type": "application/problem+json" },
   });
 
-/** Every request the app made, with the headers it sent. */
+/** The server's answer to a request made with no session. */
+const UNSIGNED = {
+  type: "https://open.bot/errors/unauthenticated",
+  title: "Sign in required.",
+  status: 401,
+  code: "UNAUTHENTICATED",
+  detail: "Sign in to continue.",
+  retryable: false,
+};
+
+/** Every request the app made, with the headers it sent, and each one the server refused. */
 let sent: { path: string; headers: Headers }[] = [];
-let answer: (path: string) => Response | Promise<Response> = () =>
-  problem(NOT_FOUND);
+let refused: string[] = [];
+/** `asNobody`: the request was made without the page's cookies, as a browser sends `credentials: "omit"`. */
+let answer: (path: string, asNobody: boolean) => Response | Promise<Response> =
+  () => problem(NOT_FOUND);
 
 const originalFetch = globalThis.fetch;
 beforeAll(() => GlobalRegistrator.register({ url: "http://127.0.0.1:3010/" }));
 beforeEach(() => {
   sent = [];
+  refused = [];
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(
@@ -104,7 +119,13 @@ beforeEach(() => {
         input instanceof Request ? input.headers : init?.headers,
       );
       sent.push({ path: url.pathname, headers });
-      return answer(url.pathname);
+      const asNobody =
+        (input instanceof Request ? input.credentials : init?.credentials) ===
+        "omit";
+      const response = await answer(url.pathname, asNobody);
+      if (response.status >= 400)
+        refused.push(`${response.status} ${url.pathname}`);
+      return response;
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -150,10 +171,113 @@ function show(Page: ComponentType, client = freshClient()) {
   );
 }
 
-test("Harbor's admin reads that identity providers are set up for all of OpenBot, with no error and nothing to press", async () => {
+test("Harbor's admin registers Harbor's own identity providers, which sign in Harbor's members", async () => {
   setCurrentOrganization(HARBOR.id);
   answer = (path) =>
     path === `/api/v2/organizations/${HARBOR.id}/identity-providers`
+      ? Response.json({ identityProviders: [], nextCursor: null })
+      : problem(NOT_FOUND);
+  const view = identityProviders();
+  await view.findByText("No identity providers yet");
+  // Not everybody who signs in to OpenBot: this organization's members.
+  view.getByText(
+    "Configure your company’s SAML or OpenID Connect provider for this organization’s members. Email domains determine which provider people use to sign in.",
+  );
+  expect(
+    view.getAllByRole("button", { name: "Add a provider" }).length,
+  ).toBeGreaterThan(0);
+  expect(view.queryByText("Set up for all of OpenBot")).toBeNull();
+  expect(document.body.textContent).not.toMatch(
+    /apply to everyone who signs in here/,
+  );
+});
+
+test("in Harbor, the providers set up for all of OpenBot are listed read-only, and while Harbor has its own each says it isn't used for Harbor's rule", async () => {
+  setCurrentOrganization(HARBOR.id);
+  answer = (path) =>
+    path === `/api/v2/organizations/${HARBOR.id}/identity-providers`
+      ? Response.json(
+          ListIdentityProvidersResponse.parse({
+            identityProviders: [
+              {
+                id: "harbor-okta",
+                issuer: "https://harbor.okta.com",
+                domain: "harborlegal.com",
+                protocol: "oidc",
+                registeredBy: INES.id,
+                deployment: false,
+              },
+              {
+                id: "company-entra",
+                issuer: "https://login.microsoftonline.com/tenant/v2.0",
+                domain: "example.com",
+                protocol: "oidc",
+                registeredBy: null,
+                deployment: true,
+              },
+            ],
+            nextCursor: null,
+          }),
+        )
+      : problem(NOT_FOUND);
+  const view = identityProviders();
+  await view.findByText("harbor-okta");
+  // Harbor's own, to remove; the deployment's, read-only in a section of its own.
+  expect(view.getByRole("button", { name: "Remove" })).toBeTruthy();
+  const everybody = view
+    .getByRole("heading", { name: "For all of OpenBot" })
+    .closest("section") as HTMLElement;
+  expect(within(everybody).getByText("company-entra")).toBeTruthy();
+  // Harbor has its own, so only those count for its Require SSO: each of the deployment's says so.
+  expect(
+    within(everybody).getByText(
+      "Set up for everyone who signs in to OpenBot. This organization has its own, so only those count for its Require SSO. Ask whoever runs OpenBot to change one of these.",
+    ),
+  ).toBeTruthy();
+  const entra = within(everybody)
+    .getByText("company-entra")
+    .closest("[data-slot=item]") as HTMLElement;
+  expect(
+    within(entra).getByText("Not used for this organization's rule"),
+  ).toBeTruthy();
+  expect(within(everybody).queryByRole("button")).toBeNull();
+  expect(view.getAllByRole("button", { name: "Remove" })).toHaveLength(1);
+});
+
+test("in Harbor with none of its own, the deployment's providers count for it and say nothing more", async () => {
+  setCurrentOrganization(HARBOR.id);
+  answer = (path) =>
+    path === `/api/v2/organizations/${HARBOR.id}/identity-providers`
+      ? Response.json(
+          ListIdentityProvidersResponse.parse({
+            identityProviders: [
+              {
+                id: "company-entra",
+                issuer: "https://login.microsoftonline.com/tenant/v2.0",
+                domain: "example.com",
+                protocol: "oidc",
+                registeredBy: null,
+                deployment: true,
+              },
+            ],
+            nextCursor: null,
+          }),
+        )
+      : problem(NOT_FOUND);
+  const view = identityProviders();
+  await view.findByText("company-entra");
+  expect(
+    view.getByText(
+      "Set up for everyone who signs in to OpenBot. They count for this organization too. Ask whoever runs OpenBot to change one.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText("Not used for this organization's rule")).toBeNull();
+});
+
+test("an admin of `default` who doesn't run OpenBot reads that its identity providers are set up for all of OpenBot, with no error and nothing to press", async () => {
+  setCurrentOrganization("default");
+  answer = (path) =>
+    path === "/api/v2/organizations/default/identity-providers"
       ? problem(DEPLOYMENT_ADMINS_ONLY)
       : problem(NOT_FOUND);
   const view = identityProviders();
@@ -185,11 +309,15 @@ test("an admin of `default` still registers providers there", async () => {
   expect(view.queryByText("Set up for all of OpenBot")).toBeNull();
 });
 
-test("signed in outside `default`, the app learns what OpenBot offers from one of the person's own organizations", async () => {
+test("signed in outside `default`, the app's first load learns what OpenBot offers and who she is with nothing refused", async () => {
+  // The self-hosted end-to-end run: before the organization was known, the deployment was asked at `default` with
+  // Ines's session, and a signed-in person outside `default` is told "not found" there. The page worked; the console
+  // showed the 404. Asked as nobody it is answered, and then everything is asked in Harbor.
   setCurrentOrganization(undefined);
-  answer = (path) => {
+  answer = (path, asNobody) => {
     if (path === "/api/v2/organizations/default/deployment")
-      return problem(NOT_FOUND);
+      return asNobody ? Response.json(FACTS) : problem(NOT_FOUND);
+    if (asNobody) return problem(UNSIGNED);
     if (path === "/api/v2/people/me/organizations")
       return Response.json({
         organizations: [{ ...HARBOR, role: "owner", active: true }],
@@ -198,16 +326,31 @@ test("signed in outside `default`, the app learns what OpenBot offers from one o
       });
     if (path === `/api/v2/organizations/${HARBOR.id}/deployment`)
       return Response.json(FACTS);
+    if (path === `/api/v2/organizations/${HARBOR.id}/people/me`)
+      return Response.json({
+        person: {
+          ...INES,
+          name: "Ines Duarte",
+          needsName: false,
+          image: null,
+          role: "owner",
+          onboarding: null,
+        },
+        openbotVersion: null,
+      });
     return problem(NOT_FOUND);
   };
-  const capabilities = await freshClient().fetchQuery(
+  const client = freshClient();
+  expect(await signedInUser(client)).toMatchObject({ id: INES.id });
+  const capabilities = await client.fetchQuery(
     deploymentCapabilitiesQueryOptions(),
   );
   expect(capabilities).toMatchObject({ edition: "team", generativeUi: true });
+  expect(refused).toEqual([]);
   expect(sent.map((request) => request.path)).toEqual([
     "/api/v2/organizations/default/deployment",
     "/api/v2/people/me/organizations",
-    `/api/v2/organizations/${HARBOR.id}/deployment`,
+    `/api/v2/organizations/${HARBOR.id}/people/me`,
   ]);
 });
 

@@ -20,6 +20,8 @@ const config: ExpoConfig = {
     "expo-router",
     "expo-secure-store",
     ["expo-notifications", { defaultChannel: "openbot" }],
+    // Back from linking the company account after the process died mid-sign-in: no Custom Tab left below Home.
+    "./plugins/linked-cold-start",
   ],
   extra: { openbotRelease, ...(projectId ? { eas: { projectId } } : {}) },
 };

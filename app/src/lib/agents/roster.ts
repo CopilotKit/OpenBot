@@ -1,3 +1,4 @@
+import { comesWithOpenBot } from "./public-words";
 import type { AgentProfile } from "./queries";
 
 /**
@@ -8,7 +9,8 @@ import type { AgentProfile } from "./queries";
  * leads. Then Pinned, where a Team Bot an administrator assigned to the person also sits: it used to
  * be in their sidebar where they could not hide it, and the top of the roster is where that promise
  * now lives. The rest split on `mine`, never on `canManage`, which is true for an administrator on
- * everybody's Bots.
+ * everybody's Bots. Of the ones that aren't theirs, a Bot OpenBot itself provides is Included, not
+ * Shared: nobody shared it ({@link comesWithOpenBot}).
  */
 export function groupRoster(
   agents: readonly AgentProfile[],
@@ -19,6 +21,7 @@ export function groupRoster(
   pinned: AgentProfile[];
   yours: AgentProfile[];
   shared: AgentProfile[];
+  included: AgentProfile[];
 } {
   const needsYou = agents.filter((agent) => waiting(agent.id) > 0);
   const quiet = agents.filter((agent) => waiting(agent.id) === 0);
@@ -29,6 +32,7 @@ export function groupRoster(
     needsYou,
     pinned: quiet.filter(isPinned),
     yours: rest.filter((agent) => agent.mine),
-    shared: rest.filter((agent) => !agent.mine),
+    shared: rest.filter((agent) => !agent.mine && !comesWithOpenBot(agent)),
+    included: rest.filter((agent) => !agent.mine && comesWithOpenBot(agent)),
   };
 }

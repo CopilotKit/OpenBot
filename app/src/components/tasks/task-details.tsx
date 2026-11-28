@@ -113,7 +113,7 @@ function ShortList<T>({
       <ul className="grid">{shown.map(row)}</ul>
       {items.length > SHOWN ? (
         <button
-          className="w-fit rounded-sm text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="w-fit rounded-md text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
           onClick={() => setAll(!all)}
           type="button"
         >
