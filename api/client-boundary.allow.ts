@@ -234,6 +234,12 @@ export const ALLOWED: Allowed[] = [
     why: "where sign-in sends a person back to finish verifying an app account",
   },
   {
+    file: "app/src/lib/auth/resume.ts",
+    what: "/api/auth/shell/handoff",
+    rule: "sign-in-protocol",
+    why: "where sign-in sends a phone app's sign-in sheet on to, a page the server draws (Continue to the OpenBot app): a document navigation in the sheet's browser, not a data request, so not through the generated client",
+  },
+  {
     file: "app/src/lib/plugins/finish-on-return.ts",
     what: "fetch()",
     rule: "sign-in-protocol",
