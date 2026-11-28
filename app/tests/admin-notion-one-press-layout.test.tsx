@@ -1,10 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Locator, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { botAppPath } from "./bot-grants-api";
 import { myConnectionPath } from "./connections-api";
+import { test } from "./renderer-crash";
 
 /**
  * Notion on the chat card, for the admin of their own organization, in a real browser.

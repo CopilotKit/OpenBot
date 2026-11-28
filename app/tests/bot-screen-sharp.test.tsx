@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
@@ -9,6 +9,7 @@ import type {
   WebSocketRoute,
 } from "playwright-core";
 import { compile } from "tailwindcss";
+import { test } from "./renderer-crash";
 
 /**
  * A Bot's screen is sharp on a high-resolution display.

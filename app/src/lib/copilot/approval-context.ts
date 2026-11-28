@@ -59,16 +59,20 @@ export function observeApprovalAgent(agent: Agent): () => void {
 /** What a computer tool's handler answers the SDK with while the gate holds the step for a person. */
 export const WAITING_FOR_PERSON = { waiting: true } as const;
 
+/** Whether a tool's answer, parsed, is `WAITING_FOR_PERSON`: the call has no answer yet. */
+export function isWaitingForPerson(answer: unknown): boolean {
+  return (
+    !!answer &&
+    typeof answer === "object" &&
+    (answer as { waiting?: unknown }).waiting === true
+  );
+}
+
 function isWaitingPlaceholder(message: { role: string; content?: unknown }) {
   if (message.role !== "tool" || typeof message.content !== "string")
     return false;
   try {
-    const parsed: unknown = JSON.parse(message.content);
-    return (
-      !!parsed &&
-      typeof parsed === "object" &&
-      (parsed as { waiting?: unknown }).waiting === true
-    );
+    return isWaitingForPerson(JSON.parse(message.content));
   } catch {
     return false;
   }

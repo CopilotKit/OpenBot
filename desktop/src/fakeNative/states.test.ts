@@ -17,8 +17,8 @@ test("providers lists the seven providers in order", () => {
     "anthropic",
     "google",
     "xai",
-    "unbiased",
     "trustedrouter",
+    "privatemode",
     "openai-compatible",
   ]);
 });

@@ -8,6 +8,7 @@ import { getGetBotResponseMock } from "@/lib/api/generated/bots/bots.msw";
 import { RUN_ENDED_UNHEARD } from "@/lib/copilot/quiet-run";
 import { personBody } from "./accounts-api";
 import { botGrantsBody } from "./bot-grants-api";
+import { still } from "./page-still";
 
 /**
  * A run whose end never reached this browser is shown as it ended on the server, in a real browser.
@@ -608,7 +609,7 @@ async function sent(
 async function shoot(page: Page, name: string) {
   await style(page);
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(400);
+  await still(page);
   if (!shots) return;
   mkdirSync(shots, { recursive: true });
   await page.screenshot({ path: join(shots, `${name}.png`) });

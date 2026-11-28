@@ -170,6 +170,132 @@ async function providerStartup(botProvider: string) {
   return { exitCode, stderr };
 }
 
+test("the bundled Mastra Bot declares and applies run guidance through its native server", async () => {
+  const prompts: string[][] = [];
+  const provider = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const body = await request.json();
+      prompts.push(
+        body.messages
+          .filter((message: { role: string }) => message.role === "system")
+          .map((message: { content: string }) => message.content),
+      );
+      return Response.json({
+        id: "chat",
+        object: "chat.completion",
+        created: 0,
+        model: body.model,
+        choices: [
+          {
+            index: 0,
+            finish_reason: "stop",
+            message: { role: "assistant", content: "hello" },
+          },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+    },
+  });
+  const role = (value: string) => ({
+    description: "OpenBot standing role",
+    value,
+  });
+  const tools = (value: string) => ({
+    description: "OpenBot granted tools guidance",
+    value,
+  });
+  const otherContext = [
+    { description: "OpenBot learned skills", value: "Refunds" },
+    { description: "Customer tier", value: "Premium" },
+    { description: "OpenBot signed run assertion", value: "private-assertion" },
+  ];
+  const contexts = [
+    [tools("First grant"), role("  First role  "), ...otherContext],
+    [role("Changed role"), tools("Changed grant"), ...otherContext],
+    [role("Changed role"), ...otherContext],
+    [role("  "), tools(""), ...otherContext],
+    [
+      role("Duplicate role"),
+      role(""),
+      tools("Duplicate grant A"),
+      tools("Duplicate grant B"),
+      ...otherContext,
+    ],
+  ];
+  try {
+    const { stdout, stderr, exitCode } = await runProbe(
+      [
+        Bun.argv[0],
+        "--no-env-file",
+        "-e",
+        [
+          'import assert from "node:assert/strict";',
+          // Use the same server adapter as the bundled Mastra deployment.
+          'const { createHonoServer } = await import(Bun.resolveSync("@mastra/deployer/server", process.cwd() + "/agent-mastra/src/mastra"));',
+          'const { mastra } = await import("./agent-mastra/src/mastra/index.ts");',
+          "const app = await createHonoServer(mastra, { browserStream: false });",
+          'const path = "/openbot/capabilities";',
+          'const headers = { "x-openbot-agent-token": process.env.MANAGED_AGENT_TOKEN };',
+          'assert.equal((await app.request("/health")).status, 200);',
+          'assert.equal((await app.request("/api/agents/openbot")).status, 401);',
+          "assert.equal((await app.request(path)).status, 401);",
+          'assert.equal((await app.request(path, { headers: { "x-openbot-agent-token": "fake-managed-token" } })).status, 401);',
+          'const otherAgent = await app.request("/another-agent/capabilities", { headers });',
+          'assert.equal((await otherAgent.text()).includes("openbot.runGuidance"), false);',
+          "const declaration = await app.request(path, { headers });",
+          "assert.equal(declaration.status, 200);",
+          'assert.deepEqual(await declaration.json(), { custom: { "openbot.runGuidance": { version: 1 } } });',
+          `for (const context of ${JSON.stringify(contexts)}) {`,
+          '  const response = await app.request("/api/agents/openbot/generate", {',
+          '    method: "POST", headers: { ...headers, "content-type": "application/json" },',
+          '    body: JSON.stringify({ messages: "Say hello", requestContext: { "ag-ui": { context } } }),',
+          "  });",
+          "  const body = await response.json();",
+          "  assert.equal(response.status, 200, JSON.stringify(body));",
+          '  assert.equal(body.text, "hello");',
+          "}",
+          "delete process.env.MANAGED_AGENT_TOKEN;",
+          "assert.equal((await app.request(path, { headers })).status, 401);",
+        ].join("\n"),
+      ],
+      {
+        PATH: process.env.PATH ?? "/opt/homebrew/bin:/usr/bin:/bin",
+        MASTRA_TELEMETRY_DISABLED: "true",
+        DO_NOT_TRACK: "1",
+        NODE_ENV: "test",
+        MANAGED_AGENT_TOKEN: "test-managed-token",
+        OPENAI_API_KEY: "test-openai-key",
+        OPENAI_BASE_URL: new URL("/v1", provider.url).toString(),
+      },
+      10_000,
+    );
+    if (exitCode !== 0) {
+      throw new Error(
+        `native Mastra probe exited ${exitCode}\n${stdout}\n${stderr}`,
+      );
+    }
+    const prompt = (...guidance: string[]) => [
+      [
+        openbotBaseInstructions,
+        ...guidance,
+        "Refunds",
+        "Customer tier: Premium",
+      ].join("\n\n"),
+    ];
+    expect(prompts).toEqual([
+      prompt("First role", "First grant"),
+      prompt("Changed role", "Changed grant"),
+      prompt("Changed role"),
+      prompt(),
+      prompt(),
+    ]);
+  } finally {
+    await provider.stop(true);
+  }
+}, 15_000);
+
 describe("OpenBot Mastra receiver instructions", () => {
   test("delivers the learned catalog after the standing role and tool guidance", () => {
     expect(

@@ -20,6 +20,7 @@ import {
 } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
+  awaitingFirstReply,
   type GroupMessage,
   groupKeys,
   groupQueryOptions,
@@ -34,9 +35,11 @@ import {
 } from "@/lib/markdown";
 import { newId } from "@/lib/new-id";
 import { DELETED_USER, isDeletedUser } from "@/lib/people/deleted-user";
+import { cn } from "@/lib/utils";
 import { ChannelAvatar } from "./avatar";
 import { RestoringTranscript } from "./chat-transcript";
 import { Composer, toAgentOptions } from "./composer";
+import { ComposerColumn, transcriptColumn } from "./conversation-columns";
 import { SentFileCard } from "./sent-file-card";
 import { TeamBotConsentCard } from "./team-bot-consent";
 
@@ -135,7 +138,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
 
   if (group.isPending)
     return (
-      <div className="mx-auto w-full max-w-3xl px-4 py-6">
+      <div className={cn("py-6", transcriptColumn)}>
         <RestoringTranscript />
       </div>
     );
@@ -143,7 +146,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
   if (group.data === undefined)
     return (
       <div
-        className="mx-auto flex w-full max-w-3xl flex-col items-start gap-3 px-4 py-8"
+        className={cn("flex flex-col items-start gap-3 py-8", transcriptColumn)}
         role="alert"
       >
         <p className="text-sm text-destructive">
@@ -166,14 +169,21 @@ export function GroupChat({ channelId }: { channelId: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div
-        className="min-h-0 flex-1 overflow-y-auto"
+        // The scrollbar a conversation with one Bot draws (`MessageScroller`): thin, and its room
+        // kept while nothing scrolls, so where scrollbars take room the column sits where that
+        // conversation's does and does not shift when the lines first overflow.
+        className="min-h-0 flex-1 scrollbar-thin scrollbar-gutter-stable overflow-y-auto"
         onScroll={(event) => {
           atBottom.current = isNearBottom(event.currentTarget);
         }}
         ref={viewportRef}
       >
+        {/*
+         * The transcript's column and the composer's below are a conversation with one Bot's
+         * (`conversation-columns.tsx`), so a group keeps its side margin on a phone too.
+         */}
         <div
-          className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-6"
+          className={cn("flex flex-col gap-5 py-6", transcriptColumn)}
           data-transcript-column
         >
           {messages.length === 0 ? (
@@ -205,10 +215,24 @@ export function GroupChat({ channelId }: { channelId: string }) {
               mine={message.ownerUserId === me?.id}
             />
           ))}
+          {/*
+           * A person's message the server has taken and no Bot has started on yet. Each Bot's line
+           * says "Thinking" once its run starts, but the page only learns that on its next read, up
+           * to a second and a half later: a first message sat alone under the box for that long,
+           * and read as broken. Which Bot goes first is the server's to say, so the line names none.
+           */}
+          {awaitingFirstReply(group.data) ? (
+            <p
+              className="tool-line-running text-sm text-muted-foreground"
+              role="status"
+            >
+              Thinking
+            </p>
+          ) : null}
         </div>
       </div>
       {/* The same column and the same compact composer as a conversation with one Bot. */}
-      <div className="mx-auto w-full max-w-2xl shrink-0 pb-4">
+      <ComposerColumn>
         {send.error ? (
           <p className="pb-2 text-sm text-destructive" role="alert">
             {failureSaid(send.error)}
@@ -257,7 +281,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
             });
           }}
         />
-      </div>
+      </ComposerColumn>
     </div>
   );
 }
@@ -378,6 +402,7 @@ function GroupLine({
               <BubbleContent className="w-full">
                 <BotMarkdown
                   components={markdownComponents}
+                  files={message.files}
                   plugins={markdownPlugins}
                   remarkPlugins={replyRemarkPlugins}
                 >

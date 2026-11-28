@@ -8,6 +8,7 @@ import { getGetBotResponseMock } from "@/lib/api/generated/bots/bots.msw";
 import { UNREADABLE_REPLY } from "@/lib/copilot/stopped-turn";
 import { personBody } from "./accounts-api";
 import { botGrantsBody } from "./bot-grants-api";
+import { still } from "./page-still";
 
 /**
  * What a person sees when a connected Bot gets something wrong, in a real browser.
@@ -346,7 +347,7 @@ async function sent(
 async function shoot(page: Page, name: string) {
   await style(page);
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(400);
+  await still(page);
   if (!shots) return;
   mkdirSync(shots, { recursive: true });
   await page.screenshot({ path: join(shots, `${name}.png`) });

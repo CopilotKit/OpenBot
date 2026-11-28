@@ -82,6 +82,11 @@ import {
   runModel,
   runRoute,
 } from "./models.ts";
+import {
+  signatureOf,
+  signatureOfDelta,
+  signedSteps,
+} from "./thought-signatures.ts";
 
 export type Emit = (event: BaseEvent) => void;
 
@@ -167,6 +172,8 @@ type Slot = {
   name?: string;
   args: string;
   started: boolean;
+  /** Gemini's thought signature, as its OpenAI-compatible API streams it on the call. */
+  signature?: string;
 };
 
 /** Whether the model declined to answer, in its provider's way of saying so. */
@@ -189,16 +196,6 @@ function declined(message: AIMessageChunk): string | undefined {
   )
     return said || "Gemini declined to answer this request.";
   return undefined;
-}
-
-/**
- * The provider's opaque artefact on a call: Gemini's thought signature, as @langchain/google puts it
- * on the call. It goes out as the call's AG-UI `encryptedValue` and comes back the same way.
- */
-function signatureOf(call: unknown): string | undefined {
-  const value = (call as { thoughtSignature?: unknown } | undefined)
-    ?.thoughtSignature;
-  return typeof value === "string" && value ? value : undefined;
 }
 
 /**
@@ -248,6 +245,20 @@ async function streamStep(
     }));
   };
 
+  /** A call's slot, keyed by its index in the response (or its id where it has no index). */
+  const slotFor = (piece: { index?: unknown; id?: unknown }): Slot => {
+    const key =
+      piece.index !== undefined && piece.index !== null
+        ? `index:${piece.index}`
+        : `id:${piece.id}`;
+    let slot = slots.get(key);
+    if (!slot) {
+      slot = { index: slots.size, args: "", started: false };
+      slots.set(key, slot);
+    }
+    return slot;
+  };
+
   const stream = await model.stream(messages, { signal: run.signal });
   for await (const chunk of stream as AsyncIterable<AIMessageChunk>) {
     whole = whole ? whole.concat(chunk) : chunk;
@@ -264,15 +275,7 @@ async function streamStep(
       run.emit({ type: "TEXT_MESSAGE_CONTENT", messageId, delta } as BaseEvent);
     }
     for (const piece of callPieces(chunk)) {
-      const key =
-        piece.index !== undefined && piece.index !== null
-          ? `index:${piece.index}`
-          : `id:${piece.id}`;
-      let slot = slots.get(key);
-      if (!slot) {
-        slot = { index: slots.size, args: "", started: false };
-        slots.set(key, slot);
-      }
+      const slot = slotFor(piece);
       if (piece.id && !slot.id) slot.id = piece.id;
       if (piece.name && !slot.name) slot.name = piece.name;
       if (slot.started) {
@@ -288,6 +291,15 @@ async function streamStep(
       slot.args += piece.args ?? "";
       if (slot.id && slot.name) start(slot);
     }
+    // Gemini's OpenAI-compatible API puts the call's thought signature on its streamed delta,
+    // which @langchain/openai keeps only in the raw calls (thought-signatures.ts).
+    const raw = (
+      chunk.additional_kwargs as { tool_calls?: unknown } | undefined
+    )?.tool_calls;
+    for (const delta of Array.isArray(raw) ? raw : []) {
+      const signature = signatureOfDelta(delta);
+      if (signature) slotFor(delta).signature = signature;
+    }
   }
   if (textOpen) run.emit({ type: "TEXT_MESSAGE_END", messageId } as BaseEvent);
   if (!whole) return new AIMessage({ id: messageId, content: "" });
@@ -302,7 +314,7 @@ async function streamStep(
     slot.name ??= parsed[position]?.name ?? "";
     if (!slot.started) start(slot);
     run.emit({ type: "TOOL_CALL_END", toolCallId: slot.id } as BaseEvent);
-    const sealed = signatureOf(parsed[position]);
+    const sealed = signatureOf(parsed[position]) ?? slot.signature;
     if (sealed)
       run.emit({
         type: "REASONING_ENCRYPTED_VALUE",
@@ -326,6 +338,7 @@ async function streamStep(
       name: slot.name,
       args,
       type: "tool_call" as const,
+      ...(sealed ? { thoughtSignature: sealed } : {}),
     };
   });
 
@@ -353,7 +366,10 @@ async function answer(state: StateType, config: RunnableConfig) {
       clearsOnServer: clearsOnServer(run.model),
       extraChars: toolChars,
     });
-    const messages = run.model instanceof ChatGoogle ? forGemini(room) : room;
+    const messages =
+      run.model instanceof ChatGoogle
+        ? signedSteps(forGemini(room), run.model.model)
+        : room;
     const model =
       offered.length && run.model.bindTools
         ? run.model.bindTools(offered)

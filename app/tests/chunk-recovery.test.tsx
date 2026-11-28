@@ -1,8 +1,10 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Browser, BrowserType, Page, Route } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
+import { test } from "./renderer-crash";
 
 /**
  * A part of the app that couldn't be fetched is fetched again, and a release that replaced the
@@ -348,7 +350,7 @@ async function style(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 describe.skipIf(!asked)("A part of the app that couldn't be fetched", () => {

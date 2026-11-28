@@ -1,6 +1,6 @@
+import type { Message } from "@ag-ui/core";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import type { Message } from "@ag-ui/core";
 import { useLayoutEffect, useState } from "react";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import {
@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authed/_app/start/$startId")({
+  staticData: { arrival: "conversation" },
   component: RouteComponent,
 });
 

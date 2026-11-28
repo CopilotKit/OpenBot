@@ -428,12 +428,6 @@ export const ALLOWED: Allowed[] = [
       why: "today's browser addresses, which the server registers from here and no client calls since the browsers moved onto the generated client",
     }),
   ),
-  {
-    file: "desktop/src-tauri/src/provider_oauth.rs",
-    what: /^\/api\/oauth\/(device_authorization|token)$/,
-    rule: "third-party",
-    why: "a model provider's own sign-in, at the provider's address",
-  },
   // Third parties.
   {
     file: "app/src/lib/voice/websocket.ts",
@@ -458,6 +452,12 @@ export const ALLOWED: Allowed[] = [
     what: "fetch()",
     rule: "third-party",
     why: "image registries, never OpenBot's server",
+  },
+  {
+    file: "scripts/ci-watch.ts",
+    what: "fetch()",
+    rule: "third-party",
+    why: "GitHub's API, for a CI job's log, never OpenBot's server",
   },
   {
     file: "scripts/model-compat.ts",

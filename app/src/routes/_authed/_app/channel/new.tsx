@@ -16,6 +16,11 @@ import {
   toAgentOptions,
 } from "@/components/channels/composer";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
+import {
+  forgetSendingDraft,
+  rememberSendingDraft,
+  sendingDraftLeftBehind,
+} from "@/components/channels/composer/saved-draft";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { seedMessage } from "@/components/channels/transcript-messages";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
@@ -46,7 +51,7 @@ import {
   loadFailure,
 } from "@/lib/load-failure";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
-import { useDraftModel } from "@/lib/models/run-model";
+import { useDraftModel, usePickedBotModel } from "@/lib/models/run-model";
 import {
   useAnyBotSkillCommands,
   useSkillCommands,
@@ -62,11 +67,15 @@ import { newId } from "../../../../lib/new-id";
 /** What the API's `getBot` answers for a Bot this person cannot see. */
 const AGENT_NOT_FOUND = "Couldn't find that Bot.";
 
+/** The name new conversations keep a Send still making its conversation under (`saved-draft.ts`). */
+const SENDING_FROM = "new";
+
 /** Said when a draft holding files is sent to two or more Bots. */
 const GROUP_TAKES_NO_FILES =
   "A conversation with more than one Bot can't take files yet. Remove them to send.";
 
 export const Route = createFileRoute("/_authed/_app/channel/new")({
+  staticData: { arrival: "conversation" },
   /*
    * The pending recipient's id, read as text whatever the router parsed it into (`searchText`):
    * search values are JSON-parsed, so a Bot id made of digits would otherwise arrive as a number
@@ -134,7 +143,16 @@ function NewConversation({ composition }: { composition: string }) {
   const [creatingBot, setCreatingBot] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const navigate = Route.useNavigate();
-  const { startChosen, startGroup, startPicked, pending } = useStartChannel();
+  /*
+   * Where this page's unsent message is kept. Its own, unless a page before it died while its Send
+   * was still making the conversation: those words open here, so they are never left where no page
+   * looks. The box's message is kept there until its conversation has it.
+   */
+  const [draftKey] = useState(
+    () => sendingDraftLeftBehind(SENDING_FROM) ?? `new:${composition}`,
+  );
+  const { startChosen, startGroup, startPicked, pending } =
+    useStartChannel(draftKey);
   const {
     data: profiles,
     isError: rosterError,
@@ -222,13 +240,23 @@ function NewConversation({ composition }: { composition: string }) {
   );
   // Not a Bot that hands work out: it answers on its own model.
   const pickable = !group && selected.length === 1 && takesModel;
+  /*
+   * Nobody in To: is home's composer, and so is its model picker: it starts on the catalogue's
+   * default, and the pick is saved with the conversation of the Bot OpenBot picks, or says that Bot
+   * picks its own model (`usePickedBotModel`, home's own).
+   */
+  const openBotPicks = recipients.length === 0;
   const models = useQuery({
     ...modelCatalogueQueryOptions(),
-    enabled: pickable,
+    enabled: pickable || openBotPicks,
   });
   const draftModel = useDraftModel(
     pickable ? models.data : undefined,
     pickable ? selected[0]?.defaultModel : undefined,
+  );
+  const pickedBotModel = usePickedBotModel(
+    openBotPicks ? models.data : undefined,
+    profiles,
   );
   // A group's first message goes to all of its Bots, so no one Bot's commands are offered.
   const skillCommands = useSkillCommands(
@@ -250,21 +278,25 @@ function NewConversation({ composition }: { composition: string }) {
     if (!draft.text.trim() && draft.attachments.length === 0) return;
     setError(null);
     setSent(seedMessage(draft.text, newId()));
+    const { pickFor } = pickedBotModel;
     try {
-      if (draft.agentId)
+      if (draft.agentId) {
+        const { pick, notUsed } = await pickFor(draft.agentId);
         await startChosen(
           draft.agentId,
           draft.text,
-          null,
+          pick,
           undefined,
           draft.attachments,
         );
-      else
+        notUsed?.();
+      } else
         await startPicked({
           text: draft.text,
           skills: draft.commandIds,
           roster: profiles,
           files: draft.attachments,
+          pickFor,
         });
     } catch (caught) {
       // The words stay in the box, with the reason under them.
@@ -291,6 +323,8 @@ function NewConversation({ composition }: { composition: string }) {
         throw new Error(GROUP_TAKES_NO_FILES);
       }
       setError(null);
+      // The message, and "Thinking" under it, while the group is made and the message sent to it.
+      setSent(seedMessage(draft.text, newId()));
       try {
         // An `@` addresses one Bot, as it does in every later message of the group.
         await startGroup(
@@ -299,6 +333,7 @@ function NewConversation({ composition }: { composition: string }) {
           draft.agentId,
         );
       } catch (caught) {
+        setSent(null);
         setError(failureOf(caught, "Couldn't start the group. Try again."));
         throw caught;
       }
@@ -474,15 +509,24 @@ function NewConversation({ composition }: { composition: string }) {
          */
         holdsFilesUntilSent={!group}
         // This new conversation's unsent message, kept with it as its Bots are (`composition`).
-        draftKey={`new:${composition}`}
+        draftKey={draftKey}
         attachmentLimits={attachmentLimits}
         modelPicker={
-          <ModelPicker
-            catalogue={pickable ? models.data : undefined}
-            defaultModel={draftModel.defaultModel}
-            onChange={draftModel.choose}
-            value={draftModel.value}
-          />
+          openBotPicks ? (
+            <ModelPicker
+              catalogue={models.data}
+              disabled={!fallback}
+              onChange={pickedBotModel.choose}
+              value={pickedBotModel.value}
+            />
+          ) : (
+            <ModelPicker
+              catalogue={pickable ? models.data : undefined}
+              defaultModel={draftModel.defaultModel}
+              onChange={draftModel.choose}
+              value={draftModel.value}
+            />
+          )
         }
         disabled={Boolean(loadError) || waitingForUrlAgent}
         /*
@@ -502,6 +546,13 @@ function NewConversation({ composition }: { composition: string }) {
             }
           : {})}
         messages={sent ? [sent] : []}
+        /*
+         * Sent, and the Bot has the turn from here: the "Thinking" line under the message, as the
+         * conversation draws it. Making the conversation can take seconds (OpenBot picking the Bot
+         * is a model call), and the message alone under a box that had emptied read as broken. A
+         * group's first message too: its transcript says "Thinking" under it once it opens.
+         */
+        busy={sent !== null}
         starterSuggestions={
           !group && !sent ? (
             <StarterSuggestions
@@ -533,7 +584,15 @@ function NewConversation({ composition }: { composition: string }) {
             </p>
           ) : null
         }
-        onSubmit={submit}
+        onSubmit={async (draft) => {
+          // Until its conversation is made, a page that dies leaves these words to the next one.
+          rememberSendingDraft(SENDING_FROM, draftKey);
+          try {
+            await submit(draft);
+          } finally {
+            forgetSendingDraft(SENDING_FROM);
+          }
+        }}
         pending={pending}
       />
     </div>

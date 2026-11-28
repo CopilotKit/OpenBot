@@ -71,28 +71,48 @@ export type OpenApps = { owner: boolean } | null;
  * The steps open apps hand to a member: adding an app nobody has added (switched off only because
  * nobody switched it on), and giving one that is open to Bot owners. Locked down, both are an
  * admin's. Everything else an admin keeps either way: finishing a set-up, the shared account, an app
- * an admin kept to admins.
+ * an admin kept to admins. A Bot nobody owns (`ownerless`) has no owner to give it one, so giving it
+ * one stays an admin's even where the app is open to Bot owners.
  */
-function openToMember(access: AppAccess): boolean {
+function openToMember(access: AppAccess, ownerless = false): boolean {
   if (access.state === "disabled")
     return access.unavailable === null || access.unavailable === "absent";
-  return access.state === "not_granted" && access.ownerGrants === "any";
+  return (
+    access.state === "not_granted" && access.ownerGrants === "any" && !ownerless
+  );
+}
+
+/**
+ * Whether nobody owns this Bot (the Bot's `ownerless`, the server's verdict), as with a Bot OpenBot
+ * made for everyone in the organization: only an admin can give it apps, and no sentence names its
+ * owner. Undefined until the Bot is known. A server that never says reads as owned, and so does a Bot
+ * that couldn't be read.
+ *
+ * FOUND IN DOGFOODING. A member asked the organization's shared General Assistant for Google
+ * Calendar, connected it, and was told the Bot's owner could give it. Nobody owns that Bot.
+ */
+export function useOwnerless(agentId: string): boolean | undefined {
+  const bot = useQuery(agentQueryOptions(agentId));
+  if (bot.isPending) return undefined;
+  return bot.data?.ownerless === true;
 }
 
 /**
  * Whether the sentence for this app tells the person looking that only an admin can take the step:
  * a member of the team edition, for the states an admin fixes. Where it does, the screen reads the
  * organization's admins (`useOrganizationAdmins`) and the sentence names them. With apps open, the
- * steps they hand to a member name nobody.
+ * steps they hand to a member name nobody, except on a Bot nobody owns (`ownerless`), where giving it
+ * the app is an admin's.
  */
 export function namesAnAdmin(
   access: AppAccess,
   edition: "team" | "personal",
   admin: boolean,
   open: OpenApps = null,
+  ownerless = false,
 ): boolean {
   if (admin || edition !== "team") return false;
-  if (open && openToMember(access)) return false;
+  if (open && !ownerless && openToMember(access)) return false;
   return (
     access.state === "not_granted" ||
     access.state === "disabled" ||
@@ -107,7 +127,8 @@ export function namesAnAdmin(
  * is an admin, who is offered the step itself (`AdminAction`) and so is never told to ask one.
  * `admins` are who a member is told to go to where only an admin can take the step (`withAdmins`).
  * `open` is set where apps are open (`OpenApps`): a member is then told the step that is theirs, or
- * that the Bot's owner's, and never to ask an admin for it.
+ * that the Bot's owner's, and never to ask an admin for it. `ownerless` is set for a Bot nobody owns
+ * (`useOwnerless`): there is no owner to name, so a member is told only an admin can give it apps.
  */
 export function appAccessSentence(
   access: AppAccess,
@@ -116,6 +137,7 @@ export function appAccessSentence(
   admin = false,
   admins: readonly AdminName[] = [],
   open: OpenApps = null,
+  ownerless = false,
 ): string {
   const name = access.displayName;
   const owners = access.accountHolder === "owner";
@@ -140,17 +162,15 @@ export function appAccessSentence(
   }
   /*
    * Apps open: the Bot's owner has the admin's button beside this (`AdminAction`), so is told what
-   * is missing, as an admin is. Anybody else connects it themselves, and the owner gives it.
+   * is missing, as an admin is. Anybody else can't give it, and is told so first (`notYoursToGive`).
    */
-  if (open && edition === "team" && !admin && openToMember(access)) {
+  if (open && edition === "team" && !admin && openToMember(access, ownerless)) {
     const name = access.displayName;
-    if (access.state === "not_granted")
-      return open.owner
-        ? `This Bot hasn't been given ${name} yet.`
-        : `This Bot hasn't been given ${name}. Its owner can give it.`;
-    return open.owner
-      ? `${name} isn't connected yet.`
-      : `${name} isn't connected yet. Connect it, and this Bot's owner can give it to the Bot.`;
+    if (ownerless) return notYoursToGive(access, bot, admins);
+    if (!open.owner) return notYoursToGive(access, bot);
+    return access.state === "not_granted"
+      ? `This Bot hasn't been given ${name} yet.`
+      : `${name} isn't connected yet.`;
   }
   switch (access.state) {
     case "ready":
@@ -178,8 +198,8 @@ export function appAccessSentence(
     case "disabled":
       return disabledSentence(access, edition, admins);
     case "not_granted":
-      // Open to Bot owners unless an admin closed it: then the Bot's owner can give it too.
-      return access.ownerGrants === "any"
+      // Open to Bot owners unless an admin closed it: then the Bot's owner can give it too, where it has one.
+      return access.ownerGrants === "any" && !ownerless
         ? withAdmins(
             `This Bot hasn't been given ${name}. Its owner can give it, or an admin.`,
             admins,
@@ -194,6 +214,55 @@ export function appAccessSentence(
       return access.needsConnect ? `${ask} Connect it first.` : ask;
     }
   }
+}
+
+/**
+ * Somebody else's Bot, apps open, an app it wasn't given: who can give it, and that Request access
+ * beside this asks for it.
+ *
+ * FOUND IN DOGFOODING. A member asked his organization's General Assistant, a shared Bot he could
+ * only view, to hook up his Google Calendar. The card said "Connect it, and this Bot's owner can
+ * give it to the Bot", so he connected it, which gave the Bot nothing; then it said "Its owner can
+ * give it" with nothing to press. Now the first thing it says is who can give it, and the button
+ * asks them. Connecting his own account, where it isn't, is offered beside it, and said to be his.
+ *
+ * AND NOBODY OWNS THAT BOT. Where a Bot has no owner (`ownerless`), only an admin can give it the
+ * app, so the sentence says so and names them (`admins`, as `withAdmins` does), and leaves the owner
+ * out. `admins` is given only for such a Bot.
+ */
+export function notYoursToGive(
+  access: AppAccess,
+  bot?: string,
+  admins?: readonly AdminName[],
+): string {
+  const owner = bot ? `${bot}'s` : "this Bot's";
+  const who = admins
+    ? withAdmins(
+        `Only an admin can give ${access.displayName} to ${bot ?? "this Bot"}.`,
+        admins,
+      )
+    : `Only ${owner} owner or an admin can give it ${access.displayName}.`;
+  const ask = access.request ? "" : " Request access to ask for it.";
+  return `${who}${ask}${connectsOwnToo(access) ? " You can connect your own account now too." : ""}`;
+}
+
+/**
+ * Whether, on somebody else's Bot that wasn't given an app, the person can connect their own
+ * account to it now: it runs on each person's own account and theirs isn't connected. An app
+ * nobody has added is added for everybody on the same press (`AddAndConnectAction`), unless they
+ * already asked for it: approving that request adds it, and adding it first would leave the card
+ * asking for it again.
+ */
+function connectsOwnToo(access: AppAccess): boolean {
+  if (access.account !== "personal" || access.accountHolder === "owner")
+    return false;
+  if (access.state === "disabled")
+    return (
+      access.request === null &&
+      access.source !== "address" &&
+      (access.unavailable === null || access.unavailable === "absent")
+    );
+  return access.state === "not_granted" && access.connectedAt === null;
 }
 
 /**
@@ -300,6 +369,7 @@ export function AppAccessAction({
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const open = useOpenApps(agentId) ?? null;
+  const ownerless = useOwnerless(agentId) ?? false;
   /*
    * ONE TAB FOR EVERY BUTTON BELOW. The personal edition's Connect turns the app on and then asks
    * for the sign-in; turning it on refetches this app, which swaps `PersonalConnectAction` for
@@ -327,6 +397,7 @@ export function AppAccessAction({
         actions,
         agentId,
         open,
+        ownerless,
         personal,
         role: me?.role,
         tab,
@@ -341,7 +412,8 @@ export function AppAccessAction({
  * (`mine`, the server's verdict). Null wherever apps are locked down, and undefined until that and
  * the Bot are known, so nothing is drawn as open before it is known to be and a screen can wait to
  * read who the admins are. A Bot that couldn't be read is read as not theirs: they are offered what
- * anybody is, and the server decides the press.
+ * anybody is, and the server decides the press. A Bot nobody owns (`ownerless`) is nobody's, so
+ * nobody is offered an owner's button on it.
  */
 export function useOpenApps(agentId: string): OpenApps | undefined {
   const open = useAppsOpen();
@@ -349,7 +421,7 @@ export function useOpenApps(agentId: string): OpenApps | undefined {
   if (open === undefined) return undefined;
   if (!open) return null;
   if (bot.isPending) return undefined;
-  return { owner: bot.data?.mine ?? false };
+  return { owner: (bot.data?.mine ?? false) && bot.data?.ownerless !== true };
 }
 
 /**
@@ -489,6 +561,7 @@ function appAccessButton({
   actions,
   agentId,
   open,
+  ownerless,
   personal,
   role,
   tab,
@@ -497,6 +570,7 @@ function appAccessButton({
   actions: string[] | undefined;
   agentId: string;
   open: OpenApps;
+  ownerless: boolean;
   personal: boolean;
   role: string | null | undefined;
   tab: ConnectInNewTab;
@@ -542,9 +616,11 @@ function appAccessButton({
     );
   /*
    * APPS OPEN: what an admin's press did is the Bot's owner's press too, Connect and give it in one
-   * go. Anybody else adds and connects it for themselves, and the owner gives it. Nobody asks.
+   * go. Anybody else can't give it, so they ask for it (`notYoursToGive`), and connect their own
+   * account beside that where it isn't connected yet. A Bot nobody owns has no owner to give it one,
+   * so an app it wasn't given is asked of an admin with Request access below.
    */
-  if (open && openToMember(access)) {
+  if (open && openToMember(access, ownerless)) {
     if (open.owner)
       return (
         <AdminAction
@@ -554,7 +630,16 @@ function appAccessButton({
           tab={tab}
         />
       );
-    return <AddAndConnectAction access={access} agentId={agentId} tab={tab} />;
+    const ask = (
+      <RequestAction access={access} actions={actions} agentId={agentId} />
+    );
+    if (!connectsOwnToo(access)) return ask;
+    return (
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <AddAndConnectAction access={access} agentId={agentId} tab={tab} />
+        {ask}
+      </div>
+    );
   }
   return <RequestAction access={access} actions={actions} agentId={agentId} />;
 }

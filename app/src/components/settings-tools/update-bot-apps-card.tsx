@@ -3,6 +3,7 @@ import { IconRobot } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { useDeclaredBotId } from "@/lib/copilot/active-bot";
 import type { SettingsToolCardProps } from "./registry";
 import { SettingsChangeCard, settingsChangeOf } from "./settings-change-card";
 import { AskedList } from "./update-my-settings-card";
@@ -40,6 +41,35 @@ function appOf(output: Record<string, unknown> | null) {
         logo: typeof app.logo === "string" ? app.logo : null,
       }
     : null;
+}
+
+/**
+ * The Bot a call is about, by name, before it has an answer: the one it names, by its id or by its
+ * name as the server reads it, or the Bot in this conversation when it names none.
+ *
+ * FOUND IN DOGFOODING. Talking with a shared Bot that wasn't his, a person saw "Your Bot" on every
+ * refused call, about a Bot that wasn't his and that he had none of: the call named the Bot by its
+ * name, or named none, and only an id was looked up.
+ */
+export function botNamed(
+  roster: readonly { id: string; name: string }[] | undefined,
+  botId: unknown,
+  declared: string | undefined,
+): string | undefined {
+  const plain = (name: string) =>
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/^the /, "")
+      .replace(/ bot$/, "");
+  const asked =
+    typeof botId === "string" && botId.trim() ? botId.trim() : declared;
+  if (!asked) return undefined;
+  const byId = roster?.find((bot) => bot.id === asked);
+  if (byId) return byId.name;
+  const byName = roster?.filter((bot) => plain(bot.name) === plain(asked));
+  return byName?.length === 1 ? byName[0]?.name : undefined;
 }
 
 /** An action by its ref (`gmail/GMAIL_SEND_EMAIL`), as the app's page names it: "Send email". */
@@ -90,12 +120,10 @@ export function UpdateBotAppsCard({
   reason,
 }: SettingsToolCardProps) {
   const roster = useQuery(agentListQueryOptions());
+  const declared = useDeclaredBotId();
   const answered = botOf(output);
-  const askedFor = typeof args.botId === "string" ? args.botId : undefined;
-  const named = askedFor
-    ? roster.data?.find((bot) => bot.id === askedFor)?.name
-    : undefined;
-  const title = answered?.name ?? named ?? "Your Bot";
+  const title =
+    answered?.name ?? botNamed(roster.data, args.botId, declared) ?? "This Bot";
   const app = appOf(output) ?? {
     title:
       typeof args.app === "string" && args.app.trim()

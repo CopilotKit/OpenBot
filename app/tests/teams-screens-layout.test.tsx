@@ -14,6 +14,7 @@ import { personBody } from "./accounts-api";
 import { teamBotOf } from "./bots-api";
 import { personLearningBody, reviewBody } from "./learning-api";
 import { marksPlugin } from "./marks-plugin";
+import { still } from "./page-still";
 import { SKILLS_PATH, skillBody } from "./skills-api";
 
 /**
@@ -483,7 +484,7 @@ const SCREENS: Screen[] = [
         await page.addStyleTag({
           content: await stylesheet([...new Set(classes)]),
         });
-        await page.waitForTimeout(400);
+        await still(page);
       }
       await account.click();
       await page.getByRole("menuitem", { name: "Teams" }).waitFor();
@@ -768,7 +769,7 @@ async function open(
   }
   await screen.lookAt?.(page);
   // Rows ease in and a dialog scales up: looked at once they are still.
-  await page.waitForTimeout(400);
+  await still(page);
   return page;
 }
 
@@ -951,7 +952,7 @@ async function restyle(page: Page) {
     ]),
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
-  await page.waitForTimeout(400);
+  await still(page);
 }
 
 /** Saves what the page shows now, when screenshots are asked for. */

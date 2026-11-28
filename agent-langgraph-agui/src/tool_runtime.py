@@ -25,6 +25,7 @@ from langchain_core.messages import (
 )
 from langgraph.graph import END
 
+from .thought_signatures import from_thread, sealed_events, with_sealed_calls
 from .whole_thread import WholeThreadAgent, is_server_instruction
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,10 @@ class RunTools:
     # The server retries this run itself (`openbotSendOnce`): the model is asked once per step and
     # a failure is handed back, where the model's own client would have retried it twice first.
     send_once: bool = False
+    # Gemini's thought signature for each call this run knows of, by call id: those the thread
+    # carried as a call's `encryptedValue`, and those the model gave in this run
+    # (thought_signatures.py).
+    signatures: dict = field(default_factory=dict, compare=False, repr=False)
 
 
 # The reasoning efforts the server sends, in its own spelling. Anything else is not an effort.
@@ -362,6 +367,7 @@ class ToolAwareAgent(WholeThreadAgent):
             model=model,
             effort=effort,
             send_once=props.get("openbotSendOnce") is True,
+            signatures=from_thread(input.messages or []),
         )
         # The maintained endpoint clones this subclass per request. ContextVar
         # also isolates graph tasks across concurrent requests and resets on
@@ -384,6 +390,8 @@ class ToolAwareAgent(WholeThreadAgent):
                         event = event.model_copy(
                             update={"code": "OPENBOT_MODEL_AUTH_REQUIRED"}
                         )
+                    if event.type == EventType.MESSAGES_SNAPSHOT:
+                        event = with_sealed_calls(event, context.signatures)
                     if event.type in (EventType.RUN_FINISHED, EventType.RUN_ERROR):
                         ended = True
                     yield event
@@ -442,6 +450,20 @@ class ToolAwareAgent(WholeThreadAgent):
                 yield RunErrorEvent(type=EventType.RUN_ERROR, message=RUN_FAILED)
         finally:
             _current.reset(token)
+
+    async def _handle_single_event(self, event, state):
+        async for result in super()._handle_single_event(event, state):
+            yield result
+        if event.get("event") != "on_chat_model_end":
+            return
+        # A finished step's calls have all ended above: each one Gemini signed now gets its
+        # signature, which the caller keeps on the call and sends back with it.
+        message = (event.get("data") or {}).get("output")
+        for sealed in sealed_events(message, self._resolve_public_tool_call_id):
+            current_tools().signatures[sealed.entity_id] = sealed.encrypted_value
+            dispatched = self._dispatch_event(sealed)
+            if dispatched is not None:
+                yield dispatched
 
 
 # What a system row that is not the server's own is introduced with when it reaches the model.

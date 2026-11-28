@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page, Request } from "playwright-core";
@@ -21,6 +21,8 @@ import {
 } from "@/lib/api/generated/people/people.zod";
 import { movedElsewhereNoticeId } from "@/lib/moves/moved-elsewhere";
 import { personBody } from "./accounts-api";
+import { still } from "./page-still";
+import { test } from "./renderer-crash";
 
 /**
  * After a move to OpenBot Cloud, the person can tell where their Bots went and as whom they are
@@ -604,7 +606,7 @@ async function style(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 async function shoot(page: Page, step: string, engine: string, theme: Theme) {

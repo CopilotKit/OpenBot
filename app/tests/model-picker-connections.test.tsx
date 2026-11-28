@@ -510,3 +510,91 @@ test("a pick on a stopped connection stays on it, even when that connection list
     view.getByRole("combobox", { name: new RegExp(`Model: ${OPUS.id}`) }),
   ).toBeTruthy();
 });
+
+/*
+ * A connection saved for a provider OpenBot no longer offers: still listed under the id it was saved
+ * with, which this app doesn't know, never ready, with nothing listed and the problem
+ * `provider-retired`. Nothing on it can run and nothing in the picker fixes it, so it isn't offered
+ * at all; it is removed in Settings → AI providers.
+ */
+const RETIRED_SAYS =
+  "OpenBot no longer offers this AI provider. Remove it and connect another AI.";
+const RETIRED = connection({
+  id: "retired-ai",
+  provider: "retired-ai",
+  login: "endpoint",
+  source: "gateway",
+  ready: false,
+  problem: { code: "provider-retired", detail: RETIRED_SAYS },
+  default: "",
+  models: [],
+  listed: false,
+});
+
+test("a connection for a provider OpenBot no longer offers isn't offered; a pick on it is shown stopped, by its id", async () => {
+  const catalogue = catalogueOf([CHATGPT, CLAUDE, RETIRED]);
+  const selected = {
+    model: "retired-model",
+    effort: null,
+    connection: RETIRED.id,
+  };
+  // The pick isn't moved anywhere: its run is refused, and the conversation says so.
+  expect(shownPick(selected, catalogue)).toEqual(selected);
+  const view = render(
+    <ModelPicker
+      catalogue={catalogue}
+      onChange={() => {}}
+      stopped
+      value={selected}
+    />,
+  );
+  const trigger = view.getByRole("combobox", { name: /Model: retired-model/ });
+  expect(trigger.getAttribute("aria-label")).toContain("can't run now");
+  const { user, popup } = await open(view, /Model: retired-model/);
+  // Only the connections that can be fixed or run are on the rail.
+  expect(rail(popup).map(({ name }) => name)).toEqual([
+    "ChatGPT plan",
+    "Claude plan",
+  ]);
+  expect(within(popup).queryByText(/retired-ai/)).toBeNull();
+  expect(within(popup).queryByText(RETIRED_SAYS)).toBeNull();
+  // A search looks through what can run, never the retired one.
+  await user.type(
+    within(popup).getByPlaceholderText("Search models"),
+    "retired",
+  );
+  expect(within(popup).queryAllByRole("option")).toEqual([]);
+});
+
+test("beside one connection that runs, a retired one leaves the picker as that one's own", async () => {
+  const picks: ModelPick[] = [];
+  const view = render(
+    <ModelPicker
+      catalogue={catalogueOf([CHATGPT, RETIRED])}
+      onChange={(pick) => picks.push(pick)}
+      value={{ model: SOL.id, effort: null, connection: CHATGPT.id }}
+    />,
+  );
+  const { user, popup } = await open(view, "Model: GPT-6.2 Sol");
+  expect(
+    within(popup).queryByRole("group", { name: "AI providers" }),
+  ).toBeNull();
+  expect(within(popup).queryByText(/retired-ai/)).toBeNull();
+  await user.click(within(popup).getByRole("option", { name: /GPT-6.2 Sol/ }));
+  expect(picks).toEqual([
+    { model: SOL.id, effort: null, connection: CHATGPT.id },
+  ]);
+});
+
+test("a retired connection on its own draws no picker, even where single-model picks are allowed", () => {
+  const alone = catalogueOf([{ ...RETIRED, isDefault: true }]);
+  const view = render(
+    <ModelPicker
+      allowSingle
+      catalogue={alone}
+      onChange={() => {}}
+      value={shownPick(null, alone)}
+    />,
+  );
+  expect(view.queryByRole("combobox")).toBeNull();
+});

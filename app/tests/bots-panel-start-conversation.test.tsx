@@ -1,10 +1,12 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Locator, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { personBody } from "./accounts-api";
 import { conversationPage } from "./conversations-api";
+import { still } from "./page-still";
+import { test } from "./renderer-crash";
 
 /**
  * A conversation with a Bot starts from the Bots panel, under the Bot.
@@ -398,7 +400,7 @@ describe.skipIf(!asked)("starting a conversation from the Bots panel", () => {
             const page = await open(browser, { theme, width });
             try {
               await page.mouse.move(width - 5, 600);
-              await page.waitForTimeout(400);
+              await still(page);
               await page.screenshot({
                 path: join(
                   shots,

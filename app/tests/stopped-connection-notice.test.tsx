@@ -257,6 +257,106 @@ test("a run on a retired Google sign-in says so, with Add a Gemini API key strai
   );
 });
 
+const RETIRED_SAYS =
+  "OpenBot no longer offers this AI provider. Remove it and connect another AI.";
+const RETIRED_SAYS_TO_A_MEMBER =
+  "OpenBot no longer offers your organization's AI provider. An admin has to connect another one.";
+
+/*
+ * A run refused on a connection saved for a provider OpenBot no longer offers (problem
+ * `provider-retired`, under an id this app doesn't know). Nothing reconnects it: the way on is its
+ * page in Settings → AI providers, where it is removed and another AI connected.
+ */
+function serveRetired(
+  owner: "personal" | "organization",
+  role: "admin" | "member",
+  detail: string,
+) {
+  const person = getGetPersonResponseMock();
+  const problem = { code: "provider-retired", detail };
+  server.use(
+    getGetPersonMockHandler({ ...person, person: { ...person.person, role } }),
+    http.get(`*${ORG}/model-catalogue`, () =>
+      HttpResponse.json({
+        ...catalogueWith(owner),
+        connections: [
+          connection({
+            id: "retired-ai",
+            provider: "retired-ai",
+            login:
+              owner === "organization" && role === "member" ? null : "endpoint",
+            source: "gateway",
+            owner,
+            isDefault: true,
+            ready: false,
+            problem,
+            default: "",
+            models: [],
+            listed: false,
+          }),
+          connection({ id: "openai", provider: "openai", owner }),
+        ],
+      }),
+    ),
+    http.get(`*${ORG}/people/me/model-choices/${CHANNEL}`, () =>
+      HttpResponse.json({
+        model: null,
+        effort: null,
+        connection: null,
+        stopped: { connection: "retired-ai", problem },
+      }),
+    ),
+  );
+}
+
+test("a run on a provider OpenBot no longer offers says so, with Remove it to its page and never Reconnect", async () => {
+  serveRetired("personal", "member", RETIRED_SAYS);
+  let chose = 0;
+  const view = render(
+    <StoppedConnectionNotice
+      channelId={CHANNEL}
+      onChooseModel={() => {
+        chose += 1;
+      }}
+    />,
+    { wrapper },
+  );
+  await view.findByText(RETIRED_SAYS);
+  expect(view.queryByRole("link", { name: "Reconnect" })).toBeNull();
+  const remove = view.getByRole("link", { name: "Remove it" });
+  expect(remove.getAttribute("href")).toBe(
+    "/settings/providers/retired-ai?owner=personal",
+  );
+  await userEvent
+    .setup({ document })
+    .click(view.getByRole("button", { name: "Choose another model" }));
+  expect(chose).toBe(1);
+});
+
+test("the organization's retired provider: an admin gets Remove it, a member reads that an admin has to", async () => {
+  serveRetired("organization", "admin", RETIRED_SAYS);
+  const admin = render(
+    <StoppedConnectionNotice channelId={CHANNEL} onChooseModel={() => {}} />,
+    { wrapper },
+  );
+  const remove = await admin.findByRole("link", { name: "Remove it" });
+  expect(remove.getAttribute("href")).toBe("/settings/providers/retired-ai");
+  cleanup();
+  queryClient.clear();
+  server.resetHandlers();
+
+  serveRetired("organization", "member", RETIRED_SAYS_TO_A_MEMBER);
+  const member = render(
+    <StoppedConnectionNotice channelId={CHANNEL} onChooseModel={() => {}} />,
+    { wrapper },
+  );
+  await member.findByText(RETIRED_SAYS_TO_A_MEMBER);
+  expect(member.queryByRole("link")).toBeNull();
+  expect(
+    member.getByRole("button", { name: "Choose another model" }),
+  ).toBeTruthy();
+});
+
 test("a refused run with stopped null draws nothing here", async () => {
   serve({ owner: "personal", role: "member", stopped: false });
   const view = render(

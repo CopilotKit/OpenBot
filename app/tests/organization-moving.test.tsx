@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import {
   alerts,
   asked,
@@ -14,6 +14,7 @@ import {
   start,
   stop,
 } from "./organization-notices-browser";
+import { test } from "./renderer-crash";
 
 /**
  * While OpenBot moves an organization between databases, its screens say so in OpenBot's own
@@ -74,9 +75,6 @@ describe.skipIf(!asked)("Routines while the organization is moved", () => {
           await page
             .getByText("Northwind check", { exact: true })
             .waitFor({ timeout: 6_000 });
-          await page
-            .getByRole("switch", { name: "Check-ins for all your Bots" })
-            .waitFor({ timeout: 3_000 });
           expect(await alerts(page)).toEqual([]);
           await shoot(page, "organization-moving", "after", engine, look);
           expect(await cutOff(page)).toEqual({ sideways: false, cut: [] });

@@ -394,12 +394,13 @@ describe("a member is told who the admins are", () => {
     const view = drawn(<AppAccessCard prompt={prompt()} />);
     const found = await card(view);
     await waitFor(() =>
-      expect(found.textContent).toContain(
-        "Gmail isn't connected yet. Connect it, and this Bot's owner can give it to the Bot.",
+      expect(found.textContent).toMatch(
+        /^.*Only (Expenses|this Bot)'s owner or an admin can give it Gmail\. Request access to ask for it\./,
       ),
     );
     await settleReactWork();
-    expect(found.textContent).not.toMatch(/admin|northwind/i);
+    // Who it went to is said once it is asked for, beside Requested: the sentence names nobody.
+    expect(found.textContent).not.toMatch(/northwind/i);
     expect(askedForMembers(sent)).toBe(false);
   });
 

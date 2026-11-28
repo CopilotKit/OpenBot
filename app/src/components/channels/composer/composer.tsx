@@ -5,6 +5,7 @@ import {
 } from "@copilotkit/react-core/v2";
 import {
   IconArrowUp,
+  IconLoader2,
   IconPlayerStopFilled,
   IconPlus,
 } from "@tabler/icons-react";
@@ -162,6 +163,11 @@ const MAX_HEIGHT_PX = 220;
  * Two 24px lines: the compact composer's message box opens two lines tall and grows from there.
  */
 const COMPACT_MIN_HEIGHT_PX = 48;
+/**
+ * One 24px line: a one-line box opens at this height. Given to PromptArea itself, whose own
+ * minimum (80px) is an inline style no class can beat.
+ */
+const ONE_LINE_HEIGHT_PX = 24;
 const COMPACT_MAX_HEIGHT_PX = 160;
 
 export type ComposerProps = {
@@ -332,6 +338,20 @@ export type ComposerProps = {
    * nothing, as before.
    */
   draftKey?: string;
+  /** What the empty box says. "Ask anything" unless a screen asks something else of it. */
+  placeholder?: string;
+  /** False leaves the microphone out, for a box whose words are not a message (Routines). */
+  dictates?: boolean;
+  /**
+   * True turns the send arrow into a spinner while `onSubmit` is out, for a box with no Stop to
+   * show that it is working (Routines). A conversation has Stop, so it leaves this off.
+   */
+  spinsWhileSending?: boolean;
+  /**
+   * True draws the words and the controls in one row, so the empty box is one line tall and grows
+   * as the words wrap (Routines). Only the full-size box has it; a compact box keeps its two rows.
+   */
+  oneLine?: boolean;
 };
 
 /**
@@ -410,6 +430,10 @@ const LAPSED_REASON =
   "was removed after a day without being sent. Attach it again.";
 
 export function Composer({
+  placeholder: emptyPlaceholder = "Ask anything",
+  dictates = true,
+  spinsWhileSending = false,
+  oneLine = false,
   className,
   editorClassName,
   compact = false,
@@ -1025,6 +1049,15 @@ export function Composer({
     if (!savedKey) {
       return;
     }
+    /*
+     * ON A SCREEN WHOSE SEND STARTS A CONVERSATION, THE MESSAGE IS KEPT UNTIL THE CONVERSATION HAS
+     * IT. Cleared at Send, a page closed while the conversation was still being made lost the words.
+     * So the draft stays as it was sent until the start keeps the message with its conversation and
+     * forgets this one (`useStartChannel`), or a failed send puts the words back.
+     */
+    if (holdsFilesUntilSent && !channelId && isSubmitting) {
+      return;
+    }
     const current = staged.flatMap((attachment) => {
       const rowId = stagedRowId(attachment);
       if (rowId === undefined) return [];
@@ -1073,6 +1106,7 @@ export function Composer({
     draftRestored,
     holdsFilesUntilSent,
     channelId,
+    isSubmitting,
   ]);
 
   /**
@@ -1759,7 +1793,9 @@ export function Composer({
     promptAreaRef.current?.setCursorToEnd();
   }, []);
   const placeholder =
-    dictation.live.state.phase === "listening" ? "Listening…" : "Ask anything";
+    dictation.live.state.phase === "listening"
+      ? "Listening…"
+      : emptyPlaceholder;
   const canSendRecording =
     !disabled &&
     !tooManyStaged &&
@@ -1833,7 +1869,14 @@ export function Composer({
       size="icon"
       type="submit"
     >
-      <IconArrowUp className="size-3.5" />
+      {spinsWhileSending && isSubmitting ? (
+        <IconLoader2
+          className="size-3.5 animate-spin motion-reduce:animate-none"
+          data-testid="composer-sending"
+        />
+      ) : (
+        <IconArrowUp className="size-3.5" />
+      )}
     </Button>
   );
 
@@ -2012,11 +2055,13 @@ export function Composer({
                 {modelPicker}
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <DictationButton
-                  dictation={dictation}
-                  disabled={disabled || voiceCall?.active === true}
-                  onStarted={focusForDictation}
-                />
+                {dictates ? (
+                  <DictationButton
+                    dictation={dictation}
+                    disabled={disabled || voiceCall?.active === true}
+                    onStarted={focusForDictation}
+                  />
+                ) : null}
                 {primaryAction}
               </div>
             </div>
@@ -2059,57 +2104,64 @@ export function Composer({
         >
           {filePicker}
 
-          <div className="grow pb-2">
-            <AttachmentStrip
-              files={files}
-              images={images}
-              onRemove={discardAttachment}
-            />
-            <div data-slot="composer-input">
-              <PromptArea
-                aria-label="Message"
-                autoGrow
-                className={inputClassName}
-                disabled={disabled}
-                maxHeight={MAX_HEIGHT_PX}
-                onChange={handleChange}
-                onImagePaste={canAttach ? stagePastedImage : undefined}
-                onKeyDown={handleEditorKeyDown}
-                onSubmit={submitDraft}
-                placeholder={placeholder}
-                ref={promptAreaRef}
-                submitOnEnter={!touchTyping}
-                triggers={triggers}
-                value={value}
+          {/* One row for a one-line box: the words grow to the left of the controls. Otherwise
+              this wrapper draws nothing, and the controls sit in their own row under the words. */}
+          <div className={oneLine ? "flex items-end gap-2" : "contents"}>
+            <div className={oneLine ? "min-w-0 grow py-0.5" : "grow pb-2"}>
+              <AttachmentStrip
+                files={files}
+                images={images}
+                onRemove={discardAttachment}
               />
+              <div data-slot="composer-input">
+                <PromptArea
+                  aria-label="Message"
+                  autoGrow
+                  className={inputClassName}
+                  disabled={disabled}
+                  maxHeight={MAX_HEIGHT_PX}
+                  minHeight={oneLine ? ONE_LINE_HEIGHT_PX : undefined}
+                  onChange={handleChange}
+                  onImagePaste={canAttach ? stagePastedImage : undefined}
+                  onKeyDown={handleEditorKeyDown}
+                  onSubmit={submitDraft}
+                  placeholder={placeholder}
+                  ref={promptAreaRef}
+                  submitOnEnter={!touchTyping}
+                  triggers={triggers}
+                  value={value}
+                />
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center justify-between">
-            {attachmentsEnabled ? (
-              <Button
-                aria-label="Attach a file"
-                className="size-7 rounded-full p-0"
-                data-slot="composer-attach"
-                disabled={disabled}
-                onClick={() => fileInputRef.current?.click()}
-                type="button"
-                variant="ghost"
-              >
-                <IconPlus className="size-4" />
-              </Button>
-            ) : (
-              <div />
-            )}
+            <div className="flex items-center justify-between">
+              {attachmentsEnabled ? (
+                <Button
+                  aria-label="Attach a file"
+                  className="size-7 rounded-full p-0"
+                  data-slot="composer-attach"
+                  disabled={disabled}
+                  onClick={() => fileInputRef.current?.click()}
+                  type="button"
+                  variant="ghost"
+                >
+                  <IconPlus className="size-4" />
+                </Button>
+              ) : (
+                <div />
+              )}
 
-            <div className="flex items-center gap-1">
-              {modelPicker}
-              <DictationButton
-                dictation={dictation}
-                disabled={disabled || voiceCall?.active === true}
-                onStarted={focusForDictation}
-              />
-              {primaryAction}
+              <div className="flex items-center gap-1">
+                {modelPicker}
+                {dictates ? (
+                  <DictationButton
+                    dictation={dictation}
+                    disabled={disabled || voiceCall?.active === true}
+                    onStarted={focusForDictation}
+                  />
+                ) : null}
+                {primaryAction}
+              </div>
             </div>
           </div>
         </DictationSurface>

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
@@ -6,6 +6,7 @@ import { compile } from "tailwindcss";
 import { APPS_PATH } from "./apps-api";
 import { APP_ACCESS_REQUESTS_PATH } from "./bot-grants-api";
 import { myConnectionPath } from "./connections-api";
+import { test } from "./renderer-crash";
 
 /**
  * OpenBot Cloud's Connections, in a real browser: find an app from Connections, add and connect it,

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
 import type { Browser, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
 
 /**
  * Record is on screen with the Bot's page, in a window of any width.
@@ -199,7 +200,7 @@ async function open(window: { width: number; height: number }): Promise<Page> {
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
   // The page is sized to the space it is given once that space has been measured (`useFittedWidth`).
-  await page.waitForTimeout(300);
+  await still(page);
   return page;
 }
 

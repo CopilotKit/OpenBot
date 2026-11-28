@@ -61,20 +61,22 @@ export const AI_PROVIDERS: AiProvider[] = [
     mark: "xai",
   },
   {
-    id: "unbiased",
-    name: "Unbiased AI",
-    summary: "Sign in with Unbiased AI to use Pareto, or use an API key.",
-    keySummary: "Use an Unbiased AI API key for Pareto.",
-    logins: ["oauth", "endpoint"],
-    mark: "unbiased",
-  },
-  {
     id: "trustedrouter",
     name: "TrustedRouter",
     summary: "Use a TrustedRouter API key for models from many providers.",
     keySummary: "Use a TrustedRouter API key for models from many providers.",
     logins: ["endpoint"],
     mark: "trustedrouter",
+  },
+  {
+    id: "privatemode",
+    name: "Privatemode",
+    summary:
+      "Use a Privatemode API key for models run in confidential computing.",
+    keySummary:
+      "Use a Privatemode API key for models run in confidential computing.",
+    logins: ["endpoint"],
+    mark: "privatemode",
   },
   {
     id: "openai-compatible",
@@ -108,17 +110,17 @@ export const ENDPOINT_PRESETS: Partial<
     keyUrl: "https://console.x.ai/",
     keyLink: "Get an xAI API key",
   },
-  unbiased: {
-    baseUrl: "https://api.unbiased.ai/v1",
-    model: "pareto",
-    keyUrl: "https://platform.unbiased.ai/dashboard/keys",
-    keyLink: "Get an Unbiased AI API key",
-  },
   trustedrouter: {
     baseUrl: "https://api.trustedrouter.com/v1",
     model: "anthropic/claude-sonnet-5.5",
     keyUrl: "https://trustedrouter.com/console/api-keys",
     keyLink: "Get a TrustedRouter API key",
+  },
+  privatemode: {
+    baseUrl: "https://proxyless-api.privatemode.ai/v1",
+    model: "glm-latest",
+    keyUrl: "https://portal.privatemode.ai",
+    keyLink: "Get a Privatemode API key",
   },
 };
 
@@ -138,7 +140,7 @@ export function loginsHere(
 /**
  * The ways in for a person's own AI: the provider's sign-in first where the server runs it itself
  * (`signIns`), then the provider's key or address. The sign-in is the one the setup window offers
- * for that provider: a ChatGPT or Claude plan (`plan`), or an xAI or Unbiased AI sign-in
+ * for that provider: a ChatGPT or Claude plan (`plan`), or an xAI sign-in
  * (`oauth`). A provider with no sign-in here (Google Gemini) is offered its key alone, whatever
  * an older server lists. The server keeps it for the person and renews it, so it is never one OpenBot Desktop
  * holds, even inside Desktop: the server runs the person's Bots.
@@ -155,8 +157,7 @@ export function personalLogins(
 
 /**
  * The providers whose sign-in an admin on OpenBot Cloud may share as the organization's AI: a
- * ChatGPT or Claude plan, or an xAI sign-in (replaceAiConnection with `plan` or `oauth`). Unbiased
- * AI's sign-in ends in a key kept for the person alone, so it is never shared.
+ * ChatGPT or Claude plan, or an xAI sign-in (replaceAiConnection with `plan` or `oauth`).
  */
 const SHAREABLE: readonly AiConnectionProvider[] = [
   "openai",
@@ -179,6 +180,26 @@ export function signInRetired(
   connection: { problem?: { code: string } | null } | null | undefined,
 ): boolean {
   return connection?.problem?.code === "sign-in-retired";
+}
+
+/**
+ * A connection saved for a provider OpenBot no longer offers: still listed under the id it was saved
+ * with (one this app may not know, shown by its id), never ready, with nothing listed and the
+ * problem `provider-retired`. Nothing on it fixes it, so no picker offers it and no page offers to
+ * sign in again or replace its key. It is removed on its page, and another AI connected.
+ */
+export const PROVIDER_RETIRED = {
+  title: "No longer offered",
+  /** Where a conversation leads: the connection's page, where it is removed. */
+  remove: "Remove it",
+  connect: "Connect another AI",
+} as const;
+
+/** Whether a connection's provider is one OpenBot no longer offers (PROVIDER_RETIRED). */
+export function providerRetired(
+  connection: { problem?: { code: string } | null } | null | undefined,
+): boolean {
+  return connection?.problem?.code === "provider-retired";
 }
 
 /**

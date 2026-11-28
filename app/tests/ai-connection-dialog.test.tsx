@@ -10,6 +10,7 @@ import {
   ReplaceAiConnectionBody,
 } from "@/lib/api/generated/models/models.zod";
 import { personBody } from "./accounts-api";
+import { still } from "./page-still";
 
 /**
  * Settings → General → AI model changes the AI connection in the app, with OpenBot running.
@@ -340,7 +341,7 @@ async function style(page: Page) {
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
   // A dialog scales in: looked at once it is still.
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 async function shoot(
@@ -440,8 +441,8 @@ describe.skipIf(!asked)("changing the AI connection in Settings", () => {
             "Anthropic",
             "Google Gemini",
             "xAI",
-            "Unbiased AI",
             "TrustedRouter",
+            "Privatemode",
             "Any OpenAI-compatible endpoint",
           ]);
           expect(await measured(page)).toEqual(FINE);

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
@@ -8,6 +8,7 @@ import type {
   WebSocketRoute,
 } from "playwright-core";
 import { compile } from "tailwindcss";
+import { test } from "./renderer-crash";
 
 /**
  * A conversation's row in the sidebar says Working for as long as its Bot works, subtasks and all,

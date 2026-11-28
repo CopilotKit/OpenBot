@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import {
   alerts,
   asked,
@@ -14,6 +14,7 @@ import {
   style,
   UNAVAILABLE,
 } from "./organization-notices-browser";
+import { test } from "./renderer-crash";
 
 /**
  * While an organization's database can't be reached, every page that draws a failed read in the

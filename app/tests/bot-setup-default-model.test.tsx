@@ -352,6 +352,89 @@ test("saving from the second group sends its source; with one connection none is
   expect(patches[0]?.defaultModel).toEqual({ model: "gpt-5.5", effort: null });
 });
 
+/*
+ * A connection saved for a provider OpenBot no longer offers: listed under an id this app doesn't
+ * know, never ready, listing nothing, with the problem `provider-retired`. A Bot default on it isn't
+ * offered, the picker doesn't offer it, and the dialog never saves a model it can't run.
+ */
+const RETIRED: CatalogueConnection = {
+  id: "retired-ai",
+  owner: "personal",
+  provider: "retired-ai",
+  login: "endpoint",
+  source: "gateway",
+  isDefault: false,
+  ready: false,
+  problem: {
+    code: "provider-retired",
+    detail:
+      "OpenBot no longer offers this AI provider. Remove it and connect another AI.",
+  },
+  default: "",
+  models: [],
+  listed: false,
+};
+
+async function openPicker(view: ReturnType<typeof draw>) {
+  const row = await (await modelSection(view)).findByRole("button", {
+    name: /Default model/,
+  });
+  fireEvent.click(row);
+  const dialog = within(await view.findByRole("dialog"));
+  fireEvent.click(dialog.getByRole("radio", { name: /^Choose a model/ }));
+  return dialog;
+}
+
+test("a Bot default on a retired provider isn't offered, and the picker leaves that provider out", async () => {
+  served = { ...catalogue, connections: [CHATGPT, CLAUDE, RETIRED] };
+  const view = draw({
+    ...BOT,
+    defaultModel: { model: "retired-model", effort: null, source: "gateway" },
+  });
+  expect(
+    await (await modelSection(view)).findByText(
+      "The chosen model isn't available. New conversations use OpenBot's default.",
+    ),
+  ).toBeTruthy();
+  const dialog = await openPicker(view);
+  const user = userEvent.setup({ document });
+  await user.click(await dialog.findByRole("combobox", { name: /Model:/ }));
+  const popups = await view.findAllByRole("dialog");
+  const popup = within(popups[popups.length - 1] as HTMLElement);
+  const rail = within(popup.getByRole("group", { name: "AI providers" }))
+    .getAllByRole("button")
+    .map((button) => button.getAttribute("aria-label"));
+  expect(rail).toEqual(["OpenAI API key", "Claude plan"]);
+});
+
+test("with a retired provider as the default connection, Save waits for a model that runs", async () => {
+  served = {
+    ...catalogue,
+    default: "",
+    models: [],
+    choosable: false,
+    connections: [{ ...RETIRED, isDefault: true }, CLAUDE],
+  };
+  const view = draw(BOT);
+  const dialog = await openPicker(view);
+  // Nothing that runs is picked yet, so nothing is named and nothing can be saved.
+  const field = await dialog.findByRole("combobox", { name: /Choose a model/ });
+  const save = dialog.getByRole("button", { name: "Save" });
+  expect((save as HTMLButtonElement).disabled).toBe(true);
+  const user = userEvent.setup({ document });
+  await user.click(field);
+  const popups = await view.findAllByRole("dialog");
+  const popup = within(popups[popups.length - 1] as HTMLElement);
+  await user.click(popup.getByRole("option", { name: /Claude Sonnet 5.5/ }));
+  await act(async () => {
+    fireEvent.click(dialog.getByRole("button", { name: "Save" }));
+  });
+  await settleReactWork();
+  expect(patches.map((patch) => patch.defaultModel)).toEqual([
+    { model: SONNET.id, effort: null, source: "claude" },
+  ]);
+});
+
 test("someone who can't manage the Bot reads its default model and can't change it", async () => {
   const view = draw({
     ...BOT,

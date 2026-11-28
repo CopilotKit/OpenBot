@@ -6,11 +6,13 @@ import {
 } from "@tanstack/react-query";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { uploadHeldFiles } from "@/components/channels/composer/attachments";
+import { forgetSavedDraft } from "@/components/channels/composer/saved-draft";
 import { stashFirstMessage } from "@/components/channels/transcript-messages";
 import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import type { AgentProfile } from "@/lib/agents/queries";
 import {
   createGroupMutationOptions,
+  groupQueryOptions,
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
 import { saveConversationModel } from "@/lib/models/mutations";
@@ -168,7 +170,13 @@ export async function startWithModel(input: {
  * stays stashed until they open it, which is when it is sent. Going back to the placeholder opens
  * it too (`settlePendingStart`).
  */
-export function useStartChannel() {
+export function useStartChannel(
+  /**
+   * The draft of the box the first message is sent from (the composer's `draftKey`). That box keeps
+   * the message while the conversation is being made, and lets it go once the conversation has it.
+   */
+  sentFrom?: string,
+) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const router = useRouter();
@@ -209,7 +217,10 @@ export function useStartChannel() {
         await discardFailedStart.mutateAsync(channelId);
       },
       open: async (channelId) => {
+        // Kept with its conversation from here until the server has it (`kept-first-message.ts`),
+        // so the box it was typed in lets it go.
         stashFirstMessage(channelId, text, attachments);
+        if (sentFrom) forgetSavedDraft(sentFrom);
         if (pendingId !== undefined) {
           // Remembered whether or not they are looking, so coming back to the placeholder opens it.
           settlePendingStart(pendingId, channelId);
@@ -249,12 +260,21 @@ export function useStartChannel() {
       discard: async (channelId) => {
         await deleteChannel.mutateAsync(channelId);
       },
-      open: (channelId) =>
-        navigate({
+      open: async (channelId) => {
+        // The server has the group's first message: the box it was typed in lets it go.
+        if (sentFrom) forgetSavedDraft(sentFrom);
+        /*
+         * Read before it opens, so the group opens on its transcript with the message in it and
+         * "Thinking" under it, as the new conversation showed them until now, and not on the
+         * shapes of a transcript still loading. A read that fails leaves the group to load it.
+         */
+        await queryClient.prefetchQuery(groupQueryOptions(channelId));
+        return navigate({
           params: { channelId },
           replace: true,
           to: "/group/$channelId",
-        }),
+        });
+      },
     });
 
   return {

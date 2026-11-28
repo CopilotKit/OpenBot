@@ -27,6 +27,10 @@ import {
 import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
+import {
+  forgetFirstMessage,
+  putBackFirstMessage,
+} from "@/components/channels/composer/kept-first-message";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { StillWorkingError } from "@/components/channels/composer/queue";
 import { ConversationIntro } from "@/components/channels/conversation-intro";
@@ -65,7 +69,7 @@ import {
   refusedTurnsQueryOptions,
 } from "@/lib/channels/queries";
 import { withRefusedTurns } from "@/lib/channels/refused-turns";
-import { runReply } from "@/lib/channels/run-reply";
+import { rosterLineMatches, runReply } from "@/lib/channels/run-reply";
 import { onBotSaidOffTheList } from "@/lib/channels/said-off-the-list";
 import { turnDidWork } from "@/lib/channels/turn-did-work";
 import {
@@ -500,6 +504,25 @@ function moreCalls(live: ToolCalls, stored: ToolCalls): ToolCalls {
   return stored.length > calls.length || longer ? stored : undefined;
 }
 
+/**
+ * Whether merging `stored` would put its copy of a Bot's words in place of the screen's: a reply the
+ * store holds otherwise than the screen, and not as the start of it (`mergeStoredMessages`).
+ */
+function rewritesReply(local: Message[], stored: Message[]): boolean {
+  const storedById = new Map(stored.map((message) => [message.id, message]));
+  return local.some((message) => {
+    const copy = storedById.get(message.id);
+    return (
+      message.role === "assistant" &&
+      copy?.role === "assistant" &&
+      typeof message.content === "string" &&
+      typeof copy.content === "string" &&
+      copy.content !== message.content &&
+      !message.content.startsWith(copy.content)
+    );
+  });
+}
+
 /** How long a read-back waits before each read of the stored thread. */
 const READ_BACK_DELAYS_MS = [250, 750, 1500, 3000];
 
@@ -699,6 +722,7 @@ export function ChannelChat({
    */
   const [first] = useState(() => {
     const pending = takeFirstMessage(channel.id);
+    // A first message an earlier page kept is decided on once the thread has been read (the join).
     if (!pending) return null;
     const attachments = [...pending.attachments];
     // Drawn with its files, as `deliver` will send it, so they do not appear only once it runs.
@@ -713,6 +737,17 @@ export function ChannelChat({
     return { seed, text: pending.text, attachments };
   });
   const seed = first?.seed ?? null;
+
+  /*
+   * A CONVERSATION THIS PAGE HAS JUST MADE SENDS ITS FIRST MESSAGE AT ONCE. Its thread is new, so
+   * there is nothing to join, no history to read and no voice chat to bring in, and waiting for them
+   * held the message in this page for a second or two after it showed as sent. A phone locked or a
+   * tab closed in that time lost it: the conversation was made, and opened later empty, with no run
+   * in its thread. So the first message leaves before any of that (`deliver`), and the join is not
+   * made at all (the join effect): the run streams the turn here itself.
+   */
+  const fresh = first !== null;
+  const firstOfFresh = useRef(fresh);
 
   /** Cleared by the send-on-mount effect without restarting it. */
   const seedRef = useRef(first);
@@ -790,6 +825,18 @@ export function ChannelChat({
    */
   const [replaying, setReplaying] = useState(false);
   /**
+   * The stored history, read alongside the join and drawn while the join replays the thread.
+   *
+   * A slow replay used to leave a conversation that already had something to show blank until the
+   * replay was over. It is kept here rather than on the agent because the join empties the agent
+   * when it starts, and anything put on the agent before the replay ends has its replayed text
+   * appended to it a second time. It is let go when the join turns out to carry the Bot's answer,
+   * and otherwise only once the history that replaces it is on the agent: let go when the join
+   * ended, it left the half-replayed agent on screen until that read landed, and the history then
+   * came back as if it had just arrived, every reply typed out again.
+   */
+  const [earlyHistory, setEarlyHistory] = useState<Message[] | null>(null);
+  /**
    * How many stored turns this app could not read.
    *
    * Held rather than derived, because the transcript is the running agent's once history is handed
@@ -842,6 +889,11 @@ export function ChannelChat({
    * so a replay is never laid over messages already on screen.
    */
   const [joins, setJoins] = useState(0);
+  /**
+   * How many times the message box has been opened again: once for a first message put back after
+   * it first opened, which it reads from its draft only as it opens.
+   */
+  const [composerOpenings, setComposerOpenings] = useState(0);
   const unanswered = useRef(false);
   const connection = useConnectionLost();
   useReconnected(() => {
@@ -851,15 +903,52 @@ export function ChannelChat({
     else pullHistoryRef.current?.();
   });
 
-  // Join the gateway socket, restore durable history, then release the first-message gate.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `joins` is the join asked for again when OpenBot answers again.
+  // Join the gateway socket, restore durable history, then release the first-message gate. `joins`
+  // is the join asked for again when OpenBot answers again.
   useEffect(() => {
     if (!isReady) return;
+    // Just made here: nothing to join or read, and the first message is not held for it (`fresh`).
+    // Asked again when OpenBot answers again (`joins`), it is joined as any conversation is.
+    if (fresh && joins === 0) {
+      openJoined.current();
+      openJoinGate.current();
+      return;
+    }
     let current = true;
     const version = ++historyReadVersion.current;
     // Before the connect: it is handed the subscribers the agent has when it starts.
     const lastRun = followLastRun(agent);
     setReplaying(true);
+    /*
+     * THE STORED HISTORY IS ASKED FOR WITH THE JOIN, NOT AFTER IT, so a conversation shows what it
+     * holds while a slow replay is still on its way. Only drawn from `earlyHistory`, never set on the
+     * agent: see there. Not drawn once the join has found the Bot answering, whose replay is then the
+     * screen's, nor once the join is over, nor when a later read has taken over the notice.
+     */
+    let joinOver = false;
+    let answering = false;
+    // This run's stored copy is on screen, so the cleanup has it to take down.
+    let earlyUp = false;
+    const early = readThreadMessages(channel.threadId, runtimeAgentId);
+    void early.then((stored) => {
+      if (
+        current &&
+        !joinOver &&
+        !answering &&
+        version === historyReadVersion.current &&
+        stored.availability === "ready"
+      ) {
+        // A read that worked owns the notice, or an earlier failure is said above the history.
+        setUnreadable(stored.unreadable);
+        setHistoryAvailability("ready");
+        setHistoryReadFailed(false);
+        // An empty store has nothing to show early: the conversation goes on loading as before.
+        if (stored.messages.length === 0) return;
+        earlyUp = true;
+        setEarlyHistory(withCurrentA2uiVersions(stored.messages));
+        setRestoring(false);
+      }
+    });
 
     void (async () => {
       let joined: "connected" | "deadline" | "gave up" = "deadline";
@@ -897,9 +986,12 @@ export function ChannelChat({
               answerMs: JOIN_LIVENESS_MS,
             })) !== "unreachable",
           onAnswering: () => {
+            answering = true;
             if (current) {
+              earlyUp = false;
               setRestoring(false);
               setReplaying(false);
+              setEarlyHistory(null);
             }
           },
           /*
@@ -943,6 +1035,8 @@ export function ChannelChat({
         stopKept();
         keptRunId = lastRun.runId();
         lastRun.stop();
+        joinOver = true;
+        // The stored copy stays up until the history below is on the agent: see `earlyHistory`.
         if (current) setReplaying(false);
         openJoined.current();
       }
@@ -991,10 +1085,41 @@ export function ChannelChat({
        */
       let askAgain = false;
       try {
-        const stored = await readThreadMessages(
-          channel.threadId,
-          runtimeAgentId,
-        );
+        /*
+         * The read taken with the join, when it worked and the join was not kept for a turn still
+         * going, which has added to the store since. Not `keptRunId`, which names the last run the
+         * replay heard start, finished or not, and so is set for nearly every thread.
+         */
+        const held = answering ? null : await early;
+        /*
+         * IT IS OLDER THAN THE REPLAY, so it stands in for a read after it only where merging it
+         * changes no reply the replay drew. A turn still going when it was taken is in it only in
+         * part, and where the replay drew that reply in pieces (the gateway drops some), the
+         * store's copy wins the merge: the reply was left cut short at the early read's part.
+         * Such a read is the screen's only when the store can't be read again.
+         */
+        const usable =
+          held?.availability === "ready" &&
+          !(
+            joined === "connected" &&
+            rewritesReply(agent.messages, held.messages)
+          )
+            ? held
+            : null;
+        /*
+         * A replay that finished leaves nothing the usable read lacks. One cut short at the
+         * deadline is followed by a read of the store, as it was before there was an early read,
+         * since a turn that ended just before opening can be missing from the early one.
+         */
+        const fresh =
+          joined === "connected" && usable !== null
+            ? usable
+            : await readThreadMessages(channel.threadId, runtimeAgentId);
+        // A read that worked counts: one failing after it does not say the history is lost.
+        const stored =
+          fresh.availability === "unavailable" && usable !== null
+            ? usable
+            : fresh;
         const isCurrent = current && version === historyReadVersion.current;
         if (isCurrent) {
           // The gateway snapshot can lag the store. Keep its valid local rows even when the
@@ -1022,11 +1147,28 @@ export function ChannelChat({
           setUnreadable(stored.unreadable);
           setHistoryAvailability("ready");
           setHistoryReadFailed(false);
+          /*
+           * A FIRST MESSAGE AN EARLIER PAGE KEPT GOES BACK IN THE BOX ONLY IF THE SERVER NEVER GOT IT.
+           * Its page can die after the server has started the run and before the run's start reaches
+           * it, and the words then came back under their own answer, asking to be sent twice. So it is
+           * decided now the thread has been read: a message of the person's in it, stored or
+           * replayed by the join, is the server having it (a run it took carries the message), and
+           * the kept copy is let go. See `kept-first-message.ts`.
+           */
+          const delivered =
+            stored.messages.some((message) => message.role === "user") ||
+            agent.messages.some((message) => message.role === "user");
+          if (putBackFirstMessage(channel.id, delivered))
+            setComposerOpenings((count) => count + 1);
         }
       } finally {
         // Cleared on failure too: placeholders over an empty transcript promise messages that are
-        // never coming.
-        if (current) setRestoring(false);
+        // never coming. The stored copy goes in the same commit as the history takes its place.
+        if (current) {
+          earlyUp = false;
+          setRestoring(false);
+          setEarlyHistory(null);
+        }
         // Release even on join/restore failure; the gate orders messages, not withholds them.
         openJoinGate.current();
       }
@@ -1080,6 +1222,16 @@ export function ChannelChat({
 
     return () => {
       current = false;
+      /*
+       * A join given up part way (the agent changed, the runtime stopped being ready) takes its
+       * stored copy down with it, or the screen kept it, read-only, until a join that might not
+       * come. What was loading goes on loading, as it did before the stored copy was drawn.
+       */
+      setReplaying(false);
+      if (earlyUp) {
+        setEarlyHistory(null);
+        setRestoring(true);
+      }
     };
   }, [
     copilotkit,
@@ -1089,6 +1241,7 @@ export function ChannelChat({
     channel.threadId,
     runtimeAgentId,
     joins,
+    fresh,
   ]);
 
   /*
@@ -1239,12 +1392,30 @@ export function ChannelChat({
       pull();
     });
     pullHistoryRef.current = pull;
+    /*
+     * THE BOT'S LINE THE ROSTER HAD ON OPENING IS READ FOR ONLY WHEN OPENING DIDN'T BRING IT. Opening
+     * reads the store with the join, so reading it again for that line read the same history three
+     * more times over the retries, which go on while a read brings nothing new, as it nearly never
+     * does. The conversation list keeps the reply as plain text on one line, cut at 200 characters,
+     * so the two are compared by their letters and digits. A transcript whose newest Bot line is the
+     * list's already holds that turn. One that isn't is a turn that ended just before opening, which
+     * the store can be a beat behind on, or a line this check can't match (a turn that only drew, or
+     * a reply whose list line drops other text, such as link addresses and list numbers): read for
+     * as before, which is safe.
+     */
+    const openedWith = (activity: ChannelActivitySignature) =>
+      rosterLineMatches(
+        runReply(agentRef.current.messages, new Set(), authoredComponents())
+          ?.text ?? "",
+        activity.text,
+      );
     void (async () => {
       await joinGatePromise;
       if (
         !cancelled &&
         initialActivity &&
-        !sameActivity(selfReportedBotActivity.current, initialActivity)
+        !sameActivity(selfReportedBotActivity.current, initialActivity) &&
+        !openedWith(initialActivity)
       ) {
         pull();
       }
@@ -1642,23 +1813,28 @@ export function ChannelChat({
     // used throughout, so the message, the repair and the run cannot land on two different agents.
     // Give initial voice history time to restore, while keeping ordinary chat usable on failure.
     setVoiceContextNotice(null);
+    // The first message of a conversation just made here: no call has been had in it (`fresh`).
+    const first = firstOfFresh.current;
+    firstOfFresh.current = false;
     let voiceHistoryTimer: ReturnType<typeof setTimeout> | undefined;
-    const priorCalls = await Promise.race([
-      loadVoiceArchive(channel.id),
-      new Promise<never>((_resolve, reject) => {
-        voiceHistoryTimer = setTimeout(
-          () => reject(new Error("Voice history timed out")),
-          2000,
-        );
-      }),
-    ])
-      .catch(() => {
-        setVoiceContextNotice(
-          "Couldn’t bring in what was said on the call. You may need to repeat it.",
-        );
-        return cachedVoiceArchive(channel.id);
-      })
-      .finally(() => clearTimeout(voiceHistoryTimer));
+    const priorCalls = first
+      ? []
+      : await Promise.race([
+          loadVoiceArchive(channel.id),
+          new Promise<never>((_resolve, reject) => {
+            voiceHistoryTimer = setTimeout(
+              () => reject(new Error("Voice history timed out")),
+              2000,
+            );
+          }),
+        ])
+          .catch(() => {
+            setVoiceContextNotice(
+              "Couldn’t bring in what was said on the call. You may need to repeat it.",
+            );
+            return cachedVoiceArchive(channel.id);
+          })
+          .finally(() => clearTimeout(voiceHistoryTimer));
     const target = agentRef.current;
     /*
      * A call this screen holds no answer for is answered from the stored thread first, so the repair
@@ -1747,6 +1923,8 @@ export function ChannelChat({
       },
       // Live on the thread now: if this chat has closed, the one open for this conversation joins the run.
       onRunStartedEvent: () => {
+        // The server has the conversation's first message: no page needs to put it back now.
+        if (first) forgetFirstMessage(channel.id);
         if (!onScreen.current) runStartedAway(channel.id);
       },
     });
@@ -2485,9 +2663,21 @@ export function ChannelChat({
    * in the thread, so without the record a reload lost the message and the notice both.
    */
   const storedRefusals = useQuery(refusedTurnsQueryOptions(channel.id)).data;
+  /*
+   * THE STORED COPY IS FOR READING ONLY. While it is drawn the join is still replaying onto an agent
+   * it emptied, or the history that replaces it is still being read, and anything that changed the
+   * agent then would be changed again: a message set on it has its replayed text appended twice. So
+   * until the history is on the agent, or a turn still going takes the screen (`onAnswering`), what
+   * the transcript draws is drawn as it is outside a conversation, with nothing in it that adds a
+   * turn; the question waiting on the person can't be answered yet; and a hand-back is not checked
+   * against a half-replayed thread. The composer waits on its own: the replay holds the agent
+   * running, so what is typed meanwhile is queued, and a turn waits for the join gate.
+   */
+  const earlyShown = earlyHistory !== null;
   // Every render, as the transcript's messages always were: the agent's list changes in place.
   const refused = withRefusedTurns(
-    transcriptMessages(agent.messages, seed),
+    // The stored history while the join replays it, which empties the agent: see `earlyHistory`.
+    transcriptMessages(earlyShown ? earlyHistory : agent.messages, seed),
     storedRefusals ?? [],
   );
   for (const [messageId, sentence] of refusals)
@@ -2500,7 +2690,7 @@ export function ChannelChat({
       agentId={localAgentId}
       threadId={channel.threadId}
     >
-      <ConversationProvider ask={askFromComponent}>
+      <ConversationProvider ask={earlyShown ? null : askFromComponent}>
         <div className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col">
           <VoiceCallWidget
             call={call}
@@ -2537,6 +2727,7 @@ export function ChannelChat({
             channelId={channel.id}
             // An unsent reply stays with this conversation when somebody looks at another one.
             draftKey={`conversation:${channel.id}`}
+            composerOpening={composerOpenings}
             attachmentLimits={attachmentLimits}
             starterSuggestions={
               channel.agentIds.length === 1 ? (
@@ -2569,10 +2760,12 @@ export function ChannelChat({
             /*
              * THE TURN, not the run. `say` waits for the runtime agent and the join before a run starts,
              * and `agent.isRunning` alone leaves that gap unmarked — which is the one moment the
-             * "Thinking" line exists for. Same value as `pending`, deliberately.
+             * "Thinking" line exists for. Same value as `pending`, except while the join replays
+             * history (`replaying`): the agent reports itself running then with nothing running, and
+             * the stored copy drawn meanwhile is a conversation at rest, not a turn going.
              */
             busy={
-              agent.isRunning ||
+              (agent.isRunning && !replaying) ||
               turnsInFlight > 0 ||
               turnsAway > 0 ||
               carryingOn ||
@@ -2602,6 +2795,7 @@ export function ChannelChat({
                 <QuestionNotice
                   avatarSeed={botSeed}
                   botName={botName}
+                  disabled={earlyShown}
                   onAnswered={answerTo}
                   question={question}
                 />
@@ -2620,7 +2814,7 @@ export function ChannelChat({
                 <HandoffResumeNotice
                   botId={runtimeAgentId}
                   agent={agent}
-                  ready={isReady && !restoring && channel.active}
+                  ready={isReady && !restoring && !earlyShown && channel.active}
                   run={async () => {
                     setRunsInFlight((count) => count + 1);
                     try {
@@ -2727,6 +2921,14 @@ export function ChannelChat({
             queueWhileBusy
             restoring={historyLoading}
             /*
+             * Read-only, because one place that stops every renderer from acting on the stored copy
+             * is safer than guarding each one: an A2UI surface's button sends its press straight to
+             * `runAgent`, past the guards above, and would detach the replay and start a run the join
+             * has not confirmed. Only the stored copy's rows: what is queued meanwhile can still be
+             * taken back. This lasts at most until the join ends or a live turn takes the screen.
+             */
+            readOnly={earlyShown}
+            /*
              * The run, not the turn. Stop reaches a run through the core's abort controller, and that
              * controller does not exist until `say` has finished waiting for the runtime agent — so
              * this is the one place the narrower fact is the honest one to draw a button from.
@@ -2793,7 +2995,8 @@ export function ChannelChat({
              * finds them mid-turn waits and is tried again.
              */
             working={
-              agent.isRunning || turnsInFlight > 0 ? null : (
+              // Not hidden by a replay, which runs nothing: see `busy`.
+              (agent.isRunning && !replaying) || turnsInFlight > 0 ? null : (
                 <>
                   {readingAnswer ? (
                     <ProgressRow

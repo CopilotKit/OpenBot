@@ -1,8 +1,9 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Locator, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
 import {
   answer,
   ORGANIZATION,
@@ -13,6 +14,7 @@ import {
   SARITA,
   SUPPORT_NORDICS,
 } from "./people-lists-api";
+import { test } from "./renderer-crash";
 
 /**
  * Every list of people pages and searches the way Admin's People does, and a person is only ever
@@ -655,7 +657,7 @@ describe.skipIf(!asked)("each screen at every width and theme", () => {
             await look.act?.(page);
             // What opened after the first styling (a dialog, a list) is styled too.
             await restyle(page);
-            await page.waitForTimeout(400);
+            await still(page);
             const sideways = await page.evaluate(
               () =>
                 document.documentElement.scrollWidth > innerWidth ||

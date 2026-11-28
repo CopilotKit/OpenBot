@@ -25,6 +25,7 @@ import {
 } from "@/lib/api/generated/models/models.zod";
 import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
 import { personBody } from "./accounts-api";
+import { still } from "./page-still";
 
 /**
  * Connect your AI, on an OpenBot that provides no AI of its own (OpenBot Cloud).
@@ -39,8 +40,7 @@ import { personBody } from "./accounts-api";
  * - Somebody who finished onboarding before the step existed is sent to it as their only step, and
  *   its button takes them in without finishing onboarding again.
  * - Every provider the server signs in to offers its sign-in first and a key as the alternative,
- *   as the setup window does. xAI and Unbiased AI sign in on their own pages and are read
- *   until approved; Google Gemini takes an API key only, whatever the server lists; a Claude
+ *   as the setup window does. xAI sign-in is read until approved; Google Gemini takes an API key only, whatever the server lists; a Claude
  *   plan finishes with the code Claude's page shows. A ChatGPT plan signs in with a code first,
  *   read until approved like xAI's, with the ChatGPT setting it needs and its link said before it starts, and again when ChatGPT gives no code. The other way, below
  *   it, finishes with the address ChatGPT sends the browser to.
@@ -154,8 +154,8 @@ type SignIn = {
 
 /**
  * A sign-in as the server starts it for each provider: the spec's own examples for ChatGPT (in the
- * browser, or with a code when `method` is device), Claude and Unbiased AI, and for xAI the shape
- * of ChatGPT's code sign-in with what its page gives. It finishes by itself (poll): xAI's device
+ * browser, or with a code when `method` is device) and Claude. xAI follows the shape of ChatGPT's
+ * code sign-in and finishes by itself (poll): xAI's device
  * page asks for the code shown here.
  */
 function signInStarted(
@@ -272,7 +272,6 @@ const SIGN_IN_NAMES: Record<string, string> = {
   google: "Google",
   openai: "ChatGPT",
   xai: "xAI",
-  unbiased: "Unbiased AI",
 };
 
 /** Where a sign-in stands, in the spec's shape, with the server's sentence when it is over. */
@@ -991,7 +990,7 @@ async function style(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(250);
+  await still(page);
 }
 
 async function shoot(
@@ -1217,13 +1216,12 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           await chooser.getByRole("button", { name: /^OpenAI/ }).count(),
         ).toBe(1);
 
-        // A second, by xAI's sign-in, the server's as before: back to the list again.
+        // A second, by xAI's sign-in, the server's as before: connected as soon as it is signed
+        // in, with nothing else pressed, and back to the list again.
         await chooser.getByRole("button", { name: /^xAI/ }).click();
         await chooser
           .getByRole("button", { name: "Sign in with xAI", exact: true })
           .click();
-        await chooser.getByText("Signed in to xAI.").waitFor();
-        await chooser.getByRole("button", { name: "Connect" }).click();
         const xai = chooser.getByRole("button", { name: /^xAI/ });
         await xai.getByRole("img", { name: "Connected" }).waitFor();
         expect(await connected.count()).toBe(2);
@@ -1497,7 +1495,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
     }, 60_000);
 
   for (const engine of engines)
-    test(`inside OpenBot Desktop: the plan and Unbiased AI sign in through the server, in ${engine}`, async () => {
+    test(`inside OpenBot Desktop: the ChatGPT plan signs in through the server, in ${engine}`, async () => {
       const server = new FakeServer("none", true);
       const page = await open(
         "/onboarding?step=ai",
@@ -1518,46 +1516,17 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
           .click();
         await chooser.getByText("VU3W-87566").waitFor();
-        await chooser.getByText("Signed in to OpenAI.").waitFor();
-        expect(server.signIns).toEqual([
-          { provider: "openai", method: "device" },
-        ]);
         expect(
           await chooser.getByLabel("Address from your browser").count(),
         ).toBe(0);
-        expect(server.finishes).toEqual([]);
-        await chooser.getByRole("button", { name: "Back" }).click();
-        server.signIns = [];
-
-        await chooser.getByRole("button", { name: /^Unbiased AI/ }).click();
-        // Sign-in first, a key as the alternative.
-        expect(await chooser.getByRole("tab").allTextContents()).toEqual([
-          "Sign in",
-          "Use an API key",
-        ]);
-        await chooser
-          .getByRole("button", {
-            name: "Sign in with Unbiased AI",
-            exact: true,
-          })
-          .click();
-        await chooser.getByText("BCDF-GHJK").waitFor();
-        await chooser
-          .getByRole("link", { name: "Open the sign-in page" })
-          .waitFor();
-        await shoot(page, "sign-in-waiting", engine, "light", WIDE);
-        await chooser.getByText("Signed in to Unbiased AI.").waitFor();
-        expect(server.signIns).toEqual([{ provider: "unbiased" }]);
-        await chooser.getByRole("button", { name: "Connect" }).click();
+        // Signed in, and connected at once, with nothing else pressed.
         await chooser.getByRole("status").waitFor();
+        expect(server.signIns).toEqual([
+          { provider: "openai", method: "device" },
+        ]);
+        expect(server.finishes).toEqual([]);
         expect(server.replaces).toEqual([
-          {
-            provider: "unbiased",
-            login: "endpoint",
-            baseUrl: "https://api.unbiased.ai/v1",
-            model: "pareto",
-            useSavedKey: true,
-          },
+          { provider: "openai", login: "plan" },
         ]);
         expect(await primary(page).isDisabled()).toBe(false);
       } finally {
@@ -1622,13 +1591,11 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
 
         // Claude's redirect reaches Desktop: its code and state go on to the server as code#state.
         await arrive(page, CLAUDE_REDIRECT_CODE);
-        await chooser.getByText("Signed in to Anthropic.").waitFor();
+        // Signed in, and connected at once, with nothing else pressed.
+        await chooser.getByRole("status").waitFor();
         expect(server.finishes).toEqual([{ code: CLAUDE_CODE }]);
         expect(server.signInReads).toBe(0);
         expect(await chooser.getByRole("textbox").count()).toBe(0);
-        await shoot(page, "desktop-claude-signed-in", engine, "light", WIDE);
-        await chooser.getByRole("button", { name: "Connect" }).click();
-        await chooser.getByRole("status").waitFor();
         expect(server.replaces).toEqual([
           { provider: "anthropic", login: "plan" },
         ]);
@@ -1669,7 +1636,8 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await shoot(page, "desktop-claude-declined", engine, "light", WIDE);
         await signIn.click();
         await arrive(page, CLAUDE_REDIRECT_CODE);
-        await chooser.getByText("Signed in to Anthropic.").waitFor();
+        // Signed in, and connected at once.
+        await chooser.getByRole("status").waitFor();
         expect(server.finishes).toEqual([{ code: CLAUDE_CODE }]);
       } finally {
         await page.close();
@@ -1742,7 +1710,8 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await signIn.click();
         await waitingLine.waitFor();
         await arrive(page, CHATGPT_CODE);
-        await chooser.getByText("Signed in to OpenAI.").waitFor();
+        // Signed in, and connected at once.
+        await chooser.getByRole("status").waitFor();
         // The whole address, built from what arrived, as a person would have pasted it.
         expect(server.finishes).toEqual([{ code: CHATGPT_REDIRECT_ADDRESS }]);
         expect(await desktopCalls(page)).toEqual([
@@ -1764,7 +1733,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await shoot(page, "desktop-chatgpt-signed-in", engine, "light", WIDE);
 
         // The code, the other way: its steps, and the browser offered back below it.
-        await chooser.getByRole("button", { name: "Back" }).click();
+        await chooser.getByRole("button", { name: "Change" }).click();
         await chooser.getByRole("button", { name: /^OpenAI/ }).click();
         await chooser
           .getByRole("button", { name: "Sign in with a code instead" })
@@ -1901,7 +1870,8 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           await chooser
             .getByRole("button", { name: "Finish", exact: true })
             .click();
-          await chooser.getByText("Signed in to Anthropic.").waitFor();
+          // Signed in, and connected at once.
+          await chooser.getByRole("status").waitFor();
           expect(server.finishes).toEqual([{ code: CLAUDE_CODE }]);
         } finally {
           await page.close();
@@ -1974,9 +1944,9 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           WIDE,
         );
 
-        // Again: the code straight away, Desktop not asked again, and it finishes.
+        // Again: the code straight away, Desktop not asked again, and it finishes and connects.
         await signIn.click();
-        await chooser.getByText("Signed in to OpenAI.").waitFor();
+        await chooser.getByRole("status").waitFor();
         expect(server.signIns).toEqual([
           { provider: "openai", method: "device" },
           { provider: "openai", method: "device" },
@@ -2265,7 +2235,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           await page.evaluate(() =>
             window.scrollTo(0, document.documentElement.scrollHeight),
           );
-          await page.waitForTimeout(100);
+          await still(page);
           const room = await page.evaluate(() => {
             const footer = document.querySelector("footer");
             const signOut = [...document.querySelectorAll("button")].find(
@@ -2504,7 +2474,9 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           await address.fill(`  ${CHATGPT_ADDRESS}\n`);
           await finish.click();
         }
-        await chooser.getByText("Signed in to OpenAI.").waitFor();
+        // Signed in, and connected at once, with nothing else pressed.
+        const connected = chooser.getByRole("status");
+        await connected.waitFor();
         // The browser sign-in, the default: no method asked for.
         expect(server.signIns).toEqual([
           { provider: "openai" },
@@ -2519,9 +2491,6 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         ]);
         // Finished by the address alone: never read in a loop.
         expect(server.signInReads).toBe(0);
-        await chooser.getByRole("button", { name: "Connect" }).click();
-        const connected = chooser.getByRole("status");
-        await connected.waitFor();
         expect(server.replaces).toEqual([
           { provider: "openai", login: "plan" },
         ]);
@@ -2623,8 +2592,10 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           .getByRole("button", { name: "Copy an address instead" })
           .waitFor({ state: "detached" });
         await chooser.getByRole("button", { name: "Get a new code" }).click();
-        // Read every interval until ChatGPT says it is approved: pending once, then approved.
-        await chooser.getByText("Signed in to OpenAI.").waitFor();
+        // Read every interval until ChatGPT says it is approved: pending once, then approved, and
+        // connected at once.
+        const connected = chooser.getByRole("status");
+        await connected.waitFor();
         expect(server.signIns).toEqual([
           { provider: "openai", method: "device" },
           { provider: "openai", method: "device" },
@@ -2633,9 +2604,6 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         expect(server.finishes).toEqual([]);
         await openedIn(page, server, device);
         expect(server.opened).toContain(device);
-        await chooser.getByRole("button", { name: "Connect" }).click();
-        const connected = chooser.getByRole("status");
-        await connected.waitFor();
         expect(server.replaces).toEqual([
           { provider: "openai", login: "plan" },
         ]);
@@ -2788,7 +2756,8 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await chooser
           .getByRole("button", { name: "Finish", exact: true })
           .click();
-        await chooser.getByText("Signed in to OpenAI.").waitFor();
+        // Signed in, and connected at once.
+        await chooser.getByRole("status").waitFor();
         expect(server.signIns).toEqual([
           { provider: "openai", method: "device" },
           { provider: "openai" },
@@ -2796,7 +2765,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         expect(server.finishes).toEqual([{ code: CHATGPT_ADDRESS }]);
 
         // And back: the code is one press away, the address steps gone.
-        await chooser.getByRole("button", { name: "Back" }).click();
+        await chooser.getByRole("button", { name: "Change" }).click();
         await chooser.getByRole("button", { name: /^OpenAI/ }).click();
         await chooser
           .getByRole("button", { name: "Copy an address instead" })
@@ -2866,7 +2835,8 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await dialog
           .getByRole("button", { name: "Finish", exact: true })
           .click();
-        await dialog.getByText("Signed in to Anthropic.").waitFor();
+        // Signed in, and connected at once, with nothing else pressed.
+        await dialog.getByText("Connected to Anthropic").waitFor();
         expect(server.signIns).toEqual([
           { provider: "anthropic" },
           { provider: "anthropic" },
@@ -2877,9 +2847,6 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         ]);
         // Finished by the code alone: never read in a loop.
         expect(server.signInReads).toBe(0);
-
-        await dialog.getByRole("button", { name: "Connect" }).click();
-        await dialog.getByText("Connected to Anthropic").waitFor();
         expect(server.replaces).toEqual([
           { provider: "anthropic", login: "plan" },
         ]);
@@ -2916,14 +2883,13 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           .getByRole("button", { name: "Sign in with xAI", exact: true })
           .click();
         await chooser.getByText("MQ7T-WD4X").waitFor();
-        await chooser.getByText("Signed in to xAI.").waitFor();
         /*
          * Nothing to type: a sign-in asks for no model, as a key or a plan doesn't. The picker
          * offers what xAI lists for it; the connection names xAI's usual one for runs nobody picked.
          */
         expect(await chooser.getByLabel("Model name").count()).toBe(0);
         expect(await chooser.getByRole("textbox").count()).toBe(0);
-        await chooser.getByRole("button", { name: "Connect" }).click();
+        // Signed in, and connected at once, with nothing else pressed.
         const connected = chooser.getByRole("status");
         await connected.waitFor();
         expect(server.replaces).toEqual([
@@ -2966,7 +2932,9 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
   /*
    * Settings → AI providers → Connect another AI, as it was reported on 1.2.0: xAI's sign-in asked for
    * a model name typed in raw, and once connected the page went on to xAI's own page. Now nothing is
-   * typed, and Connect goes back to the list with xAI checked, as onboarding's Connect your AI does.
+   * typed, and the list comes back with xAI checked, as onboarding's Connect your AI does. As
+   * reported on 1.2.1, a sign-in that looked finished saved nothing until Connect was pressed: it
+   * now connects as soon as it succeeds.
    */
   for (const engine of engines)
     for (const theme of THEMES)
@@ -2989,21 +2957,19 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
             await chooser
               .getByRole("button", { name: "Sign in with xAI", exact: true })
               .click();
-            await chooser.getByText("Signed in to xAI.").waitFor();
-            await shoot(page, "settings-xai-signed-in", engine, theme, window);
-            expect(await measured(page)).toEqual(FINE);
-            // Read now, said after Connect, so both screens are seen whatever they hold.
+            // While it waits: nothing to type, no model name, no field at all.
+            await chooser.getByText("MQ7T-WD4X").waitFor();
             const fields = await chooser.getByRole("textbox").count();
+            await shoot(page, "settings-xai-waiting", engine, theme, window);
 
-            await chooser.getByRole("button", { name: "Connect" }).click();
+            // Approved: connected at once, with nothing else pressed.
             const xai = chooser.getByRole("button", { name: /^xAI/ });
             const checked = xai.getByRole("img", { name: "Connected" });
-            // Wherever Connect leads, it is seen first, then held to where it should lead.
+            // Wherever it leads, it is seen first, then held to where it should lead.
             await checked
               .or(page.getByText(/Pick one of its models in a conversation/))
               .waitFor();
             await shoot(page, "settings-xai-connected", engine, theme, window);
-            // Nothing to type: no model name, no field at all.
             expect(fields).toBe(0);
             expect(new URL(page.url()).pathname).toBe(
               "/settings/providers/new",
@@ -3070,10 +3036,10 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await chooser
           .getByRole("button", { name: "Sign in with xAI", exact: true })
           .click();
-        await chooser.getByText("Signed in to xAI.").waitFor();
+        await chooser.getByText("MQ7T-WD4X").waitFor();
         expect(await chooser.getByRole("textbox").count()).toBe(0);
-        await chooser.getByRole("button", { name: "Connect" }).click();
-        // Changing one still goes back to its own page, where the person started.
+        // Signed in, and connected at once: changing one still goes back to its own page, where
+        // the person started.
         await page.waitForURL(
           (url) => url.pathname === "/settings/providers/xai",
         );
@@ -3120,12 +3086,13 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           .getByText("The xAI sign-in expired. Sign in again.")
           .waitFor();
         await signIn.click();
-        await chooser.getByText("Signed in to xAI.").waitFor();
+        // Approved, and connected at once.
+        await chooser.getByRole("status").waitFor();
         expect(await alert.count()).toBe(0);
         expect(server.signIns).toHaveLength(3);
 
         // A sign-in still waiting stops being read once the person leaves the row.
-        await chooser.getByRole("button", { name: "Back" }).click();
+        await chooser.getByRole("button", { name: "Change" }).click();
         await chooser.getByRole("button", { name: /^xAI/ }).click();
         await signIn.click();
         await page.waitForFunction(
@@ -3174,17 +3141,6 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
             login: "endpoint",
             baseUrl: "https://api.x.ai/v1",
             model: "grok-4.7",
-            apiKey: "sk-typed-key",
-          },
-        ],
-        [
-          /^Unbiased AI/,
-          "Unbiased AI API key",
-          {
-            provider: "unbiased",
-            login: "endpoint",
-            baseUrl: "https://api.unbiased.ai/v1",
-            model: "pareto",
             apiKey: "sk-typed-key",
           },
         ],
@@ -3241,15 +3197,13 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
               expect(await measured(page)).toEqual(FINE);
               await shoot(page, "step", engine, theme, window);
               const chooser = page.locator("[data-ai-chooser]");
-              await chooser
-                .getByRole("button", { name: /^Unbiased AI/ })
-                .click();
+              await chooser.getByRole("button", { name: /^xAI/ }).click();
               expect(await measured(page)).toEqual(FINE);
-              await shoot(page, "step-unbiased", engine, theme, window);
+              await shoot(page, "step-xai", engine, theme, window);
               await chooser
                 .getByRole("tab", { name: "Use an API key" })
                 .click();
-              await chooser.getByLabel("Unbiased AI API key").fill("ub-key");
+              await chooser.getByLabel("xAI API key").fill("xai-key");
               await chooser.getByRole("button", { name: "Connect" }).click();
               await chooser.getByRole("status").waitFor();
               expect(await measured(page)).toEqual(FINE);
@@ -3289,7 +3243,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
                 .click();
               await settings
                 .getByRole("dialog")
-                .getByRole("button", { name: /^Unbiased AI/ })
+                .getByRole("button", { name: /^xAI/ })
                 .waitFor();
               await shoot(settings, "settings-chooser", engine, theme, window);
               await settings.keyboard.press("Escape");
@@ -3440,9 +3394,10 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
               await chooser
                 .getByRole("button", { name: "Finish", exact: true })
                 .click();
-              await chooser.getByText("Signed in to Anthropic.").waitFor();
-              await look("sign-in-claude-signed-in");
-              await back();
+              // Signed in, and connected at once.
+              await chooser.getByRole("status").waitFor();
+              await look("sign-in-claude-connected");
+              await chooser.getByRole("button", { name: "Change" }).click();
 
               // Gemini takes an API key only: its key form, with no sign-in.
               await row(/^Google Gemini/);
@@ -3459,9 +3414,6 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
               await chooser
                 .getByRole("button", { name: "Sign in with xAI" })
                 .click();
-              await chooser.getByText("Signed in to xAI.").waitFor();
-              await look("sign-in-xai-signed-in");
-              await chooser.getByRole("button", { name: "Connect" }).click();
               await chooser.getByRole("status").waitFor();
               await look("sign-in-xai-connected");
             } finally {

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
 
 /**
  * Where an organization's plan shows, drawn by a real Chromium with the app's stylesheet: the bar
@@ -203,13 +204,7 @@ async function restyle(page: Page, key: string) {
   await page.evaluate(() => document.fonts.ready);
   // Styled after it was drawn, so a button's colour transition runs from the browser's own link
   // blue: wait it out, or the picture catches it half way.
-  // The transitions start on the next frame and last 150ms, so let a few frames pass first.
-  await page.waitForTimeout(400);
-  await page.waitForFunction(() =>
-    document
-      .getAnimations()
-      .every((running) => !(running instanceof CSSTransition)),
-  );
+  await still(page);
 }
 
 async function shot(page: Page, name: string) {

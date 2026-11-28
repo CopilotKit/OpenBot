@@ -88,12 +88,18 @@ export function DefaultModelSection({
     setEditing(true);
   };
   const custom = draft ?? saved ?? deploymentPick;
+  /*
+   * Only a model its connection lists is saved. A connection that lists nothing (a provider OpenBot
+   * no longer offers, as the default) leaves nothing to save until a model is picked.
+   */
+  const customSelectable =
+    custom !== undefined && modelOf(catalogue, custom) !== undefined;
   const changed = useDeploymentDefault
     ? agent.defaultModel !== null
-    : custom !== undefined &&
+    : customSelectable &&
       (custom.model !== saved?.model || custom.effort !== saved.effort);
   const save = async () => {
-    if (!useDeploymentDefault && !custom) return;
+    if (!useDeploymentDefault && !customSelectable) return;
     try {
       await onSave(
         useDeploymentDefault || !custom

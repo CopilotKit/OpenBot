@@ -20,6 +20,7 @@ import {
   settingsBody,
 } from "./admin-settings-api";
 import { marksPlugin } from "./marks-plugin";
+import { still } from "./page-still";
 
 /**
  * A team's models, set by an admin and read by anybody, in a real browser.
@@ -505,7 +506,7 @@ async function restyle(page: Page) {
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
   // Rows ease in and a dialog scales up: looked at once they are still.
-  await page.waitForTimeout(400);
+  await still(page);
 }
 
 /** What a person would see wrong: sideways scroll, a control cut off, words under a button. */
@@ -910,7 +911,7 @@ describe.skipIf(!asked)("a team's models", () => {
               .locator("[data-slot=item]")
               .filter({ hasText: "Teams with their own list" });
             await line.scrollIntoViewIfNeeded();
-            await page.waitForTimeout(200);
+            await still(page);
             expect(
               await line
                 .getByRole("link")
@@ -934,7 +935,7 @@ describe.skipIf(!asked)("a team's models", () => {
               .locator("section")
               .filter({ has: page.getByRole("heading", { name: "Usage" }) });
             await usage.scrollIntoViewIfNeeded();
-            await page.waitForTimeout(200);
+            await still(page);
             expect(
               await usage
                 .locator("[data-slot=item-title]")

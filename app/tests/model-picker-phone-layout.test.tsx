@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { still } from "./page-still";
 
 /**
  * The composer's model picker names every model whole, on a phone as on a laptop.
@@ -130,7 +131,7 @@ async function restyle(page: Page) {
     ]),
   );
   await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
-  await page.waitForTimeout(400);
+  await still(page);
 }
 
 const browsers = new Map<string, Browser>();

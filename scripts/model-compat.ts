@@ -327,12 +327,12 @@ export const PROVIDERS: readonly Provider[] = [
  */
 export const NOT_CHECKED: readonly { baseUrl: string; why: string }[] = [
   {
-    baseUrl: "https://api.unbiased.ai/v1",
-    why: "Unbiased AI is a gateway serving its own `pareto` model, not a provider's listing",
-  },
-  {
     baseUrl: "https://api.trustedrouter.com/v1",
     why: "TrustedRouter is a gateway in front of many providers, not a provider's own listing",
+  },
+  {
+    baseUrl: "https://proxyless-api.privatemode.ai/v1",
+    why: "Privatemode's model list needs a key",
   },
 ];
 

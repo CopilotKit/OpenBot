@@ -18,8 +18,8 @@ export type AiConnectionSummary = {
 const PRESET_HOSTS: Record<string, string> = {
   "generativelanguage.googleapis.com": "Google Gemini",
   "api.x.ai": "xAI",
-  "api.unbiased.ai": "Unbiased AI",
   "api.trustedrouter.com": "TrustedRouter",
+  "proxyless-api.privatemode.ai": "Privatemode",
 };
 
 function signedIn(

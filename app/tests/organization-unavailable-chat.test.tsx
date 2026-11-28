@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import type { Page, Request } from "playwright-core";
 import {
   asked,
@@ -14,6 +14,7 @@ import {
   style,
   UNAVAILABLE,
 } from "./organization-notices-browser";
+import { test } from "./renderer-crash";
 
 /**
  * While OpenBot moves an organization, or its database is briefly out of reach, the places the sweep

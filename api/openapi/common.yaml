@@ -334,6 +334,7 @@ paths:
   /api/v2/organizations/{organizationId}/people/{personId}/bot-notification-settings/{botId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1bot-notification-settings~1{botId}' }
   /api/v2/organizations/{organizationId}/notification-transports: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1notification-transports' }
   /api/v2/organizations/{organizationId}/routines: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines' }
+  /api/v2/organizations/{organizationId}/routines/read: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines~1read' }
   /api/v2/organizations/{organizationId}/routines/{routineId}: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines~1{routineId}' }
   /api/v2/organizations/{organizationId}/routines/{routineId}/pause: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines~1{routineId}~1pause' }
   /api/v2/organizations/{organizationId}/routines/{routineId}/resume: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines~1{routineId}~1resume' }
@@ -617,18 +618,23 @@ components:
         nowhere else.
 
 
-        Organization. An access token carries no memory of which
-        organization the person is working in. An address under
-        `/api/v2/organizations/{organizationId}` names it. Where an address
-        names none, such as the list of the person's own organizations, an
-        app sends the header `OpenBot-Organization` with the organization's
-        id. It is checked against the person's membership on every request,
-        and an organization they are not in answers not found. With no
-        header, the app works in the person's own organization.
+        Organization. An access token keeps the organization the person
+        signed the app in to: the one they were working in as they allowed
+        it, which on OpenBot Cloud is the one they picked as they signed in.
+        A token refreshed from it keeps it too. An address under
+        `/api/v2/organizations/{organizationId}` names the organization.
+        Where an address names none, such as the list of the person's own
+        organizations, an app sends the header `OpenBot-Organization` with
+        the organization's id. It is checked against the person's membership
+        on every request, and an organization they are not in answers not
+        found. With no header, the app works in the organization it was
+        signed in to, while the person is a member of it, else in the
+        person's own organization.
 
 
-        Consent. The person is asked once for each app, and not again for
-        scopes they already allowed it.
+        Consent. The person is asked once for each app in each organization
+        they sign it in to, and not again for scopes they already allowed it
+        there.
 
 
         An install for one person on one computer has no sign-in, so it has

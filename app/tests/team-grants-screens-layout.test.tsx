@@ -26,6 +26,7 @@ import {
   sharedConnectionPath,
   sharedConnectionResponse,
 } from "./connections-api";
+import { still } from "./page-still";
 import { SKILLS_PATH, skillPath, skillsResponse } from "./skills-api";
 
 /**
@@ -921,7 +922,7 @@ async function open(
   await page.evaluate(() => document.fonts.ready);
   await screen.lookAt?.(page);
   // Rows ease in and a dialog scales up: looked at once they are still.
-  await page.waitForTimeout(400);
+  await still(page);
   return { page, unanswered };
 }
 

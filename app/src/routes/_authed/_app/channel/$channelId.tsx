@@ -33,6 +33,7 @@ import { useNoBotComputers } from "@/lib/deployment/queries";
 import { useConnectionLost } from "@/lib/desktop/connection-lost";
 import { loadFailure } from "@/lib/load-failure";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
+import { loadFirstScreen } from "@/lib/route-data";
 import { taskListQueryOptions } from "@/lib/tasks/queries";
 
 const chatSearchSchema = z.object({
@@ -55,7 +56,14 @@ const HEADING_ENTRANCE_OFFSET = "translateY(4px)";
 const SCREEN_PANEL_WIDTH = 360;
 
 export const Route = createFileRoute("/_authed/_app/channel/$channelId")({
+  staticData: { arrival: "conversation" },
   validateSearch: chatSearchSchema,
+  // Only the conversation itself, never its history, so a sidebar hover can't pull a thread's history. A gone
+  // conversation's error reaches the page's own notice, not the router's error screen.
+  loader: ({ context, params }) =>
+    loadFirstScreen(context.queryClient, [
+      channelQueryOptions(params.channelId),
+    ]),
   component: RouteComponent,
 });
 

@@ -6,9 +6,11 @@ import type {
   ListRoutineRunsParams,
   ListRoutinesParams,
   RoutinePage,
+  RoutineReading,
   RoutineResponse,
   RoutineRunAccepted,
   RoutineRunPage,
+  RoutineSentence,
   RoutineSwitch,
   UpdateRoutineRequest,
 } from "../model";
@@ -91,6 +93,51 @@ export const createRoutine = async (
       ...getHeaders(options?.headers),
     },
     body: JSON.stringify(createRoutineRequest),
+  });
+};
+
+export const getReadRoutineSentenceUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/routines/read`;
+};
+
+/**
+ * Read a sentence in English as New routine's answers: what the Bot does, when it starts, the schedule and what ends it. It writes nothing. createRoutine, createGoal or createCheckIn makes what it read. A repeated request with the same Idempotency-Key and body returns the first reading without asking the model again.
+ * @summary Read a sentence as a routine's answers
+ */
+export const readRoutineSentence = async (
+  organizationId: string,
+  routineSentence: RoutineSentence,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<RoutineReading> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<RoutineReading>(getReadRoutineSentenceUrl(organizationId), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(routineSentence),
   });
 };
 

@@ -7,9 +7,17 @@ import { GroupPeopleButton } from "@/components/channels/group-people";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
 import { channelQueryOptions } from "@/lib/channels/queries";
+import { loadFirstScreen } from "@/lib/route-data";
 
 /** A conversation with several Bots. The channel is an ordinary channel with more than one Bot. */
 export const Route = createFileRoute("/_authed/_app/group/$channelId")({
+  staticData: { arrival: "conversation" },
+  // Only the group's own record, never its history, so a sidebar hover can't pull a transcript. A gone
+  // group's error reaches the page, not the router's error screen.
+  loader: ({ context, params }) =>
+    loadFirstScreen(context.queryClient, [
+      channelQueryOptions(params.channelId),
+    ]),
   component: RouteComponent,
 });
 
