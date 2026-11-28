@@ -236,15 +236,33 @@ abstract class ShellTestBase {
         return null
     }
 
+    /** Must run on the instrumentation main thread. */
+    private fun shellActivity(): Activity? {
+        val registry = ActivityLifecycleMonitorRegistry.getInstance()
+        return listOf(Stage.RESUMED, Stage.PAUSED, Stage.STARTED, Stage.STOPPED)
+            .flatMap { registry.getActivitiesInStage(it) }
+            .firstOrNull { it.javaClass.name == ACTIVITY }
+    }
+
+    /** Chromium rounds accessibility bounds to CSS pixels. Read native pixels for layout assertions. */
+    fun layoutBounds(id: Int): Rect? {
+        var bounds: Rect? = null
+        instrumentation.runOnMainSync {
+            val view = shellActivity()?.findViewById<View>(id) ?: return@runOnMainSync
+            if (!view.isShown) return@runOnMainSync
+            val position = IntArray(2)
+            view.getLocationOnScreen(position)
+            bounds = Rect(position[0], position[1], position[0] + view.width, position[1] + view.height)
+        }
+        return bounds
+    }
+
     /** The debug build's state line: read from the app's own view (the test runs in its process). */
     fun debugState(): String {
         if (variant != "debug") return "(no debug-state: $variant build)"
         var state: String? = null
         instrumentation.runOnMainSync {
-            val registry = ActivityLifecycleMonitorRegistry.getInstance()
-            val activity = listOf(Stage.RESUMED, Stage.PAUSED, Stage.STARTED, Stage.STOPPED)
-                .flatMap { registry.getActivitiesInStage(it) }
-                .firstOrNull { it.javaClass.name == ACTIVITY }
+            val activity = shellActivity()
             state = activity?.window?.decorView?.findViewWithTag<View>("debug-state")?.contentDescription?.toString()
         }
         return state?.removePrefix("debug-state ") ?: "(no debug-state)"
@@ -468,10 +486,7 @@ abstract class ShellTestBase {
         var result: String? = null
         val latch = CountDownLatch(1)
         instrumentation.runOnMainSync {
-            val registry = ActivityLifecycleMonitorRegistry.getInstance()
-            val activity: Activity? = listOf(Stage.RESUMED, Stage.PAUSED, Stage.STARTED, Stage.STOPPED)
-                .flatMap { registry.getActivitiesInStage(it) }
-                .firstOrNull { it.javaClass.name == ACTIVITY }
+            val activity = shellActivity()
             val web = activity?.window?.decorView?.let { findWebView(it) }
             if (web == null) latch.countDown() else web.evaluateJavascript(script) { value ->
                 result = value

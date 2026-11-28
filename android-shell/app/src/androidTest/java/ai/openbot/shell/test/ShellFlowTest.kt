@@ -1,5 +1,6 @@
 package ai.openbot.shell.test
 
+import ai.openbot.shell.R
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
 import org.junit.Test
@@ -27,8 +28,9 @@ class ShellFlowTest : ShellTestBase() {
         val h = bounds(home)!!
         val b = bounds(bots)!!
         check(c.left < h.left && h.left < b.left, "$moment: tabs are not Conversations, Home, Bots from left to right")
-        val web = bounds(find("openbot_webview"))
-        val bar = bounds(find("bottom_nav"))
+        val web = layoutBounds(R.id.openbot_webview)
+        val bar = layoutBounds(R.id.bottom_nav)
+        check(web != null && bar != null, "$moment: cannot measure the native web view and tab bar")
         if (web != null && bar != null) {
             check(web.bottom <= bar.top + 1, "$moment: the web view runs under the bottom bar (web ${web.bottom}, bar ${bar.top})")
             check(web.top > 0, "$moment: the web view starts at the top edge, under the status bar (web top ${web.top})")
@@ -163,7 +165,7 @@ class ShellFlowTest : ShellTestBase() {
         sleep(1_000)
         screenshot("3-conversation")
         val boxBounds = waitComposerRect(10_000)
-        val bar = bounds(find("bottom_nav"))
+        val bar = layoutBounds(R.id.bottom_nav)
         check(boxBounds != null, "no message box in the conversation")
         if (boxBounds != null && bar != null) {
             check(boxBounds.bottom <= bar.top + 1, "the message box is under the bottom bar (box $boxBounds, bar $bar)")
@@ -345,7 +347,7 @@ class ShellFlowTest : ShellTestBase() {
         sleep(1_000)
         screenshot("keyboard-up")
         val boxNow = composerRect()
-        val webNow = bounds(find("openbot_webview"))
+        val webNow = layoutBounds(R.id.openbot_webview)
         note("keyboard up: ${debugState()}; message box $boxNow; web view $webNow; display height ${device.displayHeight}")
         if (boxNow != null && webNow != null) {
             // The web view ends at the keyboard's top edge: the box must be inside it, whole.
@@ -369,7 +371,7 @@ class ShellFlowTest : ShellTestBase() {
         if (!keyboardShown()) waitComposerRect(10_000)?.let { tapComposer(it) }
         check(waitKeyboard(true, 8_000), "the keyboard did not show in the conversation")
         sleep(1_200)
-        val web = bounds(find("openbot_webview"))
+        val web = layoutBounds(R.id.openbot_webview)
         val send = webRect("Send message")
         val boxRect = composerRect()
         val plus = webRect("Attach a file")
@@ -386,8 +388,8 @@ class ShellFlowTest : ShellTestBase() {
         check(waitForTab(Tab.CONVERSATIONS, 5_000) != null, "the bottom bar did not come back")
         check(waitForState("path=/channel", 2_000) || pageText().contains("Here is the first draft."), "the first Back navigated instead of only closing the keyboard: ${debugState()}")
         sleep(800)
-        val webAfter = bounds(find("openbot_webview"))
-        val bar = bounds(find("bottom_nav"))
+        val webAfter = layoutBounds(R.id.openbot_webview)
+        val bar = layoutBounds(R.id.bottom_nav)
         if (webAfter != null && bar != null) check(kotlin.math.abs(webAfter.bottom - bar.top) <= 2, "a gap or overlap between the web view and the bar after the keyboard (web ${webAfter.bottom}, bar ${bar.top})")
         screenshot("conversation-keyboard-dismissed")
         device.pressBack()
@@ -411,7 +413,7 @@ class ShellFlowTest : ShellTestBase() {
             check(waitForTab(Tab.HOME, 2_000) != null, "$moment: the bottom bar is not usable while the skeleton shows")
             val web = bounds(find("web_container"))
             val shown = bounds(skeleton)
-            val bar = bounds(find("bottom_nav"))
+            val bar = layoutBounds(R.id.bottom_nav)
             if (shown != null && bar != null) check(shown.bottom <= bar.top + 1, "$moment: the skeleton runs under the bottom bar ($shown, bar $bar)")
             note("$moment skeleton: $shown, web area $web, bottom bar $bar; ${debugState()}")
             sleep(600)
