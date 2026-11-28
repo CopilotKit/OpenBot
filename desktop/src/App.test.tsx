@@ -4544,6 +4544,11 @@ test("Quit shows Shutting down with each part's row as it starts and ends", asyn
   );
   const view = await renderApp();
   await view.findByRole("heading", { name: "OpenBot is running" });
+  // `findByRole` resolves as soon as the heading commits, before React flushes passive effects
+  // from the same render (including `CheckForUpdates`'s mount `app_update_offer` call). Drain
+  // them before snapshotting `callsBefore` so the running screen's own mount call is never
+  // counted as a call made while quitting.
+  await act(async () => {});
   const callsBefore = invokeCalls.length;
 
   await emitQuit({ seq: 2, steps: [running("stop-openbot")] });
