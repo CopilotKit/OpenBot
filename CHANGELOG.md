@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- The Recorder keeps capturing a recording's requests when one of its tabs can't take the page
+  hook. When Chrome would not let the Recorder use its debugger, one recorded tab it could not reach,
+  such as a tab closed since or one showing a `chrome://` page, stopped request capture for every
+  tab, for the rest of the recording, and after the extension's background woke up again. That tab
+  is now skipped, and picked up once it shows a website.
+
 - **The API takes Privatemode as an AI connection.** `replaceAiConnection` and the other AI
   connection writes take `provider: privatemode` with `login: endpoint`, an address and a key.
   `AiConnectionProviderAnswer` can name it. `signIns` keeps the values it had, since Privatemode

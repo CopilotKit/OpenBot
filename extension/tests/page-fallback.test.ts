@@ -76,6 +76,34 @@ test("start reports false when the injection is refused", async () => {
   expect(fallback.active()).toBe(false);
 });
 
+test("start skips a tab Chrome refuses and still captures the others", async () => {
+  const fallback = createPageFallback();
+  const original = chrome.scripting.executeScript;
+  chrome.scripting.executeScript = (async (
+    injection: Parameters<typeof chrome.scripting.executeScript>[0],
+  ) => {
+    // Tab 8 closed (or went to a chrome:// page) and is still in the recording's tab list.
+    if (injection.target.tabId === 8) throw new Error("No tab with id: 8");
+    return original(injection);
+  }) as typeof chrome.scripting.executeScript;
+  try {
+    expect(await fallback.start([8, 7])).toBe(true);
+  } finally {
+    chrome.scripting.executeScript = original;
+  }
+  expect(fallback.active()).toBe(true);
+  expect(targets().map(({ target }) => target)).toEqual([
+    { tabId: 7, allFrames: true },
+    { tabId: 7, allFrames: true },
+  ]);
+  // The refused tab is still followed: once it shows a website, its frame gets the hook.
+  await fallback.onCommitted(8, 0);
+  expect(targets().map(({ target }) => target)).toContainEqual({
+    tabId: 8,
+    frameIds: [0],
+  });
+});
+
 test("addTab injects into the new tab and onCommitted into that frame of a followed tab", async () => {
   const fallback = createPageFallback();
   await fallback.start([7]);

@@ -52,9 +52,15 @@ export function createPageFallback(): PageFallback {
     async start(tabIds) {
       tabs.clear();
       for (const tabId of tabIds) tabs.add(tabId);
-      try {
-        for (const tabId of tabIds) await inject(tabId);
-      } catch {
+      // One tab Chrome refuses (closed since, or showing a chrome:// page) is skipped, not the whole capture: it stays
+      // followed, so onCommitted injects into it once it shows a website.
+      let injected = 0;
+      for (const tabId of tabIds)
+        await inject(tabId).then(
+          () => injected++,
+          () => {},
+        );
+      if (injected === 0) {
         tabs.clear();
         return false;
       }
