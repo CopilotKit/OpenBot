@@ -55,9 +55,7 @@ object ShellUrls {
         } catch (error: Exception) {
             return "/"
         }
-        val base = URI(origin)
-        val sameHost = uri.scheme.equals(base.scheme, ignoreCase = true) && uri.host.equals(base.host, ignoreCase = true) && uri.port == base.port
-        if (!sameHost) return "/"
+        if (!Origins.same(returnTo, origin)) return "/"
         val path = (uri.rawPath ?: "").ifEmpty { "/" }
         return path + (uri.rawQuery?.let { "?$it" } ?: "") + (uri.rawFragment?.let { "#$it" } ?: "")
     }

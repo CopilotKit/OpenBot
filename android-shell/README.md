@@ -88,6 +88,11 @@ What is native:
   `OpenBotShellAndroid.postMessage(json)`, which `bridge.ts` calls; messages are accepted from the
   main frame on the base origin only. No `addJavascriptInterface`. The user agent ends with
   ` OpenBotShell-Android/<version>`.
+- **"The app's own origin" is one rule.** Every check (the bridge, the lock, dialogs, media
+  permissions, Back, the navigation policy, the last page a retry loads, `/sign`, the hosted sign-in,
+  a certificate error) goes through `Origins.same`: scheme, host and effective port (443 or 80 when
+  none is written), case ignored, a trailing-dot host or user info never matching
+  (`OriginsTest`).
 - **Only the app's own origin locks the app.** A page of another site that fails to load (the
   identity provider, a link) sends the WebView back to the last page of the app; retries load the last
   page of the app, never another site's.

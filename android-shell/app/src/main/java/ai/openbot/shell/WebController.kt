@@ -571,7 +571,7 @@ class WebController(
             handler.cancel()
             diagnostics.log("ssl-error", mapOf("primaryError" to error.primaryError, "url" to Diagnostics.redact(error.url)))
             val loading = lastRequestedUrl
-            if (loading != null && Uri.parse(loading).host == Uri.parse(error.url).host) failMainFrame("ssl ${error.primaryError}", error.url)
+            if (Origins.same(loading, error.url)) failMainFrame("ssl ${error.primaryError}", error.url)
         }
 
         override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {

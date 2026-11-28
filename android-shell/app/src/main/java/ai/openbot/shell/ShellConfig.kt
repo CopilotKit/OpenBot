@@ -47,23 +47,12 @@ class ShellConfig(
     fun url(pathAndQuery: String): String =
         origin + if (pathAndQuery.startsWith("/")) pathAndQuery else "/$pathAndQuery"
 
-    fun isOwnOrigin(uri: Uri?): Boolean {
-        if (uri == null) return false
-        val scheme = uri.scheme?.lowercase() ?: return false
-        if (scheme != baseScheme) return false
-        if ((uri.host?.lowercase() ?: "") != baseHost) return false
-        return effectivePort(uri) == effectivePort(baseUrl)
-    }
+    /** Same scheme, host and effective port as the base URL (Origins.same). */
+    fun isOwnOrigin(uri: Uri?): Boolean = uri != null && isOwnOrigin(uri.toString())
 
-    fun isOwnOrigin(url: String?): Boolean = url != null && isOwnOrigin(Uri.parse(url))
+    fun isOwnOrigin(url: String?): Boolean = Origins.same(url, origin)
 
     companion object {
-        fun effectivePort(uri: Uri): Int = when {
-            uri.port != -1 -> uri.port
-            uri.scheme.equals("https", ignoreCase = true) -> 443
-            else -> 80
-        }
-
         fun from(intent: Intent?): ShellConfig {
             var baseOverride: String? = null
             var diagnostics = false
@@ -84,16 +73,15 @@ class ShellConfig(
             )
         }
 
-        /** The override when it is an http(s) URL with a host, else BuildConfig.BASE_URL; origin only. */
+        /**
+         * The override when it is an http(s) URL with a host, else BuildConfig.BASE_URL; origin only,
+         * spelled as `location.origin` spells it (lower case, default port left out), because the
+         * marker script and the bridge's origin rule compare against that spelling.
+         */
         fun resolveBase(candidate: String?): Uri {
             for (value in listOfNotNull(candidate, BuildConfig.BASE_URL)) {
-                val uri = Uri.parse(value)
-                val scheme = uri.scheme?.lowercase()
-                val host = uri.host?.lowercase()
-                if ((scheme == "https" || scheme == "http") && !host.isNullOrEmpty()) {
-                    val authority = if (uri.port != -1) "$host:${uri.port}" else host
-                    return Uri.Builder().scheme(scheme).encodedAuthority(authority).build()
-                }
+                val origin = Origins.of(value) ?: continue
+                return Uri.parse(origin.toString())
             }
             return Uri.parse("https://my.open.bot")
         }
