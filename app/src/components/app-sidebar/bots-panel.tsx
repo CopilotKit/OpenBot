@@ -235,7 +235,10 @@ function BotRow({
         <ContextMenu>
           <ContextMenuTrigger className="min-w-0 flex-1">
             <Link
-              className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg pr-2.5 pl-2.5 text-sm outline-hidden ring-sidebar-ring transition-colors hover:bg-foreground/5 focus-visible:ring-2"
+              className={cn(
+                "flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg pr-2.5 pl-2.5 outline-hidden ring-sidebar-ring transition-colors hover:bg-foreground/5 focus-visible:ring-2",
+                !mobile && "text-sm",
+              )}
               params={{ agentId: bot.id }}
               to="/bots/$agentId"
             >
