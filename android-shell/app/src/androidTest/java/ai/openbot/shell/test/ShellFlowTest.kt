@@ -245,9 +245,7 @@ class ShellFlowTest : ShellTestBase() {
     fun testSignOutFromAccountMenu() {
         if (!launchSignedIn("sign-in")) return
         check(homeRendered(), "Home did not render")
-        val account = device.wait(androidx.test.uiautomator.Until.findObject(By.desc("Account")), 10_000) ?: accountButton()
-        check(account != null, "no Account button on Home")
-        account?.click()
+        if (!check(tapWeb("Account"), "no Account button on Home")) return
         sleep(1_000)
         screenshot("1-account-menu")
         if (!check(tapWeb("Sign out"), "the Account menu has no Sign out")) return

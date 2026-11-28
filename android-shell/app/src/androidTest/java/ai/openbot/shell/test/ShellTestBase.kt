@@ -349,8 +349,8 @@ abstract class ShellTestBase {
             if (variant == "debug") {
                 val raw = pageString(
                     "(function(t){var best=null;var all=document.querySelectorAll('a,button,[role=button],[role=link],[role=menuitem],li,div,span,p,h1,h2,h3');" +
-                        "for(var i=0;i<all.length;i++){var e=all[i];var s=(e.innerText||e.getAttribute('aria-label')||'').trim();" +
-                        "if(s===t||s.indexOf(t)===0){var r=e.getBoundingClientRect();" +
+                        "for(var i=0;i<all.length;i++){var e=all[i];var s=(e.innerText||'').trim();" +
+                        "if(e.getAttribute('aria-label')===t||s.indexOf(t)===0){var r=e.getBoundingClientRect();" +
                         "if(r.width>0&&r.height>0&&(!best||r.width*r.height<best.a))best={a:r.width*r.height,e:e};}}" +
                         "if(!best)return 'null';best.e.scrollIntoView({block:'center'});var q=best.e.getBoundingClientRect();" +
                         "return JSON.stringify({l:q.left,t:q.top,r:q.right,b:q.bottom,d:window.devicePixelRatio});})(" +
