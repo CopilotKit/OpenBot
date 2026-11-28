@@ -481,6 +481,50 @@ final class ShellFlowUITests: ShellTestCase {
         screenshot("bots-after-keyboard")
     }
 
+    func testSettingsNameFieldStaysAboveKeyboard() throws {
+        let app = launchSignedIn(moment: "settings-keyboard")
+        let account = accountButton(app)
+        XCTAssertTrue(account.waitForExistence(timeout: 15))
+        account.tap()
+        let settings = webElement(app, label: "Settings")
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
+        let nameRow = app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Name'")).firstMatch
+        XCTAssertTrue(nameRow.waitForExistence(timeout: 15))
+        nameRow.tap()
+
+        let field = app.webViews.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        focusComposerForTyping(field, in: app)
+        field.typeText(" Sample")
+        XCTAssertTrue((field.value as? String)?.contains("Sample") == true)
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(field.isHittable)
+        XCTAssertLessThanOrEqual(field.frame.maxY, keyboard.frame.minY + 1)
+        screenshot("settings-name-keyboard")
+        app.webViews.firstMatch.swipeDown()
+        XCTAssertTrue(keyboard.waitForNonExistence(timeout: 5))
+    }
+
+    func testTabletRotationKeepsTabsAndComposerVisible() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "requires an iPad")
+        let device = XCUIDevice.shared
+        device.orientation = .portrait
+        defer { device.orientation = .portrait }
+        let app = launchSignedIn(moment: "tablet")
+        for (orientation, name) in [(UIDeviceOrientation.portrait, "portrait"), (.landscapeLeft, "landscape")] {
+            device.orientation = orientation
+            XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 20))
+            let left = tab(app, .conversations)
+            let home = tab(app, .home)
+            let right = tab(app, .bots)
+            XCTAssertTrue(left.isHittable && home.isHittable && right.isHittable)
+            XCTAssertLessThan(left.frame.midX, home.frame.midX)
+            XCTAssertLessThan(home.frame.midX, right.frame.midX)
+            try checkKeyboardRoundTrip(app, place: "tablet-\(name)")
+        }
+    }
+
     private func checkKeyboardRoundTrip(_ app: XCUIApplication, place: String) throws {
         let composer = app.webViews.textViews.firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 10), "\(place): no message box")
