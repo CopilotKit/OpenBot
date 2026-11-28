@@ -65,6 +65,10 @@ jobs:
           bun build --target=bun --splitting --root=app --outdir="$fixture" --entry-naming='[dir]/[name].ts' \
             app/serve.ts app/workbench/mock-server.ts app/src/lib/api/generated/*/*.msw.ts
           cp -R app/dist "$fixture/dist"
+          # Include the pinned Apple Silicon runtime so macOS can start its build immediately.
+          cd "$fixture"
+          curl -fsSL --retry 3 -O https://github.com/oven-sh/bun/releases/download/bun-v1.4.3/bun-darwin-aarch64.zip
+          echo "80afd4c069b46a6fa8f3ec520bebc750a7843e4a8d5b9583d29ad436c00a3403  bun-darwin-aarch64.zip" | sha256sum -c -
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-demo-workbench-${{ github.run_attempt }}
@@ -75,7 +79,7 @@ jobs:
   demo:
     name: Record the demo tour (mock)
     if: github.repository == 'CopilotKit/OpenBot' && inputs.which != 'real'
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 13
     permissions:
       contents: read
@@ -120,10 +124,6 @@ jobs:
             (cd ios-shell && xcodegen generate)
           fi
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.3
-
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: DerivedData-Debug
@@ -162,6 +162,8 @@ jobs:
         run: |
           echo "$(date +%s) web-and-mock" >> "$RUNNER_TEMP/timing"
           mkdir -p "$GITHUB_WORKSPACE/artifacts/video"
+          unzip -q bun-darwin-aarch64.zip
+          export PATH="$PWD/bun-darwin-aarch64:$PATH"
           MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun --no-install workbench/mock-server.ts > "$GITHUB_WORKSPACE/artifacts/mock-a.log" 2>&1 &
           APP_PORT=3010 SERVER_PORT=3001 nohup bun --no-install serve.ts > "$GITHUB_WORKSPACE/artifacts/app-a.log" 2>&1 &
           for i in {1..30}; do
