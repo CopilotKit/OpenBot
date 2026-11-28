@@ -114,7 +114,7 @@ jobs:
           bun test __tests__
           npx expo prebuild --platform android --no-install --clean
           sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g/' android/gradle.properties
-          echo "org.gradle.caching=true" >> android/gradle.properties
+          printf '\norg.gradle.caching=true\n' >> android/gradle.properties
 
       - name: Build the release APK with the test hooks (x86_64)
         timeout-minutes: 20
@@ -163,7 +163,7 @@ jobs:
           python3 rn-shell/ci/run_flows.py --platform android --suite mock --artifacts "$ARTIFACTS" --only "$ONLY"
 
       - name: Run the real-backend suite
-        if: always() && steps.mock.conclusion != 'cancelled'
+        if: always() && (steps.mock.conclusion == 'success' || steps.mock.conclusion == 'failure')
         timeout-minutes: 12
         env:
           OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
