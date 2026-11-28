@@ -126,6 +126,18 @@ class ShellTestCase: XCTestCase {
 
     enum Tab: String { case conversations, home, bots }
 
+    /// Taps a tab and makes sure it took (a tap right after the first page drew was lost once, in
+    /// run 46156469394): a second tap if the tab is not selected 4 s later.
+    func tapTab(_ app: XCUIApplication, _ which: Tab) {
+        let button = tab(app, which)
+        button.tap()
+        let selected = NSPredicate(format: "isSelected == true")
+        if XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: selected, object: button)], timeout: 4) != .completed {
+            note("the \(which) tab tap did not take; tapping again")
+            button.tap()
+        }
+    }
+
     func tab(_ app: XCUIApplication, _ tab: Tab) -> XCUIElement {
         app.buttons["tab-\(tab.rawValue)"]
     }

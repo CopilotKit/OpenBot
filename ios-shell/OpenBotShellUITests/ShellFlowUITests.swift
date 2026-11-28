@@ -692,7 +692,7 @@ final class ShellFlowUITests: ShellTestCase {
     func testChatsStackBackByControlAndSwipe() throws {
         let app = launchSignedIn()
         XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
-        tab(app, .conversations).tap()
+        tapTab(app, .conversations)
         XCTAssertTrue(chatsList(app).waitForExistence(timeout: 15), "no Chats list")
         app.webViews.firstMatch.swipeUp()
         sleep(1)
@@ -742,7 +742,7 @@ final class ShellFlowUITests: ShellTestCase {
     func testBotsStackKeepsBotsHighlighted() throws {
         let app = launchSignedIn()
         XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
-        tab(app, .bots).tap()
+        tapTab(app, .bots)
         XCTAssertTrue(botsList(app).waitForExistence(timeout: 15), "no Bots list")
         sleep(1)
         screenshot("1-bots-list")
@@ -760,12 +760,12 @@ final class ShellFlowUITests: ShellTestCase {
     func testTabsRememberWhereTheyWereLeft() throws {
         let app = launchSignedIn()
         XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
-        tab(app, .conversations).tap()
+        tapTab(app, .conversations)
         XCTAssertTrue(chatsList(app).waitForExistence(timeout: 15))
         XCTAssertTrue(openConversation(app, "Quarterly forecast"))
-        tab(app, .bots).tap()
+        tapTab(app, .bots)
         XCTAssertTrue(botsList(app).waitForExistence(timeout: 15))
-        tab(app, .conversations).tap()
+        tapTab(app, .conversations)
         let transcript = firstExisting([webText(app, "Here is the first draft."), webText(app, "Can you draft the quarterly forecast?")], timeout: 15)
         XCTAssertNotNil(transcript, "the conversation left open in Chats was not there on return")
         // The conversation takes the focus on return: the keyboard hides the tab bar until it goes.
@@ -773,7 +773,7 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertTrue(tab(app, .conversations).waitForExistence(timeout: 5))
         XCTAssertTrue(tab(app, .conversations).isSelected)
         screenshot("1-chats-where-it-was-left")
-        tab(app, .conversations).tap()
+        tapTab(app, .conversations)
         XCTAssertTrue(chatsList(app).waitForExistence(timeout: 10), "tapping the current tab did not pop to its list")
         screenshot("2-chats-popped-to-root")
 
@@ -798,7 +798,7 @@ final class ShellFlowUITests: ShellTestCase {
     func testSwipeBackSlidesToTheList() throws {
         let app = launchSignedIn()
         XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
-        tab(app, .conversations).tap()
+        tapTab(app, .conversations)
         XCTAssertTrue(chatsList(app).waitForExistence(timeout: 15))
         XCTAssertTrue(openConversation(app, "Quarterly forecast"))
         XCTAssertTrue(waitForState(app, "back=page", timeout: 5), "\(debugState(app))")
