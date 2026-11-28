@@ -1,9 +1,9 @@
 {
-  "checkedAt": "2026-11-18",
+  "checkedAt": "2026-11-28",
   "engines": {
     "agent-adk": {
       "clients": {
-        "google-adk": "2.14.1",
+        "google-adk": "2.15.1",
         "google-genai": "2.34.0",
         "litellm": "1.105.7",
         "openai": "2.54.0"
@@ -46,6 +46,7 @@
             "gemini-4-argon",
             "gemini-4-carbon",
             "gemini-4-hydrogen",
+            "gemini-4-neon",
             "gemini-flash-latest",
             "gemini-flash-lite-latest",
             "gemini-pro-latest"
@@ -54,8 +55,10 @@
             "gemini-2.5-flash-lite": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_...",
             "gemini-omni-1.1-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
             "gemini-omni-1.2-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
-            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with a single word: \"OK\". I should follow the instruction exactly.</thought>OK",
-            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with a single word: \"OK\". I should follow this instruction exactly.</thought>OK"
+            "gemini-omni-flash-preview": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
+            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with the single word \"OK\". The user instruction is: \"Reply with the single word OK.\" My internal name is \"openbot\". I should...",
+            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with the single word \"OK\". I should follow this instruction strictly.</thought>OK",
+            "genie-4": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'models/genie-4 only supports real-time bidirectional streaming via WebSocket (bidiGenerateContent). Please use the Gemini Live API (bidiGenerateContent via WebSocket) instead of generateContent.', 'status': 'INVALID_ARGUMENT'}}]"
           }
         },
         "openai": {
@@ -81,12 +84,16 @@
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-6-astra",
+            "gpt-6-astra-healthcare",
             "gpt-6-luna",
             "gpt-6-sol",
             "gpt-6.1-sol",
+            "gpt-6.1-sol-healthcare",
             "gpt-6.1-terra",
             "gpt-6.2-astra",
+            "gpt-6.2-astra-healthcare",
             "gpt-6.2-sol",
+            "gpt-6.2-sol-healthcare",
             "o3",
             "o3-pro"
           ],
@@ -96,9 +103,9 @@
     },
     "agent-ag2": {
       "clients": {
-        "ag2": "1.3.2",
-        "anthropic": "2.10.0",
-        "openai": "3.55.0"
+        "ag2": "1.3.4",
+        "anthropic": "2.14.0",
+        "openai": "3.60.0"
       },
       "providers": {
         "anthropic": {
@@ -138,6 +145,7 @@
             "gemini-4-argon",
             "gemini-4-carbon",
             "gemini-4-hydrogen",
+            "gemini-4-neon",
             "gemini-flash-latest",
             "gemini-flash-lite-latest",
             "gemini-pro-latest"
@@ -145,8 +153,10 @@
           "refused": {
             "gemini-omni-1.1-flash": "BadRequestError('Error code: 400')",
             "gemini-omni-1.2-flash": "BadRequestError('Error code: 400')",
-            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with the single word \"OK\". I should comply with the instruction.</thought>OK",
-            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user is asking for a specific single-word response: \"OK\". No tool calls are needed. The response should be exactly \"OK\".</thought>OK"
+            "gemini-omni-flash-preview": "BadRequestError('Error code: 400')",
+            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with a single word: \"OK\". I should follow the instruction precisely.</thought>OK",
+            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with a single word: \"OK\". This is a simple instruction. Plan: 1. Respond with \"OK\".</thought>OK",
+            "genie-4": "BadRequestError('Error code: 400')"
           }
         },
         "openai": {
@@ -172,12 +182,16 @@
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-6-astra",
+            "gpt-6-astra-healthcare",
             "gpt-6-luna",
             "gpt-6-sol",
             "gpt-6.1-sol",
+            "gpt-6.1-sol-healthcare",
             "gpt-6.1-terra",
             "gpt-6.2-astra",
+            "gpt-6.2-astra-healthcare",
             "gpt-6.2-sol",
+            "gpt-6.2-sol-healthcare",
             "o3",
             "o3-pro"
           ],
@@ -231,14 +245,17 @@
             "gemini-4-argon": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
             "gemini-4-carbon": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
             "gemini-4-hydrogen": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-4-neon": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
             "gemini-decision-1": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
             "gemini-flash-latest": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
             "gemini-flash-lite-latest": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
             "gemini-omni-1.1-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
             "gemini-omni-1.2-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-omni-flash-preview": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
             "gemini-pro-latest": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
             "gemma-4-26b-a4b-it": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
-            "gemma-4-31b-it": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei..."
+            "gemma-4-31b-it": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "genie-4": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei..."
           }
         },
         "openai": {
@@ -264,12 +281,16 @@
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-6-astra",
+            "gpt-6-astra-healthcare",
             "gpt-6-luna",
             "gpt-6-sol",
             "gpt-6.1-sol",
+            "gpt-6.1-sol-healthcare",
             "gpt-6.1-terra",
             "gpt-6.2-astra",
+            "gpt-6.2-astra-healthcare",
             "gpt-6.2-sol",
+            "gpt-6.2-sol-healthcare",
             "o3",
             "o3-pro"
           ],
@@ -279,7 +300,7 @@
     },
     "agent-antigravity": {
       "clients": {
-        "google-genai": "3.5.0"
+        "google-genai": "3.6.1"
       },
       "providers": {
         "google": {
@@ -299,6 +320,7 @@
             "gemini-4-argon",
             "gemini-4-carbon",
             "gemini-4-hydrogen",
+            "gemini-4-neon",
             "gemini-flash-latest",
             "gemini-flash-lite-latest",
             "gemini-pro-latest"
@@ -306,7 +328,9 @@
           "refused": {
             "gemini-2.5-flash-lite": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 404, Message: This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started)., Status: NOT_FOU...",
             "gemini-omni-1.1-flash": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []\") (HTTP 400)",
-            "gemini-omni-1.2-flash": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []\") (HTTP 400)"
+            "gemini-omni-1.2-flash": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []\") (HTTP 400)",
+            "gemini-omni-flash-preview": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []\") (HTTP 400)",
+            "genie-4": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 400, Message: models/genie-4 only supports real-time bidirectional streaming via WebSocket (bidiGenerateContent). Please use the Gemini Live API (bidiGenerateContent via WebSocket) instead of generateContent., Status: INVALID_ARGUMENT, Details: []: Error 400, Message: models/genie-4 only supports real..."
           }
         }
       }
@@ -314,7 +338,7 @@
     "agent-claude-sdk": {
       "clients": {
         "ag-ui-claude-sdk": "0.1.5",
-        "anthropic": "2.10.0",
+        "anthropic": "2.14.0",
         "claude-agent-sdk": "0.2.182"
       },
       "providers": {
@@ -342,7 +366,7 @@
     },
     "agent-crewai": {
       "clients": {
-        "crewai": "1.15.41",
+        "crewai": "1.15.45",
         "litellm": "1.105.7",
         "openai": "2.54.0"
       },
@@ -384,17 +408,20 @@
             "gemini-4-argon",
             "gemini-4-carbon",
             "gemini-4-hydrogen",
+            "gemini-4-neon",
             "gemini-flash-latest",
             "gemini-flash-lite-latest",
             "gemini-pro-latest"
           ],
           "refused": {
-            "gemini-2.5-flash-lite": "thread=model-compat-811af2816788 run=run-811af2816788: CrewAI flow failed; see server logs",
-            "gemini-decision-1": "thread=model-compat-53e7cc2c2ba7 run=run-53e7cc2c2ba7: CrewAI flow failed; see server logs",
-            "gemini-omni-1.1-flash": "thread=model-compat-bb5958474292 run=run-bb5958474292: CrewAI flow failed; see server logs",
-            "gemini-omni-1.2-flash": "thread=model-compat-d99e32be6322 run=run-d99e32be6322: CrewAI flow failed; see server logs",
-            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with the single word \"OK\". This is a direct instruction. I should comply.</thought>OK",
-            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with a single word: \"OK\". This is a simple constraint following task. No tools are needed.</thought>OK"
+            "gemini-2.5-flash-lite": "thread=model-compat-17651c0061ff run=run-17651c0061ff: CrewAI flow failed; see server logs",
+            "gemini-decision-1": "thread=model-compat-223669ceb979 run=run-223669ceb979: CrewAI flow failed; see server logs",
+            "gemini-omni-1.1-flash": "thread=model-compat-883a767a974b run=run-883a767a974b: CrewAI flow failed; see server logs",
+            "gemini-omni-1.2-flash": "thread=model-compat-f438233a82bc run=run-f438233a82bc: CrewAI flow failed; see server logs",
+            "gemini-omni-flash-preview": "thread=model-compat-66b17b7ef1fd run=run-66b17b7ef1fd: CrewAI flow failed; see server logs",
+            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants a single word response: \"OK\". I should comply with the instruction.</thought>OK",
+            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user is asking me to reply with the single word \"OK\". This is a very simple request. I should just respond with \"OK\".</thought>OK",
+            "genie-4": "thread=model-compat-6dd6bdaef9af run=run-6dd6bdaef9af: CrewAI flow failed; see server logs"
           }
         },
         "openai": {
@@ -420,12 +447,16 @@
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-6-astra",
+            "gpt-6-astra-healthcare",
             "gpt-6-luna",
             "gpt-6-sol",
             "gpt-6.1-sol",
+            "gpt-6.1-sol-healthcare",
             "gpt-6.1-terra",
             "gpt-6.2-astra",
+            "gpt-6.2-astra-healthcare",
             "gpt-6.2-sol",
+            "gpt-6.2-sol-healthcare",
             "o3",
             "o3-pro"
           ],
@@ -444,7 +475,7 @@
         "langchain-google-genai": "4.4.3",
         "langchain-openai": "1.8.1",
         "langgraph": "1.2.22",
-        "openai": "3.55.0"
+        "openai": "3.60.0"
       },
       "providers": {
         "anthropic": {
@@ -500,6 +531,7 @@
             "gemini-4-argon",
             "gemini-4-carbon",
             "gemini-4-hydrogen",
+            "gemini-4-neon",
             "gemini-flash-latest",
             "gemini-flash-lite-latest",
             "gemini-pro-latest"
@@ -507,8 +539,10 @@
           "refused": {
             "gemini-omni-1.1-flash": "Error code: 400",
             "gemini-omni-1.2-flash": "Error code: 400",
-            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants a single-word response: \"OK\". This is a direct instruction to follow a specific format. Plan: 1. Acknowledge the instruction. 2. Output ...",
-            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants a specific single-word response: \"OK\". I should comply with this request exactly.</thought>OK"
+            "gemini-omni-flash-preview": "Error code: 400",
+            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with the single word \"OK\". I should comply with this instruction.</thought>OK",
+            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants a specific response: \"OK\". The instruction is simple: \"Reply with the single word OK.\" I should follow this instruction precisely.</thou...",
+            "genie-4": "Error code: 400"
           }
         },
         "openai": {
@@ -534,12 +568,16 @@
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-6-astra",
+            "gpt-6-astra-healthcare",
             "gpt-6-luna",
             "gpt-6-sol",
             "gpt-6.1-sol",
+            "gpt-6.1-sol-healthcare",
             "gpt-6.1-terra",
             "gpt-6.2-astra",
+            "gpt-6.2-astra-healthcare",
             "gpt-6.2-sol",
+            "gpt-6.2-sol-healthcare",
             "o3",
             "o3-pro"
           ],
@@ -596,6 +634,7 @@
             "gemini-4-argon",
             "gemini-4-carbon",
             "gemini-4-hydrogen",
+            "gemini-4-neon",
             "gemini-flash-latest",
             "gemini-flash-lite-latest",
             "gemini-pro-latest"
@@ -604,8 +643,10 @@
             "gemini-2.5-flash-lite": "Error code: 404 - [{\"error\":{\"code\":404,\"message\":\"This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).\",\"status\":\"NOT_FOUND\"}}] Troubleshooting URL: https://docs.langchain.com/oss/...",
             "gemini-omni-1.1-flash": "Error code: 400 - [{\"error\":{\"code\":400,\"message\":\"This model only supports Interactions API.\",\"status\":\"INVALID_ARGUMENT\"}}]",
             "gemini-omni-1.2-flash": "Error code: 400 - [{\"error\":{\"code\":400,\"message\":\"This model only supports Interactions API.\",\"status\":\"INVALID_ARGUMENT\"}}]",
-            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with a single word: \"OK\". This is a direct instruction for a specific output. I should comply.</thought>OK",
-            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants a single word response: \"OK\".</thought>OK"
+            "gemini-omni-flash-preview": "Error code: 400 - [{\"error\":{\"code\":400,\"message\":\"This model only supports Interactions API.\",\"status\":\"INVALID_ARGUMENT\"}}]",
+            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants a single word \"OK\" as a response. I should comply with this request.</thought>OK",
+            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user is asking for a specific single-word response: \"OK\". I should follow this instruction exactly.</thought>OK",
+            "genie-4": "Error code: 400 - [{\"error\":{\"code\":400,\"message\":\"models/genie-4 only supports real-time bidirectional streaming via WebSocket (bidiGenerateContent). Please use the Gemini Live API (bidiGenerateContent via WebSocket) instead of generateContent.\",\"status\":\"INVALID_ARGUMENT\"}}]"
           }
         },
         "openai": {
@@ -631,12 +672,16 @@
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-6-astra",
+            "gpt-6-astra-healthcare",
             "gpt-6-luna",
             "gpt-6-sol",
             "gpt-6.1-sol",
+            "gpt-6.1-sol-healthcare",
             "gpt-6.1-terra",
             "gpt-6.2-astra",
+            "gpt-6.2-astra-healthcare",
             "gpt-6.2-sol",
+            "gpt-6.2-sol-healthcare",
             "o3",
             "o3-pro"
           ],
@@ -646,8 +691,8 @@
     },
     "agent-langroid": {
       "clients": {
-        "google-genai": "3.5.0",
-        "langroid": "0.69.24",
+        "google-genai": "3.6.1",
+        "langroid": "0.70.5",
         "litellm": "1.105.7",
         "openai": "2.54.0"
       },
@@ -689,6 +734,7 @@
             "gemini-4-argon",
             "gemini-4-carbon",
             "gemini-4-hydrogen",
+            "gemini-4-neon",
             "gemini-flash-latest",
             "gemini-flash-lite-latest",
             "gemini-pro-latest"
@@ -697,8 +743,10 @@
             "gemini-2.5-flash-lite": "Agent error: Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_FOUND'}}]",
             "gemini-omni-1.1-flash": "Agent error: Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
             "gemini-omni-1.2-flash": "Agent error: Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
-            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with the single word \"OK\". I should comply with this instruction.</thought>OK",
-            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with a single word: \"OK\". I should follow this instruction exactly.</thought>OK"
+            "gemini-omni-flash-preview": "Agent error: Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
+            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with the single word \"OK\". This is a direct instruction. Plan: 1. Respond with \"OK\".</thought>OK",
+            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with the single word \"OK\". I should follow this instruction exactly.</thought>OK",
+            "genie-4": "Agent error: Error code: 400 - [{'error': {'code': 400, 'message': 'models/genie-4 only supports real-time bidirectional streaming via WebSocket (bidiGenerateContent). Please use the Gemini Live API (bidiGenerateContent via WebSocket) instead of generateContent.', 'status': 'INVALID_ARGUMENT'}}]"
           }
         },
         "openai": {
@@ -724,12 +772,16 @@
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-6-astra",
+            "gpt-6-astra-healthcare",
             "gpt-6-luna",
             "gpt-6-sol",
             "gpt-6.1-sol",
+            "gpt-6.1-sol-healthcare",
             "gpt-6.1-terra",
             "gpt-6.2-astra",
+            "gpt-6.2-astra-healthcare",
             "gpt-6.2-sol",
+            "gpt-6.2-sol-healthcare",
             "o3",
             "o3-pro"
           ],
@@ -781,6 +833,7 @@
             "gemini-4-argon",
             "gemini-4-carbon",
             "gemini-4-hydrogen",
+            "gemini-4-neon",
             "gemini-flash-latest",
             "gemini-flash-lite-latest",
             "gemini-pro-latest"
@@ -789,8 +842,10 @@
             "gemini-2.5-flash-lite": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_...",
             "gemini-omni-1.1-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
             "gemini-omni-1.2-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
+            "gemini-omni-flash-preview": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
             "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with the single word \"OK\". I should comply with this instruction.</thought>OK",
-            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with a single word: \"OK\". I should follow this instruction exactly.</thought>OK"
+            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with a single word: \"OK\". I should follow this instruction exactly.</thought>OK",
+            "genie-4": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'models/genie-4 only supports real-time bidirectional streaming via WebSocket (bidiGenerateContent). Please use the Gemini Live API (bidiGenerateContent via WebSocket) instead of generateContent.', 'status': 'INVALID_ARGUMENT'}}]"
           }
         },
         "openai": {
@@ -816,12 +871,16 @@
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-6-astra",
+            "gpt-6-astra-healthcare",
             "gpt-6-luna",
             "gpt-6-sol",
             "gpt-6.1-sol",
+            "gpt-6.1-sol-healthcare",
             "gpt-6.1-terra",
             "gpt-6.2-astra",
+            "gpt-6.2-astra-healthcare",
             "gpt-6.2-sol",
+            "gpt-6.2-sol-healthcare",
             "o3",
             "o3-pro"
           ],
@@ -873,17 +932,20 @@
             "gemini-4-argon",
             "gemini-4-carbon",
             "gemini-4-hydrogen",
+            "gemini-4-neon",
             "gemini-flash-latest",
             "gemini-flash-lite-latest",
             "gemini-pro-latest"
           ],
           "refused": {
-            "gemini-2.5-flash-lite": "HTTP 500: Not Found",
+            "gemini-2.5-flash-lite": "HTTP 500: Not Found; logged: stack: \"AI_APICallError: Not Found\\n at <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:4216:15)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:3618:30)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/...",
             "gemini-decision-1": "HTTP 500: Not Found; logged: stack: \"AI_APICallError: Not Found\\n at <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:4216:15)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:3618:30)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/...",
             "gemini-omni-1.1-flash": "HTTP 500: Bad Request; logged: stack: \"AI_APICallError: Bad Request\\n at <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:4216:15)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:3618:30)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sd...",
             "gemini-omni-1.2-flash": "HTTP 500: Bad Request; logged: stack: \"AI_APICallError: Bad Request\\n at <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:4216:15)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:3618:30)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sd...",
-            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with a single word: \"OK\". * Prompt: \"Reply with the single word OK.\" * Instruction: Answer the question briefly and correctl...",
-            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants a response consisting of a single word: \"OK\". Constraint checklist & Confidence score: 1. Single word? Yes. 2. Word is \"OK\"? Yes. Confid..."
+            "gemini-omni-flash-preview": "HTTP 500: Bad Request; logged: stack: \"AI_APICallError: Bad Request\\n at <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:4216:15)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:3618:30)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sd...",
+            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with the single word \"OK\". Constraint Checklist & Confidence Score: 1. Reply with single word OK? Yes. 2. Briefly? Yes. 3. C...",
+            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants a response consisting of the single word \"OK\". Constraint Checklist & Confidence Score: 1. Reply with the single word OK? Yes. Confidenc...",
+            "genie-4": "HTTP 500: Bad Request; logged: stack: \"AI_APICallError: Bad Request\\n at <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:4216:15)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:3618:30)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sd..."
           }
         },
         "openai": {
@@ -909,12 +971,16 @@
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-6-astra",
+            "gpt-6-astra-healthcare",
             "gpt-6-luna",
             "gpt-6-sol",
             "gpt-6.1-sol",
+            "gpt-6.1-sol-healthcare",
             "gpt-6.1-terra",
             "gpt-6.2-astra",
+            "gpt-6.2-astra-healthcare",
             "gpt-6.2-sol",
+            "gpt-6.2-sol-healthcare",
             "o3",
             "o3-pro"
           ],
@@ -926,7 +992,7 @@
       "clients": {
         "agent-framework-core": "1.26.0",
         "anthropic": "1.17.0",
-        "openai": "3.55.0"
+        "openai": "3.60.0"
       },
       "providers": {
         "anthropic": {
@@ -968,14 +1034,17 @@
             "gemini-4-argon": "An internal error has occurred while streaming events.",
             "gemini-4-carbon": "An internal error has occurred while streaming events.",
             "gemini-4-hydrogen": "An internal error has occurred while streaming events.",
+            "gemini-4-neon": "An internal error has occurred while streaming events.",
             "gemini-decision-1": "An internal error has occurred while streaming events.",
             "gemini-flash-latest": "An internal error has occurred while streaming events.",
             "gemini-flash-lite-latest": "An internal error has occurred while streaming events.",
             "gemini-omni-1.1-flash": "An internal error has occurred while streaming events.",
             "gemini-omni-1.2-flash": "An internal error has occurred while streaming events.",
+            "gemini-omni-flash-preview": "An internal error has occurred while streaming events.",
             "gemini-pro-latest": "An internal error has occurred while streaming events.",
             "gemma-4-26b-a4b-it": "An internal error has occurred while streaming events.",
-            "gemma-4-31b-it": "An internal error has occurred while streaming events."
+            "gemma-4-31b-it": "An internal error has occurred while streaming events.",
+            "genie-4": "An internal error has occurred while streaming events."
           }
         },
         "openai": {
@@ -1001,12 +1070,16 @@
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-6-astra",
+            "gpt-6-astra-healthcare",
             "gpt-6-luna",
             "gpt-6-sol",
             "gpt-6.1-sol",
+            "gpt-6.1-sol-healthcare",
             "gpt-6.1-terra",
             "gpt-6.2-astra",
+            "gpt-6.2-astra-healthcare",
             "gpt-6.2-sol",
+            "gpt-6.2-sol-healthcare",
             "o3",
             "o3-pro"
           ],
@@ -1018,8 +1091,8 @@
       "clients": {
         "anthropic": "1.17.0",
         "google-genai": "2.34.0",
-        "openai": "3.55.0",
-        "pydantic-ai-slim": "2.70.0"
+        "openai": "3.60.0",
+        "pydantic-ai-slim": "2.77.0"
       },
       "providers": {
         "anthropic": {
@@ -1061,14 +1134,17 @@
             "gemini-4-argon": "status_code: 404, model_name: gemini-4-argon, body:",
             "gemini-4-carbon": "status_code: 404, model_name: gemini-4-carbon, body:",
             "gemini-4-hydrogen": "status_code: 404, model_name: gemini-4-hydrogen, body:",
+            "gemini-4-neon": "status_code: 404, model_name: gemini-4-neon, body:",
             "gemini-decision-1": "status_code: 404, model_name: gemini-decision-1, body:",
             "gemini-flash-latest": "status_code: 404, model_name: gemini-flash-latest, body:",
             "gemini-flash-lite-latest": "status_code: 404, model_name: gemini-flash-lite-latest, body:",
             "gemini-omni-1.1-flash": "status_code: 404, model_name: gemini-omni-1.1-flash, body:",
             "gemini-omni-1.2-flash": "status_code: 404, model_name: gemini-omni-1.2-flash, body:",
+            "gemini-omni-flash-preview": "status_code: 404, model_name: gemini-omni-flash-preview, body:",
             "gemini-pro-latest": "status_code: 404, model_name: gemini-pro-latest, body:",
             "gemma-4-26b-a4b-it": "status_code: 404, model_name: gemma-4-26b-a4b-it, body:",
-            "gemma-4-31b-it": "status_code: 404, model_name: gemma-4-31b-it, body:"
+            "gemma-4-31b-it": "status_code: 404, model_name: gemma-4-31b-it, body:",
+            "genie-4": "status_code: 404, model_name: genie-4, body:"
           }
         },
         "openai": {
@@ -1094,12 +1170,16 @@
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-6-astra",
+            "gpt-6-astra-healthcare",
             "gpt-6-luna",
             "gpt-6-sol",
             "gpt-6.1-sol",
+            "gpt-6.1-sol-healthcare",
             "gpt-6.1-terra",
             "gpt-6.2-astra",
+            "gpt-6.2-astra-healthcare",
             "gpt-6.2-sol",
+            "gpt-6.2-sol-healthcare",
             "o3",
             "o3-pro"
           ],
@@ -1111,7 +1191,7 @@
       "clients": {
         "litellm": "1.105.7",
         "openai": "2.54.0",
-        "strands-agents": "1.65.0"
+        "strands-agents": "1.68.0"
       },
       "providers": {
         "anthropic": {
@@ -1151,6 +1231,7 @@
             "gemini-4-argon",
             "gemini-4-carbon",
             "gemini-4-hydrogen",
+            "gemini-4-neon",
             "gemini-flash-latest",
             "gemini-flash-lite-latest",
             "gemini-pro-latest"
@@ -1159,8 +1240,10 @@
             "gemini-2.5-flash-lite": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_...",
             "gemini-omni-1.1-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
             "gemini-omni-1.2-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
-            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants a single-word response: \"OK\". No tools are needed. Compliance with the constraint is required.</thought>OK",
-            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants a specific response: \"OK\". The instruction is very clear and simple. No tool calls are needed.</thought>OK"
+            "gemini-omni-flash-preview": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
+            "gemma-4-26b-a4b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with the single word \"OK\". I should comply with this request directly.</thought>OK",
+            "gemma-4-31b-it": "answered with its reasoning in the reply text: <thought>The user wants me to reply with the single word \"OK\". This is a simple request and does not require any tool calls.</thought>OK",
+            "genie-4": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'models/genie-4 only supports real-time bidirectional streaming via WebSocket (bidiGenerateContent). Please use the Gemini Live API (bidiGenerateContent via WebSocket) instead of generateContent.', 'status': 'INVALID_ARGUMENT'}}]"
           }
         },
         "openai": {
@@ -1186,12 +1269,16 @@
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-6-astra",
+            "gpt-6-astra-healthcare",
             "gpt-6-luna",
             "gpt-6-sol",
             "gpt-6.1-sol",
+            "gpt-6.1-sol-healthcare",
             "gpt-6.1-terra",
             "gpt-6.2-astra",
+            "gpt-6.2-astra-healthcare",
             "gpt-6.2-sol",
+            "gpt-6.2-sol-healthcare",
             "o3",
             "o3-pro"
           ],
