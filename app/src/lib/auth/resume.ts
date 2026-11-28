@@ -41,6 +41,24 @@ export function verifierPathFor(flowId: string | undefined): string | null {
     : null;
 }
 
+/** Resume the shell's first sign-in in the same system browser that opened the hand-off. */
+export function signInResumePath(
+  flowId?: string,
+  shellHandoff?: string,
+): string | null {
+  const verifier = verifierPathFor(flowId);
+  if (verifier || !shellHandoff || shellHandoff.length > 256) return verifier;
+  const input = new URLSearchParams(shellHandoff);
+  const challenge = input.get("challenge") ?? "";
+  if (!/^[A-Za-z0-9_-]{43}$/.test(challenge)) return null;
+  const query = new URLSearchParams({ challenge });
+  const platform = input.get("platform");
+  if (platform === "ios" || platform === "android")
+    query.set("platform", platform);
+  if (input.get("callback") === "https") query.set("callback", "https");
+  return `/api/auth/shell/handoff?${query}`;
+}
+
 /**
  * Where sign-in should send the browser back to: the verifier carrying the handle, or the origin
  * itself when there is none. Pure, so the resume is pinned without a DOM, a router or Better Auth.
@@ -48,7 +66,8 @@ export function verifierPathFor(flowId: string | undefined): string | null {
 export function resumeUrlFor(
   origin: string,
   flowId: string | undefined,
+  shellHandoff?: string,
 ): string {
-  const path = verifierPathFor(flowId);
+  const path = signInResumePath(flowId, shellHandoff);
   return path === null ? origin : `${origin}${path}`;
 }
