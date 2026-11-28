@@ -26,11 +26,17 @@ final class DemoTourUITests: ShellTestCase {
     func testDemoTour() throws {
         note("video-mark start \(Date().timeIntervalSince1970)")
         defer { note("video-mark end \(Date().timeIntervalSince1970)") }
-        var app = launch(base: ShellTestCase.mockA, moment: "tour")
+        // Not ephemeral: the system's consent alert, as a person sees it.
+        var app = launch(base: ShellTestCase.mockA, moment: "tour", ephemeral: false)
         let signIn = app.buttons["sign-in-button"]
         XCTAssertTrue(signIn.waitForExistence(timeout: 20))
         pause(2)
         signIn.tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if let consent = firstExisting([springboard.alerts.buttons["Continue"], springboard.buttons["Continue"]], timeout: 10) {
+            pause(1.5)
+            consent.tap()
+        }
 
         // The system sheet with the mock's page, followed by hand.
         let link = app.webViews.links["Sign in as test person"]
@@ -100,10 +106,18 @@ final class DemoTourUITests: ShellTestCase {
         _ = webText(app, "Start a conversation").waitForExistence(timeout: 10)
         pause(1.5)
 
-        // Sign out from the Account menu: the native sign-in screen.
-        tapWhenThere(webElement(app, label: "Account"), "Account button", timeout: 10)
+        // The native More button: Reload (the skeleton, as long as it really takes), then Sign out.
+        let more = app.buttons["more-button"]
+        tapWhenThere(more, "More button", timeout: 10)
         pause(1.2)
-        tapWhenThere(webElement(app, label: "Sign out"), "Sign out item")
+        tapWhenThere(app.buttons["Reload"].firstMatch, "Reload")
+        _ = webText(app, "Start a conversation").waitForExistence(timeout: 15)
+        pause(1.5)
+        tapWhenThere(more, "More button", timeout: 10)
+        pause(1.2)
+        tapWhenThere(app.buttons["Sign out"].firstMatch, "Sign out")
+        pause(1.2)
+        tapWhenThere(app.alerts["Sign out of OpenBot?"].buttons["Sign out"], "confirmation")
         XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 20), "demo: Sign out did not return")
         pause(2)
         app.terminate()

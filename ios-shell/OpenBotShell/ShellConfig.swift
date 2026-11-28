@@ -28,6 +28,10 @@ struct ShellConfig {
     /// Draws the whole app, web view included, in dark mode (XCUIDevice's appearance switch does not
     /// reach the app on the CI simulator).
     var forceDark = false
+    /// Waits this long before the first page load when signed in, so tests can see the skeleton.
+    var delayFirstLoadSeconds: Double?
+    /// Plants `better-auth.session_token=<value>` (the plain name the http mock uses).
+    var testPlainSessionCookie: String?
 
     static func fromEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> ShellConfig {
         let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0"
@@ -56,6 +60,12 @@ struct ShellConfig {
             config.forceOfflineSeconds = seconds
         }
         config.forceDark = environment["OPENBOT_SHELL_FORCE_DARK"] == "1"
+        if let value = environment["OPENBOT_SHELL_DELAY_FIRST_LOAD_SECONDS"], let seconds = Double(value), seconds > 0 {
+            config.delayFirstLoadSeconds = seconds
+        }
+        if let value = environment["OPENBOT_SHELL_TEST_PLAIN_SESSION_COOKIE"], !value.isEmpty {
+            config.testPlainSessionCookie = value
+        }
         #endif
         return config
     }

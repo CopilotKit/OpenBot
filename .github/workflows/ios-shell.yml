@@ -6,7 +6,7 @@ name: iOS shell
 #
 # Artifacts: ios-shell-<run id> (everything that is not a real account's), ios-shell-shots-<run id>
 # (downscaled screenshots, SUMMARY.md, diagnostics.jsonl) and, only when a test used a real account,
-# ios-shell-private-<run id>. Simulator only: no signing.
+# ios-shell-private-<run id>. Recordings are made by ios-shell-video.yml. Simulator only: no signing.
 #
 # Optional repository secrets for the tests against a real account (skipped when empty):
 # OPENBOT_SHELL_TEST_SESSION, OPENBOT_SHELL_GOOGLE_EMAIL, OPENBOT_SHELL_GOOGLE_PASSWORD,
@@ -182,7 +182,7 @@ jobs:
             2>&1 | tee xcodebuild-build-release.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build-release.log
           app="$(ls -d DerivedDataRelease/Build/Products/Release-iphonesimulator/OpenBotShell.app)"
-          found="$(strings -a "$app/OpenBotShell" | grep -E 'OPENBOT_SHELL_(TEST_SESSION_COOKIE|TEST_STALE_SESSION|FORCE_OFFLINE|FORCE_DARK|HANDOFF_AUTO|DEBUG_SHEET_URL|PLAIN_WEBVIEW|RESET)|debug-state' || true)"
+          found="$(strings -a "$app/OpenBotShell" | grep -E 'OPENBOT_SHELL_(TEST_SESSION_COOKIE|TEST_PLAIN_SESSION_COOKIE|TEST_STALE_SESSION|FORCE_OFFLINE|FORCE_DARK|DELAY_FIRST_LOAD|HANDOFF_AUTO|DEBUG_SHEET_URL|PLAIN_WEBVIEW|RESET)|debug-state' || true)"
           if [ -n "$found" ]; then
             echo "::error::DEBUG-only hooks are in the Release binary:"
             echo "$found"
@@ -223,72 +223,9 @@ jobs:
             -derivedDataPath DerivedData \
             -resultBundlePath TestResults.xcresult \
             -parallel-testing-enabled NO \
-            -skip-testing:OpenBotShellUITests/DemoTourUITests \
             -skip-testing:OpenBotShellUITests/RealBackendUITests \
-            -skip-testing:OpenBotShellUITests/RealBackendDebugUITests/testRealSignedInJourneyWithSessionCookie \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee xcodebuild.log
-
-      - name: Record the real-backend journey (a real account; private artifact only)
-        if: always() && steps.build.outcome == 'success'
-        timeout-minutes: 15
-        env:
-          TEST_RUNNER_OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
-        run: |
-          mkdir -p private-artifacts/video
-          recording_started="$(python3 -c 'import time; print(time.time())')"
-          xcrun simctl io "$SIM_UDID" recordVideo --codec h264 --force private-artifacts/video/real-journey.mp4 > artifacts/video-record-real.log 2>&1 &
-          recorder=$!
-          sleep 3
-          set +e
-          xcodebuild test-without-building \
-            -project ios-shell/OpenBotShell.xcodeproj \
-            -scheme OpenBotShell \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIM_UDID" \
-            -derivedDataPath DerivedData \
-            -resultBundlePath RealJourney.xcresult \
-            -only-testing:OpenBotShellUITests/RealBackendDebugUITests/testRealSignedInJourneyWithSessionCookie \
-            CODE_SIGNING_ALLOWED=NO \
-            > xcodebuild-real-journey.log 2>&1
-          status=$?
-          grep -E "Test Case|error:|SHELL_NOTE" xcodebuild-real-journey.log
-          # SIGINT and wait, so the recorder writes a playable file.
-          kill -INT "$recorder"
-          wait "$recorder"
-          python3 ios-shell/ci/trim_video.py private-artifacts/video/real-journey.mp4 xcodebuild-real-journey.log "$recording_started" || true
-          ls -la private-artifacts/video
-          python3 ios-shell/ci/check_video.py private-artifacts/video/real-journey.mp4 xcodebuild-real-journey.log 30 || status=1
-          exit $status
-
-      - name: Record the demo tour
-        if: always() && steps.build.outcome == 'success' && inputs.real_backend_only != true
-        timeout-minutes: 12
-        run: |
-          mkdir -p artifacts/video
-          recording_started="$(python3 -c 'import time; print(time.time())')"
-          xcrun simctl io "$SIM_UDID" recordVideo --codec h264 --force artifacts/video/demo-tour.mp4 > artifacts/video-record.log 2>&1 &
-          recorder=$!
-          sleep 3
-          set +e
-          xcodebuild test-without-building \
-            -project ios-shell/OpenBotShell.xcodeproj \
-            -scheme OpenBotShell \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIM_UDID" \
-            -derivedDataPath DerivedData \
-            -resultBundlePath DemoTour.xcresult \
-            -only-testing:OpenBotShellUITests/DemoTourUITests/testDemoTour \
-            CODE_SIGNING_ALLOWED=NO \
-            > xcodebuild-demo.log 2>&1
-          status=$?
-          grep -E "Test Case|error:|SHELL_NOTE" xcodebuild-demo.log
-          # SIGINT and wait, so the recorder writes a playable file.
-          kill -INT "$recorder"
-          wait "$recorder"
-          python3 ios-shell/ci/trim_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log "$recording_started" || true
-          ls -la artifacts/video
-          exit $status
 
       - name: Copy the Debug app's diagnostics
         if: always()
@@ -314,17 +251,8 @@ jobs:
         run: |
           status=0
           : > xcodebuild-release.log
-          mkdir -p private-artifacts/video
           for test in testRealFirstScreenAndWebSignIn testRealLockScreenWhenBackendUnreachable testRealGoogleSignInInWebViewAndJourney; do
             xcrun simctl uninstall "$SIM_UDID" ai.openbot.shell || true
-            recorder=""
-            if [ "$test" = testRealGoogleSignInInWebViewAndJourney ]; then
-              # A real account: this recording goes only to the private artifact.
-              recording_started="$(python3 -c 'import time; print(time.time())')"
-              xcrun simctl io "$SIM_UDID" recordVideo --codec h264 --force private-artifacts/video/google-webview-journey.mp4 > artifacts/video-record-google.log 2>&1 &
-              recorder=$!
-              sleep 3
-            fi
             xcodebuild test-without-building \
               -xctestrun "$RELEASE_XCTESTRUN" \
               -destination "platform=iOS Simulator,id=$SIM_UDID" \
@@ -332,11 +260,6 @@ jobs:
               -only-testing:"OpenBotShellUITests/RealBackendUITests/$test" \
               > "xcodebuild-release-$test.log" 2>&1 || status=1
             cat "xcodebuild-release-$test.log" >> xcodebuild-release.log
-            if [ -n "$recorder" ]; then
-              kill -INT "$recorder"
-              wait "$recorder"
-              python3 ios-shell/ci/trim_video.py private-artifacts/video/google-webview-journey.mp4 "xcodebuild-release-$test.log" "$recording_started" || true
-            fi
             container="$(xcrun simctl get_app_container "$SIM_UDID" ai.openbot.shell data 2>/dev/null || true)"
             if [ -n "$container" ] && [ -f "$container/Documents/diagnostics.jsonl" ]; then
               cat "$container/Documents/diagnostics.jsonl" >> artifacts/diagnostics.jsonl
@@ -349,7 +272,7 @@ jobs:
         if: always()
         run: |
           mkdir -p artifacts/attachments
-          for bundle in TestResults.xcresult RealJourney.xcresult DemoTour.xcresult Release-*.xcresult; do
+          for bundle in TestResults.xcresult Release-*.xcresult; do
             [ -d "$bundle" ] || continue
             xcrun xcresulttool export attachments --path "$bundle" --output-path "artifacts/attachments/${bundle%.xcresult}" \
               || echo "could not export attachments from $bundle"
@@ -362,9 +285,8 @@ jobs:
       - name: Write the summary and collect the screenshots
         if: always()
         run: |
-          bundles="$(ls -d TestResults.xcresult RealJourney.xcresult DemoTour.xcresult Release-*.xcresult 2>/dev/null | paste -sd: -)"
-          logs="$(ls xcodebuild.log xcodebuild-real-journey.log xcodebuild-demo.log xcodebuild-release.log 2>/dev/null | paste -sd: -)"
-          if [ -n "$(ls -A private-artifacts/video 2>/dev/null)" ]; then echo "HAS_PRIVATE=1" >> "$GITHUB_ENV"; fi
+          bundles="$(ls -d TestResults.xcresult Release-*.xcresult 2>/dev/null | paste -sd: -)"
+          logs="$(ls xcodebuild.log xcodebuild-release.log 2>/dev/null | paste -sd: -)"
           python3 ios-shell/ci/summarize.py artifacts "$bundles" "$logs" || true
           python3 ios-shell/ci/collect_shots.py artifacts || true
           if [ -f artifacts/SUMMARY.md ]; then
@@ -390,19 +312,10 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: ios-shell-video-${{ github.run_id }}
-          path: artifacts/video/
-          retention-days: 14
-          if-no-files-found: ignore
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
           name: ios-shell-${{ github.run_id }}
           path: |
             artifacts/
             !artifacts/shots/
-            !artifacts/video/
             xcodebuild*.log
           retention-days: 14
           if-no-files-found: warn

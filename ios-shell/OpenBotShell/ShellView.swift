@@ -18,6 +18,18 @@ struct ShellView: View {
             content
                 .accessibilityHidden(model.showsLock)
 
+            if model.showsSkeleton && model.webFrame.height > 0 {
+                // Exactly over the web view: the status bar strip and the tab bar stay as they are.
+                GeometryReader { _ in
+                    LoadingSkeleton()
+                        .frame(width: model.webFrame.width, height: model.webFrame.height)
+                        .position(x: model.webFrame.midX, y: model.webFrame.midY)
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+
             if model.showsSignInScreen {
                 SignInScreen(
                     launching: model.phase == .launching,
@@ -36,6 +48,7 @@ struct ShellView: View {
             DebugStateLabel(text: model.debugState)
             #endif
         }
+        .animation(.easeOut(duration: 0.2), value: model.showsSkeleton)
         .onChange(of: colorScheme) { _ in
             // A page that follows the system theme repaints itself; read its colours again.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { shell.refreshChrome() }
@@ -60,7 +73,9 @@ struct ShellView: View {
                     selected: model.selectedTab,
                     isDark: model.pageIsDark,
                     onSelect: { tab in shell.selectTab(tab) },
-                    onLayout: { height, frame in shell.layoutChanged(tabBarHeight: height, webFrame: frame) }
+                    onLayout: { height, frame in shell.layoutChanged(tabBarHeight: height, webFrame: frame) },
+                    onReload: { shell.reloadFromMenu() },
+                    onSignOut: { shell.confirmSignOut() }
                 )
                 // Down to the screen's edge: the tab bar takes the home indicator's strip.
                 .ignoresSafeArea(.container, edges: .bottom)

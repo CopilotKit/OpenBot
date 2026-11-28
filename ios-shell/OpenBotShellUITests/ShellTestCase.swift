@@ -76,6 +76,28 @@ class ShellTestCase: XCTestCase {
         _ = app.keyboards.firstMatch.waitForNonExistence(timeout: 3)
     }
 
+    /// True in the video workflow: scenes are paced for watching and the background step is short.
+    var videoMode: Bool { ProcessInfo.processInfo.environment["OPENBOT_SHELL_VIDEO_MODE"] == "1" }
+
+    /// The native More button's Sign out, with its confirmation.
+    @discardableResult
+    func signOutWithMoreButton(_ app: XCUIApplication, screenshots: Bool = true) -> Bool {
+        let more = app.buttons["more-button"]
+        guard more.waitForExistence(timeout: 10) else { XCTFail("no More button"); return false }
+        more.tap()
+        let item = app.buttons["Sign out"].firstMatch
+        guard item.waitForExistence(timeout: 5) else { XCTFail("the More menu has no Sign out"); return false }
+        if screenshots { screenshot("more-menu") }
+        item.tap()
+        let alert = app.alerts["Sign out of OpenBot?"]
+        guard alert.waitForExistence(timeout: 5) else { XCTFail("no confirmation before signing out"); return false }
+        if screenshots { screenshot("sign-out-confirmation") }
+        alert.buttons["Sign out"].tap()
+        let back = app.buttons["sign-in-button"].waitForExistence(timeout: 20)
+        XCTAssertTrue(back, "Sign out did not bring back the native sign-in; state \(debugState(app))")
+        return back
+    }
+
     // MARK: - Elements
 
     enum Tab: String { case conversations, home, bots }

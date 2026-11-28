@@ -87,6 +87,12 @@ final class AppModel: ObservableObject {
     /// How the last tab tap reached the page: "event" (openbot:open) or "load".
     @Published var lastNavigation = "none"
     @Published var mainFrameCommits = 0
+    /// A main-frame page is loading and has not drawn yet: the native skeleton covers the web view.
+    @Published var pageLoading = false {
+        didSet { if pageLoading != oldValue { diagnostics.log("skeleton", ["shown": pageLoading]) } }
+    }
+    /// The web view's frame in the window, for laying the skeleton over it exactly.
+    @Published var webFrame: CGRect = .zero
     /// The first segment of the page's path ("/", "/channel", "/sign"), for tests.
     @Published var webPathRoot = "-"
 
@@ -103,6 +109,7 @@ final class AppModel: ObservableObject {
     }
 
     var showsTabBar: Bool { phase == .signedIn && !keyboardVisible }
+    var showsSkeleton: Bool { pageLoading && webVisible && !showsSignInScreen && !showsLock }
     var showsWebSignInBar: Bool { phase == .signedOut && signIn == .webFallback }
 
     /// The lock screen covers everything: no network, or the web app did not load.
@@ -123,6 +130,6 @@ final class AppModel: ObservableObject {
 
     /// For UI tests (DEBUG only on screen).
     var debugState: String {
-        "phase=\(phase.rawValue) signIn=\(signIn.rawValue) tab=\(selectedTab.rawValue) nav=\(lastNavigation) commits=\(mainFrameCommits) lock=\(lockReason) keyboard=\(keyboardVisible ? 1 : 0) path=\(webPathRoot) dark=\(pageIsDark.map { $0 ? "1" : "0" } ?? "-")"
+        "phase=\(phase.rawValue) signIn=\(signIn.rawValue) tab=\(selectedTab.rawValue) nav=\(lastNavigation) commits=\(mainFrameCommits) lock=\(lockReason) loading=\(pageLoading ? 1 : 0) keyboard=\(keyboardVisible ? 1 : 0) path=\(webPathRoot) dark=\(pageIsDark.map { $0 ? "1" : "0" } ?? "-")"
     }
 }

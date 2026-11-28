@@ -28,6 +28,16 @@ What is native:
   `route` messages select the tab. The bar hides while the keyboard is up. The web view sits between
   the status bar and the tab bar; the strips around it take the page's background colour and its
   light or dark style.
+- **The More button.** A round button beside the tab bar (`more-button`) with Reload and Sign
+  out. Sign out asks first, then ends the session on the server whatever the web app's version:
+  Better Auth's `POST /api/auth/sign-out` from the page and, on a hosted OpenBot, the hosted
+  sign-out in the web view (back to `/sign`); after that (8 s at most, or at once when offline) it
+  deletes the two session cookies and shows the native sign-in screen.
+- **The loading skeleton.** While a page has not drawn yet (launch when signed in, the web sign-in's
+  first load, Reload, a retry), a native skeleton (`loading-skeleton`, "Loading") covers the web
+  view with a highlight sweeping left to right (a gentle pulse with Reduce Motion). It goes when the
+  page says `ready`, or when an older web app's document is complete and has content, after at
+  least 0.3 s.
 - **The lock screen.** No connection (`NWPathMonitor`), or the web app did not load (a failed
   main-frame load, 20 s without any answer from WebKit, or no answer to a sign-in step): one native
   screen, "Cannot reach the OpenBot backend", covers everything, with Try again and the support
@@ -105,6 +115,8 @@ ignores them.
 | `OPENBOT_SHELL_FORCE_OFFLINE=1` | The offline lock, for good. |
 | `OPENBOT_SHELL_FORCE_OFFLINE_SECONDS=<n>` | The offline lock for n seconds, then the real network. |
 | `OPENBOT_SHELL_FORCE_DARK=1` | The whole app, web view included, in dark mode. |
+| `OPENBOT_SHELL_DELAY_FIRST_LOAD_SECONDS=<n>` | Holds the first page load back n seconds when signed in (to see the skeleton). |
+| `OPENBOT_SHELL_TEST_PLAIN_SESSION_COOKIE=<value>` | Sets `better-auth.session_token` (the http mock's name). |
 
 In every build, Release included (a launch environment cannot be set on a person's phone, so these
 change nothing there): `OPENBOT_BASE_URL`, `OPENBOT_SHELL_DIAGNOSTICS=1`, `OPENBOT_SHELL_TEST_NAME`, and
@@ -156,6 +168,13 @@ uploads `ios-shell-shots-<run id>` (every screenshot as a small JPEG named `<tes
 the text attachments, `SUMMARY.md`, `diagnostics.jsonl`), `ios-shell-<run id>` (everything else)
 and `ios-shell-video-<run id>`: a screen recording of `DemoTourUITests/testDemoTour`, a paced tour
 of the app against mock stack A, run on its own after the main suite.
+
+Recordings come from `.github/workflows/ios-shell-video.yml` ("iOS shell video", about 10
+minutes): on every push it records the demo tour (public artifact `ios-shell-video-<run id>`) and
+the real-backend journey on the session cookie (private `ios-shell-video-private-<run id>`), each
+cut to its test and also as a 600-px copy. Started by hand with `real_google_sign_in`, the real
+recording is a Release build signing in with Google in the web view (one prompt to the account's
+phone per run).
 
 The production tests never fail for network reasons. `testProductionSignedIn` and
 `testProductionGoogleSignIn` use a throwaway account and run only when the repository secrets

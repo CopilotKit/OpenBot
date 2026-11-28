@@ -147,7 +147,7 @@ class RealBackendTestCase: ShellTestCase {
             field.press(forDuration: 1.2)
             let paste = first({ $0.menuItems.matching(identifier: "Paste").firstMatch }, timeout: 5)
             paste?.tap()
-            sleep(2)
+            sleep(1)
             UIPasteboard.general.string = ""
             var length = valueLength(field)
             let secure = field.elementType == .secureTextField
@@ -303,9 +303,9 @@ class RealBackendTestCase: ShellTestCase {
 
         tab(app, .home).tap()
         sleep(2)
-        // Background for 40 s, then back.
+        // Background for 40 s (6 s in the video), then back.
         XCUIDevice.shared.press(.home)
-        sleep(40)
+        sleep(videoMode ? 6 : 40)
         app.activate()
         sleep(3)
         screenshot("j9-back-from-background")
@@ -326,27 +326,10 @@ class RealBackendTestCase: ShellTestCase {
             note("sign-out skipped: it would end the session the secret holds")
             return
         }
-        // Sign out from the web app's own menu (the sidebar's account button).
-        if webElement(app, label: "Show sidebar").exists { webElement(app, label: "Show sidebar").tap(); sleep(2) }
-        var signedOut = false
-        for candidate in app.webViews.popUpButtons.allElementsBoundByIndex.prefix(6) where candidate.exists && candidate.isHittable {
-            candidate.tap()
-            sleep(1)
-            let item = webElement(app, label: "Sign out")
-            if item.waitForExistence(timeout: 2) {
-                screenshot("j11-account-menu")
-                item.tap()
-                signedOut = true
-                break
-            }
-            app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        }
-        note("found Sign out in the web app's menu: \(signedOut)")
-        if signedOut {
-            XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 30),
-                          "the native sign-in did not come back after Sign out; state \(debugState(app))")
-            screenshot("j12-signed-out")
-        }
+        // Sign out with the native More button: it ends the session on the server too.
+        let ok = signOutWithMoreButton(app)
+        note("signed out with the native More button: \(ok); state \(debugState(app))")
+        if ok { screenshot("j11-signed-out") }
     }
 }
 
@@ -394,7 +377,7 @@ final class RealBackendUITests: RealBackendTestCase {
         google.tap()
         sleep(10)
         screenshot("google-page")
-        try googleSteps(app: app, roots: [app], inputs: inputs)
+        try googleSteps(app: app, roots: [app], inputs: inputs, tryAnotherWay: true)
         let signedIn = tab(app, .home).waitForExistence(timeout: 30)
         screenshot("after-google")
         note("Google sign-in in the web view reached the tabs: \(signedIn); state \(debugState(app))")

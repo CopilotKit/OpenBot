@@ -3,6 +3,8 @@
 
 Usage: trim_video.py <video.mp4> <xcodebuild log> <epoch when the recording started>
 
+With ffmpeg it also writes <video>-600.mp4, a 600-px-wide H.264 copy for a phone.
+
 The test prints `SHELL_NOTE <test>: video-mark start <epoch>` and `... video-mark end <epoch>`
 (the simulator shares the Mac's clock). Uses ffmpeg when the runner has it, else avconvert, else
 leaves the file as it is.
@@ -45,3 +47,10 @@ else:
     print(f"could not trim ({result.stderr.strip()[:300]}); the raw recording stays")
     if os.path.exists(tmp):
         os.remove(tmp)
+
+if ffmpeg and os.path.exists(video):
+    small = video[:-4] + "-600.mp4"
+    result = subprocess.run([ffmpeg, "-loglevel", "error", "-y", "-i", video, "-vf", "scale=600:-2", "-c:v", "libx264",
+                             "-crf", "28", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", small],
+                            capture_output=True, text=True)
+    print(f"600-px copy: {os.path.getsize(small) if result.returncode == 0 else 'failed ' + result.stderr[:200]}")

@@ -33,6 +33,8 @@
  *        Loaded by the web view. With a known, unused, unexpired T whose C is base64url(sha256(V)):
  *        sets the cookie better-auth.session_token=mock and answers 303 to `to` (an own path, else /).
  *        Otherwise 303 to /sign?native-sign-in=failed, setting nothing.
+ *   POST /api/auth/sign-out
+ *        Ends the mock's session: its cookie stops counting until the next /enter.
  *
  * Signed in, the API answers as the workbench's app-home scene does (workbench/session.ts,
  * api/extraHandlers.ts and the spec's generated answers), with a fixed person (Sam Rivera, in Acme),
@@ -66,6 +68,8 @@ const TICKET_MS = 60_000;
 
 /** Whether a request with no mock cookie is signed in. */
 let signedInByDefault = process.env.MOCK_SIGNED_OUT !== "1";
+/** The mock's one session was signed out: its cookie no longer counts until the next sign-in. */
+let mockSessionEnded = false;
 
 // The Bots and conversations every signed-in page shows. ---------------------------------------
 
@@ -328,6 +332,7 @@ async function generatedHandlersFromDisk(): Promise<RequestHandler[]> {
 // Signed in or not, per request. ---------------------------------------------------------------
 
 function hasMockCookie(request: Request): boolean {
+  if (mockSessionEnded) return false;
   const cookies = request.headers.get("cookie") ?? "";
   return cookies
     .split(";")
@@ -426,6 +431,7 @@ function enter(url: URL): Response {
   const challenge = base64url(createHash("sha256").update(verifier).digest());
   if (challenge !== ticket.challenge) return failed;
   ticket.used = true;
+  mockSessionEnded = false;
   return new Response(null, {
     status: 303,
     headers: {
@@ -516,6 +522,8 @@ async function start() {
       const known = signedIn(incoming);
       if (path === "/api/auth/sign-out" && incoming.method === "POST") {
         signedInByDefault = false;
+        // As a real server does: the session is over, so the same cookie no longer signs anybody in.
+        if (hasMockCookie(incoming)) mockSessionEnded = true;
         return Response.json(
           { success: true },
           {
