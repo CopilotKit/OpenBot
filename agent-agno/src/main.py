@@ -8,6 +8,7 @@ here, which is the rule.
 import hmac
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 # The spec file every language in the box reads: one level above this Bot in the repository, and
@@ -27,6 +28,25 @@ from .conversation import PausedRunsDb, add_run_context
 from .conversation import install as answer_from_the_whole_thread
 
 TOKEN_HEADER = "x-openbot-agent-token"
+# Agno-internal metadata serialized into every `Function.to_dict()` (`agno.tools.function.SERIALIZED_FIELDS`).
+# Agno's `OpenAIChat` strips these only for a fixed allowlist of providers, and `LiteLLM` never
+# strips them at all. Strict OpenAI-compatible endpoints (including Google's Gemini endpoint)
+# reject any unknown key under `tools[i].function` with HTTP 400.
+_AGNO_INTERNAL_TOOL_KEYS = ("requires_confirmation", "external_execution", "approval_type")
+
+
+@dataclass
+class _CleanToolsLiteLLM(LiteLLM):
+    """LiteLLM model that strips Agno-internal metadata from outgoing tool schemas."""
+
+    def _format_tools(self, tools):
+        formatted = super()._format_tools(tools)
+        for tool in formatted:
+            fn = tool.get("function") if isinstance(tool, dict) else None
+            if isinstance(fn, dict):
+                for key in _AGNO_INTERNAL_TOOL_KEYS:
+                    fn.pop(key, None)
+        return formatted
 
 
 def _model_id() -> str:
@@ -75,7 +95,7 @@ agent = Agent(
     # refuses both for a reasoning model, the default `gpt-5.5` among them: every run on an OpenAI
     # key failed before it reached OpenAI. A parameter a model does not take is dropped instead,
     # for this one client, as the LlamaIndex Bot does.
-    model=LiteLLM(id=_model_id(), request_params={"drop_params": True}, **_sampling()),
+    model=_CleanToolsLiteLLM(id=_model_id(), request_params={"drop_params": True}, **_sampling()),
     # No role, goal or backstory invented on somebody's behalf. A Bot answers the question it is
     # asked, and anybody who wants a persona sets one in OpenBot where the rest of them live.
     instructions="Answer the question you are asked, briefly and correctly.",
