@@ -791,4 +791,23 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertTrue(chatsList(app).waitForExistence(timeout: 10), "Back from Settings did not return to Chats")
         screenshot("4-chats-after-settings")
     }
+
+    // The slide back: with the page's will-navigate, a slow swipe from the edge slides the
+    // conversation away over the list's picture and lands on the list at its scroll position, with no
+    // blank web view on the way (the frames are checked in the video workflow's recording).
+    func testSwipeBackSlidesToTheList() throws {
+        let app = launchSignedIn()
+        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
+        tab(app, .conversations).tap()
+        XCTAssertTrue(chatsList(app).waitForExistence(timeout: 15))
+        XCTAssertTrue(openConversation(app, "Quarterly forecast"))
+        XCTAssertTrue(waitForState(app, "back=page", timeout: 5), "\(debugState(app))")
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.45))
+        start.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.47)),
+                    withVelocity: .slow, thenHoldForDuration: 0)
+        XCTAssertTrue(chatsList(app).waitForExistence(timeout: 10), "the slow swipe did not land on the Chats list: \(debugState(app))")
+        XCTAssertTrue(tab(app, .conversations).isSelected)
+        sleep(1)
+        screenshot("after-slide")
+    }
 }

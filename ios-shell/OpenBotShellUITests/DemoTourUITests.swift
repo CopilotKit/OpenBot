@@ -132,8 +132,12 @@ final class DemoTourUITests: ShellTestCase {
         dismissKeyboardIfUp(app)
         XCTAssertTrue(tab(app, .bots).isSelected, "demo: a conversation from Bots moved the tab")
         pause(1.2)
+        // Slowly, so the recording shows the page sliding over the Bots list.
+        note("video-swipe start \(Date().timeIntervalSince1970)")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.45))
-            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.47)))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.47)),
+                   withVelocity: .slow, thenHoldForDuration: 0)
+        note("video-swipe end \(Date().timeIntervalSince1970)")
         XCTAssertTrue(app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == 'Search Bots'")).firstMatch
             .waitForExistence(timeout: 10), "demo: the edge swipe did not return to the Bots list")
         pause(1.2)
