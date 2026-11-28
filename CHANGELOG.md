@@ -8,46 +8,94 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- **Privatemode is an AI provider choice.** OpenBot Desktop's setup, Settings and Admin AI
-  providers offer Privatemode. Enter a Privatemode API key and OpenBot fills in
-  `https://proxyless-api.privatemode.ai/v1` and the `glm-latest` model. A model whose listing says
-  it can't chat and call tools isn't offered.
+**Conversations.**
 
-- **The API takes Privatemode as an AI connection.** `replaceAiConnection` and the other AI
-  connection writes take `provider: privatemode` with `login: endpoint`, an address and a key.
-  `AiConnectionProviderAnswer` can name it. `signIns` keeps the values it had, since Privatemode
-  has no sign-in.
+- **A turn the server carries on is followed to its answer.** When OpenBot's server carries a
+  person's turn on in a run of its own, an open page now joins that run and shows it to its end,
+  instead of saying "The Bot stopped before it finished" under a turn the server finished. The
+  conversation reads as working the whole time, between runs too, and holds what is typed; a page
+  opened part way through reads it as working from the start. Stop is offered for the whole turn,
+  and a Stop the server refuses says so. A step the server holds itself (taking over the Bot's
+  screen, a secret, a sign-in) is left to it: a sign-in no longer opens a second form, and the page
+  no longer puts its own answer in the conversation beside the server's. API: a conversation's work
+  gains the kind `turn`, sent only to a caller that names `conversation-work-turn` (below).
 
-- **Unbiased AI is gone from OpenBot.** It stopped serving models, and nothing in OpenBot offers
-  it: not OpenBot Desktop's setup, Settings or Admin AI providers, Connect another AI, or the
-  conversation and Bot model pickers. The API no longer takes it as a provider. A connection saved
-  for it before is still listed in AI providers, stopped, with the new problem `provider-retired`:
-  its page says OpenBot no longer offers it, and offers Disconnect and Connect another AI. No model
-  picker offers it. A conversation whose model was on it says it can't run, with Remove it leading
-  to that page, and a Bot's default model on it reads as not available. OpenBot Desktop treats a
-  connection it saved for it as one to set up again.
+- **A computer step runs once.** Every step a Bot takes on its computer now names its conversation
+  and tool call, so it runs once however many pages ask for it. A step already running is never run
+  again from the page, and one cut off before it answered reads "Didn't run" with a plain sentence,
+  never "Blocked". API: the computer step outcome gains `taken`, and a direct computer call can name
+  `threadId` and `toolCallId` and be answered `COMPUTER_STEP_RUNNING` or
+  `COMPUTER_STEP_OUTCOME_UNKNOWN`, each only for a caller that names `computer-step-taken`.
+
+- **An app says which newer answers it understands.** Requests carry the `OpenBot-Capabilities`
+  header, and the conversation events socket a `capabilities` query, listing tokens such as
+  `computer-step-taken` and `conversation-work-turn`. The server sends a newer shape only to a
+  caller that names its token, so a released app keeps getting the answers it reads.
+
+- **A new conversation's first message is never lost to a closed page.** It is sent the moment it
+  shows, instead of a moment later, and kept in the browser until the server has it. If the page
+  closed, reloaded or crashed first and the server never got it, opening the conversation again puts
+  the words and files back in its message box to send. They are never sent again by themselves.
+
+- **"Thinking" shows from the moment you send.** A first message from Home or a new conversation,
+  a starter task clicked on Home, and a first message to two or more Bots now show the message with
+  "Thinking" under it at once, until the Bot's first words. They used to sit on an emptied box, or a
+  greyed-out row, while OpenBot picked the Bot and made the conversation. A starter task that can't
+  start comes back to Home with its reason under the box, and what was typed there stays.
+
+- **A new conversation with nobody in To: can pick its model**, as Home does. The pick is saved
+  with the conversation of the Bot OpenBot picks, before the first message runs; a Bot that picks
+  its own model says so.
+
+- **A file a Bot sent opens from the link in its reply.** A Bot that linked a file by its place on
+  its computer showed "[blocked]" after the link's words, under a card that downloaded fine. Such a
+  link now downloads the stored file, under its name. Any other link the chat can't open shows as
+  its words; `javascript:`, `data:`, `file:` and `vbscript:` are still never links.
+
+- **A Bot's "can't run" stays under the message it couldn't answer.** When a Bot's engine isn't
+  answering, the sentence that says so stays under that message after the next message is answered,
+  and after a reload. It used to go as soon as the next turn started, and the message sat in the
+  conversation with nothing under it. `listRefusedTurns` gains the code `BOT_ENGINE_UNAVAILABLE`,
+  and the run's RUN_ERROR carries the same code.
+
+- **A group conversation keeps its side margins on a phone**, 16px a side as a conversation with one
+  Bot has, instead of running to the screen's edges. In a wide window it lines up with one too.
+
+- **On a phone, the Computer no longer covers a card that waits on you.** Its sheet still opens by
+  itself while the Bot browses, but a take-over, sign-in or approval card that starts waiting now
+  closes it once, and it doesn't open by itself while the card waits. Opened by the person, it
+  stays. Beside a wide conversation nothing changes.
+
+- **Hand back on a phone says its whole sentence**, with the reason the Bot handed over, right
+  under the Bot's page. It was cut short ("You have control. Click and type on t…") below a blank
+  band.
+
+**The app.**
 
 - **The app opens and changes page faster, and holds still.** The checks before every page are
-  asked together and the page's code downloads while they run, so Home is ready about a third
-  sooner on a real network; somebody signed in last time sees the app's frame at once instead of a
-  blank page. Resting the pointer on a link loads its page, so the click shows it finished, and a
-  page change keeps the old page up for a moment instead of cutting to a skeleton, with a short
-  fade (none when less motion is asked for). Home's heading and box no longer move as the page
-  fills in, and Home scrolls to every Explore card. A conversation shows its history at once while
-  it reconnects, instead of after, and reads it once instead of up to four times. "Back in a moment"
-  tries again at most once a second and stays up until the app is ready. No API or database change.
+  asked together and the page's code downloads while they run, and somebody signed in last time sees
+  the app's frame at once instead of a blank page. Resting the pointer on a link loads its page. A
+  page change keeps the old page up for a moment while the new one's data loads, instead of cutting
+  to a skeleton, and fades the new one in (not when less motion is asked for). Home's heading and
+  box no longer move as the page fills in, and Home scrolls to its last Explore card. A
+  conversation shows its stored history at once while it reconnects, instead of after, and reads it
+  once instead of up to four times. "Back in a moment" tries again at most once a second and stays
+  up until the app is ready.
+
+**Routines.**
 
 - **Routines is one box.** Routines in the main menu opens on a box: say what a Bot should do and
   when ("Every weekday at 9, send me yesterday's new leads"), naming the Bot with @, or leaving
-  OpenBot to pick it as Home does, and the Bot makes the routine, a goal on a schedule when you give
-  it an outcome, or a check-in when it should only tell you. The line under the box says when it
-  starts and offers Open and Undo, which takes back what was just made. If the sentence leaves out
-  when, which event, or says it is something to do once, the line says so and Finish opens New
-  routine with what it read. If it asks for what a routine can't do, such as more often than every
-  15 minutes, the line says why and keeps your sentence. Under the box your routines, goals and
-  check-ins are grouped by Bot, one line each with the one thing worth knowing: running now, what
-  went wrong, paused, or when it starts next. The New routine button on that page is gone, and so is
-  the check-ins switch: it is now Check-ins at the top of Settings → Notifications. Behind it,
+  OpenBot to pick it as Home does. OpenBot makes what the sentence says: a routine, a goal on a
+  schedule when you give it an outcome, or a check-in when the Bot should only tell you. The line
+  under the box names the Bot that took it, says when it starts, and offers Open and Undo, which
+  takes back what was just made. If the sentence leaves out when, which event, or says it is
+  something to do once, the line says so and Finish opens New routine with what it read. If it asks
+  for what a routine can't do, such as more often than every 15 minutes, the line says why and keeps
+  your sentence. Under the box your routines, goals and check-ins are grouped by Bot, one line each
+  with the one thing worth knowing: running now, what went wrong, paused, or when it starts next.
+  The New routine button on that page is gone (a Bot's own Routines page keeps it), and so is the
+  check-ins switch: it is now Check-ins at the top of Settings → Notifications. Behind it,
   `POST /api/v2/organizations/{organizationId}/routines/read` (`readRoutineSentence`) reads a
   sentence as a routine's answers and writes nothing.
 
@@ -55,17 +103,91 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   to five, in the Routines page's words, with See all to the Bot's Routines. The Activity section
   that listed them is gone; Activity is a row in For you.
 
-- **Bots on Gemini 3 no longer stop at their second tool step.** On a Gemini key, through OpenBot
-  Cloud's AI connection or a key saved as Google's OpenAI-compatible endpoint, a Bot on the
-  TypeScript LangGraph engine stopped partway through a task with Google's "Function call is missing
-  a thought_signature in functionCall parts". Each tool call now keeps the thought signature Gemini
-  gave it, and sends it back with the call on the next step. A conversation that already lost one
-  goes on: the call is sent with Google's documented placeholder for calls it didn't make.
+**Bots.**
+
+- **A long task runs until it is done, on every engine.** A turn has no step ceiling now: it ends
+  when the model answers in words or when it is stopped. The LangGraph (TypeScript) engine dropped
+  its 40-step budget, whose last step was sent with no tools and told to finish, so a long task
+  stopped half done. The LangGraph (Python) harness dropped LangGraph's 25-step limit, which ended a
+  turn at its twelfth tool call with an error. On the Claude Agent SDK harness, a turn of hundreds
+  of steps no longer outgrows the model's window: older results in the current turn are cleared to
+  a note naming their call, keeping the newest 10 whole, and only then are its oldest steps left
+  out, never the person's first and latest messages. The Google ADK harness summarises a long
+  session's older events past 100,000 prompt tokens, keeping the newest 20 as they were.
+
+- **Bots on Gemini 3 no longer stop at their second tool step.** Google refused the second step of
+  a task with "Function call is missing a thought_signature in functionCall parts". On the LangGraph
+  (TypeScript) engine this happened through OpenBot Cloud's AI connection or a key saved as Google's
+  OpenAI-compatible endpoint; on the LangGraph (Python) harness, at that endpoint, which is how
+  OpenBot Desktop reaches Gemini. Both now keep the thought signature Gemini gave each tool call and
+  send it back with the call, to a Gemini model only. A conversation that already lost one goes on:
+  the call is sent with Google's documented placeholder for calls it didn't make.
 
 - **The Google default model is `gemini-3.8-flash`.** It was `gemini-2.5-flash`, which Google no
   longer serves to new keys ("This model models/gemini-2.5-flash is no longer available to new
-  users"), so a run nobody picked a model for failed on a new Gemini key. It applies where a Bot or
-  `BOT_PROVIDER=google` names no model.
+  users"), so a run nobody picked a model for failed on a new Gemini key. It applies where a Bot,
+  `BOT_MODEL` or `BOT_PROVIDER=google` names no model.
+
+- **Switching to another provider's model mid-conversation gets an answer.** On the LangGraph
+  (Python) harness, a switch from Claude to an OpenAI model sent Anthropic's sealed reasoning to
+  OpenAI, which refused the request; reasoning from earlier turns is no longer sent to the model. On
+  the LangGraph (TypeScript) engine, Claude Opus 5 and 5.5 at Extra high or Max stopped with no
+  answer; they now answer.
+
+- **New Bot says how to give a connected agent its full role.** For LangChain, Mastra and "An
+  agent you already run", the address step now says that such an agent gives a Bot's role and tool
+  guidance full weight only to a caller it trusts, one presenting a key or on a listener only it can
+  reach, and links that framework's setup. `docs/agent-frameworks.md` gains "Give OpenBot a trusted
+  path" and setups for releases that take run guidance.
+
+**Apps.**
+
+- **Browse apps shows its first apps at once.** With nothing typed, it read every page of the
+  directory before it drew a row. It now shows the first 50 as soon as they come and the next as
+  you scroll, without rows moving, and still says how many apps there are in all. A page that fails
+  keeps what is shown and offers to try again. API: `listAppDirectory` answers an optional `total`,
+  and lists apps you sign in to before apps that take a key, each by title.
+
+- **A shared Bot's app card says who can give it the app.** On a Bot that isn't yours, with apps
+  open, the card told a member to connect the app and that the Bot's owner would give it; connecting
+  gave the Bot nothing, and then the card offered nothing to press. It now says only the Bot's owner
+  or an admin can give it the app and offers Request access, with connecting your own account beside
+  it where it isn't connected. The same goes for actions of an app the Bot holds but wasn't given.
+  The settings card for a change to a Bot's apps names the Bot, never "Your Bot".
+
+- **A Bot nobody owns says only an admin can give it apps.** In the team edition, a Bot nobody
+  owns, such as an organization's shared assistant, sent a member to an owner it doesn't have. Its
+  app card and its Apps and Skills pages now say only an admin can give it an app, actions or
+  skills, naming the admins, and offer a member no give button. API: `Bot` gains the read-only
+  `ownerless`; a Bot without it reads as owned, as before.
+
+- **The admin inbox says what approving a request gives.** It told every grant and turn-on request
+  "Approving gives {bot} only {app}'s read-only actions", which holds only while apps are locked
+  down. While apps are open, the default, it now says "Approving gives {bot} every {app} action.
+  Choose fewer on the Bot's page under {app}." Requests for named actions are unchanged.
+
+- **An app's sign-in works in the organization you picked.** For a person in several
+  organizations, an app's token used with no `OpenBot-Organization` header worked in their own
+  organization, whatever they picked as they signed the app in. It now works in the organization
+  they were working in as they allowed the app (on OpenBot Cloud, the one picked at sign-in), also
+  after a refresh, while they are a member of it. `listOrganizations` marks that one active, and
+  consent is asked once for each app in each organization.
+
+**AI providers.**
+
+- **An AI sign-in connects as soon as it succeeds.** A successful sign-in showed "Signed in to
+  Anthropic." with Connect under it, and nothing was saved until Connect was pressed, so leaving the
+  page lost it. ChatGPT and Claude plans and xAI, in a person's own list and the organization's, and
+  OpenBot Desktop's plan sign-in, now connect at once. A refused connect says why, and Connect tries
+  again. Sharing an admin's own sign-in with the organization still waits for its own button.
+
+- **Unbiased AI is no longer an AI provider choice.** OpenBot Desktop's setup, Settings and Admin
+  AI providers, Connect another AI, and the conversation and Bot model pickers no longer offer it,
+  and OpenBot Desktop's Sign in with Unbiased AI is gone. Settings saved for it and the model shown
+  on an existing conversation stay readable, but it can't be picked again. The API still names
+  `unbiased` as a provider, so a released client keeps working; only its examples changed.
+
+**Notifications.**
 
 - **Notifications in the browser, with OpenBot closed.** Settings, Notifications has a new switch,
   Notifications in this browser. Turned on, a Bot's replies, questions and approvals reach that
@@ -75,13 +197,23 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   app of its own (`display: standalone`). Signing out turns notifications off in that browser.
   Enable notifications in a conversation and Turn on on a Bot's page do the same as the switch: they
   used to allow only the notices a page shows while it is open. On an iPhone or iPad in Safari, both
-  say to add OpenBot to the Home Screen first instead of offering a button that can't work.
+  say to add OpenBot to the Home Screen first instead of offering a button that can't work. Nothing
+  needs setting up: the server makes its own key pair. `WEB_PUSH_VAPID_PUBLIC_KEY` with
+  `WEB_PUSH_VAPID_PRIVATE_KEY`, and `WEB_PUSH_SUBJECT`, are optional; one key without the other, a
+  pair that doesn't match, or a subject that isn't an `https:` URL or `mailto:` address stops the
+  server at start-up. API: `getWebPushKey`, `saveWebPushSubscription` and
+  `deleteWebPushSubscription`.
 
-- **A Bot's "can't run" stays under the message it couldn't answer.** When a Bot's engine isn't
-  answering, the sentence that says so stays under that message after the next message is answered,
-  and after a reload. It used to go as soon as the next turn started, and the message sat in the
-  conversation with nothing under it. `listRefusedTurns` gains the code `BOT_ENGINE_UNAVAILABLE`, and
-  the run's RUN_ERROR carries the same code.
+**OpenBot Desktop.**
+
+- **A new sign-in opens in the organization picked as you signed in.** Signing OpenBot Desktop in
+  again at the same address opened in the organization its switcher had before the sign-out,
+  whatever was picked in the browser. It now opens where you picked, until you pick another in the
+  switcher.
+
+- **A command the local sandbox stopped for memory says so.** On Docker with cgroup v2, some
+  commands the memory limit killed were told they had run out of time, after half a second. A
+  command killed before the time limit is up is now always told it used too much memory.
 
 ## 1.2.1
 
