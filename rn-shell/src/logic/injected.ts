@@ -30,7 +30,11 @@ export type InjectedOptions = {
 
 export function injectedScript(options: InjectedOptions): string {
   const own = JSON.stringify(options.origin);
-  const marker = JSON.stringify({ platform: options.platform, version: options.version, bridge: 1 });
+  const marker = JSON.stringify({
+    platform: options.platform,
+    version: options.version,
+    bridge: 1,
+  });
   const token = JSON.stringify(options.token);
   const hideScrollbars = options.platform === "android";
   return `(function () {

@@ -29,7 +29,14 @@ export function TabBar(props: {
     <View
       testID="tab-bar"
       accessibilityRole="tablist"
-      style={[styles.bar, { backgroundColor: props.background, borderTopColor: colors.border, paddingBottom: props.bottomInset }]}
+      style={[
+        styles.bar,
+        {
+          backgroundColor: props.background,
+          borderTopColor: colors.border,
+          paddingBottom: props.bottomInset,
+        },
+      ]}
     >
       {ITEMS.map(({ tab, label, Icon }) => {
         const selected = tab === props.selected;
@@ -46,7 +53,14 @@ export function TabBar(props: {
             style={styles.item}
           >
             <Icon color={tint} strokeWidth={selected ? 2.25 : 1.75} />
-            <Text style={[styles.label, { color: tint, fontWeight: selected ? "600" : "400" }]}>{label}</Text>
+            <Text
+              style={[
+                styles.label,
+                { color: tint, fontWeight: selected ? "600" : "400" },
+              ]}
+            >
+              {label}
+            </Text>
           </Pressable>
         );
       })}
@@ -56,6 +70,12 @@ export function TabBar(props: {
 
 const styles = StyleSheet.create({
   bar: { flexDirection: "row", borderTopWidth: StyleSheet.hairlineWidth },
-  item: { flex: 1, height: TAB_BAR_HEIGHT, alignItems: "center", justifyContent: "center", gap: 2 },
+  item: {
+    flex: 1,
+    height: TAB_BAR_HEIGHT,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+  },
   label: { fontSize: 11 },
 });

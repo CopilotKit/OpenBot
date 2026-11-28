@@ -52,10 +52,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         imageWidth: 72,
         resizeMode: "contain",
         backgroundColor: LIGHT_BACKGROUND,
-        dark: { image: "./assets/openbot-mark.png", backgroundColor: DARK_BACKGROUND },
+        dark: {
+          image: "./assets/openbot-mark.png",
+          backgroundColor: DARK_BACKGROUND,
+        },
       },
     ],
-    ["expo-build-properties", { ios: { deploymentTarget: "17.0" }, android: { minSdkVersion: 26 } }],
+    [
+      "expo-build-properties",
+      { ios: { deploymentTarget: "17.0" }, android: { minSdkVersion: 26 } },
+    ],
     ["./plugins/withOpenBotShell", { testBuild: TEST_BUILD }],
   ],
   extra: { testBuild: TEST_BUILD },

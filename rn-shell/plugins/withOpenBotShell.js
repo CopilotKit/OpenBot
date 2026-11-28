@@ -6,7 +6,12 @@
 //   mock stacks on localhost).
 // - Android: cleartext. The store build says usesCleartextTraffic="false"; the test build gets a
 //   network security config with cleartext only to localhost, 127.0.0.1 and 10.0.2.2.
-const { withInfoPlist, withAndroidManifest, withDangerousMod, AndroidConfig } = require("expo/config-plugins");
+const {
+  withInfoPlist,
+  withAndroidManifest,
+  withDangerousMod,
+  AndroidConfig,
+} = require("expo/config-plugins");
 const fs = require("fs");
 const path = require("path");
 
@@ -25,7 +30,8 @@ const NETWORK_CONFIG = `<?xml version="1.0" encoding="utf-8"?>
 function withIosSettings(config, testBuild) {
   return withInfoPlist(config, (mod) => {
     const plist = mod.modResults;
-    if (testBuild) plist.NSAppTransportSecurity = { NSAllowsLocalNetworking: true };
+    if (testBuild)
+      plist.NSAppTransportSecurity = { NSAllowsLocalNetworking: true };
     else delete plist.NSAppTransportSecurity;
     // No URL scheme at all: Expo adds the bundle identifier as one, and the sign-in's callback
     // scheme must never be registered (only the ASWebAuthenticationSession the app started takes it).
@@ -39,9 +45,12 @@ function withIosSettings(config, testBuild) {
 
 function withCleartext(config, testBuild) {
   config = withAndroidManifest(config, (mod) => {
-    const application = AndroidConfig.Manifest.getMainApplicationOrThrow(mod.modResults);
+    const application = AndroidConfig.Manifest.getMainApplicationOrThrow(
+      mod.modResults,
+    );
     if (testBuild) {
-      application.$["android:networkSecurityConfig"] = "@xml/network_security_config";
+      application.$["android:networkSecurityConfig"] =
+        "@xml/network_security_config";
       delete application.$["android:usesCleartextTraffic"];
     } else {
       application.$["android:usesCleartextTraffic"] = "false";
@@ -53,9 +62,19 @@ function withCleartext(config, testBuild) {
   return withDangerousMod(config, [
     "android",
     async (mod) => {
-      const dir = path.join(mod.modRequest.platformProjectRoot, "app", "src", "main", "res", "xml");
+      const dir = path.join(
+        mod.modRequest.platformProjectRoot,
+        "app",
+        "src",
+        "main",
+        "res",
+        "xml",
+      );
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, "network_security_config.xml"), NETWORK_CONFIG);
+      fs.writeFileSync(
+        path.join(dir, "network_security_config.xml"),
+        NETWORK_CONFIG,
+      );
       return mod;
     },
   ]);

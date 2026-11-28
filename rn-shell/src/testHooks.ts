@@ -57,7 +57,8 @@ export function readTestHooks(): TestHooks {
     staleSession: flag(args["openbot.stale_session"]),
     handoffAuto: flag(args["openbot.handoff_auto"]),
     forceOffline: flag(args["openbot.force_offline"]),
-    forceOfflineSeconds: Number(args["openbot.force_offline_seconds"] ?? 0) || 0,
+    forceOfflineSeconds:
+      Number(args["openbot.force_offline_seconds"] ?? 0) || 0,
     delayFirstLoadMs: Number(args["openbot.delay_first_load_ms"] ?? 0) || 0,
     probeUrl: httpUrl(args["openbot.probe_url"]),
     diagnostics: true,

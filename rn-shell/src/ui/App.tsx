@@ -1,8 +1,21 @@
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BackHandler, Dimensions, Keyboard, type KeyboardEvent, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  BackHandler,
+  Dimensions,
+  Keyboard,
+  type KeyboardEvent,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import WebView from "react-native-webview";
 import type {
   ShouldStartLoadRequest,
@@ -59,8 +72,28 @@ function Shell() {
   const systemColors = useColors();
   const insets = useSafeAreaInsets();
   const token = useMemo(makeToken, []);
-  const startScript = useMemo(() => injectedScript({ origin: BASE_URL, platform: PLATFORM, version: VERSION, token, when: "start" }), [token]);
-  const endScript = useMemo(() => injectedScript({ origin: BASE_URL, platform: PLATFORM, version: VERSION, token, when: "end" }), [token]);
+  const startScript = useMemo(
+    () =>
+      injectedScript({
+        origin: BASE_URL,
+        platform: PLATFORM,
+        version: VERSION,
+        token,
+        when: "start",
+      }),
+    [token],
+  );
+  const endScript = useMemo(
+    () =>
+      injectedScript({
+        origin: BASE_URL,
+        platform: PLATFORM,
+        version: VERSION,
+        token,
+        when: "end",
+      }),
+    [token],
+  );
   const [rootHeight, setRootHeight] = useState(0);
   const [keyboardTop, setKeyboardTop] = useState<number | null>(null);
   const [released, setReleased] = useState(hooks.delayFirstLoadMs <= 0);
@@ -76,7 +109,10 @@ function Shell() {
     const show = (event: KeyboardEvent) => {
       // keyboardWillChangeFrame also fires on the way down, with the keyboard below the screen.
       const screenHeight = Dimensions.get("screen").height;
-      if (event.endCoordinates.height <= 0 || event.endCoordinates.screenY >= screenHeight - 1) {
+      if (
+        event.endCoordinates.height <= 0 ||
+        event.endCoordinates.screenY >= screenHeight - 1
+      ) {
         setKeyboardTop(null);
         dispatch({ type: "keyboard", visible: false });
         return;
@@ -90,40 +126,61 @@ function Shell() {
     };
     const subscriptions =
       Platform.OS === "ios"
-        ? [Keyboard.addListener("keyboardWillShow", show), Keyboard.addListener("keyboardWillChangeFrame", show), Keyboard.addListener("keyboardWillHide", hide)]
-        : [Keyboard.addListener("keyboardDidShow", show), Keyboard.addListener("keyboardDidHide", hide)];
-    return () => subscriptions.forEach((subscription) => subscription.remove());
+        ? [
+            Keyboard.addListener("keyboardWillShow", show),
+            Keyboard.addListener("keyboardWillChangeFrame", show),
+            Keyboard.addListener("keyboardWillHide", hide),
+          ]
+        : [
+            Keyboard.addListener("keyboardDidShow", show),
+            Keyboard.addListener("keyboardDidHide", hide),
+          ];
+    return () => {
+      for (const subscription of subscriptions) subscription.remove();
+    };
   }, [dispatch]);
 
   // Android Back: back in the web view while there is somewhere in the app to go, else the system's.
   useEffect(() => {
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      const s = stateRef.current;
-      if (showsLock(s)) return false;
-      if (s.phase === "signedOut" && s.signIn === "webFallback") {
-        if (s.canGoBack) webRef.current?.goBack();
-        else dispatch({ type: "cancelWebSignIn" });
-        return true;
-      }
-      if (s.phase === "signedIn" && s.canGoBack) {
-        webRef.current?.goBack();
-        return true;
-      }
-      return false;
-    });
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        const s = stateRef.current;
+        if (showsLock(s)) return false;
+        if (s.phase === "signedOut" && s.signIn === "webFallback") {
+          if (s.canGoBack) webRef.current?.goBack();
+          else dispatch({ type: "cancelWebSignIn" });
+          return true;
+        }
+        if (s.phase === "signedIn" && s.canGoBack) {
+          webRef.current?.goBack();
+          return true;
+        }
+        return false;
+      },
+    );
     return () => subscription.remove();
   }, [dispatch, stateRef]);
 
   const onShouldStart = useCallback(
     (request: ShouldStartLoadRequest) => {
-      const extra = request as ShouldStartLoadRequest & { hasGesture?: boolean; isTopFrame?: boolean };
+      const extra = request as ShouldStartLoadRequest & {
+        hasGesture?: boolean;
+        isTopFrame?: boolean;
+      };
       const decision = decideNavigation(
         shellConfig,
         stateRef.current,
-        { url: request.url, isTopFrame: extra.isTopFrame, navigationType: request.navigationType, hasGesture: extra.hasGesture },
+        {
+          url: request.url,
+          isTopFrame: extra.isTopFrame,
+          navigationType: request.navigationType,
+          hasGesture: extra.hasGesture,
+        },
         Date.now(),
       );
-      if (decision.events.length > 0) setTimeout(() => decision.events.forEach(dispatch), 0);
+      if (decision.events.length > 0)
+        setTimeout(() => decision.events.forEach(dispatch), 0);
       return decision.allow;
     },
     [dispatch, stateRef],
@@ -131,24 +188,46 @@ function Shell() {
 
   const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
-      const message = parsePageMessage(event.nativeEvent.data, event.nativeEvent.url, BASE_URL, token);
+      const message = parsePageMessage(
+        event.nativeEvent.data,
+        event.nativeEvent.url,
+        BASE_URL,
+        token,
+      );
       if (!message) {
         diag("bridge-rejected", { url: event.nativeEvent.url });
         return;
       }
-      if (message.kind === "bridge") diag("bridge", { type: message.message.type, ...("path" in message.message ? { path: message.message.path, tab: message.message.tab, signedIn: message.message.signedIn } : {}) });
+      if (message.kind === "bridge")
+        diag("bridge", {
+          type: message.message.type,
+          ...("path" in message.message
+            ? {
+                path: message.message.path,
+                tab: message.message.tab,
+                signedIn: message.message.signedIn,
+              }
+            : {}),
+        });
       dispatch({ type: "page", message });
     },
     [dispatch, token],
   );
 
-  const pageColors = state.pageDark === null ? systemColors : colorsFor(state.pageDark);
+  const pageColors =
+    state.pageDark === null ? systemColors : colorsFor(state.pageDark);
   const onWeb = !showsSignInScreen(state) && !showsLock(state);
-  const chromeBackground = onWeb ? (state.pageColor ?? pageColors.background) : systemColors.background;
+  const chromeBackground = onWeb
+    ? (state.pageColor ?? pageColors.background)
+    : systemColors.background;
   const chromeDark = onWeb ? pageColors.dark : systemColors.dark;
-  const keyboardOverlap = keyboardTop !== null && rootHeight > 0 ? Math.max(0, rootHeight - keyboardTop) : 0;
+  const keyboardOverlap =
+    keyboardTop !== null && rootHeight > 0
+      ? Math.max(0, rootHeight - keyboardTop)
+      : 0;
   const tabBar = showsTabBar(state);
-  const bottomPadding = keyboardOverlap > 0 ? keyboardOverlap : tabBar ? 0 : insets.bottom;
+  const bottomPadding =
+    keyboardOverlap > 0 ? keyboardOverlap : tabBar ? 0 : insets.bottom;
   const mounted = webMounted(state) && released;
 
   return (
@@ -157,11 +236,30 @@ function Shell() {
       onLayout={(event) => setRootHeight(event.nativeEvent.layout.height)}
     >
       <StatusBar style={chromeDark ? "light" : "dark"} />
-      <View style={[styles.column, { paddingTop: insets.top, paddingBottom: bottomPadding }]}>
+      <View
+        style={[
+          styles.column,
+          { paddingTop: insets.top, paddingBottom: bottomPadding },
+        ]}
+      >
         {showsWebSignInBar(state) ? (
-          <View style={[styles.cancelBar, { borderBottomColor: systemColors.border }]}>
-            <Pressable testID="web-sign-in-cancel" accessibilityRole="button" onPress={() => dispatch({ type: "cancelWebSignIn" })} hitSlop={8}>
-              <Text style={[styles.cancelText, { color: systemColors.foreground }]}>Cancel</Text>
+          <View
+            style={[
+              styles.cancelBar,
+              { borderBottomColor: systemColors.border },
+            ]}
+          >
+            <Pressable
+              testID="web-sign-in-cancel"
+              accessibilityRole="button"
+              onPress={() => dispatch({ type: "cancelWebSignIn" })}
+              hitSlop={8}
+            >
+              <Text
+                style={[styles.cancelText, { color: systemColors.foreground }]}
+              >
+                Cancel
+              </Text>
             </Pressable>
           </View>
         ) : null}
@@ -195,25 +293,63 @@ function Shell() {
               mixedContentMode="never"
               setSupportMultipleWindows
               javaScriptCanOpenWindowsAutomatically={false}
-              onOpenWindow={(event: WebViewOpenWindowEvent) => dispatch({ type: "openWindow", url: event.nativeEvent.targetUrl })}
-              onFileDownload={(event) => dispatch({ type: "fileDownload", url: event.nativeEvent.downloadUrl })}
-              onContentProcessDidTerminate={() => dispatch({ type: "processGone" })}
+              onOpenWindow={(event: WebViewOpenWindowEvent) =>
+                dispatch({
+                  type: "openWindow",
+                  url: event.nativeEvent.targetUrl,
+                })
+              }
+              onFileDownload={(event) =>
+                dispatch({
+                  type: "fileDownload",
+                  url: event.nativeEvent.downloadUrl,
+                })
+              }
+              onContentProcessDidTerminate={() =>
+                dispatch({ type: "processGone" })
+              }
               onRenderProcessGone={() => dispatch({ type: "processGone" })}
-              onLoad={(event: WebViewNavigationEvent) => dispatch({ type: "loadEnd", url: event.nativeEvent.url })}
+              onLoad={(event: WebViewNavigationEvent) =>
+                dispatch({ type: "loadEnd", url: event.nativeEvent.url })
+              }
               onError={(event: WebViewErrorEvent) =>
-                dispatch({ type: "loadError", url: event.nativeEvent.url ?? null, code: event.nativeEvent.code, description: event.nativeEvent.description })
+                dispatch({
+                  type: "loadError",
+                  url: event.nativeEvent.url ?? null,
+                  code: event.nativeEvent.code,
+                  description: event.nativeEvent.description,
+                })
               }
-              onHttpError={(event: WebViewHttpErrorEvent) => dispatch({ type: "httpError", url: event.nativeEvent.url, status: event.nativeEvent.statusCode })}
+              onHttpError={(event: WebViewHttpErrorEvent) =>
+                dispatch({
+                  type: "httpError",
+                  url: event.nativeEvent.url,
+                  status: event.nativeEvent.statusCode,
+                })
+              }
               onNavigationStateChange={(navigation: WebViewNavigation) =>
-                dispatch({ type: "urlChanged", url: navigation.url, canGoBack: navigation.canGoBack })
+                dispatch({
+                  type: "urlChanged",
+                  url: navigation.url,
+                  canGoBack: navigation.canGoBack,
+                })
               }
-              renderError={() => <View style={[StyleSheet.absoluteFill, { backgroundColor: chromeBackground }]} />}
+              renderError={() => (
+                <View
+                  style={[
+                    StyleSheet.absoluteFill,
+                    { backgroundColor: chromeBackground },
+                  ]}
+                />
+              )}
               hideKeyboardAccessoryView
               contentInsetAdjustmentBehavior="never"
               automaticallyAdjustContentInsets={false}
               allowsBackForwardNavigationGestures
               // Inline (not the imported TEST_BUILD) so a store bundle folds it away with what it guards.
-              webviewDebuggingEnabled={process.env.EXPO_PUBLIC_OPENBOT_TEST_BUILD === "1"}
+              webviewDebuggingEnabled={
+                process.env.EXPO_PUBLIC_OPENBOT_TEST_BUILD === "1"
+              }
               mediaCapturePermissionGrantType="grantIfSameHostElsePrompt"
               geolocationEnabled={false}
               pullToRefreshEnabled={false}
@@ -221,7 +357,9 @@ function Shell() {
               containerStyle={{ backgroundColor: chromeBackground }}
             />
           ) : null}
-          {showsSkeleton(state) ? <Skeleton colors={pageColors} background={chromeBackground} /> : null}
+          {showsSkeleton(state) ? (
+            <Skeleton colors={pageColors} background={chromeBackground} />
+          ) : null}
         </View>
         {tabBar ? (
           <TabBar
@@ -244,9 +382,19 @@ function Shell() {
           onLayout={() => void SplashScreen.hideAsync().catch(() => undefined)}
         />
       ) : null}
-      {showsLock(state) ? <LockScreen colors={systemColors} reason={lockReason(state)} onRetry={() => dispatch({ type: "retry", automatic: false })} /> : null}
+      {showsLock(state) ? (
+        <LockScreen
+          colors={systemColors}
+          reason={lockReason(state)}
+          onRetry={() => dispatch({ type: "retry", automatic: false })}
+        />
+      ) : null}
       {process.env.EXPO_PUBLIC_OPENBOT_TEST_BUILD === "1" ? (
-        <Text testID="debug-state" accessibilityLabel={`debug-state ${debugState(state, BASE_URL)}`} style={styles.debug}>
+        <Text
+          testID="debug-state"
+          accessibilityLabel={`debug-state ${debugState(state, BASE_URL)}`}
+          style={styles.debug}
+        >
           {`debug-state ${debugState(state, BASE_URL)}`}
         </Text>
       ) : null}
@@ -258,7 +406,20 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   column: { flex: 1 },
   webArea: { flex: 1, overflow: "hidden" },
-  cancelBar: { height: 44, justifyContent: "center", paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth },
+  cancelBar: {
+    height: 44,
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   cancelText: { fontSize: 17 },
-  debug: { position: "absolute", top: 0, left: 0, width: 4, height: 4, opacity: 0.02, fontSize: 1 },
+  debug: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: 4,
+    height: 4,
+    opacity: 0.02,
+    fontSize: 1,
+  },
 });

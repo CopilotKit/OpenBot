@@ -27,10 +27,19 @@ import {
 } from "./urls";
 
 export type Phase = "launching" | "signedOut" | "signedIn";
-export type SignInStep = "idle" | "probing" | "sheet" | "entering" | "webFallback";
+export type SignInStep =
+  | "idle"
+  | "probing"
+  | "sheet"
+  | "entering"
+  | "webFallback";
 export type Tab = "conversations" | "home" | "bots";
 export const TABS: readonly Tab[] = ["conversations", "home", "bots"];
-export const TAB_PATHS: Record<Tab, string> = { conversations: "/conversations", home: "/", bots: "/bots" };
+export const TAB_PATHS: Record<Tab, string> = {
+  conversations: "/conversations",
+  home: "/",
+  bots: "/bots",
+};
 
 export type Config = {
   origin: string;
@@ -53,7 +62,11 @@ export type TimerName =
   | "signConfirm"
   | "autoRetry";
 
-export type SessionCheckReason = "entering-url" | "web-fallback-url" | "enter-timeout" | "sign-confirm";
+export type SessionCheckReason =
+  | "entering-url"
+  | "web-fallback-url"
+  | "enter-timeout"
+  | "sign-confirm";
 
 export type Effect =
   | { type: "fetchConfig"; purpose: "sign-in" }
@@ -82,13 +95,25 @@ export type PageMessage =
   | { kind: "chrome"; color: string; dark: boolean }
   | { kind: "alert"; message: string }
   | { kind: "open"; handled: boolean }
-  | { kind: "bridge"; message: { type: "ready" } | { type: "signed-out" } | { type: "route"; path: string; tab: Tab | null; signedIn: boolean } };
+  | {
+      kind: "bridge";
+      message:
+        | { type: "ready" }
+        | { type: "signed-out" }
+        | { type: "route"; path: string; tab: Tab | null; signedIn: boolean };
+    };
 
 export type Event =
   | { type: "launch"; hasSession: boolean; probeUrl?: string | null }
   | { type: "signInPressed" }
   | { type: "configAnswered"; mode: HandoffMode; pair: PkcePair }
-  | { type: "renewalConfigAnswered"; mode: HandoffMode; pair: PkcePair; to: string; intercepted: string }
+  | {
+      type: "renewalConfigAnswered";
+      mode: HandoffMode;
+      pair: PkcePair;
+      to: string;
+      intercepted: string;
+    }
   | { type: "sheetFailedToOpen" }
   | { type: "sheetResult"; result: "success" | "cancel"; url: string | null }
   | { type: "callbackUrl"; url: string }
@@ -116,7 +141,12 @@ export type Event =
   | { type: "openExternal"; url: string }
   | { type: "blocked"; reason: string; url: string };
 
-export type Pending = { pair: PkcePair; mode: HandoffMode; to: string; renewal: boolean };
+export type Pending = {
+  pair: PkcePair;
+  mode: HandoffMode;
+  to: string;
+  renewal: boolean;
+};
 
 export type State = {
   phase: Phase;
@@ -229,11 +259,19 @@ export function initialState(): State {
 // What is on screen, derived. ---------------------------------------------------------------------
 
 export function showsSignInScreen(s: State): boolean {
-  return s.phase === "launching" || (s.phase === "signedOut" && s.signIn !== "webFallback" && s.signIn !== "entering");
+  return (
+    s.phase === "launching" ||
+    (s.phase === "signedOut" &&
+      s.signIn !== "webFallback" &&
+      s.signIn !== "entering")
+  );
 }
 export function webVisible(s: State): boolean {
   if (s.phase === "signedIn") return true;
-  return s.phase === "signedOut" && (s.signIn === "webFallback" || s.signIn === "entering");
+  return (
+    s.phase === "signedOut" &&
+    (s.signIn === "webFallback" || s.signIn === "entering")
+  );
 }
 /** The web view exists only while it is shown: each sign-in starts with a new one (fresh history). */
 export function webMounted(s: State): boolean {
@@ -255,13 +293,21 @@ export function showsWebSignInBar(s: State): boolean {
   return s.phase === "signedOut" && s.signIn === "webFallback";
 }
 export function signInBusy(s: State): boolean {
-  return s.phase === "signedOut" && (s.signIn === "probing" || s.signIn === "sheet");
+  return (
+    s.phase === "signedOut" && (s.signIn === "probing" || s.signIn === "sheet")
+  );
 }
 
 /** One line for the tests (a hidden label in test builds). Never a URL's query, a ticket or a verifier. */
 export function debugState(s: State, origin: string): string {
-  const path = isOwnOrigin(s.currentUrl, origin) ? pathOf(s.currentUrl) : s.currentUrl ? "off-origin" : "-";
-  const root = path.startsWith("/") ? `/${path.split("/").filter(Boolean)[0] ?? ""}` : path;
+  const path = isOwnOrigin(s.currentUrl, origin)
+    ? pathOf(s.currentUrl)
+    : s.currentUrl
+      ? "off-origin"
+      : "-";
+  const root = path.startsWith("/")
+    ? `/${path.split("/").filter(Boolean)[0] ?? ""}`
+    : path;
   return [
     `phase=${s.phase}`,
     `signIn=${s.signIn}`,
@@ -281,7 +327,12 @@ export function debugState(s: State, origin: string): string {
 
 type Step = { state: State; effects: Effect[] };
 
-export function reduce(config: Config, state: State, event: Event, at: number): Step {
+export function reduce(
+  config: Config,
+  state: State,
+  event: Event,
+  at: number,
+): Step {
   const step: Step = { state: { ...state }, effects: [] };
   handle(config, step, event, at);
   return step;
@@ -309,7 +360,8 @@ function baseUrl(config: Config, path = "/"): string {
 
 /** Retry and restart target: the last own page, never an address of the hand-off. */
 function reloadTarget(config: Config, s: State): string {
-  if (s.lastOwnUrl && isReloadableOwnUrl(s.lastOwnUrl, config.origin)) return s.lastOwnUrl;
+  if (s.lastOwnUrl && isReloadableOwnUrl(s.lastOwnUrl, config.origin))
+    return s.lastOwnUrl;
   return baseUrl(config);
 }
 
@@ -331,7 +383,13 @@ function startCovering(step: Step, at: number) {
 }
 
 /** Loads `url` in the web view; the same address again needs a new web view to load at all. */
-function load(config: Config, step: Step, url: string, at: number, headers?: Record<string, string>) {
+function load(
+  config: Config,
+  step: Step,
+  url: string,
+  at: number,
+  headers?: Record<string, string>,
+) {
   const s = step.state;
   const same = s.source?.uri === url;
   set(step, {
@@ -342,13 +400,21 @@ function load(config: Config, step: Step, url: string, at: number, headers?: Rec
   if (isReloadableOwnUrl(url, config.origin)) set(step, { lastOwnUrl: url });
   startCovering(step, at);
   timer(step, "watchdog", TIMING.watchdogMs);
-  log(step, "load", { url: isShellAuthUrl(url, config.origin) ? "shell-auth" : url, header: headers !== undefined });
+  log(step, "load", {
+    url: isShellAuthUrl(url, config.origin) ? "shell-auth" : url,
+    header: headers !== undefined,
+  });
 }
 
 /** A new web view at the last own page: after the process died, or for a retry. */
 function remount(config: Config, step: Step, at: number) {
   const url = reloadTarget(config, step.state);
-  set(step, { source: { uri: url }, webKey: step.state.webKey + 1, pendingNavUrl: url, lastOwnUrl: url });
+  set(step, {
+    source: { uri: url },
+    webKey: step.state.webKey + 1,
+    pendingNavUrl: url,
+    lastOwnUrl: url,
+  });
   startCovering(step, at);
   timer(step, "watchdog", TIMING.watchdogMs);
 }
@@ -356,7 +422,11 @@ function remount(config: Config, step: Step, at: number) {
 function scheduleHide(step: Step, at: number, after: number) {
   const s = step.state;
   if (!s.pageLoading || s.hideScheduled) return;
-  const delay = Math.max(after, TIMING.minSkeletonMs - (at - s.loadingSince), 0);
+  const delay = Math.max(
+    after,
+    TIMING.minSkeletonMs - (at - s.loadingSince),
+    0,
+  );
   set(step, { hideScheduled: true });
   cancel(step, "noReady", "textWait", "readyText");
   timer(step, "hideSkeleton", delay);
@@ -375,7 +445,10 @@ function maybeHide(config: Config, step: Step, at: number) {
     if (s.finished && s.currentUrl) scheduleHide(step, at, TIMING.offOriginMs);
     return;
   }
-  if (s.pageReady && (s.textMain >= TIMING.readyTextChars || s.readyTextPassed)) {
+  if (
+    s.pageReady &&
+    (s.textMain >= TIMING.readyTextChars || s.readyTextPassed)
+  ) {
     scheduleHide(step, at, TIMING.afterReadyMs);
   } else if (!s.pageReady && s.noReadyPassed && s.textBody > 0) {
     scheduleHide(step, at, 0);
@@ -395,14 +468,24 @@ function showLoadFailure(step: Step, source: "web" | "signIn", detail: string) {
 }
 
 function scheduleRetry(step: Step) {
-  timer(step, "autoRetry", step.state.retryCount < 6 ? TIMING.retryMs : TIMING.slowRetryMs);
+  timer(
+    step,
+    "autoRetry",
+    step.state.retryCount < 6 ? TIMING.retryMs : TIMING.slowRetryMs,
+  );
 }
 
 function finishSignIn(config: Config, step: Step, at: number) {
   const s = step.state;
   const fromWeb = s.signIn === "webFallback";
   cancel(step, "enter", "sheetClosed");
-  set(step, { phase: "signedIn", signIn: "idle", message: null, pending: null, renewing: false });
+  set(step, {
+    phase: "signedIn",
+    signIn: "idle",
+    message: null,
+    pending: null,
+    renewing: false,
+  });
   clearLoadFailure(step);
   fx(step, { type: "flushCookies" });
   log(step, "signed-in", { from: fromWeb ? "web-sign-in" : "hand-off" });
@@ -419,12 +502,28 @@ function failSignIn(step: Step, message: string) {
   }
   if (s.phase !== "signedOut" || s.signIn !== "entering") return;
   log(step, "sign-in-failed", { message });
-  set(step, { signIn: "idle", message, pending: null, source: null, pageLoading: false });
+  set(step, {
+    signIn: "idle",
+    message,
+    pending: null,
+    source: null,
+    pageLoading: false,
+  });
 }
 
 function sessionEnded(step: Step, reason: string) {
   log(step, "session-ended", { reason });
-  cancel(step, "enter", "signConfirm", "hideSkeleton", "watchdog", "skeletonDeadline", "noReady", "textWait", "readyText");
+  cancel(
+    step,
+    "enter",
+    "signConfirm",
+    "hideSkeleton",
+    "watchdog",
+    "skeletonDeadline",
+    "noReady",
+    "textWait",
+    "readyText",
+  );
   clearLoadFailure(step);
   set(step, {
     phase: "signedOut",
@@ -443,7 +542,14 @@ function sessionEnded(step: Step, reason: string) {
   fx(step, { type: "dismissKeyboard" }, { type: "clearSiteData" });
 }
 
-function presentSheet(config: Config, step: Step, pair: PkcePair, mode: HandoffMode, to: string, renewal: boolean) {
+function presentSheet(
+  config: Config,
+  step: Step,
+  pair: PkcePair,
+  mode: HandoffMode,
+  to: string,
+  renewal: boolean,
+) {
   let path = handoffPath(pair.challenge, config.platform, callbackName(mode));
   if (config.handoffAuto) path += "&auto=1";
   const url = renewal ? renewalUrl(config.origin, path) : baseUrl(config, path);
@@ -469,25 +575,52 @@ function enter(config: Config, step: Step, ticket: string, at: number) {
   log(step, "enter", { to, renewal: pending.renewal });
   // The one request with the header the server requires (login CSRF). Never logged, never kept as a
   // page to reload: a retry or a restart loads `to` (lastOwnUrl is set from it, not from this).
-  load(config, step, enterUrl(config.origin, ticket, pending.pair.verifier, to), at, { "OpenBot-Shell": config.platform });
-  if (isReloadableOwnUrl(baseUrl(config, to), config.origin)) set(step, { lastOwnUrl: baseUrl(config, to) });
+  load(
+    config,
+    step,
+    enterUrl(config.origin, ticket, pending.pair.verifier, to),
+    at,
+    { "OpenBot-Shell": config.platform },
+  );
+  if (isReloadableOwnUrl(baseUrl(config, to), config.origin))
+    set(step, { lastOwnUrl: baseUrl(config, to) });
 }
 
-function onOffOriginFailure(config: Config, step: Step, at: number, detail: string, url: string) {
+function onOffOriginFailure(
+  config: Config,
+  step: Step,
+  at: number,
+  detail: string,
+  url: string,
+) {
   log(step, "off-origin-load-failed", { url, detail });
   const s = step.state;
   if (s.phase === "signedIn") load(config, step, reloadTarget(config, s), at);
-  else if (s.signIn === "webFallback") load(config, step, baseUrl(config, "/sign?native-sign-in=web"), at);
+  else if (s.signIn === "webFallback")
+    load(config, step, baseUrl(config, "/sign?native-sign-in=web"), at);
 }
 
-function onLoadFailure(config: Config, step: Step, at: number, url: string | null, detail: string) {
+function onLoadFailure(
+  config: Config,
+  step: Step,
+  at: number,
+  url: string | null,
+  detail: string,
+) {
   const s = step.state;
   cancel(step, "watchdog");
   if (url && !isOwnOrigin(url, config.origin) && /^https?:/i.test(url)) {
     onOffOriginFailure(config, step, at, detail, url);
     return;
   }
-  cancel(step, "hideSkeleton", "noReady", "textWait", "readyText", "skeletonDeadline");
+  cancel(
+    step,
+    "hideSkeleton",
+    "noReady",
+    "textWait",
+    "readyText",
+    "skeletonDeadline",
+  );
   set(step, { pageLoading: false, hideScheduled: false });
   if (s.phase === "signedOut" && s.signIn === "entering") {
     failSignIn(step, MESSAGES.notFinished);
@@ -504,19 +637,26 @@ function committedPage(step: Step) {
   if (s.committed) return;
   set(step, { committed: true, commits: s.commits + 1 });
   cancel(step, "watchdog");
-  if (s.failureSource === "web" || s.failureSource === null) clearLoadFailure(step);
-  if (s.pageLoading) timer(step, "skeletonDeadline", TIMING.skeletonAfterCommitMs);
+  if (s.failureSource === "web" || s.failureSource === null)
+    clearLoadFailure(step);
+  if (s.pageLoading)
+    timer(step, "skeletonDeadline", TIMING.skeletonAfterCommitMs);
 }
 
 function handle(config: Config, step: Step, event: Event, at: number): void {
   const s = step.state;
   switch (event.type) {
     case "launch": {
-      log(step, "launch", { session: event.hasSession, probe: Boolean(event.probeUrl) });
+      log(step, "launch", {
+        session: event.hasSession,
+        probe: Boolean(event.probeUrl),
+      });
       if (event.probeUrl) {
         // Test hook: the header probe, loaded as `enter` is (with the header), to see where it goes.
         set(step, { phase: "signedIn" });
-        load(config, step, event.probeUrl, at, { "OpenBot-Shell": config.platform });
+        load(config, step, event.probeUrl, at, {
+          "OpenBot-Shell": config.platform,
+        });
       } else if (event.hasSession) {
         set(step, { phase: "signedIn" });
         load(config, step, baseUrl(config), at);
@@ -527,7 +667,8 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
     }
 
     case "signInPressed": {
-      if (s.phase !== "signedOut" || s.signIn !== "idle" || showsLock(s)) return;
+      if (s.phase !== "signedOut" || s.signIn !== "idle" || showsLock(s))
+        return;
       set(step, { signIn: "probing", message: null });
       fx(step, { type: "fetchConfig", purpose: "sign-in" });
       return;
@@ -535,7 +676,10 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
 
     case "configAnswered": {
       if (s.signIn !== "probing") return;
-      log(step, "hand-off-config", { mode: event.mode.kind, reason: "reason" in event.mode ? event.mode.reason : undefined });
+      log(step, "hand-off-config", {
+        mode: event.mode.kind,
+        reason: "reason" in event.mode ? event.mode.reason : undefined,
+      });
       if (event.mode.kind === "unreachable") {
         set(step, { signIn: "idle" });
         showLoadFailure(step, "signIn", "hand-off-config-no-answer");
@@ -553,7 +697,8 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
         set(step, { handoffMode: event.mode });
         presentSheet(config, step, event.pair, event.mode, event.to, true);
       } else {
-        if (event.mode.kind === "webSignIn") set(step, { handoffMode: event.mode });
+        if (event.mode.kind === "webSignIn")
+          set(step, { handoffMode: event.mode });
         // No hand-off on this server: let the hosted sign-in run in the web view after all.
         set(step, { renewing: false, allowHostedOnce: event.intercepted });
         load(config, step, event.intercepted, at);
@@ -573,7 +718,8 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
     case "sheetResult": {
       const pending = s.pending;
       if (!pending) return;
-      const ticket = event.result === "success" ? ticketFrom(event.url, pending.mode) : null;
+      const ticket =
+        event.result === "success" ? ticketFrom(event.url, pending.mode) : null;
       if (ticket) {
         enter(config, step, ticket, at);
         return;
@@ -581,7 +727,11 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
       log(step, "sheet-ended", { result: event.result, ticket: false });
       set(step, { pending: null });
       if (pending.renewal) set(step, { renewing: false });
-      else if (s.signIn === "sheet") set(step, { signIn: "idle", message: event.result === "success" ? MESSAGES.notFinished : null });
+      else if (s.signIn === "sheet")
+        set(step, {
+          signIn: "idle",
+          message: event.result === "success" ? MESSAGES.notFinished : null,
+        });
       return;
     }
 
@@ -589,10 +739,16 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
       // Android: openbotshell:// (or the App Link) arrived. Any app can fire the scheme: only a
       // well-formed ticket for the sign-in this app started counts; anything else changes nothing.
       const pending = s.pending;
-      const waiting = pending !== null && (pending.renewal ? s.renewing : s.signIn === "sheet");
+      const waiting =
+        pending !== null &&
+        (pending.renewal ? s.renewing : s.signIn === "sheet");
       const ticket = waiting ? ticketFrom(event.url, pending.mode) : null;
       if (!ticket) {
-        log(step, "callback-ignored", { reason: waiting ? "no-ticket-or-wrong-callback" : "no-pending-sign-in" });
+        log(step, "callback-ignored", {
+          reason: waiting
+            ? "no-ticket-or-wrong-callback"
+            : "no-pending-sign-in",
+        });
         return;
       }
       fx(step, { type: "closeSheet" });
@@ -619,7 +775,10 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
           return;
         }
         case "text": {
-          set(step, { textBody: Math.max(s.textBody, message.body), textMain: Math.max(s.textMain, message.main) });
+          set(step, {
+            textBody: Math.max(s.textBody, message.body),
+            textMain: Math.max(s.textMain, message.main),
+          });
           maybeHide(config, step, at);
           return;
         }
@@ -650,10 +809,18 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
 
     case "loadEnd": {
       cancel(step, "watchdog");
-      set(step, { finished: true, currentUrl: event.url || s.currentUrl, pendingNavUrl: null });
+      set(step, {
+        finished: true,
+        currentUrl: event.url || s.currentUrl,
+        pendingNavUrl: null,
+      });
       committedPage(step);
       const now = step.state;
-      if (now.pageLoading && !now.pageReady && isOwnOrigin(now.currentUrl, config.origin)) {
+      if (
+        now.pageLoading &&
+        !now.pageReady &&
+        isOwnOrigin(now.currentUrl, config.origin)
+      ) {
         timer(step, "noReady", TIMING.noReadyMs);
         timer(step, "textWait", TIMING.textWaitMs);
       }
@@ -681,7 +848,8 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
     case "urlChanged": {
       const url = event.url;
       set(step, { currentUrl: url, canGoBack: event.canGoBack });
-      if (isReloadableOwnUrl(url, config.origin)) set(step, { lastOwnUrl: url });
+      if (isReloadableOwnUrl(url, config.origin))
+        set(step, { lastOwnUrl: url });
       if (!isOwnOrigin(url, config.origin)) return;
       const path = pathOf(url);
       const onSign = isSignPath(path);
@@ -689,30 +857,60 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
         // A web app without the bridge (production today) says nothing; its /sign sends a signed-in
         // person on to "/". Still on /sign after 2.5 s, or no session cookie: the session ended.
         timer(step, "signConfirm", TIMING.signConfirmMs);
-      } else if (s.phase === "signedOut" && s.signIn === "entering" && !onSign && !path.startsWith("/api/")) {
+      } else if (
+        s.phase === "signedOut" &&
+        s.signIn === "entering" &&
+        !onSign &&
+        !path.startsWith("/api/")
+      ) {
         fx(step, { type: "checkSession", reason: "entering-url" });
-      } else if (s.phase === "signedOut" && s.signIn === "webFallback" && !onSign && !path.startsWith("/api/")) {
+      } else if (
+        s.phase === "signedOut" &&
+        s.signIn === "webFallback" &&
+        !onSign &&
+        !path.startsWith("/api/")
+      ) {
         fx(step, { type: "checkSession", reason: "web-fallback-url" });
       }
       return;
     }
 
     case "sessionChecked": {
-      log(step, "session-check", { reason: event.reason, present: event.present });
+      log(step, "session-check", {
+        reason: event.reason,
+        present: event.present,
+      });
       switch (event.reason) {
         case "entering-url":
-          if (event.present && s.phase === "signedOut" && s.signIn === "entering") finishSignIn(config, step, at);
+          if (
+            event.present &&
+            s.phase === "signedOut" &&
+            s.signIn === "entering"
+          )
+            finishSignIn(config, step, at);
           return;
         case "web-fallback-url":
-          if (event.present && s.phase === "signedOut" && s.signIn === "webFallback") finishSignIn(config, step, at);
+          if (
+            event.present &&
+            s.phase === "signedOut" &&
+            s.signIn === "webFallback"
+          )
+            finishSignIn(config, step, at);
           return;
         case "enter-timeout":
-          if (event.present && s.phase === "signedOut" && s.signIn === "entering") finishSignIn(config, step, at);
+          if (
+            event.present &&
+            s.phase === "signedOut" &&
+            s.signIn === "entering"
+          )
+            finishSignIn(config, step, at);
           else failSignIn(step, MESSAGES.tooLong);
           return;
         case "sign-confirm": {
           if (s.phase !== "signedIn") return;
-          const stillOnSign = isOwnOrigin(s.currentUrl, config.origin) && isSignPath(pathOf(s.currentUrl));
+          const stillOnSign =
+            isOwnOrigin(s.currentUrl, config.origin) &&
+            isSignPath(pathOf(s.currentUrl));
           if (stillOnSign || !event.present) sessionEnded(step, "url-sign");
           return;
         }
@@ -732,14 +930,19 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
         fx(step, { type: "dismissKeyboard" });
         return;
       }
-      if (s.loadFailed) handle(config, step, { type: "retry", automatic: true }, at);
+      if (s.loadFailed)
+        handle(config, step, { type: "retry", automatic: true }, at);
       return;
     }
 
     case "retry": {
       if (!s.loadFailed) return;
       set(step, { retryCount: s.retryCount + 1 });
-      log(step, "retry", { automatic: event.automatic, count: s.retryCount + 1, offline: s.offline });
+      log(step, "retry", {
+        automatic: event.automatic,
+        count: s.retryCount + 1,
+        offline: s.offline,
+      });
       if (!s.offline) {
         if (s.failureSource === "signIn") fx(step, { type: "ping" });
         else if (webVisible(s)) remount(config, step, at);
@@ -758,10 +961,17 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
       fx(step, { type: "dismissKeyboard" });
       set(step, { tab: event.tab });
       const path = TAB_PATHS[event.tab];
-      if (s.pageReady && isOwnOrigin(s.currentUrl, config.origin) && !showsLock(s)) {
+      if (
+        s.pageReady &&
+        isOwnOrigin(s.currentUrl, config.origin) &&
+        !showsLock(s)
+      ) {
         // The page's own router, as OpenBot Desktop asks: `openbot:open`. The script loads the page
         // itself when nobody handled the event.
-        fx(step, { type: "inject", script: `window.__openbotShellOpen && window.__openbotShellOpen(${JSON.stringify(path)}); true;` });
+        fx(step, {
+          type: "inject",
+          script: `window.__openbotShellOpen && window.__openbotShellOpen(${JSON.stringify(path)}); true;`,
+        });
       } else {
         set(step, { lastNavigation: "load" });
         load(config, step, baseUrl(config, path), at);
@@ -786,7 +996,8 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
         fx(step, { type: "dismissKeyboard" }, { type: "flushCookies" });
         return;
       }
-      if (s.pending && config.platform === "android" && !s.callbackArrived) timer(step, "sheetClosed", TIMING.sheetClosedMs);
+      if (s.pending && config.platform === "android" && !s.callbackArrived)
+        timer(step, "sheetClosed", TIMING.sheetClosedMs);
       return;
     }
 
@@ -795,7 +1006,12 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
       set(step, { renewing: true });
       const to = renewalTo(event.url, config.origin);
       log(step, "renewal", { to });
-      fx(step, { type: "fetchConfig", purpose: "renewal", to, intercepted: event.url });
+      fx(step, {
+        type: "fetchConfig",
+        purpose: "renewal",
+        to,
+        intercepted: event.url,
+      });
       return;
     }
 
@@ -808,7 +1024,11 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
       const tapped = at - s.lastTapAt < TIMING.tapWindowMs;
       if (isOwnOrigin(url, config.origin)) {
         if (isShellAuthUrl(url, config.origin)) return;
-        if (s.pageReady) fx(step, { type: "inject", script: `location.assign(${JSON.stringify(url)}); true;` });
+        if (s.pageReady)
+          fx(step, {
+            type: "inject",
+            script: `location.assign(${JSON.stringify(url)}); true;`,
+          });
         else load(config, step, url, at);
       } else if (/^https?:/i.test(url) && tapped) {
         fx(step, { type: "openBrowser", url });
@@ -820,7 +1040,8 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
 
     case "fileDownload": {
       // Never in place of the page: the system share sheet takes the address.
-      if (/^https?:/i.test(event.url)) fx(step, { type: "share", url: event.url });
+      if (/^https?:/i.test(event.url))
+        fx(step, { type: "share", url: event.url });
       return;
     }
 
@@ -841,7 +1062,10 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
 function handleBridge(
   config: Config,
   step: Step,
-  message: { type: "ready" } | { type: "signed-out" } | { type: "route"; path: string; tab: Tab | null; signedIn: boolean },
+  message:
+    | { type: "ready" }
+    | { type: "signed-out" }
+    | { type: "route"; path: string; tab: Tab | null; signedIn: boolean },
   at: number,
 ) {
   const s = step.state;
@@ -858,12 +1082,18 @@ function handleBridge(
       if (message.tab) set(step, { tab: message.tab });
       if (message.signedIn) {
         if (s.phase !== "signedIn" || s.renewing) {
-          if (s.phase === "signedOut" && (s.signIn === "entering" || s.signIn === "webFallback")) finishSignIn(config, step, at);
+          if (
+            s.phase === "signedOut" &&
+            (s.signIn === "entering" || s.signIn === "webFallback")
+          )
+            finishSignIn(config, step, at);
           else if (s.renewing) set(step, { renewing: false });
         }
       } else if (isSignPath(message.path)) {
-        if (s.phase === "signedIn") timer(step, "signConfirm", TIMING.signConfirmMs);
-        else if (s.signIn === "entering") failSignIn(step, MESSAGES.notFinished);
+        if (s.phase === "signedIn")
+          timer(step, "signConfirm", TIMING.signConfirmMs);
+        else if (s.signIn === "entering")
+          failSignIn(step, MESSAGES.notFinished);
       }
       return;
     }
@@ -880,7 +1110,13 @@ function handleTimer(config: Config, step: Step, name: TimerName, at: number) {
   switch (name) {
     case "watchdog":
       log(step, "load-watchdog");
-      onLoadFailure(config, step, at, s.pendingNavUrl ?? s.currentUrl, "watchdog");
+      onLoadFailure(
+        config,
+        step,
+        at,
+        s.pendingNavUrl ?? s.currentUrl,
+        "watchdog",
+      );
       return;
     case "enter":
       fx(step, { type: "checkSession", reason: "enter-timeout" });
@@ -889,7 +1125,8 @@ function handleTimer(config: Config, step: Step, name: TimerName, at: number) {
       if (!s.pending || s.callbackArrived) return;
       log(step, "sheet-closed-without-callback");
       if (s.pending.renewal) set(step, { renewing: false, pending: null });
-      else if (s.signIn === "sheet") set(step, { signIn: "idle", pending: null });
+      else if (s.signIn === "sheet")
+        set(step, { signIn: "idle", pending: null });
       return;
     case "noReady":
       set(step, { noReadyPassed: true });
@@ -912,7 +1149,8 @@ function handleTimer(config: Config, step: Step, name: TimerName, at: number) {
       if (s.pageLoading) scheduleHide(step, at, 0);
       return;
     case "signConfirm":
-      if (s.phase === "signedIn") fx(step, { type: "checkSession", reason: "sign-confirm" });
+      if (s.phase === "signedIn")
+        fx(step, { type: "checkSession", reason: "sign-confirm" });
       return;
     case "autoRetry":
       handle(config, step, { type: "retry", automatic: true }, at);
@@ -934,31 +1172,65 @@ export type NavigationRequest = {
 
 export type NavigationDecision = { allow: boolean; events: Event[] };
 
-export function decideNavigation(config: Config, s: State, request: NavigationRequest, at: number): NavigationDecision {
+export function decideNavigation(
+  config: Config,
+  s: State,
+  request: NavigationRequest,
+  at: number,
+): NavigationDecision {
   const { url } = request;
   const scheme = schemeOf(url);
   const top = request.isTopFrame !== false;
-  const tapped = request.navigationType === "click" || request.hasGesture === true || at - s.lastTapAt < TIMING.tapWindowMs;
-  if (scheme === "openbotshell") return { allow: false, events: [{ type: "blocked", reason: "callback-scheme", url }] };
-  if (scheme === "about" || scheme === "blob" || scheme === "data") return { allow: true, events: [] };
+  const tapped =
+    request.navigationType === "click" ||
+    request.hasGesture === true ||
+    at - s.lastTapAt < TIMING.tapWindowMs;
+  if (scheme === "openbotshell")
+    return {
+      allow: false,
+      events: [{ type: "blocked", reason: "callback-scheme", url }],
+    };
+  if (scheme === "about" || scheme === "blob" || scheme === "data")
+    return { allow: true, events: [] };
   if (scheme === "http" || scheme === "https") {
     if (!top) return { allow: true, events: [] };
     const own = isOwnOrigin(url, config.origin);
     if (own && isHostedSignIn(url, config.origin) && s.phase === "signedIn") {
-      if (s.allowHostedOnce === url) return { allow: true, events: [{ type: "allowedOnce" }, { type: "navStart", url }] };
+      if (s.allowHostedOnce === url)
+        return {
+          allow: true,
+          events: [{ type: "allowedOnce" }, { type: "navStart", url }],
+        };
       if (!s.renewing && s.handoffMode?.kind !== "webSignIn")
         return { allow: false, events: [{ type: "interceptRenewal", url }] };
     }
     if (s.phase === "signedIn" && request.navigationType === "backforward") {
       if (!own || isSignPath(pathOf(url)) || pathOf(url).startsWith("/api/"))
-        return { allow: false, events: [{ type: "blocked", reason: "back-out-of-app", url }] };
+        return {
+          allow: false,
+          events: [{ type: "blocked", reason: "back-out-of-app", url }],
+        };
     }
     if (own) return { allow: true, events: [{ type: "navStart", url }] };
-    if (s.phase === "signedOut" && s.signIn === "webFallback") return { allow: true, events: [{ type: "navStart", url }] };
+    if (s.phase === "signedOut" && s.signIn === "webFallback")
+      return { allow: true, events: [{ type: "navStart", url }] };
     if (tapped) return { allow: false, events: [{ type: "openBrowser", url }] };
     return { allow: true, events: [{ type: "navStart", url }] };
   }
-  if (top && tapped && (scheme === "mailto" || scheme === "tel" || scheme === "sms"))
+  if (
+    top &&
+    tapped &&
+    (scheme === "mailto" || scheme === "tel" || scheme === "sms")
+  )
     return { allow: false, events: [{ type: "openExternal", url }] };
-  return { allow: false, events: [{ type: "blocked", reason: tapped ? "scheme-not-allowed" : "no-tap", url: `${scheme}:` }] };
+  return {
+    allow: false,
+    events: [
+      {
+        type: "blocked",
+        reason: tapped ? "scheme-not-allowed" : "no-tap",
+        url: `${scheme}:`,
+      },
+    ],
+  };
 }

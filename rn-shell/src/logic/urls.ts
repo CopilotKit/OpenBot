@@ -25,12 +25,19 @@ export function encodeValue(value: string): string {
 /** `scheme://host[:port]` of an absolute http(s) URL, lowercased, or null. No `URL` needed (Hermes has one, but tests and old engines agree on this). */
 export function originOf(url: string | null | undefined): string | null {
   if (!url) return null;
-  const match = /^(https?):\/\/([^/?#@]*@)?([^/?#:]+|\[[^\]]+\])(:\d+)?(?:[/?#]|$)/i.exec(url);
+  const match =
+    /^(https?):\/\/([^/?#@]*@)?([^/?#:]+|\[[^\]]+\])(:\d+)?(?:[/?#]|$)/i.exec(
+      url,
+    );
   if (!match) return null;
   const scheme = match[1].toLowerCase();
   const host = match[3].toLowerCase();
   let port = match[4] ?? "";
-  if ((scheme === "https" && port === ":443") || (scheme === "http" && port === ":80")) port = "";
+  if (
+    (scheme === "https" && port === ":443") ||
+    (scheme === "http" && port === ":80")
+  )
+    port = "";
   return `${scheme}://${host}${port}`;
 }
 
@@ -52,10 +59,15 @@ export function pathQueryFragmentOf(url: string): string {
   const match = /^https?:\/\/[^/?#]*(.*)$/i.exec(url);
   if (!match) return "/";
   const rest = match[1];
-  return rest === "" || rest.startsWith("?") || rest.startsWith("#") ? `/${rest}` : rest;
+  return rest === "" || rest.startsWith("?") || rest.startsWith("#")
+    ? `/${rest}`
+    : rest;
 }
 
-export function isOwnOrigin(url: string | null | undefined, origin: string): boolean {
+export function isOwnOrigin(
+  url: string | null | undefined,
+  origin: string,
+): boolean {
   const found = originOf(url);
   return found !== null && found === originOf(origin);
 }
@@ -65,19 +77,29 @@ export function isSignPath(path: string): boolean {
 }
 
 /** Under `/api/auth/shell/`: the hand-off's addresses, which carry the ticket and the verifier. */
-export function isShellAuthUrl(url: string | null | undefined, origin: string): boolean {
+export function isShellAuthUrl(
+  url: string | null | undefined,
+  origin: string,
+): boolean {
   return isOwnOrigin(url, origin) && pathOf(url).startsWith("/api/auth/shell/");
 }
 
 /** A page of the app a retry or a restart may load again: own origin, not /sign, not under /api/. */
-export function isReloadableOwnUrl(url: string | null | undefined, origin: string): boolean {
+export function isReloadableOwnUrl(
+  url: string | null | undefined,
+  origin: string,
+): boolean {
   if (!isOwnOrigin(url, origin)) return false;
   const path = pathOf(url);
   return !path.startsWith("/api/") && !isSignPath(path);
 }
 
 /** `/api/auth/shell/handoff?challenge=<C>&platform=<P>&callback=<https|scheme>`, in that order. */
-export function handoffPath(challenge: string, platform: Platform, callback: "https" | "scheme" | null): string {
+export function handoffPath(
+  challenge: string,
+  platform: Platform,
+  callback: "https" | "scheme" | null,
+): string {
   let path = `/api/auth/shell/handoff?challenge=${encodeValue(challenge)}&platform=${encodeValue(platform)}`;
   if (callback) path += `&callback=${encodeValue(callback)}`;
   return path;
@@ -89,7 +111,12 @@ export function renewalUrl(origin: string, handoff: string): string {
 }
 
 /** `GET <origin>/api/auth/shell/enter?ticket=<T>&verifier=<V>&to=<to>`, each one encoded value. */
-export function enterUrl(origin: string, ticket: string, verifier: string, to: string): string {
+export function enterUrl(
+  origin: string,
+  ticket: string,
+  verifier: string,
+  to: string,
+): string {
   return `${origin}/api/auth/shell/enter?ticket=${encodeValue(ticket)}&verifier=${encodeValue(verifier)}&to=${encodeValue(to)}`;
 }
 
@@ -124,7 +151,10 @@ export function renewalTo(intercepted: string, origin: string): string {
   if (raw === null) return "/";
   const returnTo = decodeOnce(raw);
   if (returnTo === null) return "/";
-  if (returnTo.startsWith("/")) return returnTo.startsWith("//") || returnTo.includes("\\") ? "/" : returnTo;
+  if (returnTo.startsWith("/"))
+    return returnTo.startsWith("//") || returnTo.includes("\\")
+      ? "/"
+      : returnTo;
   if (!isOwnOrigin(returnTo, origin)) return "/";
   const to = pathQueryFragmentOf(returnTo);
   return to.startsWith("/") && !to.startsWith("//") ? to : "/";
@@ -142,7 +172,8 @@ export function isHostedSignIn(url: string, origin: string): boolean {
 export function redact(url: string | null | undefined): string {
   if (!url) return "";
   const scheme = schemeOf(url);
-  if (scheme !== "http" && scheme !== "https") return scheme ? `${scheme}:` : "";
+  if (scheme !== "http" && scheme !== "https")
+    return scheme ? `${scheme}:` : "";
   const origin = originOf(url) ?? "";
   const path = pathOf(url);
   const queryStart = url.indexOf("?");

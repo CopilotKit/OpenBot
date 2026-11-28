@@ -42,14 +42,17 @@ export function decideHandoff(
   if (typeof object !== "object" || object === null || Array.isArray(object))
     return { kind: "webSignIn", reason: "not-json-object" };
   const record = object as Record<string, unknown>;
-  if (typeof record.handoff !== "boolean") return { kind: "webSignIn", reason: "handoff-not-boolean" };
+  if (typeof record.handoff !== "boolean")
+    return { kind: "webSignIn", reason: "handoff-not-boolean" };
   if (!record.handoff) return { kind: "webSignIn", reason: "handoff-off" };
   const callback = record.callback;
   const callbackUrl = record.callbackUrl;
   if (typeof callback !== "string" || typeof callbackUrl !== "string")
     return { kind: "webSignIn", reason: "callback-missing" };
   if (callback === "scheme")
-    return callbackUrl === SCHEME_CALLBACK ? { kind: "scheme" } : { kind: "webSignIn", reason: "scheme-url-unexpected" };
+    return callbackUrl === SCHEME_CALLBACK
+      ? { kind: "scheme" }
+      : { kind: "webSignIn", reason: "scheme-url-unexpected" };
   if (callback === "https") {
     const match = /^https:\/\/([^/?#:@]+)(\/[^?#]*)$/i.exec(callbackUrl);
     if (!match) return { kind: "webSignIn", reason: "https-url-unexpected" };
@@ -57,7 +60,8 @@ export function decideHandoff(
     const path = match[2];
     if (host !== baseHost.toLowerCase() || path === "/" || path === "")
       return { kind: "webSignIn", reason: "https-url-unexpected" };
-    if (!httpsCallbackSupported) return { kind: "webSignIn", reason: "https-callback-unsupported" };
+    if (!httpsCallbackSupported)
+      return { kind: "webSignIn", reason: "https-callback-unsupported" };
     return { kind: "https", host, path, url: `https://${host}${path}` };
   }
   return { kind: "webSignIn", reason: "callback-unknown" };
@@ -81,14 +85,22 @@ export function redirectUrlFor(mode: HandoffMode): string | null {
  * The ticket, when `url` is the callback this mode expects and carries one well-formed ticket;
  * otherwise null (and a pending sign-in stays pending: any app can fire openbotshell://).
  */
-export function ticketFrom(url: string | null | undefined, mode: HandoffMode | null): string | null {
+export function ticketFrom(
+  url: string | null | undefined,
+  mode: HandoffMode | null,
+): string | null {
   if (!url || !mode) return null;
   if (mode.kind === "scheme") {
     if (!/^openbotshell:\/\/signed-in(?:[/?#]|$)/i.test(url)) return null;
     if (/^openbotshell:\/\/signed-in\/[^?#]/i.test(url)) return null;
   } else if (mode.kind === "https") {
     const match = /^https:\/\/([^/?#:@]+)([^?#]*)/i.exec(url);
-    if (!match || match[1].toLowerCase() !== mode.host || match[2] !== mode.path) return null;
+    if (
+      !match ||
+      match[1].toLowerCase() !== mode.host ||
+      match[2] !== mode.path
+    )
+      return null;
   } else {
     return null;
   }

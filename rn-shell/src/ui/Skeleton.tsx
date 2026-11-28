@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Animated, Easing, type LayoutChangeEvent, StyleSheet, View } from "react-native";
+import {
+  AccessibilityInfo,
+  Animated,
+  Easing,
+  type LayoutChangeEvent,
+  StyleSheet,
+  View,
+} from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import type { Colors } from "./theme";
 
@@ -17,8 +24,13 @@ export function Skeleton(props: { colors: Colors; background: string }) {
 
   useEffect(() => {
     let alive = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then((value) => alive && setReduceMotion(value));
-    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
+    void AccessibilityInfo.isReduceMotionEnabled().then(
+      (value) => alive && setReduceMotion(value),
+    );
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      setReduceMotion,
+    );
     return () => {
       alive = false;
       subscription.remove();
@@ -29,19 +41,41 @@ export function Skeleton(props: { colors: Colors; background: string }) {
     const animation = reduceMotion
       ? Animated.loop(
           Animated.sequence([
-            Animated.timing(pulse, { toValue: 0.6, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-            Animated.timing(pulse, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+            Animated.timing(pulse, {
+              toValue: 0.6,
+              duration: 900,
+              easing: Easing.inOut(Easing.quad),
+              useNativeDriver: true,
+            }),
+            Animated.timing(pulse, {
+              toValue: 1,
+              duration: 900,
+              easing: Easing.inOut(Easing.quad),
+              useNativeDriver: true,
+            }),
           ]),
         )
-      : Animated.loop(Animated.timing(sweep, { toValue: 1, duration: 1300, easing: Easing.linear, useNativeDriver: true }));
+      : Animated.loop(
+          Animated.timing(sweep, {
+            toValue: 1,
+            duration: 1300,
+            easing: Easing.linear,
+            useNativeDriver: true,
+          }),
+        );
     animation.start();
     return () => animation.stop();
   }, [reduceMotion, sweep, pulse]);
 
   const band = Math.max(width * 0.6, 120);
-  const translateX = sweep.interpolate({ inputRange: [0, 1], outputRange: [-band, width + band] });
+  const translateX = sweep.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-band, width + band],
+  });
   const shape = colors.muted;
-  const highlight = colors.dark ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.65)";
+  const highlight = colors.dark
+    ? "rgba(255,255,255,0.07)"
+    : "rgba(255,255,255,0.65)";
 
   return (
     <View
@@ -50,30 +84,69 @@ export function Skeleton(props: { colors: Colors; background: string }) {
       accessibilityLabel="Loading"
       accessibilityRole="progressbar"
       onStartShouldSetResponder={() => true}
-      onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width)}
-      style={[StyleSheet.absoluteFill, styles.root, { backgroundColor: props.background }]}
+      onLayout={(event: LayoutChangeEvent) =>
+        setWidth(event.nativeEvent.layout.width)
+      }
+      style={[
+        StyleSheet.absoluteFill,
+        styles.root,
+        { backgroundColor: props.background },
+      ]}
     >
       <Animated.View style={[styles.shapes, { opacity: pulse }]}>
         <View style={styles.header}>
           <View style={[styles.circle, { backgroundColor: shape }]} />
-          <View style={[styles.line, { width: "38%", backgroundColor: shape }]} />
+          <View
+            style={[styles.line, { width: "38%", backgroundColor: shape }]}
+          />
         </View>
-        <View style={[styles.line, { width: "62%", height: 22, marginTop: 28, backgroundColor: shape }]} />
-        <View style={[styles.line, { width: "84%", marginTop: 12, backgroundColor: shape }]} />
+        <View
+          style={[
+            styles.line,
+            { width: "62%", height: 22, marginTop: 28, backgroundColor: shape },
+          ]}
+        />
+        <View
+          style={[
+            styles.line,
+            { width: "84%", marginTop: 12, backgroundColor: shape },
+          ]}
+        />
         {[0, 1, 2].map((row) => (
-          <View key={row} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View
+            key={row}
+            style={[
+              styles.card,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
             <View style={[styles.tile, { backgroundColor: shape }]} />
             <View style={styles.cardLines}>
-              <View style={[styles.line, { width: "70%", backgroundColor: shape }]} />
-              <View style={[styles.line, { width: "45%", marginTop: 8, backgroundColor: shape }]} />
+              <View
+                style={[styles.line, { width: "70%", backgroundColor: shape }]}
+              />
+              <View
+                style={[
+                  styles.line,
+                  { width: "45%", marginTop: 8, backgroundColor: shape },
+                ]}
+              />
             </View>
           </View>
         ))}
         <View style={styles.spacer} />
-        <View style={[styles.composer, { backgroundColor: colors.card, borderColor: colors.border }]} />
+        <View
+          style={[
+            styles.composer,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        />
       </Animated.View>
       {reduceMotion || width === 0 ? null : (
-        <Animated.View pointerEvents="none" style={[styles.band, { width: band, transform: [{ translateX }] }]}>
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.band, { width: band, transform: [{ translateX }] }]}
+        >
           <Svg width={band} height="100%">
             <Defs>
               <LinearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
@@ -96,10 +169,21 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", gap: 12 },
   circle: { width: 32, height: 32, borderRadius: 16 },
   line: { height: 12, borderRadius: 6 },
-  card: { flexDirection: "row", alignItems: "center", marginTop: 16, padding: 14, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth },
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   tile: { width: 32, height: 32, borderRadius: 8 },
   cardLines: { flex: 1, marginLeft: 12 },
   spacer: { flex: 1 },
-  composer: { height: 96, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth },
+  composer: {
+    height: 96,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   band: { position: "absolute", top: 0, bottom: 0, left: 0 },
 });

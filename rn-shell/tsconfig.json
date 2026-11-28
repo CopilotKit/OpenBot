@@ -7,5 +7,13 @@
     "noUnusedParameters": true,
     "types": ["bun"]
   },
-  "include": ["index.ts", "app.config.ts", "src/**/*.ts", "src/**/*.tsx", "modules/**/*.ts", "__tests__/**/*.ts", "expo-env.d.ts"]
+  "include": [
+    "index.ts",
+    "app.config.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "modules/**/*.ts",
+    "__tests__/**/*.ts",
+    "expo-env.d.ts"
+  ]
 }

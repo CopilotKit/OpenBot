@@ -7,7 +7,8 @@
 
 export type PkcePair = { verifier: string; challenge: string };
 
-const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /** base64url without padding. */
 export function base64url(bytes: Uint8Array): string {
@@ -15,7 +16,11 @@ export function base64url(bytes: Uint8Array): string {
   let index = 0;
   for (; index + 2 < bytes.length; index += 3) {
     const n = (bytes[index] << 16) | (bytes[index + 1] << 8) | bytes[index + 2];
-    out += ALPHABET[(n >> 18) & 63] + ALPHABET[(n >> 12) & 63] + ALPHABET[(n >> 6) & 63] + ALPHABET[n & 63];
+    out +=
+      ALPHABET[(n >> 18) & 63] +
+      ALPHABET[(n >> 12) & 63] +
+      ALPHABET[(n >> 6) & 63] +
+      ALPHABET[n & 63];
   }
   const left = bytes.length - index;
   if (left === 1) {
@@ -23,7 +28,10 @@ export function base64url(bytes: Uint8Array): string {
     out += ALPHABET[(n >> 18) & 63] + ALPHABET[(n >> 12) & 63];
   } else if (left === 2) {
     const n = (bytes[index] << 16) | (bytes[index + 1] << 8);
-    out += ALPHABET[(n >> 18) & 63] + ALPHABET[(n >> 12) & 63] + ALPHABET[(n >> 6) & 63];
+    out +=
+      ALPHABET[(n >> 18) & 63] +
+      ALPHABET[(n >> 12) & 63] +
+      ALPHABET[(n >> 6) & 63];
   }
   return out;
 }
@@ -39,6 +47,7 @@ export async function makePkcePair(
 ): Promise<PkcePair> {
   const verifier = base64url(randomBytes(32));
   const challenge = base64url(await sha256(verifier));
-  if (!VERIFIER.test(verifier) || !CHALLENGE.test(challenge)) throw new Error("pkce-pair-malformed");
+  if (!VERIFIER.test(verifier) || !CHALLENGE.test(challenge))
+    throw new Error("pkce-pair-malformed");
   return { verifier, challenge };
 }

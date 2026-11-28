@@ -3,9 +3,23 @@ import Svg, { Path } from "react-native-svg";
 /** Tabler icons (the web app's set), outline, line 1.75. */
 type IconProps = { color: string; size?: number; strokeWidth?: number };
 
-function Icon({ color, size = 24, strokeWidth = 1.75, paths }: IconProps & { paths: string[] }) {
+function Icon({
+  color,
+  size = 24,
+  strokeWidth = 1.75,
+  paths,
+}: IconProps & { paths: string[] }) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <Svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       {paths.map((d) => (
         <Path key={d} d={d} />
       ))}
@@ -29,7 +43,11 @@ export function HomeIcon(props: IconProps) {
   return (
     <Icon
       {...props}
-      paths={["M5 12l-2 0l9 -9l9 9l-2 0", "M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7", "M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6"]}
+      paths={[
+        "M5 12l-2 0l9 -9l9 9l-2 0",
+        "M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7",
+        "M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6",
+      ]}
     />
   );
 }

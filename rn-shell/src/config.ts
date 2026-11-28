@@ -31,7 +31,9 @@ export const NO_HOOKS: TestHooks = {
 function loadHooks(): TestHooks {
   if (process.env.EXPO_PUBLIC_OPENBOT_TEST_BUILD === "1") {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return (require("./testHooks") as typeof import("./testHooks")).readTestHooks();
+    return (
+      require("./testHooks") as typeof import("./testHooks")
+    ).readTestHooks();
   }
   return NO_HOOKS;
 }
@@ -43,7 +45,11 @@ function normalizedOrigin(url: string): string {
 }
 
 export const BASE_URL = normalizedOrigin(hooks.baseUrl ?? RELEASE_BASE_URL);
-export const BASE_HOST = BASE_URL.replace(/^https?:\/\//, "").replace(/[:/].*$/, "");
-export const PLATFORM: "ios" | "android" = Platform.OS === "ios" ? "ios" : "android";
+export const BASE_HOST = BASE_URL.replace(/^https?:\/\//, "").replace(
+  /[:/].*$/,
+  "",
+);
+export const PLATFORM: "ios" | "android" =
+  Platform.OS === "ios" ? "ios" : "android";
 export const VERSION: string = Constants.expoConfig?.version ?? "0.1.0";
 export const USER_AGENT_MARK = `${PLATFORM === "ios" ? "OpenBotShell-iOS" : "OpenBotShell-Android"}/${VERSION}`;

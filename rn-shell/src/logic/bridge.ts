@@ -29,7 +29,8 @@ export function parsePageMessage(
   }
   if (typeof raw !== "object" || raw === null) return null;
   const record = raw as Record<string, unknown>;
-  if (typeof token !== "string" || token.length < 16 || record.token !== token) return null;
+  if (typeof token !== "string" || token.length < 16 || record.token !== token)
+    return null;
   switch (record.kind) {
     case "doc":
       return { kind: "doc", late: record.late === true };
@@ -44,10 +45,17 @@ export function parsePageMessage(
     case "chrome": {
       const color = typeof record.color === "string" ? record.color : "";
       if (!/^#[0-9a-f]{6}$/i.test(color)) return null;
-      return { kind: "chrome", color: color.toLowerCase(), dark: record.dark === true };
+      return {
+        kind: "chrome",
+        color: color.toLowerCase(),
+        dark: record.dark === true,
+      };
     }
     case "alert":
-      return { kind: "alert", message: String(record.message ?? "").slice(0, 2_000) };
+      return {
+        kind: "alert",
+        message: String(record.message ?? "").slice(0, 2_000),
+      };
     case "open":
       return { kind: "open", handled: record.handled === true };
     case "bridge":
@@ -67,11 +75,20 @@ function parseBridge(message: unknown): PageMessage | null {
     case "signed-out":
       return { kind: "bridge", message: { type: "signed-out" } };
     case "route": {
-      if (typeof record.path !== "string" || !record.path.startsWith("/")) return null;
-      const tab = typeof record.tab === "string" && TABS.has(record.tab) ? (record.tab as Tab) : null;
+      if (typeof record.path !== "string" || !record.path.startsWith("/"))
+        return null;
+      const tab =
+        typeof record.tab === "string" && TABS.has(record.tab)
+          ? (record.tab as Tab)
+          : null;
       return {
         kind: "bridge",
-        message: { type: "route", path: record.path.slice(0, 2_000), tab, signedIn: record.signedIn === true },
+        message: {
+          type: "route",
+          path: record.path.slice(0, 2_000),
+          tab,
+          signedIn: record.signedIn === true,
+        },
       };
     }
     default:
