@@ -326,7 +326,9 @@ class RealBackendTestCase: ShellTestCase {
         tab(app, .bots).tap()
         hold(5)
         screenshot("j5-bots")
-        if let bot = firstExisting([webText(app, "General Assistant")], timeout: 10) {
+        // The video stays on the Bots page (a Bot's own page stays in the test suite): 13 minutes for
+        // the whole job.
+        if !videoMode, let bot = firstExisting([webText(app, "General Assistant")], timeout: 10) {
             bot.tap()
             hold(5)
             dismissKeyboardIfUp(app)
@@ -338,14 +340,13 @@ class RealBackendTestCase: ShellTestCase {
         tab(app, .conversations).tap()
         hold(6)
         screenshot("j7-conversations-tab")
-        note("conversations tab: \(debugState(app)); web app's sidebar button \(webElement(app, label: "Show sidebar").exists)")
-        // The video keeps launch, Home, the message and its reply, Conversations and Bots; the
+        // The video keeps launch, Home, the message and its reply, Bots and Conversations; the
         // drawer, the background and the relaunch stay in the test suite.
         if videoMode {
-            tab(app, .home).tap()
-            hold(2)
+            note("conversations tab: \(debugState(app))")
             return
         }
+        note("conversations tab: \(debugState(app)); web app's sidebar button \(webElement(app, label: "Show sidebar").exists)")
         if webElement(app, label: "Show sidebar").exists {
             webElement(app, label: "Show sidebar").tap()
             hold(2)

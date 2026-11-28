@@ -1,12 +1,12 @@
 name: iOS shell
 
-# Builds the experimental iOS shell in ios-shell/ for the simulator and runs its UI tests in 3
+# Builds the experimental iOS shell in ios-shell/ for the simulator and runs its UI tests in 4
 # parallel jobs, each on its own simulator:
 # - real: suite 1, against the hosted web app at my.open.bot (a Release build, a fresh install per
 #   test, and the Debug-only session-cookie journey), plus the Release and store build checks;
-# - flow: suite 2, ShellFlowUITests against two mock stacks of the real built web app
-#   (app/workbench/mock-server.ts);
-# - edges: the hardening tests, the probe site (ios-shell/Probe), the demo tour and the unit tests.
+# - flow-a, flow-b: suite 2, ShellFlowUITests in 2 halves (and the demo tour), against two mock
+#   stacks of the real built web app (app/workbench/mock-server.ts);
+# - edges: the hardening tests, the probe site (ios-shell/Probe) and the unit tests.
 #
 # Artifacts per job: ios-shell-shots-<run id>-<job> (downscaled screenshots, SUMMARY.md,
 # diagnostics.jsonl), ios-shell-<run id>-<job> (everything else that is not a real account's) and,
@@ -65,7 +65,7 @@ jobs:
       fail-fast: false
       matrix:
         # real_backend_only: suite 1 alone. An iPad: everything but the real-backend suites.
-        shard: ${{ fromJSON(inputs.real_backend_only && '["real"]' || (inputs.device == 'ipad' && '["flow","edges"]' || '["real","flow","edges"]')) }}
+        shard: ${{ fromJSON(inputs.real_backend_only && '["real"]' || (inputs.device == 'ipad' && '["flow-a","flow-b","edges"]' || '["real","flow-a","flow-b","edges"]')) }}
     env:
       SHARD: ${{ matrix.shard }}
     steps:
@@ -191,7 +191,7 @@ jobs:
           exit 1
 
       - name: Arm the late stack
-        if: matrix.shard == 'flow'
+        if: matrix.shard == 'flow-b'
         run: |
           # testLockLiftsWhenServerComesBack writes the trigger file, then expects OpenBot to come up
           # on 3012 (over mock A's server) about 8 s later.
@@ -302,8 +302,19 @@ jobs:
           t=OpenBotShellUITests
           case "$SHARD" in
             real) only=(-only-testing:$t/RealBackendDebugUITests -only-testing:$t/ShellUITests/testLoadsHostedWebApp) ;;
-            flow) only=(-only-testing:$t/ShellFlowUITests) ;;
-            edges) only=(-only-testing:$t/HardeningUITests -only-testing:$t/ShellUITests -only-testing:$t/DemoTourUITests/testDemoTour
+            # Suite 2 in 2 halves of about the same length.
+            flow-a) f=$t/ShellFlowUITests
+                    only=(-only-testing:$f/testTabsRouteTheWebView -only-testing:$f/testNoBrowserNotificationOffersInTheShell
+                          -only-testing:$f/testKeyboardKeepsTheMessageBoxVisible -only-testing:$f/testKeyboardHidesTabBar
+                          -only-testing:$f/testResumeFromBackground -only-testing:$f/testLoadingSkeleton
+                          -only-testing:$f/testFallbackToWebSignIn) ;;
+            flow-b) f=$t/ShellFlowUITests
+                    only=(-only-testing:$f -skip-testing:$f/testTabsRouteTheWebView
+                          -skip-testing:$f/testNoBrowserNotificationOffersInTheShell -skip-testing:$f/testKeyboardKeepsTheMessageBoxVisible
+                          -skip-testing:$f/testKeyboardHidesTabBar -skip-testing:$f/testResumeFromBackground
+                          -skip-testing:$f/testLoadingSkeleton -skip-testing:$f/testFallbackToWebSignIn
+                          -only-testing:$t/DemoTourUITests/testDemoTour) ;;
+            edges) only=(-only-testing:$t/HardeningUITests -only-testing:$t/ShellUITests
                          -only-testing:$t/HandoffConfigTests -only-testing:$t/ShellURLsTests
                          -skip-testing:$t/ShellUITests/testLoadsHostedWebApp) ;;
           esac
