@@ -552,8 +552,8 @@ function createStates(where: Where): States {
             id: "trustedrouter",
             name: "TrustedRouter",
             summary:
-              "Use a TrustedRouter API key for models from many providers.",
-            logins: ["endpoint"],
+              "Sign in with TrustedRouter or use an API key for many providers.",
+            logins: ["oauth", "endpoint"],
             mark: "trustedrouter",
             caution: null,
           },

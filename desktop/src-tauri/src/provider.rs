@@ -1,8 +1,8 @@
 //! The model provider screen's list, as data.
 //!
-//! OpenAI and Anthropic offer plan sign-in alongside API keys. Google and xAI use named endpoint
-//! presets with API keys; their official addresses are supplied by the frontend. xAI also offers
-//! sign-in. TrustedRouter and Privatemode are named endpoint presets with an API key and no
+//! OpenAI and Anthropic offer plan sign-in alongside API keys. Google, xAI, TrustedRouter and
+//! Privatemode use named endpoint presets with API keys; their official addresses are supplied by
+//! the frontend. xAI and TrustedRouter also offer sign-in. Privatemode takes an API key and no
 //! sign-in.
 //!
 //! The row that asks for a URL is the last one, and it is the only one that asks. Keeping it there
@@ -115,8 +115,8 @@ pub fn catalogue() -> Vec<Provider> {
         Provider {
             id: "trustedrouter".into(),
             name: "TrustedRouter".into(),
-            summary: "Use a TrustedRouter API key for models from many providers.".into(),
-            logins: vec![Login::Endpoint],
+            summary: "Sign in with TrustedRouter or use an API key for many providers.".into(),
+            logins: vec![Login::Oauth, Login::Endpoint],
             mark: Some("trustedrouter".into()),
             caution: None,
         },
@@ -221,14 +221,14 @@ mod tests {
         );
     }
 
-    /// TrustedRouter has no sign-in, so its row asks for an API key and nothing else.
+    /// TrustedRouter's sign-in mints an API key, so its row leads with sign-in and never asks for a plan.
     #[test]
-    fn trustedrouter_asks_only_for_a_key() {
+    fn trustedrouter_signs_in_before_asking_for_a_key() {
         let trustedrouter = catalogue()
             .into_iter()
             .find(|p| p.id == "trustedrouter")
             .expect("trustedrouter is not offered");
-        assert_eq!(trustedrouter.logins, vec![Login::Endpoint]);
+        assert_eq!(trustedrouter.logins, vec![Login::Oauth, Login::Endpoint]);
         assert_eq!(trustedrouter.name, "TrustedRouter");
     }
 

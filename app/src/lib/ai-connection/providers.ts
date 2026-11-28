@@ -63,9 +63,9 @@ export const AI_PROVIDERS: AiProvider[] = [
   {
     id: "trustedrouter",
     name: "TrustedRouter",
-    summary: "Use a TrustedRouter API key for models from many providers.",
+    summary: "Sign in with TrustedRouter or use an API key for many providers.",
     keySummary: "Use a TrustedRouter API key for models from many providers.",
-    logins: ["endpoint"],
+    logins: ["oauth", "endpoint"],
     mark: "trustedrouter",
   },
   {

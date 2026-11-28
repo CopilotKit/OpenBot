@@ -375,6 +375,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 **OpenBot Desktop.**
 
+- **TrustedRouter offers one-click browser sign-in alongside an API key.** On the setup screen and
+  in Settings, signing in to TrustedRouter opens the browser with PKCE loopback authorization and
+  mints an inference API key automatically, connecting TrustedRouter without pasting a key.
+
 - **A command the local sandbox stopped for memory says so.** On Docker with cgroup v2, some
   commands the memory limit killed were told they had run out of time, after half a second. A
   command killed before the time limit is up is now always told it used too much memory.

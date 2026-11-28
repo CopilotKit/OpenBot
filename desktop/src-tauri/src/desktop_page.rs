@@ -26,7 +26,8 @@
 //! `finish_plan_sign_in`, `cancel_plan_sign_in`, `begin_provider_sign_in`,
 //! `finish_provider_sign_in`, `cancel_provider_sign_in`, `prepare_ai_connection`,
 //! `settle_ai_connection`): the sign-ins that run here, which keep what they get here and never hand
-//! a token to the page, and the plan engines and the picked Bot, started, stopped or restarted
+//! a token to the page (a TrustedRouter sign-in's key excepted, which the page sends straight to the
+//! server like a typed one), and the plan engines and the picked Bot, started, stopped or restarted
 //! one container at a time while everything else keeps running. A key or an address never passes
 //! through here: the page sends it to the server.
 //!
@@ -415,7 +416,7 @@ async fn cancel_plan_sign_in(
     crate::cancel_plan_sign_in_now(app, plan).await
 }
 
-/// Start an xAI sign-in in the browser.
+/// Start an xAI or TrustedRouter sign-in in the browser. Google's is refused: Gemini takes a key.
 #[tauri::command]
 async fn begin_provider_sign_in(
     app: tauri::AppHandle,
@@ -424,14 +425,28 @@ async fn begin_provider_sign_in(
     crate::begin_provider_sign_in_now(app, provider).await
 }
 
+/// What a provider's sign-in gave the page: for TrustedRouter, the key it minted, which the page
+/// sends straight to the server as an address's key and keeps nowhere. Nothing for xAI,
+/// whose sign-in stays in the file the server reads.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderSignedIn {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    api_key: Option<String>,
+}
+
 #[tauri::command]
-async fn finish_provider_sign_in(app: tauri::AppHandle, attempt_id: String) -> Result<(), String> {
+async fn finish_provider_sign_in(
+    app: tauri::AppHandle,
+    attempt_id: String,
+) -> Result<ProviderSignedIn, String> {
     crate::desktop_connected::nothing_here(&app)?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let api_key = tauri::async_runtime::spawn_blocking(move || {
         openbot_desktop_lib::provider_oauth::finish(&attempt_id)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())??;
+    Ok(ProviderSignedIn { api_key })
 }
 
 #[tauri::command]
