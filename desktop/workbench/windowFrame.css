@@ -1,0 +1,139 @@
+/*
+ * The window's frame and the tools over it: geometry only (position, size, z-order, motion). Their
+ * colors, fonts and shadows come from the app's tokens through Tailwind classes in WindowFrame.tsx,
+ * WarningHighlight.tsx. In Tailwind's base layer (app/workbench/page.css declares the layers), so
+ * those classes, which are utilities, always win over these rules.
+ *
+ * The app's popups (Select, Popover, Tooltip) are portals on the page's body at z-index 50. Every
+ * z-index here stays under that, so a popup shows above the window and its tools.
+ */
+@layer base {
+  .wb-window {
+    display: inline-block;
+  }
+
+  .wb-window-mac {
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .wb-window-windows {
+    border-radius: 0;
+  }
+
+  .wb-window-content {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .wb-window-content iframe {
+    display: block;
+  }
+
+  .wb-window-bar {
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    user-select: none;
+  }
+
+  /* Over the page, as macOS draws them; each light's place comes from titleBar.ts. */
+  .wb-window-bar-mac {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 0;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  .wb-window-light {
+    position: absolute;
+    box-sizing: border-box;
+    border-radius: 50%;
+    pointer-events: auto;
+  }
+
+  .wb-window-bar-windows {
+    height: 32px;
+    justify-content: space-between;
+  }
+
+  .wb-window-title {
+    padding-left: 12px;
+  }
+
+  .wb-window-controls {
+    display: flex;
+    height: 100%;
+  }
+
+  .wb-window-control {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 100%;
+  }
+
+  .wb-window-bar-browser {
+    height: 36px;
+    gap: 12px;
+    padding: 0 12px;
+  }
+
+  .wb-browser-dots {
+    display: flex;
+    gap: 8px;
+    flex: none;
+  }
+
+  .wb-browser-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
+
+  .wb-browser-address {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 10px;
+    border-radius: 6px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /*
+   * The highlight of a layout warning (WarningHighlight.tsx), over the window and not in the window
+   * element, so a shot of the window does not show it.
+   */
+  .wb-highlight {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+  }
+
+  .wb-highlight-box,
+  .wb-highlight-ghost,
+  .wb-highlight-shade {
+    position: absolute;
+    border-radius: 2px;
+  }
+
+  .wb-highlight-arrow {
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: visible;
+  }
+
+  .wb-highlight-label {
+    position: absolute;
+    transform: translateY(calc(-100% - 6px));
+  }
+
+  .wb-highlight-label-below {
+    transform: translateY(6px);
+  }
+}

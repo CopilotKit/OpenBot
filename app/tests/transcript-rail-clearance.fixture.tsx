@@ -7,8 +7,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 /**
  * A conversation of several turns, the transcript filling the window, as a page of its own for
- * transcript-rail-clearance.test.tsx to bundle and load in Chromium. Enough turns for the rail to
- * draw; the Bot's replies are prose, a list and a code block, so their text and their boxes start
+ * transcript-rail-clearance.test.tsx to bundle and load in Chromium. Enough turns to run past the
+ * window, so the rail draws; the Bot's replies are prose, a list and a code block, so their text and their boxes start
  * at the column's left edge.
  */
 const REPLIES = [
@@ -17,14 +17,18 @@ const REPLIES = [
   "The query I ran:\n\n```sql\nselect region, sum(amount) from orders group by region;\n```",
   "Shall I draft the summary for the team channel, or send it to you first?",
 ];
-const messages: Message[] = REPLIES.flatMap((reply, index) => [
-  {
-    id: `u${index}`,
-    role: "user" as const,
-    content: `Question number ${index + 1} about the numbers`,
-  },
-  { id: `a${index}`, role: "assistant" as const, content: reply },
-]);
+// The first three twice over: the rail draws only once the turns run past the window, and four of
+// them fit it. The last reply, which the test waits for, once.
+const messages: Message[] = [...REPLIES.slice(0, 3), ...REPLIES].flatMap(
+  (reply, index) => [
+    {
+      id: `u${index}`,
+      role: "user" as const,
+      content: `Question number ${index + 1} about the numbers`,
+    },
+    { id: `a${index}`, role: "assistant" as const, content: reply },
+  ],
+);
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },

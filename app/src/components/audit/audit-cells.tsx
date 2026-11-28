@@ -12,6 +12,7 @@ import {
 } from "@openbot/shared/connect-prompt";
 import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import { connectorName, humanise, inFolder } from "@openbot/shared/tool-name";
+import { useQuery } from "@tanstack/react-query";
 import {
   Fragment,
   type ReactNode,
@@ -24,6 +25,9 @@ import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
 import { silenceOf } from "@/lib/audit/silence";
 import { galleryComponent } from "@/lib/copilot/gallery-registry";
 import { atStart } from "@/lib/manage-paths";
+import { modelNamer } from "@/lib/models/names";
+import { availableModelsQueryOptions } from "@/lib/models/queries";
+import { DELETED_USER, isDeletedUser } from "@/lib/people/deleted-user";
 import { cn } from "@/lib/utils";
 
 /** One row as the API returns it. */
@@ -43,6 +47,12 @@ export type AuditEvent = {
    * ("Write a skill" for `skill-creator`). Not part of the stored row, so older rows read it too.
    */
   subjectTitle?: string;
+  /**
+   * The address of the person the page found for the row's `actorUserId`, where the row records
+   * none of its own: a Bot's action, run on its person's authority. Not part of the stored row
+   * (components/manage/audit-page.tsx, `withPeopleNamed`).
+   */
+  startedBy?: string;
 };
 
 type NameFor = (botId: string) => string;
@@ -144,11 +154,14 @@ export function WhoCell({
   deployment,
   event,
   nameFor,
+  viewer,
 }: {
   /** What OpenBot itself is called here; see {@link startedByText}. */
   deployment?: string;
   event: AuditEvent;
   nameFor: NameFor;
+  /** The signed-in person's email, read as "you"; see {@link startedByText}. */
+  viewer?: string | null;
 }) {
   return (
     <>
@@ -160,6 +173,7 @@ export function WhoCell({
           deployment={deployment}
           event={event}
           nameFor={nameFor}
+          viewer={viewer}
         />
       </div>
     </>
@@ -340,6 +354,9 @@ export function subjectText(event: AuditEvent, storedNames = true): string {
   // Which permission, for whom: one sentence can save several switches, each a row of its own.
   if (event.eventType === "capability.changed")
     return permissionSubject(payload);
+  // Which team, by the name it had then: every team event keeps it, so a deleted team is still named.
+  if (event.eventType.startsWith("team.") && typeof payload.team === "string")
+    return payload.team;
   if (!storedNames) {
     const words = subjectWords(event);
     if (words !== undefined) return words;
@@ -456,14 +473,37 @@ function initiatorKindOf(event: AuditEvent): string | undefined {
 }
 
 /**
+ * The person a row says started it, by the email the server records in `payload.by`, else the
+ * address the page found for the person whose authority it ran on (`startedBy`). The row carries no
+ * name, so the email is what every row can name. Undefined when the row names nobody.
+ */
+function personOf(event: AuditEvent): string | undefined {
+  const by = event.payload?.by;
+  // A person who deleted their account: their rows stay for 180 days, named by a pseudonym.
+  if (
+    isDeletedUser(event.actorUserId) ||
+    isDeletedUser(typeof by === "string" ? by : null) ||
+    isDeletedUser(
+      typeof event.payload?.actor === "string" ? event.payload.actor : null,
+    )
+  )
+    return DELETED_USER;
+  if (typeof by === "string" && by.trim()) return by.trim();
+  return event.startedBy?.trim() || undefined;
+}
+
+/**
  * Who started a row, as the row's Started by filter and its line under the Bot both say it.
  * `deployment` is what OpenBot itself is called on this screen: "this deployment" in Admin, and
- * "OpenBot" in the personal edition's Activity, which is anybody's page.
+ * "OpenBot" in the personal edition's Activity, which is anybody's page. A person is named where
+ * the row or the page says who ({@link personOf}), "You" where that is `viewer` (the signed-in
+ * person's email), and is "A person" where nobody can.
  */
 export function startedByText(
   event: AuditEvent,
   nameFor: NameFor,
   deployment = "this deployment",
+  viewer?: string | null,
 ): string {
   switch (initiatorKindOf(event)) {
     case "routine":
@@ -478,8 +518,13 @@ export function startedByText(
       return "A goal";
     case "deployment":
       return atStart(deployment);
-    default:
-      return "A person";
+    default: {
+      const person = personOf(event);
+      if (!person) return "A person";
+      return viewer && person.toLowerCase() === viewer.trim().toLowerCase()
+        ? "You"
+        : person;
+    }
   }
 }
 
@@ -585,6 +630,8 @@ function connectPromptOf(event: AuditEvent): ConnectPrompt | null {
 function notConnectedText(event: AuditEvent): string | undefined {
   const prompt = connectPromptOf(event);
   if (!prompt) return undefined;
+  // Connected and held: what was missing was actions of it the Bot wasn't given.
+  if (prompt.reason === "tools") return "Not given";
   return prompt.reason === "reconnect"
     ? "No longer connected"
     : "Not connected";
@@ -597,6 +644,10 @@ function notConnectedText(event: AuditEvent): string | undefined {
  */
 function notConnectedLine(prompt: ConnectPrompt, storedNames: boolean): string {
   if (storedNames && prompt.message) return prompt.message;
+  if (prompt.reason === "tools")
+    return prompt.need
+      ? `The Bot needed more of ${prompt.title} to ${prompt.need.replace(/^to\s+/i, "").replace(/[\s.]+$/, "")}.`
+      : `The Bot needed more of ${prompt.title} than it was given.`;
   if (prompt.reason === "reconnect")
     return `${prompt.title} is no longer connected. Reconnect it in Connections.`;
   if (prompt.reason === "shared")
@@ -838,6 +889,8 @@ export function decisionDetails(
     lines.push(payload.reason);
   if (event.eventType === "bot.declined" && typeof payload.reason === "string")
     lines.push(`${payload.reason}, reported by the Bot itself`);
+  if (event.eventType === "computer.limit_reached")
+    lines.push(...computerLimitLines(payload));
   const notConnected = connectPromptOf(event);
   if (failed && notConnected)
     lines.push(notConnectedLine(notConnected, storedNames));
@@ -882,11 +935,45 @@ export function decisionDetails(
   return lines;
 }
 
+/** A count of computers in words: "1 computer", "2 computers". */
+function computersCount(count: number): string {
+  return count === 1 ? "1 computer" : `${count} computers`;
+}
+
+/**
+ * Which limit refused a new computer, and for whose. The row's Started by names the person and the page is the
+ * organization's own, so this says which of the three limits it was and how many it allows.
+ */
+export function computerLimitLines(payload: Record<string, unknown>): string[] {
+  const cap = typeof payload.cap === "number" ? payload.cap : undefined;
+  const limit =
+    payload.limit === "organization"
+      ? cap === undefined
+        ? "This organization is at its limit of computers."
+        : `This organization is at its limit of ${computersCount(cap)}.`
+      : payload.limit === "person"
+        ? cap === undefined
+          ? "This person is at their limit of computers in this organization."
+          : `This person is at their limit of ${computersCount(cap)} in this organization.`
+        : payload.limit === "deployment"
+          ? cap === undefined
+            ? "OpenBot is at its limit of computers."
+            : `OpenBot is at its limit of ${computersCount(cap)}.`
+          : undefined;
+  return [
+    ...(limit ? [limit] : []),
+    ...(payload.browser === true
+      ? ["The computer was for their own browser."]
+      : []),
+  ];
+}
+
 /** Everything on a row as one lower-cased string, for the search box. */
 export function searchTextOf(
   event: AuditEvent,
   nameFor: NameFor,
   deployment?: string,
+  viewer?: string | null,
 ): string {
   return [
     whatText(event),
@@ -898,7 +985,9 @@ export function searchTextOf(
     subjectText(event, false),
     hostText(event),
     botText(event, nameFor),
-    startedByText(event, nameFor, deployment),
+    startedByText(event, nameFor, deployment, viewer),
+    // Who did it, by email, on any row that says so, whatever started it, "you" included.
+    personOf(event) ?? "",
     decisionText(event),
     decisionText(event, false),
     // Both ways a reason is said, as for the subject above.
@@ -982,10 +1071,12 @@ export function StartedByCell({
   deployment,
   event,
   nameFor,
+  viewer,
 }: {
   deployment?: string;
   event: AuditEvent;
   nameFor: NameFor;
+  viewer?: string | null;
 }) {
   // Anything that ran with nobody watching is the colour of a warning; a person or the deployment is not.
   const unattended =
@@ -996,24 +1087,23 @@ export function StartedByCell({
   return (
     <span
       className={
-        unattended
-          ? "font-medium text-amber-600 dark:text-amber-500"
-          : "text-muted-foreground"
+        unattended ? "font-medium text-warning" : "text-muted-foreground"
       }
     >
-      {startedByLine(startedByText(event, nameFor, deployment))}
+      {startedByLine(startedByText(event, nameFor, deployment, viewer))}
     </span>
   );
 }
 
 /**
  * Under the Bot's name, so it says what it is: "Started by a routine", "Handed on by Scout",
- * "Started by OpenBot". Only a leading "A" or "This" is lowered; a name keeps its capitals.
+ * "Started by OpenBot", "Started by you". Only a leading "A" or "This", or "You" on its own, is
+ * lowered; a name keeps its capitals.
  */
 export function startedByLine(text: string): string {
   return text.startsWith("Handed on")
     ? text
-    : `Started by ${text.replace(/^(A|This) /, (word) => word.toLowerCase())}`;
+    : `Started by ${text.replace(/^(?:(?:A|This) |You$)/, (word) => word.toLowerCase())}`;
 }
 
 export function DecisionCell({
@@ -1033,7 +1123,7 @@ export function DecisionCell({
           outcome === "refused"
             ? "font-medium text-destructive"
             : outcome === "did-not-happen"
-              ? "font-medium text-amber-600 dark:text-amber-500"
+              ? "font-medium text-warning"
               : "text-muted-foreground"
         }
       >
@@ -1051,8 +1141,103 @@ export function DecisionCell({
         </div>
       ))}
       {expression ? <RuleExpression expression={expression} /> : null}
+      {event.eventType === "team.models_changed" ? (
+        <TeamModelsChange payload={event.payload ?? {}} />
+      ) : null}
+      {event.eventType === "model.refused" ? (
+        <ModelRefusal payload={event.payload ?? {}} />
+      ) : null}
     </>
   );
+}
+
+/** A team's list as the trail keeps it (`provider/model` each), or null while it set none. */
+function teamModelsOf(value: unknown): string[] | null {
+  return Array.isArray(value) &&
+    value.every((model): model is string => typeof model === "string")
+    ? value
+    : null;
+}
+
+/**
+ * The words for a team's models before or after a change: the models by their names, or everything
+ * the organization allows while the team set none. `nameOf` names a model as the provider lists it;
+ * one it doesn't list keeps its id.
+ */
+export function teamModelsWords(
+  models: readonly string[] | null,
+  nameOf: (name: string) => string,
+): string {
+  return models === null || models.length === 0
+    ? "Everything the organization allows"
+    : models.map(nameOf).join(", ");
+}
+
+/**
+ * What a change to a team's models changed, under its decision as a guidance save's words are: the
+ * models before and after, by their names from the listing the team's page chooses them from.
+ */
+function TeamModelsChange({ payload }: { payload: Record<string, unknown> }) {
+  const listing = useQuery(availableModelsQueryOptions());
+  const nameOf = modelNamer(listing.data);
+  return (
+    <>
+      <div className={DETAIL_LINE}>
+        Before: {teamModelsWords(teamModelsOf(payload.before), nameOf)}
+      </div>
+      <div className={DETAIL_LINE}>
+        Now: {teamModelsWords(teamModelsOf(payload.after), nameOf)}
+      </div>
+    </>
+  );
+}
+
+/**
+ * Why a run was refused for its model, under Blocked: the model by its name, and whose list left it
+ * out, as the server records it (`rule`: the organization's allowed models, or the person's teams').
+ */
+export function modelRefusalWords(
+  payload: Record<string, unknown>,
+  nameOf: (name: string) => string,
+): string | null {
+  if (typeof payload.model !== "string") return null;
+  const name = nameOf(payload.model);
+  if (payload.rule === "team") {
+    // The teams whose lists applied then, by their names then; a row written before has none.
+    const teams = teamNamesOf(payload.teams);
+    return teams.length > 0
+      ? `${name} isn't on ${orList(teams.map(possessive))} list.`
+      : `${name} isn't one their teams allow.`;
+  }
+  if (payload.rule === "organization")
+    return `${name} isn't one the organization allows.`;
+  return `${name} isn't allowed.`;
+}
+
+/** The names of a refusal's teams (`[{ id, name }]`), skipping any entry without a name. */
+function teamNamesOf(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.flatMap((team: { name?: unknown }) =>
+        typeof team?.name === "string" && team.name ? [team.name] : [],
+      )
+    : [];
+}
+
+/** "Sales'", "Engineering's": the owner's form of a team's name. */
+function possessive(name: string): string {
+  return /s$/i.test(name) ? `${name}'` : `${name}'s`;
+}
+
+/** "A", "A or B", "A, B or C". */
+function orList(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`;
+}
+
+function ModelRefusal({ payload }: { payload: Record<string, unknown> }) {
+  const listing = useQuery(availableModelsQueryOptions());
+  const words = modelRefusalWords(payload, modelNamer(listing.data));
+  return words ? <div className={DETAIL_LINE}>{words}</div> : null;
 }
 
 const DETAIL_LINE =
@@ -1119,14 +1304,14 @@ function RuleExpression({ expression }: { expression: string }) {
 /** The square at the start of each row: what happened, at a glance down the log. */
 export const OUTCOME_MARK: Record<AuditOutcome, string> = {
   refused: "bg-destructive",
-  "did-not-happen": "bg-amber-500",
+  "did-not-happen": "bg-warning",
   allowed: "bg-muted-foreground/20",
 };
 
 /** The faint tint on rows worth stopping at. Allowed rows stay plain. */
 export const OUTCOME_ROW: Record<AuditOutcome, string> = {
   refused: "bg-destructive/5 hover:bg-destructive/10",
-  "did-not-happen": "bg-amber-500/5 hover:bg-amber-500/10",
+  "did-not-happen": "bg-warning/5 hover:bg-warning/10",
   allowed: "",
 };
 
@@ -1178,6 +1363,9 @@ const DECISIONS: Record<string, string> = {
   "computer.browser_cleared": "A person cleared the browser",
   "computer.updated": "The computer was updated",
   "computer.stopped": "A person pressed stop",
+  // Not "Allowed": nobody asked. The computer was idle, and its files and sign-ins are kept.
+  "computer.suspended": "Turned off while idle",
+  "computer.resumed": "Started again",
 
   "component.granted": "Granted to this Bot",
   "component.revoked": "Taken away from this Bot",

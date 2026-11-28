@@ -10,7 +10,25 @@ export type HandoffSource =
   | "model"
   | "cloudflare"
   | "visible-challenge"
-  | "manual";
+  | "manual"
+  | "passkey";
+/**
+ * The page asked for a passkey while a request was open (`navigator.credentials.get` or `.create` with a public key).
+ * A passkey kept on the person's own device, in their password manager or their phone, can't be used in a Bot's
+ * computer, so they sign in another way on the page.
+ */
+export type PasskeyAsk = {
+  /** The site that asked, such as accounts.google.com. */
+  host: string;
+  askedAt: string;
+};
+/**
+ * Why a request the computer raised for a passkey is open, as the person reads it after "The Bot needs you." and as
+ * the Bot is told it in the challenge. Take control works on that page: the passkey window Chromium would open is held
+ * back, so the page's own "Try another way" takes the click.
+ */
+export const PASSKEY_REASON =
+  "This page is asking for a passkey. A passkey on your own device can't be used in the Bot's computer, so take control and choose Try another way on the page to sign in with a password or a code.";
 export type HandoffRequest = {
   id: string;
   toolCallId?: string;
@@ -32,6 +50,14 @@ export type HandoffRequest = {
    * request may reopen that page. A stop or reset clears it, and so does the help TTL running out.
    */
   keepsPage?: boolean;
+  /** Set when the page asked for a passkey while this request was open. See `PasskeyAsk`. */
+  passkey?: PasskeyAsk;
+};
+export type SecretEnding = {
+  id: string;
+  supplied: boolean;
+  /** Why nothing was typed, said to the Bot. Absent on a value that was typed. */
+  reason?: string;
 };
 export type ComputerControlState = {
   holder: "bot" | "human";
@@ -43,9 +69,17 @@ export type ComputerControlState = {
   resumeSnapshotRequired: boolean;
   /** A person had the page when the computer stopped, so they must check it before the Bot acts. */
   recoveryRequired: boolean;
+  /** The open secret request, while the Bot waits for a value a person types (`computer_request_secret`). */
+  secretId?: string;
   secretWanted?: string;
   secretRef?: string;
   secretSnapshotId?: number;
+  /**
+   * How the last secret request ended: its value typed into the field (`supplied`), or ended without
+   * one and why. The request going away does not say which, and a Bot that read every ending as typed
+   * submitted forms with the field empty.
+   */
+  secretEnded?: SecretEnding;
   /**
    * The user id of the person holding the wheel, while `holder` is `human` and they took it with `by`. Recording in a
    * Bot's browser and its bar are theirs alone (`shared/bot-browser.ts`).
@@ -69,7 +103,40 @@ export type ControlRequestInput = {
   by?: string;
 };
 export type BrowserChallenge = {
-  kind: "cloudflare" | "visible-challenge";
+  kind: "cloudflare" | "visible-challenge" | "passkey";
   reason: string;
   requestId: string;
 };
+
+/**
+ * How a Bot asks for a value it must not be told (`computer_request_secret`), said the same way by the
+ * browser's tool, the server's and the standing instructions (`bot-prompt.ts`).
+ *
+ * WITHOUT A CLICK. All three used to say to click the field first. A click on a password field is a
+ * credential typed on a website to the approval gate (`safetyRequirement` in
+ * `server/src/approvals/policy.ts`), which hands that step to the person: a Bot that did as it was told
+ * handed the whole browser over on the click and never reached the masked box. The box needs no click.
+ * The value goes into the field the ref names, which the computer clicks and fills itself when the
+ * person sends it (`/human/secret` in `agent-computer/src/index.ts`). The gate is right to hand a
+ * Bot's own click there to the person, so the words changed, not the rule.
+ */
+export const SECRET_FIELD_BY_REF =
+  "Give the ref of the field from your most recent snapshot and the snapshotId it came from. Do not click or type into the field first: the value goes into the field that ref names, and clicking a password field hands that step to the person instead.";
+
+/**
+ * A computer step's answer, with when it finished (`finishedAt`), for the time beside it in Activity.
+ *
+ * Activity used to time a step by the page watching it run, and the conversation it reads said what a
+ * step did and not when. The steps the server takes after a person allows one never pass through the
+ * page, so their rows had no time; nor did any row once the conversation was opened again. Said in
+ * the answer the conversation keeps, every step has it: stamped by the server for a step it runs
+ * (`headless-tools.ts`) and by the browser for one it runs (`approval-tools.tsx`). An answer that
+ * already says, and the placeholder a step waiting on a person leaves, are left as they are.
+ */
+export function withFinishedAt(answer: unknown): unknown {
+  if (!answer || typeof answer !== "object" || Array.isArray(answer))
+    return answer;
+  if ("finishedAt" in answer || (answer as { waiting?: unknown }).waiting)
+    return answer;
+  return { ...answer, finishedAt: new Date().toISOString() };
+}

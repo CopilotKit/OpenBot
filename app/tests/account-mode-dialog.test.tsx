@@ -28,31 +28,45 @@ beforeEach(() => {
     async (_path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
       sent.push({ body });
-      if (body?.confirm === false) {
+      const bots = [
+        {
+          botId: "triage",
+          approval: { audience: "team", outsideInput: true, members: [] },
+        },
+      ];
+      if (body?.validateOnly === true) {
         return Response.json({
-          changed: false,
-          preview: {
-            mode: "shared",
-            wouldRevoke: { holder: "person", count: 14 },
-            bots: [
-              {
-                botId: "triage",
-                exposure: { audience: "team", outsideInput: true, members: [] },
-              },
-            ],
-          },
+          mode: "shared",
+          applied: false,
+          accountsEnded: { holder: "person", count: 14 },
+          bots,
         });
       }
       if (failing)
         return Response.json(
           {
-            changed: false,
-            failures: [{ account: "u2", error: "Composio said no." }],
-            error: "Composio said no.",
+            type: "https://open.bot/errors/app-service-failed",
+            title: "The service behind this app didn't answer.",
+            status: 502,
+            detail: "Composio said no.",
+            code: "APP_SERVICE_FAILED",
+            category: "dependency",
+            retryable: true,
+            requestId: "req_test",
+            traceId: "trace_test",
+            problems: [{ account: "u2", detail: "Composio said no." }],
           },
-          { status: 502 },
+          {
+            status: 502,
+            headers: { "content-type": "application/problem+json" },
+          },
         );
-      return Response.json({ changed: true, revoked: 14 });
+      return Response.json({
+        mode: "shared",
+        applied: true,
+        accountsEnded: { holder: "person", count: 14 },
+        bots,
+      });
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -92,7 +106,7 @@ describe("switching an app to Shared", () => {
     ).toBeTruthy();
     expect(view.getByText(/triage/)).toBeTruthy();
     expect(view.getByText(/Everyone, and outside input/)).toBeTruthy();
-    expect(sent).toEqual([{ body: { mode: "shared", confirm: false } }]);
+    expect(sent).toEqual([{ body: { mode: "shared", validateOnly: true } }]);
   });
 
   test("confirming sends the switch once", async () => {
@@ -100,7 +114,7 @@ describe("switching an app to Shared", () => {
     await userEvent.click(
       await view.findByRole("button", { name: "Make Linear shared" }),
     );
-    expect(sent.at(-1)).toEqual({ body: { mode: "shared", confirm: true } });
+    expect(sent.at(-1)).toEqual({ body: { mode: "shared" } });
   });
 
   test("a vendor that refuses a revoke is shown in the dialog, which stays open", async () => {

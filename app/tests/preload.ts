@@ -22,11 +22,40 @@
  * `./react-teardown` comes first: it has to evaluate React's scheduler before anything else does,
  * and from then on every `GlobalRegistrator.unregister()` settles React's work before the document
  * goes.
+ *
+ * THE ORGANIZATION EVERY TEST WORKS IN. The app learns which organization the person is working in
+ * from the server before it asks for anything else (src/lib/organizations/current.ts), and a request
+ * made before that throws. A test draws one screen against a server it fakes, with no sign-in in
+ * front of it, so each test starts in `default`, the organization those servers answer for. A test
+ * about the organization itself (organizations.test.tsx) sets its own.
  */
 
 import "./react-teardown";
-import { mock } from "bun:test";
+import { beforeEach, mock } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { setCurrentOrganization } from "../src/lib/organizations/current";
+
+setCurrentOrganization("default");
+beforeEach(() => setCurrentOrganization("default"));
+
+/*
+ * msw's `HttpResponse` extends its `FetchResponse`, and `setupServer().listen()` re-parents that
+ * class onto whatever `Response` is global at the time; `close()` puts back the one it found then.
+ * A DOM test that listens while happy-dom is registered leaves every later file's `HttpResponse`
+ * built on that file's happy-dom `Response`, whose window is gone: its `json()` reads an empty body
+ * ("JSON Parse error: Unexpected EOF" in app/workbench/api on a CI shard, passing on its own). So
+ * before each test, a `FetchResponse` that is not on the global `Response` (a listening server put
+ * it there) goes back on the platform's, as a test file run alone has it.
+ */
+const PLATFORM_RESPONSE = globalThis.Response;
+const FETCH_RESPONSE = Object.getPrototypeOf(
+  (await import("msw")).HttpResponse,
+) as typeof Response;
+beforeEach(() => {
+  if (Object.getPrototypeOf(FETCH_RESPONSE) === globalThis.Response) return;
+  Object.setPrototypeOf(FETCH_RESPONSE, PLATFORM_RESPONSE);
+  Object.setPrototypeOf(FETCH_RESPONSE.prototype, PLATFORM_RESPONSE.prototype);
+});
 
 GlobalRegistrator.register();
 /* `@base-ui/utils` is not a dependency of this package; the react package that owns it is. */

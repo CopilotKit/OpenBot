@@ -61,3 +61,11 @@ test("the offer and the step together are the window's height, and a taller step
     "overflow-y": "auto",
   });
 });
+
+test("the resize card's restarting line keeps the buttons' gap under its paragraph", () => {
+  // Every paragraph in a setup card loses its margins, the status line (a <p>) among them, so the
+  // line sat on the sentence above it once Resize my Podman was clicked.
+  expect(rule(".local-alert p").margin).toBe("0");
+  expect(rule(".local-alert .row")["margin-top"]).toBe("12px");
+  expect(rule(".podman-too-small .status-line")["margin-top"]).toBe("12px");
+});

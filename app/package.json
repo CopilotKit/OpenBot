@@ -11,17 +11,20 @@
     "prebuild": "bun run --cwd .. generate:app-config",
     "predev": "bun run --cwd .. generate:app-config",
     "pretypecheck": "bun run --cwd .. generate:app-config",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "desktop-workbench": "bun run --cwd .. generate:app-config && bun --bun node_modules/vite/bin/vite.js --config vite.workbench.config.ts",
+    "typecheck:desktop-workbench": "bun run --cwd .. generate:app-config && tsc --noEmit -p workbench"
   },
   "dependencies": {
     "@ag-ui/core": "1.0.2",
     "@base-ui/react": "^1.6.0",
     "@better-auth/sso": "^1.7.1",
-    "@copilotkit/react-core": "1.85.0",
+    "@copilotkit/react-core": "1.88.0",
     "@fontsource-variable/inter": "^5.3.0",
     "@openbot/shared": "workspace:*",
     "@shadcn/react": "^0.3.0",
     "@streamdown/code": "2.0.0",
+    "@streamdown/math": "1.0.3",
     "@tabler/icons-react": "^3.36.1",
     "@tanstack/react-form": "^1.33.5",
     "@tanstack/react-hotkeys": "^0.10.0",
@@ -36,6 +39,7 @@
     "clsx": "^2.1.1",
     "diff": "9.0.0",
     "embla-carousel-react": "^8.6.0",
+    "katex": "0.16.47",
     "motion": "^13.1.0",
     "prompt-area": "^0.6.3",
     "react": "^19.2.0",
@@ -60,6 +64,7 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.4",
     "happy-dom": "^20.11.2",
+    "msw": "2.15.0",
     "tailwindcss": "^4.3.3",
     "vite": "^7.1.12"
   }

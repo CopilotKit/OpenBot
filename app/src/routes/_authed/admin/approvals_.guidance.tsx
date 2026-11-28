@@ -4,6 +4,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { GuidanceBacktestField } from "@/components/approvals/guidance-backtest";
 import { ReadingStatus } from "@/components/boundaries/rule-reading";
+import { TeamPage, YourOwnApprovals } from "@/components/edition/for-a-team";
 import {
   PageCard,
   PageSection,
@@ -40,9 +41,10 @@ import {
   reviewerGuidanceQueryOptions,
 } from "@/lib/reviewer-guidance/queries";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 export const Route = createFileRoute("/_authed/admin/approvals_/guidance")({
-  component: ReviewerGuidancePage,
+  component: ReviewerGuidancePageInEveryEdition,
 });
 
 const BACK = {
@@ -100,7 +102,7 @@ function ReviewerGuidancePage() {
     >
       {saved.isPending ? null : saved.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {saved.error.message}
+          {failureSaid(saved.error)}
         </p>
       ) : (
         <form
@@ -164,7 +166,7 @@ function ReviewerGuidancePage() {
                 </div>
                 {check.error ? (
                   <p className="text-destructive text-sm" role="alert">
-                    {check.error.message}
+                    {failureSaid(check.error)}
                   </p>
                 ) : null}
               </Field>
@@ -193,7 +195,7 @@ function ReviewerGuidancePage() {
             </FieldGroup>
             {save.error ? (
               <p className="mt-5 text-destructive text-sm" role="alert">
-                {save.error.message}
+                {failureSaid(save.error)}
               </p>
             ) : null}
           </PageCard>
@@ -227,7 +229,7 @@ function ReviewerGuidancePage() {
           </DialogHeader>
           {remove.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {remove.error.message}
+              {failureSaid(remove.error)}
             </p>
           ) : null}
           <DialogFooter>
@@ -250,5 +252,19 @@ function ReviewerGuidancePage() {
         </DialogContent>
       </Dialog>
     </PageShell>
+  );
+}
+
+/** The personal edition shows this page's title, and that it applies to a team. */
+function ReviewerGuidancePageInEveryEdition() {
+  return (
+    <TeamPage
+      description="Tell the reviewer what your organization needs a person for, or what is routine. It reads your guidance with every action it checks. Nothing changes until you save."
+      backButton={BACK}
+      more={<YourOwnApprovals />}
+      title="Guidance for auto-review"
+    >
+      <ReviewerGuidancePage />
+    </TeamPage>
   );
 }

@@ -19,7 +19,7 @@ import type { ComponentType } from "react";
 import { Route as BoundariesRoute } from "@/routes/_authed/admin/boundaries";
 
 /**
- * Boundaries is drawn from one read, `GET /api/computers/policy`. When that read fails the page
+ * Boundaries is drawn from one read, the API's `getBoundaries`. When that read fails the page
  * used to render its title over nothing, for as long as it stayed open, because nothing read the
  * query's error. The harness is the one `composing-enter.test.tsx` uses for the same screen.
  */
@@ -34,7 +34,7 @@ let policyResponse: () => Response;
 beforeEach(() => {
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0]) =>
-      path === "/api/computers/policy"
+      path === "/api/v2/organizations/default/boundaries"
         ? policyResponse()
         : new Response(null, { status: 404 }),
     { preconnect: originalFetch.preconnect },
@@ -74,8 +74,14 @@ test("a boundary that could not be read says so instead of leaving the page blan
 test("a refused read shows the server's own reason", async () => {
   policyResponse = () =>
     Response.json(
-      { error: "Only an administrator may read the boundary." },
-      { status: 403 },
+      {
+        type: "about:blank",
+        title: "Permission denied.",
+        status: 403,
+        detail: "Only an administrator may read the boundary.",
+        code: "PERMISSION_DENIED",
+      },
+      { status: 403, headers: { "content-type": "application/problem+json" } },
     );
 
   const view = drawBoundaries();

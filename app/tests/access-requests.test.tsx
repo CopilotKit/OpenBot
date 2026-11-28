@@ -20,6 +20,20 @@ import type { ReactNode } from "react";
 import { AccessRequestsSection } from "@/components/plugins/access-requests";
 import type { AppAccessRequest } from "@/lib/app-access/queries";
 import { Route as PluginsIndexRoute } from "@/routes/_authed/admin/plugins/index";
+import {
+  APPS_SETTING_PATH,
+  appsSettingResponse,
+  DEPLOYMENT_PATH,
+  deploymentResponse,
+} from "./admin-settings-api";
+import { answerAppsApi } from "./apps-api";
+import {
+  APP_ACCESS_REQUESTS_PATH,
+  appAccessApprovalResponse,
+  appAccessRequestBody,
+  appAccessRequestPath,
+  appAccessRequestResponse,
+} from "./bot-grants-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -59,62 +73,74 @@ const request = (
   createdAt: new Date(Date.now() - 5 * 60_000).toISOString(),
   resolvedAt: null,
   resolvedBy: null,
+  actions: [],
   ...overrides,
 });
 
 function serving(options: {
   requests: AppAccessRequest[];
   approve?: { status: number; body: unknown };
+  /** How many requests the list answers on one page; every one on the first page unless given. */
+  pageSize?: number;
+  /** The organization's apps open, as they are by default. Locked down unless given here. */
+  open?: boolean;
 }) {
   const sent: string[] = [];
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
     sent.push(`${method} ${url}`);
+    if (url === DEPLOYMENT_PATH) return deploymentResponse();
+    if (url === APPS_SETTING_PATH) return appsSettingResponse(!options.open);
     if (method === "POST" && url.endsWith("/approve"))
-      return Response.json(options.approve?.body ?? { request: {} }, {
-        status: options.approve?.status ?? 200,
-      });
+      return options.approve
+        ? Response.json(options.approve.body, {
+            status: options.approve.status,
+          })
+        : appAccessApprovalResponse({
+            request: request({ status: "approved" }),
+          });
     if (method === "POST" && url.endsWith("/dismiss"))
-      return Response.json({ request: {} });
-    if (url.startsWith("/api/plugins/access-requests")) {
-      const app = new URL(url, "http://x").searchParams.get("app");
-      const byApp: Record<string, number> = {};
-      for (const each of options.requests)
-        byApp[each.appKey] = (byApp[each.appKey] ?? 0) + 1;
+      return appAccessRequestResponse(request({ status: "dismissed" }));
+    if (url.startsWith(APP_ACCESS_REQUESTS_PATH)) {
+      const query = new URL(url, "http://x").searchParams;
+      const app = query.get("appId");
+      const listed = app
+        ? options.requests.filter((each) => each.appKey === app)
+        : options.requests;
+      // Pages of `pageSize`, the cursor saying where the next one starts.
+      const start = Number(query.get("cursor") ?? 0);
+      const size = options.pageSize ?? listed.length;
+      const page = listed.slice(start, start + size);
+      const next = start + size < listed.length ? String(start + size) : null;
       return Response.json({
-        requests: app
-          ? options.requests.filter((each) => each.appKey === app)
-          : options.requests,
-        counts: { total: options.requests.length, byApp },
+        appAccessRequests: page.map(appAccessRequestBody),
+        nextCursor: next,
       });
     }
     if (url === "/api/plugins/connections")
       return Response.json({ connections: [], redirectUri: null });
-    if (url === "/api/plugins")
-      return Response.json({
-        catalogue: [],
-        servers: [
-          {
-            id: "composio-gmail",
-            title: "Gmail",
-            summary: "Mail.",
-            tools: [],
-            lastError: null,
-          },
-          {
-            id: "notion",
-            title: "Notion",
-            summary: "Docs.",
-            tools: [],
-            lastError: null,
-          },
-        ],
-        composioConfigured: true,
-        botsMayCallBack: true,
-        redirectUri: null,
-        skills: [],
-      });
+    const apps = answerAppsApi(input, init, {
+      servers: [
+        {
+          id: "composio-gmail",
+          title: "Gmail",
+          summary: "Mail.",
+          tools: [],
+          lastError: null,
+        },
+        {
+          id: "notion",
+          title: "Notion",
+          summary: "Docs.",
+          tools: [],
+          lastError: null,
+        },
+      ],
+      composioConfigured: true,
+      botsMayCallBack: true,
+    });
+    if (apps) return apps;
     return Response.json({});
   }) as unknown as typeof fetch;
   return sent;
@@ -178,12 +204,29 @@ test("lists who asked for what, for which Bot, and when — and nothing about an
   expect(view.queryByText(/connected/i)).toBeNull();
 });
 
+test("a request from somebody who deleted their account says Deleted user asked", async () => {
+  serving({
+    requests: [
+      request({
+        requestedBy: "deleted-user:8f14e45fceea167a5a36dedd4bea2543",
+        requesterName: null,
+        requesterEmail: null,
+      }),
+    ],
+  });
+  const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
+  expect(
+    await view.findByText(/Deleted user asked 5 minutes ago/),
+  ).toBeTruthy();
+  expect(view.queryByText(/Somebody/)).toBeNull();
+});
+
 test("approve does what was asked through the approve route", async () => {
   const sent = serving({ requests: [request()] });
   const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
   fireEvent.click(await view.findByRole("button", { name: "Approve" }));
   await waitFor(() =>
-    expect(sent).toContain("POST /api/plugins/access-requests/req_1/approve"),
+    expect(sent).toContain(`POST ${appAccessRequestPath("req_1")}/approve`),
   );
 });
 
@@ -209,7 +252,7 @@ test("an approval the server cannot complete says why, on the request, and leave
   expect(row.getByRole("button", { name: "Approve" })).toBeTruthy();
 });
 
-test("a grant says approving gives the Bot read-only actions, and links to where the others are chosen", async () => {
+test("while apps are locked down, a grant says approving gives the Bot read-only actions, and links to where the others are chosen", async () => {
   serving({ requests: [request()] });
   const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
   const element = (await view.findByText("Give Gmail to Expenses")).closest(
@@ -227,7 +270,108 @@ test("a grant says approving gives the Bot read-only actions, and links to where
   );
 });
 
-test("switching an app on for a Bot says the same, with no link to a page the app does not have yet", async () => {
+/*
+ * While apps are open, the default, the server's approve gives every action the app lists
+ * (`ownersOnePress` in openbot-backend), so the row says so. It said "only read-only actions" in
+ * both modes.
+ */
+test("while apps are open, a grant says approving gives the Bot every action, and links to where fewer are chosen", async () => {
+  serving({ requests: [request()], open: true });
+  const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
+  const element = (await view.findByText("Give Gmail to Expenses")).closest(
+    "[data-request]",
+  ) as HTMLElement;
+  expect(element.textContent).toContain(
+    "Approving gives Expenses every Gmail action. Choose fewer on the Bot's page under Gmail.",
+  );
+  expect(element.textContent).not.toContain("read-only");
+  const page = within(element).getByRole("link", {
+    name: "the Bot's page under Gmail",
+  });
+  expect(page.getAttribute("href")).toBe(
+    "/admin/plugins/composio-gmail/bots/expenses",
+  );
+});
+
+test("while apps are open, switching an app on for a Bot says it gives every action", async () => {
+  serving({ requests: [request({ kind: "enable" })], open: true });
+  const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
+  const element = (await view.findByText("Turn on Gmail for Expenses")).closest(
+    "[data-request]",
+  ) as HTMLElement;
+  expect(element.textContent).toContain(
+    "Approving gives Expenses every Gmail action. Choose fewer on the Bot's page under Gmail.",
+  );
+  expect(element.textContent).not.toContain("read-only");
+});
+
+test("while apps are open, a request for named actions still gives only those", async () => {
+  serving({
+    requests: [request({ actions: ["composio-gmail/GMAIL_SEND_EMAIL"] })],
+    open: true,
+  });
+  const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
+  expect(
+    await view.findByText(/Approving gives Expenses only GMAIL_SEND_EMAIL\./),
+  ).toBeTruthy();
+});
+
+test("a request for actions a Bot needs names them, and Approve gives them with no body", async () => {
+  const sent = serving({
+    requests: [
+      request({
+        appKey: "composio-googlecalendar",
+        appTitle: "Google Calendar",
+        botName: "Calendar Bot",
+        actions: [
+          "composio-googlecalendar/GOOGLECALENDAR_PATCH_EVENT",
+          "composio-googlecalendar/GOOGLECALENDAR_UPDATE_EVENT",
+        ],
+      }),
+    ],
+  });
+  const view = draw(() => (
+    <AccessRequestsSection app="composio-googlecalendar" />
+  ));
+  const element = (
+    await view.findByText("Give Calendar Bot 2 more Google Calendar actions")
+  ).closest("[data-request]") as HTMLElement;
+  expect(element.textContent).toContain(
+    "Approving gives Calendar Bot only GOOGLECALENDAR_PATCH_EVENT and GOOGLECALENDAR_UPDATE_EVENT. Choose any others on the Bot's page under Google Calendar.",
+  );
+  expect(element.textContent).not.toContain("read-only");
+  const bodies: unknown[] = [];
+  const answer = global.fetch;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") bodies.push(init.body);
+    return answer(input, init);
+  }) as typeof fetch;
+  fireEvent.click(within(element).getByRole("button", { name: "Approve" }));
+  await waitFor(() =>
+    expect(sent).toContain(`POST ${appAccessRequestPath("req_1")}/approve`),
+  );
+  // The server gives the actions the request names.
+  expect(bodies).toEqual([undefined]);
+});
+
+test("one action asked for reads in the singular", async () => {
+  serving({
+    requests: [
+      request({
+        actions: ["composio-gmail/GMAIL_SEND_EMAIL"],
+      }),
+    ],
+  });
+  const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
+  expect(
+    await view.findByText("Give Expenses 1 more Gmail action"),
+  ).toBeTruthy();
+  expect(
+    view.getByText(/Approving gives Expenses only GMAIL_SEND_EMAIL\./),
+  ).toBeTruthy();
+});
+
+test("while apps are locked down, switching an app on for a Bot says the same, with no link to a page the app does not have yet", async () => {
   serving({ requests: [request({ kind: "enable" })] });
   const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
   const row = within(
@@ -241,6 +385,28 @@ test("switching an app on for a Bot says the same, with no link to a page the ap
     ),
   ).toBeTruthy();
   expect(row.queryByRole("link")).toBeNull();
+});
+
+test("an app asked for from Connections, with no Bot, is added for everyone", async () => {
+  serving({
+    requests: [
+      request({
+        kind: "enable",
+        agentId: null,
+        botName: null,
+        appKey: "slack",
+        appTitle: "Slack",
+      }),
+    ],
+  });
+  const view = draw(() => <AccessRequestsSection />);
+  const row = within(
+    (await view.findByText("Add Slack for everyone")).closest(
+      "[data-request]",
+    ) as HTMLElement,
+  );
+  expect(row.queryByText(/a Bot/)).toBeNull();
+  expect(row.queryByText(/read-only/)).toBeNull();
 });
 
 test("connecting the shared account says nothing about actions", async () => {
@@ -274,7 +440,7 @@ test("dismiss goes to the dismiss route", async () => {
   const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
   fireEvent.click(await view.findByRole("button", { name: "Dismiss" }));
   await waitFor(() =>
-    expect(sent).toContain("POST /api/plugins/access-requests/req_1/dismiss"),
+    expect(sent).toContain(`POST ${appAccessRequestPath("req_1")}/dismiss`),
   );
 });
 
@@ -283,7 +449,7 @@ test("nothing waiting draws no section at all", async () => {
   const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
   await waitFor(() =>
     expect(sent).toContain(
-      "GET /api/plugins/access-requests?app=composio-gmail",
+      `GET ${APP_ACCESS_REQUESTS_PATH}?limit=100&appId=composio-gmail`,
     ),
   );
   await settleReactWork();
@@ -312,4 +478,20 @@ test("the Plugins list puts every request first and counts them on each app's ro
   expect(gmail.getByText("2 requests")).toBeTruthy();
   const notion = within(view.getByTestId("plugin-notion"));
   expect(notion.queryByText(/request/)).toBeNull();
+});
+
+test("the inbox reads every page of waiting requests, and counts them all", async () => {
+  serving({
+    requests: [
+      request(),
+      request({ id: "req_2", kind: "enable" }),
+      request({ id: "req_3", appKey: "notion", appTitle: "Notion" }),
+    ],
+    pageSize: 1,
+  });
+  const Page = PluginsIndexRoute.options.component as () => ReactNode;
+  const view = draw(Page);
+  expect(await view.findByText("Give Notion to Expenses")).toBeTruthy();
+  const gmail = within(await view.findByTestId("plugin-composio-gmail"));
+  expect(gmail.getByText("2 requests")).toBeTruthy();
 });

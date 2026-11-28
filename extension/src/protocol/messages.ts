@@ -320,7 +320,13 @@ export type PageToBackground =
   | { type: "page.disconnect" }
   | { type: "page.desktop.available" }
   | { type: "page.connect.desktop" }
+  /** Opens a page of an OpenBot in a new tab (`url`, its full address): through OpenBot Desktop's entry address when it
+   * is OpenBot Desktop's own OpenBot, else at `url` itself. */
+  | { type: "page.openbot.open"; url: string }
   | { type: "page.kept.discard" } // the person discards every stopped recording's kept events
+  /** Whether the security floor holds this copy (background/security-floor.ts), and Update and restart. */
+  | { type: "page.floor" }
+  | { type: "page.update" }
   | { type: "RECORDER_E2E_FLOOD"; count: number }; // e2e variant only: the router ignores it in a release build (Task 9), and a type emits no code
 export type PageStateResponse = {
   ok: true;
@@ -329,6 +335,9 @@ export type PageStateResponse = {
     openbotUrl: string;
     user: { name: string; email: string };
     via: RecorderConnectVia;
+    /** The organization it records into, by name: OpenBot's latest answer, else the grant's. Absent from an OpenBot that
+     * keeps every connection in `default`. */
+    organizationName?: string;
   } | null;
   me: RecorderMe | null;
   policy: { openbotUrl: string | null; invalid: boolean };
@@ -348,8 +357,10 @@ export type PageResponse =
     }
   | { ok: true; learning: LearningSpaceState }
   | { ok: true; available: boolean }
+  | { ok: true; organizationName?: string } // an approved Connect, and the organization this browser now records into
   | { ok: true; connected: true } // OpenBot Desktop connected this browser, with no Connect page
   | { ok: true; connected: false; reason: string } // why OpenBot Desktop did not connect this browser, as a code (DesktopConnect)
+  | { ok: true; floor: { release: string } | null } // the release to update to while the security floor holds this copy
   | { ok: true }
   | { ok: false; error: string };
 

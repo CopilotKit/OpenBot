@@ -1,6 +1,10 @@
 import type { Message } from "@ag-ui/core";
 import { MessageSchema } from "@ag-ui/core/schemas";
 import { tryClient } from "@/lib/client";
+import {
+  currentOrganizationId,
+  organizationHeaders,
+} from "@/lib/organizations/current";
 
 /**
  * The messages a thread already holds, for restoring a conversation somebody comes back to.
@@ -257,7 +261,11 @@ export async function readThreadMessages(
     const read = async () => {
       const response = await tryClient(
         `/api/copilotkit/threads/${encodeURIComponent(threadId)}/messages?agentId=${encodeURIComponent(agentId)}`,
-        { signal: controller.signal },
+        {
+          signal: controller.signal,
+          // Read in the organization this tab works in, as its runs are (copilot/provider.tsx).
+          headers: organizationHeaders(currentOrganizationId()),
+        },
       );
       if (!response.ok) return UNAVAILABLE_THREAD;
       const body: unknown = await response.json();

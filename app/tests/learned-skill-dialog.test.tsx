@@ -13,6 +13,15 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
 import type { LearnedSkillSource } from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
+import {
+  LEARNING,
+  learningContract,
+  ORGANIZATION,
+  personLearning,
+  problem,
+  requestOf,
+  served,
+} from "./learning-api";
 
 let wasServer = true;
 beforeAll(() => {
@@ -38,23 +47,31 @@ const skill: LearnedSkillContent = {
   ],
 };
 
+/** A name a path has to encode: a space, an ampersand and a question mark. */
+const ODD_NAME = "a b&c?";
+
 beforeEach(() => {
   queryClient.clear();
   asked.length = 0;
   global.fetch = Object.assign(
-    async (path: Parameters<typeof fetch>[0]) => {
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(path);
       asked.push(url);
-      if (url === "/api/settings/learning/skills/refund-order")
-        return Response.json({ skill });
+      const request = requestOf(path, init);
+      if (request.path === personLearning().learnedSkill("refund-order"))
+        return served(learningContract.GetLearnedSkillResponse, skill);
       if (
-        url ===
-        `/api/admin/learning/skills/${encodeURIComponent("a b/c")}?agentId=bot-1`
+        request.path === LEARNING.skill(ODD_NAME) &&
+        request.query.get("botId") === "bot-1"
       )
-        return Response.json({ skill: { ...skill, name: "a b/c" } });
-      return Response.json(
-        { error: "That skill is no longer there." },
-        { status: 404 },
+        return served(learningContract.GetPublishedSkillResponse, {
+          ...skill,
+          name: ODD_NAME,
+        });
+      return problem(
+        404,
+        "That skill is no longer there.",
+        "LEARNED_SKILL_NOT_FOUND",
       );
     },
     { preconnect: originalFetch.preconnect },
@@ -88,7 +105,7 @@ function draw(
 test("the personal source fetches the skill and renders its SKILL.md", async () => {
   const view = draw("refund-order");
   await view.findByText("Open the order, then refund it.");
-  expect(asked).toEqual(["/api/settings/learning/skills/refund-order"]);
+  expect(asked).toEqual([personLearning().learnedSkill("refund-order")]);
   expect(view.getByText("Refunds an order.")).toBeTruthy();
   expect(view.getByText("Refund order")).toBeTruthy();
 });
@@ -118,7 +135,9 @@ test("Done closes the dialog", async () => {
 });
 
 test("the admin source reads the Bot's skill with its name encoded", async () => {
-  const view = draw("a b/c", () => {}, { kind: "admin", agentId: "bot-1" });
+  const view = draw(ODD_NAME, () => {}, { kind: "admin", agentId: "bot-1" });
   await view.findByText("Open the order, then refund it.");
-  expect(asked).toEqual(["/api/admin/learning/skills/a%20b%2Fc?agentId=bot-1"]);
+  expect(asked).toEqual([
+    `${ORGANIZATION}/settings/learning/skills/a%20b%26c%3F?botId=bot-1`,
+  ]);
 });

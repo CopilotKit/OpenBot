@@ -11,8 +11,8 @@ import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { BotNeedsYou } from "@/components/needs-you/board";
 import { DoneTasks, useNeedsYou } from "@/components/needs-you/needs-you";
+import { NotificationsOfferRow } from "@/components/notifications/notifications-offer-row";
 import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
-import { Button } from "@/components/ui/button";
 import {
   Item,
   ItemActions,
@@ -40,19 +40,44 @@ import {
   type BotNotify,
   botLifecycleQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
-import {
-  requestNotificationPermission,
-  useNotificationPermission,
-} from "@/lib/notifications/permission";
+import { loadFailure } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
-import { BotActivityGlance, BotActivityRow } from "./activity";
+import { BotActivityRow } from "./activity";
 import { BotPausedBanner } from "./pause-banner";
+import { BotRoutinesSummary } from "./routines-summary";
 
 const NOTIFY_LABEL: Record<BotNotify, string> = {
   all: "Everything",
   needs_input: "Only when it needs me",
   none: "Nothing (badges only)",
 };
+
+/** The top of a Bot's page: its orb, what it is for and what it does. */
+export function BotProfileHeader({
+  agent,
+}: {
+  agent: Pick<
+    AgentProfile,
+    "name" | "title" | "roleDescription" | "avatarSeed"
+  >;
+}) {
+  return (
+    <div className="mt-6 flex items-center gap-3">
+      <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
+      <div className="min-w-0">
+        {/* Up to three lines, so a phone shows the whole of a subtitle like the starter's. */}
+        {agent.title && (
+          <p className="line-clamp-3 text-pretty font-medium">
+            {shownSubtitle(agent.title)}
+          </p>
+        )}
+        <p className="line-clamp-2 text-muted-foreground text-sm">
+          {agent.roleDescription}
+        </p>
+      </div>
+    </div>
+  );
+}
 
 /**
  * A Bot's own page: what it needs from you, its state for you, what it is doing, the tasks you marked
@@ -73,25 +98,10 @@ export function BotProfile({
   const { done } = useNeedsYou(agent.id);
   const pause = useMutation(setBotPausedMutationOptions(queryClient));
   const notify = useMutation(setBotNotifyMutationOptions(queryClient));
-  // The browser's answer, shared with the prompt a conversation offers, so a yes there shows here.
-  const permission = useNotificationPermission();
 
   return (
     <>
-      <div className="mt-6 flex items-center gap-3">
-        <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
-        <div className="min-w-0">
-          {/* Up to three lines, so a phone shows the whole of a subtitle like the starter's. */}
-          {agent.title && (
-            <p className="line-clamp-3 text-pretty font-medium">
-              {shownSubtitle(agent.title)}
-            </p>
-          )}
-          <p className="line-clamp-2 text-muted-foreground text-sm">
-            {agent.roleDescription}
-          </p>
-        </div>
-      </div>
+      <BotProfileHeader agent={agent} />
       <div className="mt-4">
         <BotPausedBanner agentId={agent.id} />
       </div>
@@ -108,7 +118,10 @@ export function BotProfile({
         ) : null}
         {lifecycle.isPending ? null : lifecycle.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load this Bot's settings. Reload the page.
+            {loadFailure(
+              lifecycle.error,
+              "Couldn't load this Bot's settings. Try again in a moment.",
+            )}
           </p>
         ) : (
           <PageRows>
@@ -166,7 +179,14 @@ export function BotProfile({
                   <SelectTrigger aria-label="Notifications">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  {/* Below the control and level with its right edge, as wide as the longest label.
+                      Laid over the trigger at its width, "Only when it needs me" was cut off and the
+                      list ran past the card's edge. */}
+                  <SelectContent
+                    align="end"
+                    alignItemWithTrigger={false}
+                    className="w-max min-w-(--anchor-width)"
+                  >
                     {(Object.keys(NOTIFY_LABEL) as BotNotify[]).map((value) => (
                       <SelectItem key={value} value={value}>
                         {NOTIFY_LABEL[value]}
@@ -176,32 +196,11 @@ export function BotProfile({
                 </Select>
               </ItemActions>
             </Item>
-            {permission === "default" ? (
-              <>
-                <Separator />
-                <Item size="sm">
-                  <ItemMedia variant="icon">
-                    <IconBell />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>Browser notifications</ItemTitle>
-                    <ItemDescription>
-                      Off in this browser. Turn them on to hear when a Bot needs
-                      you.
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    <Button
-                      onClick={() => void requestNotificationPermission()}
-                      size="sm"
-                      variant="outline"
-                    >
-                      Turn on
-                    </Button>
-                  </ItemActions>
-                </Item>
-              </>
-            ) : null}
+            {/*
+             * Browser notifications, until they are on: the same one press as the offer in a
+             * conversation and Settings' switch, which all read one state, so a yes anywhere shows here.
+             */}
+            <NotificationsOfferRow />
             <Separator />
             <Item
               render={<Link to="/channel/new" search={{ agent: agent.id }} />}
@@ -223,7 +222,7 @@ export function BotProfile({
         )}
       </PageSection>
 
-      <BotActivityGlance agentId={agent.id} />
+      <BotRoutinesSummary agentId={agent.id} />
       <DoneTasks done={done} />
       {settings}
       {manage}

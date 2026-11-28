@@ -6,7 +6,7 @@
  */
 @import "./openduet/skin.css";
 @import "./opendots/skin.css";
-@import "./openmuse/skin.css";
+@import "./openfuse/skin.css";
 
 /*
  * OpenBot's own composer column pads `px-4`, the transcript's inset, so a narrow pane keeps it off

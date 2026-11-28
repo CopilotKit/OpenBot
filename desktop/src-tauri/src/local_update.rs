@@ -51,23 +51,49 @@ pub fn cli_config_dir() -> Option<PathBuf> {
 }
 
 fn config_dir_with(var: impl Fn(&str) -> Option<std::ffi::OsString>, os: &str) -> Option<PathBuf> {
-    const NAME: &str = "copilotkit-config-nodejs";
+    conf_dir_with("copilotkit-config-nodejs", var, os)
+}
+
+/**
+The file the CLI keeps the device sign-in code a `login` is waiting on, in its sign-in folder
+(`conf`'s `pending-device-code.json` for `copilotkit-auth`).
+
+A `login` that ends by itself forgets the code. One stopped mid-wait leaves it, and the next `login`
+shows that code again instead of a new one, for as long as it has a minute left.
+*/
+pub fn cli_saved_sign_in_code() -> Option<PathBuf> {
+    saved_sign_in_code_with(|name| std::env::var_os(name), std::env::consts::OS)
+}
+
+fn saved_sign_in_code_with(
+    var: impl Fn(&str) -> Option<std::ffi::OsString>,
+    os: &str,
+) -> Option<PathBuf> {
+    Some(conf_dir_with("copilotkit-auth-nodejs", var, os)?.join("pending-device-code.json"))
+}
+
+/// Where `conf` (`env-paths`) keeps the store named `store` on `os`.
+fn conf_dir_with(
+    store: &str,
+    var: impl Fn(&str) -> Option<std::ffi::OsString>,
+    os: &str,
+) -> Option<PathBuf> {
     let set = |name: &str| {
         var(name)
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
     };
     match os {
-        "macos" => Some(set("HOME")?.join("Library").join("Preferences").join(NAME)),
+        "macos" => Some(set("HOME")?.join("Library").join("Preferences").join(store)),
         "windows" => {
             let app_data = set("APPDATA")
                 .or_else(|| Some(set("USERPROFILE")?.join("AppData").join("Roaming")))?;
-            Some(app_data.join(NAME).join("Config"))
+            Some(app_data.join(store).join("Config"))
         }
         _ => Some(
             set("XDG_CONFIG_HOME")
                 .or_else(|| Some(set("HOME")?.join(".config")))?
-                .join(NAME),
+                .join(store),
         ),
     }
 }
@@ -846,6 +872,45 @@ mod tests {
             )
         );
         assert_eq!(config_dir_with(vars(&[]), "macos"), None);
+    }
+
+    /// The CLI's saved sign-in code sits in its sign-in folder, `copilotkit-auth`, not in its
+    /// configuration folder.
+    #[test]
+    fn the_clis_saved_sign_in_code_is_where_conf_puts_it_on_each_platform() {
+        let vars = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| std::ffi::OsString::from(value))
+            }
+        };
+        assert_eq!(
+            saved_sign_in_code_with(vars(&[("HOME", "/Users/a")]), "macos"),
+            Some(PathBuf::from(
+                "/Users/a/Library/Preferences/copilotkit-auth-nodejs/pending-device-code.json"
+            ))
+        );
+        assert_eq!(
+            saved_sign_in_code_with(vars(&[("HOME", "/home/a")]), "linux"),
+            Some(PathBuf::from(
+                "/home/a/.config/copilotkit-auth-nodejs/pending-device-code.json"
+            ))
+        );
+        assert_eq!(
+            saved_sign_in_code_with(
+                vars(&[("APPDATA", "C:/Users/a/AppData/Roaming")]),
+                "windows"
+            ),
+            Some(
+                PathBuf::from("C:/Users/a/AppData/Roaming")
+                    .join("copilotkit-auth-nodejs")
+                    .join("Config")
+                    .join("pending-device-code.json")
+            )
+        );
+        assert_eq!(saved_sign_in_code_with(vars(&[]), "windows"), None);
     }
 
     #[test]

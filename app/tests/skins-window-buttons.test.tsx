@@ -39,7 +39,7 @@ const NARROWEST_WIDTH = 720;
 
 type Case = {
   name: string;
-  skin: "openduet" | "opendots" | "openmuse";
+  skin: "openduet" | "opendots" | "openfuse";
   path: string;
   width: number;
   /** Whether the desktop app offers an update, so the update notice is drawn across the top. */
@@ -140,15 +140,15 @@ const CASES: Case[] = [
     corner: ['[data-testid="opendots-wordmark"]'],
   },
   {
-    name: "openmuse-narrowest",
-    skin: "openmuse",
+    name: "openfuse-narrowest",
+    skin: "openfuse",
     path: "/",
     width: NARROWEST_WIDTH,
     corner: ['button[aria-label="Open conversations and menu"]'],
   },
   {
-    name: "openmuse-update",
-    skin: "openmuse",
+    name: "openfuse-update",
+    skin: "openfuse",
     path: "/",
     width: NARROWEST_WIDTH,
     update: true,
@@ -338,12 +338,118 @@ async function corner(page: Page, shown: Case) {
   return found;
 }
 
+/** The desktop's macOS page script, read from its source, as the shell evaluates it in the page. */
+const overlayScript = (() => {
+  const source = readFileSync(
+    join(APP, "..", "desktop", "src-tauri", "src", "main.rs"),
+    "utf8",
+  );
+  const found = source.match(
+    /const OVERLAY_TITLE_BAR_PAGE: &str = r#"([\s\S]*?)"#;/,
+  );
+  if (!found?.[1]) throw new Error("OVERLAY_TITLE_BAR_PAGE is not in main.rs");
+  return found[1];
+})();
+
+/**
+ * Every place along the window's top strip where a press neither moves the window nor reaches a
+ * control, after the desktop's macOS script has marked the page. The strip is the 40px a Mac title
+ * bar spans, pressed every 8px on two rows, leaving out the window's buttons themselves. Whether a
+ * press drags is Tauri's own rule (tauri 2.12, window/scripts/drag.js `isDragRegion`), copied here:
+ * walking up from what was pressed, a button or link without a mark stops it, "deep" drags from
+ * anything inside, and a bare mark drags only from the marked element itself.
+ */
+async function deadStrip(page: Page): Promise<string[]> {
+  await page.evaluate(overlayScript);
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => resolve(0))),
+  );
+  return page.evaluate((area) => {
+    const DRAG = "data-tauri-drag-region";
+    const CLICKABLE = new Set([
+      "A",
+      "BUTTON",
+      "INPUT",
+      "SELECT",
+      "TEXTAREA",
+      "LABEL",
+      "SUMMARY",
+    ]);
+    const ROLES = new Set([
+      "button",
+      "link",
+      "menuitem",
+      "tab",
+      "checkbox",
+      "radio",
+      "switch",
+      "option",
+    ]);
+    const clickable = (el: HTMLElement) =>
+      CLICKABLE.has(el.tagName) ||
+      (el.hasAttribute("contenteditable") &&
+        el.getAttribute("contenteditable") !== "false") ||
+      (el.hasAttribute("tabindex") && el.getAttribute("tabindex") !== "-1") ||
+      ROLES.has(el.getAttribute("role") ?? "");
+    /** "drag", "control" or "dead", for a press on `target`. */
+    const press = (target: Element) => {
+      // An open drawer's scrim closes it when pressed, as it should.
+      if (target.getAttribute("data-slot") === "sheet-overlay")
+        return "control";
+      for (let el: Element | null = target; el; el = el.parentElement) {
+        if (!(el instanceof HTMLElement)) continue;
+        const attr = el.getAttribute(DRAG);
+        if (clickable(el) && attr === null) return "control";
+        if (attr === null) continue;
+        if (attr === "false") return "dead";
+        if (attr === "deep") return "drag";
+        if (attr === "" || attr === "true")
+          return el === target ? "drag" : "dead";
+      }
+      return "dead";
+    };
+    const dead: string[] = [];
+    for (const y of [8, 30]) {
+      for (let x = 2; x < window.innerWidth; x += 8) {
+        if (
+          x >= area.left &&
+          x <= area.right &&
+          y >= area.top &&
+          y <= area.bottom
+        )
+          continue;
+        const target = document.elementFromPoint(x, y);
+        if (!target || press(target) !== "dead") continue;
+        const name =
+          target.getAttribute("aria-label") ??
+          target.getAttribute("data-slot") ??
+          target.className;
+        dead.push(
+          `${x},${y} ${target.tagName.toLowerCase()} ${String(name).slice(0, 40)}`,
+        );
+      }
+    }
+    return dead;
+  }, WINDOW_BUTTONS);
+}
+
 describe.skipIf(!asked)("the skins and the window's buttons", () => {
   for (const shown of CASES) {
     test(`${shown.name} at ${shown.width}px: in the macOS desktop, nothing is drawn under the window's buttons`, async () => {
       const page = await open(shown, true);
       try {
         expect(await covered(page)).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+  }
+
+  for (const shown of CASES.filter((each) => !each.update)) {
+    test(`${shown.name} at ${shown.width}px: in the macOS desktop, the whole top strip moves the window`, async () => {
+      const page = await open(shown, true);
+      try {
+        expect(await deadStrip(page)).toEqual([]);
       } finally {
         await page.close();
       }
@@ -403,10 +509,10 @@ describe.skipIf(!asked)("the skins and the window's buttons", () => {
       "opendots-narrowest-drawer": {
         '[data-testid="opendots-wordmark"]': { x: 12, y: 23 },
       },
-      "openmuse-narrowest": {
+      "openfuse-narrowest": {
         'button[aria-label="Open conversations and menu"]': { x: 20, y: 16 },
       },
-      "openmuse-update": {
+      "openfuse-update": {
         '[aria-label="OpenBot update"] p': { x: 16, y: 11 },
       },
     };

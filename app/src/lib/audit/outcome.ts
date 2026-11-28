@@ -49,6 +49,17 @@ export const REFUSED_EVENT_TYPES = [
   "bot.isolation_refused",
   /** A run that would have sent more tools than its model accepts, never sent to it. */
   "agent.tool_limit_refused",
+  /**
+   * A new computer refused because a limit on computers was reached: the organization's, the person's in it, or
+   * OpenBot's own. Nothing was started.
+   */
+  "computer.limit_reached",
+  /**
+   * A run refused before it started because its model isn't allowed: by the organization's allowed
+   * models, or the person's teams' (`rule` says which). It was drawn as "Allowed", and the Blocked
+   * view, which asks for these types, never showed one.
+   */
+  "model.refused",
 ] as const;
 
 /**

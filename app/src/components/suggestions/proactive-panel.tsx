@@ -57,6 +57,7 @@ import { CHECK_IN_INTERVALS, intervalLabel } from "@/lib/routines/merged";
 import { useUserPreferences } from "@/lib/settings/message-list";
 import { queryClient } from "@/query-client";
 import { SuggestionRow } from "./suggestion-row";
+import { failureSaid } from "@/lib/load-failure";
 
 export const intervals = CHECK_IN_INTERVALS;
 /** The label map, so a closed trigger says "Every 4 hours" rather than 240. */
@@ -69,7 +70,7 @@ const SUGGESTIONS_SHOWN = 3;
 
 /**
  * What the person's Bots found in their check-ins, each with why, its source and its Bot, to Start
- * as a task or Hide. The skins list it on its own (OpenDuet's Up next, OpenMuse's Ideas); OpenBot's
+ * as a task or Hide. The skins list it on its own (OpenDuet's Up next, OpenFuse's Ideas); OpenBot's
  * own pages list the same rows under Needs you.
  */
 export function SuggestionsInbox({
@@ -80,7 +81,7 @@ export function SuggestionsInbox({
 } = {}) {
   const suggestions = useQuery(proactiveSuggestionsQueryOptions());
   const shown = (suggestions.data ?? []).filter(
-    (suggestion) => agentId === undefined || suggestion.agentId === agentId,
+    (suggestion) => agentId === undefined || suggestion.botId === agentId,
   );
   const bots = useQuery(agentListQueryOptions());
   const [expanded, setExpanded] = useState(false);
@@ -98,7 +99,7 @@ export function SuggestionsInbox({
     <PageSection title="Suggested next steps">
       {suggestions.isPending ? null : suggestions.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {suggestions.error.message}
+          {failureSaid(suggestions.error)}
         </p>
       ) : shown.length ? (
         <PageRows>
@@ -106,7 +107,7 @@ export function SuggestionsInbox({
             <Fragment key={suggestion.id}>
               {index > 0 ? <Separator /> : null}
               <SuggestionRow
-                botName={botName(suggestion.agentId)}
+                botName={botName(suggestion.botId)}
                 suggestion={suggestion}
               />
             </Fragment>
@@ -176,7 +177,7 @@ export function ProactiveResearchSettings({
   const blocked = useCheckInsBlocked();
   const [adding, setAdding] = useState(false);
   const shown = (settings.data ?? []).filter(
-    (setting) => fixedBot === undefined || setting.agentId === fixedBot,
+    (setting) => fixedBot === undefined || setting.botId === fixedBot,
   );
   const canAdd =
     settings.isSuccess && (fixedBot === undefined || shown.length === 0);
@@ -198,8 +199,11 @@ export function ProactiveResearchSettings({
           {blocked === "Off for all your Bots" ? (
             <>
               You turned off check-ins for all your Bots in{" "}
-              <Link className="underline underline-offset-4" to="/routines">
-                Routines
+              <Link
+                className="underline underline-offset-4"
+                to="/settings/notifications"
+              >
+                Notifications
               </Link>
               .
             </>
@@ -210,7 +214,7 @@ export function ProactiveResearchSettings({
       ) : null}
       {settings.isPending ? null : settings.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {settings.error.message}
+          {failureSaid(settings.error)}
         </p>
       ) : shown.length === 0 ? (
         <PageEmpty
@@ -232,8 +236,8 @@ export function ProactiveResearchSettings({
                 blocked={blocked}
                 setting={setting}
                 botName={
-                  bots.data?.find((bot) => bot.id === setting.agentId)?.name ??
-                  setting.agentId
+                  bots.data?.find((bot) => bot.id === setting.botId)?.name ??
+                  setting.botId
                 }
               />
             </Fragment>
@@ -266,7 +270,7 @@ export function TurnOnResearchDialog({
   const allBots = useQuery(agentListQueryOptions());
   const bots = {
     data: allBots.data?.filter(
-      (bot) => !settings.data?.some((setting) => setting.agentId === bot.id),
+      (bot) => !settings.data?.some((setting) => setting.botId === bot.id),
     ),
   };
   const channels = useInfiniteQuery(channelListQueryOptions());
@@ -300,7 +304,12 @@ export function TurnOnResearchDialog({
             onSubmit={(event) => {
               event.preventDefault();
               add.mutate(
-                { agentId, channelId, focus, intervalMinutes },
+                {
+                  botId: agentId,
+                  conversationId: channelId,
+                  focus,
+                  intervalMinutes,
+                },
                 { onSuccess: onClose },
               );
             }}
@@ -397,7 +406,7 @@ export function TurnOnResearchDialog({
           </form>
           {add.error && (
             <p role="alert" className="text-destructive text-sm">
-              {add.error.message}
+              {failureSaid(add.error)}
             </p>
           )}
         </DialogBody>
@@ -422,18 +431,20 @@ export function TurnOnResearchDialog({
 /**
  * Whether it is on, and when it runs next. Stated rather than captured, so it follows the query.
  * While check-ins are off for all the person's Bots, that is the answer, whatever this one says.
+ *
+ * When is said the way a routine's page says it ("in 6 days", "tomorrow"), never as a date and
+ * time. A time already past is one the scheduler hasn't picked up yet, so it is due, not "ago".
  */
 export function checkInStatus(
   setting: ProactiveSetting,
   blocked: string | null,
 ) {
-  return !setting.enabled
-    ? "Off"
-    : blocked
-      ? blocked
-      : setting.lastStatus === "running"
-        ? "Checking now"
-        : `Next ${new Date(setting.nextRunAt).toLocaleString()}`;
+  if (!setting.enabled) return "Off";
+  if (blocked) return blocked;
+  if (setting.lastStatus === "running") return "Checking now";
+  return Date.parse(setting.nextRunAt) <= Date.now()
+    ? "Next check due"
+    : `Next check ${relativeTime(setting.nextRunAt)}`;
 }
 
 /** When a check-in happened, as its line says it: "just now" for the moment after a Run now. */

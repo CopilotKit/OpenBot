@@ -24,7 +24,9 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { appsQueryOptions } from "@/lib/apps/queries";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
+import { loadFailure } from "@/lib/load-failure";
 import { undeclaredElsewhere } from "@/lib/skills/form";
 
 /**
@@ -97,7 +99,9 @@ export function SkillTools({
   selected: string[];
   onChange: (refs: string[]) => void;
 }) {
-  const plugins = useQuery(pluginsPageQueryOptions());
+  const plugins = useQuery(appsQueryOptions());
+  // Apps open: anybody adds an app, so an app not added yet is not an admin's to add.
+  const appsOpen = useAppsOpen() === true;
   const [open, setOpen] = useState<string | null>(null);
   const held = new Set(selected);
 
@@ -117,15 +121,16 @@ export function SkillTools({
   if (!plugins.data) {
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Couldn't load the tools. Reload the page.
+        {loadFailure(
+          plugins.error,
+          "Couldn't load the tools. Try again in a moment.",
+        )}
       </p>
     );
   }
 
   /* Only apps that offer something: a heading with nothing under it reads as a failed draw. */
-  const servers = plugins.data.servers.filter(
-    (server) => server.tools.length > 0,
-  );
+  const servers = plugins.data.filter((server) => server.tools.length > 0);
   /*
    * Declared, and offered by nothing connected here. Shown rather than dropped: a package ships
    * skills declaring tools for apps nobody has added yet, and leaving them out would state part of
@@ -234,7 +239,9 @@ export function SkillTools({
               <DialogTitle>{current.title}</DialogTitle>
               <DialogDescription>
                 {current.unavailable
-                  ? "These do nothing until an admin adds the app. Untick one to remove it from the skill."
+                  ? appsOpen
+                    ? "These do nothing until the app is added. Untick one to remove it from the skill."
+                    : "These do nothing until an admin adds the app. Untick one to remove it from the skill."
                   : "Using this skill loads the tools you tick for that reply."}
               </DialogDescription>
             </DialogHeader>
@@ -257,7 +264,7 @@ export function SkillTools({
                        * worth seeing before ticking it.
                        */}
                       {tool.writes ? (
-                        <span className="text-amber-600 text-xs dark:text-amber-500">
+                        <span className="text-warning text-xs">
                           changes things
                         </span>
                       ) : null}

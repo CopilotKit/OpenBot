@@ -70,7 +70,7 @@ describe.each(Object.entries(avatars))("%s", (_, Avatar) => {
 
 test("OpenBot's own look opts in to orbs and the skins do not", () => {
   expect(SKINS.openbot.botLook).toBe("orb");
-  for (const id of ["openduet", "opendots", "openmuse"] as const) {
+  for (const id of ["openduet", "opendots", "openfuse"] as const) {
     expect(SKINS[id].botLook ?? "face").toBe("face");
   }
 });

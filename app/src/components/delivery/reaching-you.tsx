@@ -47,13 +47,16 @@ import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
   type ChatLink,
   confirmSmsMutationOptions,
-  deliveryQueryOptions,
-  type Reachability,
+  type Destination,
+  destinationsQueryOptions,
   removeDeliveryBindingMutationOptions,
   startChatLinkMutationOptions,
   startSmsMutationOptions,
+  type Transports,
+  transportsQueryOptions,
 } from "@/lib/delivery";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The phone verification waiting for its code, kept for the tab.
@@ -79,14 +82,13 @@ function writePending(id: string) {
   }
 }
 
-type Transport = Reachability["bindings"][number]["transport"];
+type Transport = Destination["transport"];
 type ChatPlatform = ChatLink["platform"];
 
 /** A one-time link message, the conversation and Bot it links, and when it stops working. */
 type HeldLink = ChatLink & {
   channelId: string;
   agentId: string;
-  expiresAt: number;
 };
 
 const TRANSPORT: Record<
@@ -119,7 +121,8 @@ const TRANSPORT: Record<
  * a phone number — and the answer is a code to send back.
  */
 export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
-  const reach = useQuery(deliveryQueryOptions());
+  const connected = useQuery(destinationsQueryOptions());
+  const transports = useQuery(transportsQueryOptions());
   // People read Bots by name; the id is what the list used to show.
   const botName = useBotNames();
   const [challengeId, setChallengeId] = useState(readPending);
@@ -139,19 +142,17 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
     return held && held.expiresAt > Date.now() ? held : undefined;
   };
   const remove = useMutation(removeDeliveryBindingMutationOptions(queryClient));
-  const destinations = reach.data?.bindings.filter(
-    (binding) =>
-      binding.enabled &&
-      (fixedBot === undefined || binding.agentId === fixedBot),
+  const destinations = connected.data?.filter(
+    (destination) => fixedBot === undefined || destination.botId === fixedBot,
   );
-  const listError = reach.error ?? remove.error;
+  const listError = connected.error ?? remove.error;
   /*
    * A transport the deployment cannot reach is a row that says why rather than one that opens a
    * dialog whose every button is disabled. A phone with a code already on its way stays reachable,
    * so the code can still be confirmed.
    */
   const open = (transport: Transport) =>
-    !!reach.data?.available[transport] ||
+    !!transports.data?.[transport] ||
     (transport === "sms" && challengeId !== "");
   const summary = (transport: Transport) => {
     if (transport === "sms" && challengeId) {
@@ -184,10 +185,11 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
       <PageSection title="Connected destinations">
         {listError ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            {listError.message}
+            {failureSaid(listError)}
           </p>
         ) : null}
-        {reach.isPending || !destinations ? null : destinations.length === 0 ? (
+        {connected.isPending || !destinations ? null : destinations.length ===
+          0 ? (
           <PageEmpty icon={IconSend} title="No destinations connected" />
         ) : (
           <PageRows>
@@ -209,7 +211,7 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
                             : binding.address}
                       </ItemTitle>
                       <ItemDescription>
-                        {botName(binding.agentId)}
+                        {botName(binding.botId)}
                         {binding.optedOutAt
                           ? " · You texted STOP. Text START to resume."
                           : null}
@@ -236,7 +238,7 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
         description="In a Slack or Teams channel that others can read, the Bot replies to you in a direct message."
         title="Connect a conversation"
       >
-        {reach.data ? (
+        {transports.data ? (
           <PageRows>
             {(Object.keys(TRANSPORT) as Transport[]).map((transport, index) => {
               const Icon = TRANSPORT[transport].icon;
@@ -274,9 +276,9 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
           </PageRows>
         ) : null}
       </PageSection>
-      {connecting && reach.data ? (
+      {connecting && transports.data ? (
         <ConnectDialog
-          available={reach.data.available}
+          available={transports.data}
           botName={botName}
           challengeId={challengeId}
           fixedBot={fixedBot}
@@ -310,7 +312,7 @@ function ConnectDialog({
   onClose,
 }: {
   transport: Transport;
-  available: Reachability["available"];
+  available: Transports;
   fixedBot: string | undefined;
   botName: (id: string) => string;
   challengeId: string;
@@ -337,12 +339,7 @@ function ConnectDialog({
       { channelId, agentId, platform },
       {
         onSuccess: (result) => {
-          onLinked({
-            ...result,
-            channelId,
-            agentId,
-            expiresAt: Date.now() + result.expiresInMinutes * 60_000,
-          });
+          onLinked({ ...result, channelId, agentId });
           setCopied(false);
         },
       },
@@ -537,7 +534,7 @@ function ConnectDialog({
           ) : null}
           {error ? (
             <p className="text-destructive text-sm" role="alert">
-              {error.message}
+              {failureSaid(error)}
             </p>
           ) : null}
         </DialogBody>

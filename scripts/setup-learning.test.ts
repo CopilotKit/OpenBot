@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
-import type { ContainerProbe } from "../server/src/learning/auto-assign";
+import type { ContainerProbe } from "./learning-key";
 import { setupLearning } from "./setup-learning";
 
 const directories: string[] = [];

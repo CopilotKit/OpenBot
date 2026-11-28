@@ -4,9 +4,9 @@
  * ITS OWN MODULE BECAUSE THE PANEL GOT THIS WRONG WHILE READING CORRECTLY. The panel joined the
  * grants the server reports against the roster the browser holds, and those two are not filtered the
  * same way. `reachable` is `botsReachableFrom`, a raw read of the `bot` grants on this coworker with
- * no visibility filter of any kind. The roster is `GET /api/agents`, which drops every coworker the
- * signed-in person has hidden — and hidden is a PER-PERSON display preference, one row per user in
- * `agent_preferences`, not a fact about the coworker.
+ * no visibility filter of any kind. The roster is the API's `listBots`, which drops every coworker
+ * the signed-in person has hidden — and hidden is a PER-PERSON display preference, one row per user
+ * in `agent_preferences`, not a fact about the coworker.
  *
  * So an administrator who tidied a coworker off their own roster stopped being shown its inbound
  * grants. The switch was not disabled and no note appeared; the row was simply not drawn, and the
@@ -43,9 +43,9 @@ export type HandoffRoster<T> = {
 export function handoffRoster<T extends Placeable>(input: {
   /** The coworker whose panel this is. It may not be granted itself, so it is never a row. */
   agentId: string;
-  /** `GET /api/agents`: everybody this person can see and has not hidden. */
+  /** `listBots`: everybody this person can see and has not hidden. */
   roster: readonly T[];
-  /** `GET /api/agents?hidden=true`: the ones this person has hidden from that roster. */
+  /** `listBots` with `hidden=true`: the ones this person has hidden from that roster. */
   hidden: readonly T[];
   /** Bot ids this coworker may address today, exactly as the server reports them. */
   reachable: readonly string[];

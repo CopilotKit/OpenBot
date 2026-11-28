@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { queryClient } from "@/query-client";
 import { saveVoiceSession } from "./archive";
 import { connectVoice, voiceSupported } from "./connection";
@@ -54,6 +55,8 @@ export function useVoiceCall(options: {
     available: data?.voice === true,
     supported: voiceSupported(),
     open() {
+      // Bots can't run until a card is added: the dialog says why, in place of a call.
+      if (!active && stopIfNeedsCard()) return;
       setMinimized(false);
       if (!active) void session.start();
     },

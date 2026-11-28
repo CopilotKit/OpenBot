@@ -1,0 +1,584 @@
+# Skills: the named instructions a person runs with / in a conversation.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+paths:
+  /api/v2/organizations/{organizationId}/skills:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Skills]
+      operationId: listSkills
+      summary: List skills
+      description: >-
+        Return one page of the skills the caller can see: their own, the
+        ones granted to a team they are in, and the organization's that are
+        granted to no team. An organization's skill granted to teams is
+        listed only to those teams' people. An admin of the organization
+        sees every skill.
+        Another organization's skills are never listed. Ordered by title, then
+        slug. A missing cursor starts at the first page and nextCursor null
+        ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [skills:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of skills.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/SkillPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/skills/{skillId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SkillId'
+    get:
+      tags: [Skills]
+      operationId: getSkill
+      summary: Read a skill
+      description: >-
+        Return one skill the caller can see, as the list shows them. An admin
+        can read any. One the caller can't see is not found.
+      security:
+        - webSession: []
+        - appOAuth: [skills:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The skill.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+              examples:
+                skill:
+                  $ref: '#/components/examples/SkillExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/SkillNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    put:
+      tags: [Skills]
+      operationId: replaceSkill
+      summary: Save a skill
+      description: >-
+        Write a skill under its slug, the command a person types after /, or
+        rewrite it. A new slug makes a skill that is the caller's own, or the
+        organization's when an admin sends forEveryone. Rewriting one keeps
+        whose it is. Anybody signed in may write their own skill. Only an
+        admin may write or change the organization's, or anybody else's. A
+        skill adds no access: it can only ask a Bot to use apps the Bot can
+        already use. tools names the actions it needs, each one OpenBot has
+        seen. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [skills:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillInput'
+            examples:
+              standup:
+                value:
+                  title: Standup
+                  summary: Write today's standup from my calendar and my pull requests.
+                  instructions: Read my calendar for today and my open pull requests, then write three short lines for yesterday, today and blockers.
+                  tools: [google-calendar/list_events]
+      responses:
+        '200':
+          description: The skill as saved, new or rewritten.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+              examples:
+                saved:
+                  $ref: '#/components/examples/SkillExample'
+        '400':
+          $ref: '#/components/responses/InvalidSkill'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SkillForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Skills]
+      operationId: deleteSkill
+      summary: Delete a skill
+      description: >-
+        Delete a skill, and stop every Bot offering it. Anybody may delete
+        their own. Only an admin may delete the organization's or anybody
+        else's. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [skills:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The skill was deleted.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SkillForbidden'
+        '404':
+          $ref: '#/components/responses/SkillNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/skills/{skillId}/team-grants:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SkillId'
+    get:
+      tags: [Skills]
+      operationId: getSkillTeamGrants
+      summary: Read the teams the skill is granted to
+      description: >-
+        Return the teams the skill is granted to, by id. A person in one of those teams, or in a team beneath one, may put the skill on a Bot they own, and the Bot is offered it only while they stay in such a team. Only an admin
+        of the organization may read them.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [skills:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The teams the skill is granted to.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillTeamGrants'
+              examples:
+                granted:
+                  $ref: '#/components/examples/SkillTeamGrantsExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/SkillOrTeamNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    put:
+      tags: [Skills]
+      operationId: replaceSkillTeamGrants
+      summary: Grant a skill to teams
+      description: >-
+        Grant the skill to exactly these teams of the organization, taking it
+        from any team left out. An empty list takes it from every team.
+        A person in one of those teams, or in a team beneath one, may put the skill on a Bot they own, and the Bot is offered it only while they stay in such a team. A team of another organization is not found. Only an admin
+        of the organization may do this. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [skills:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillTeamGrantsInput'
+            examples:
+              oneTeam:
+                value:
+                  teams: [Tm4Qx8LpV2nWc7RbY1sKd0Ze]
+      responses:
+        '200':
+          description: The teams the skill is now granted to.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillTeamGrants'
+              examples:
+                granted:
+                  $ref: '#/components/examples/SkillTeamGrantsExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/SkillOrTeamNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  parameters:
+    SkillId:
+      name: skillId
+      in: path
+      required: true
+      description: >-
+        The skill's slug: the command a person types after /. Lower-case
+        letters, numbers and hyphens, 2 to 40 long, starting and ending with a
+        letter or number.
+      schema:
+        type: string
+        minLength: 2
+        maxLength: 40
+        pattern: ^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$
+      example: standup
+  schemas:
+    Skill:
+      type: object
+      description: >-
+        A named instruction a person runs with / in a conversation, on a Bot
+        that offers it.
+      required: [slug, title, summary, instructions, tools, ownerId, botIds, usableOnYourBots]
+      properties:
+        slug:
+          type: string
+          minLength: 2
+          maxLength: 40
+          description: What a person types after /, and the skill's address.
+        title:
+          type: string
+        summary:
+          type: string
+          description: One line, shown in the / menu. May be empty.
+        instructions:
+          type: string
+          description: What the Bot is told when the skill runs.
+        tools:
+          type: array
+          description: >-
+            The actions it needs, as appId/toolName. Naming one gives no Bot
+            access to it: a Bot uses only what it can already use.
+          items:
+            type: string
+        ownerId:
+          type: [string, 'null']
+          description: Whose it is, by person id. Null when it is the organization's.
+        botIds:
+          type: array
+          description: The Bots that offer it, by id.
+          items:
+            type: string
+        usableOnYourBots:
+          type: boolean
+          description: >-
+            Whether the caller may put it on a Bot they own: it is their own,
+            or it is granted to a team they are in. A Bot's Skills page offers
+            these.
+    SkillInput:
+      type: object
+      additionalProperties: false
+      required: [title, instructions, tools]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          pattern: \S
+          description: Trimmed.
+        summary:
+          type: string
+          default: ''
+          description: One line, shown in the / menu.
+        instructions:
+          type: string
+          minLength: 1
+          pattern: \S
+          description: Trimmed.
+        tools:
+          type: array
+          description: >-
+            Every action the skill needs, as appId/toolName, each one OpenBot
+            has seen. Replaces what it named before; empty names none.
+          items:
+            type: string
+            minLength: 1
+            pattern: \S
+        forEveryone:
+          type: boolean
+          default: false
+          description: >-
+            Make a new skill the organization's. Only an admin may. It
+            applies when the skill is made: rewriting one keeps whose it is.
+    SkillTeamGrants:
+      type: object
+      description: The teams the skill is granted to.
+      required: [teams]
+      properties:
+        teams:
+          type: array
+          description: Each team's id, in order.
+          items:
+            type: string
+    SkillTeamGrantsInput:
+      type: object
+      additionalProperties: false
+      required: [teams]
+      properties:
+        teams:
+          type: array
+          maxItems: 100
+          description: The id of each team of this organization to grant it to.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: ^[A-Za-z0-9_-]+$
+    SkillPage:
+      type: object
+      required: [skills, nextCursor]
+      properties:
+        skills:
+          type: array
+          description: By title, then slug.
+          items:
+            $ref: '#/components/schemas/Skill'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+  responses:
+    SkillNotFound:
+      description: >-
+        No skill has that slug, the caller isn't an admin and can't see it,
+        or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/skill-not-found
+                title: Skill not found.
+                status: 404
+                detail: There's no skill called standup.
+                code: SKILL_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SkillOrTeamNotFound:
+      description: >-
+        There is no skill by that slug, a team named is not one of this
+        organization's, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            skill:
+              value:
+                type: https://open.bot/errors/skill-not-found
+                title: Skill not found.
+                status: 404
+                detail: There is no skill called standup.
+                code: SKILL_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            team:
+              value:
+                type: https://open.bot/errors/team-not-found
+                title: Team not found.
+                status: 404
+                detail: Couldn't find that team.
+                code: TEAM_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidSkill:
+      description: >-
+        A field is missing, blank once trimmed or holds text that can't be
+        kept, or a tool is one OpenBot hasn't seen.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unknownTool:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Couldn't find a tool called gmail/send_mail. Check its name, or refresh its app and try again.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SkillForbidden:
+      description: >-
+        Only an admin may write a skill for everyone, or change or delete the
+        organization's or somebody else's.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            forEveryone:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can write a skill for everyone.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            organization:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: standup belongs to everyone. Only an admin can change it.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            someoneElse:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: standup is somebody else's skill.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    SkillPageExample:
+      summary: Every skill the caller can see, on one page.
+      value:
+        skills:
+          - slug: standup
+            title: Standup
+            summary: Write today's standup from my calendar and my pull requests.
+            instructions: Read my calendar for today and my open pull requests, then write three short lines.
+            tools: [google-calendar/list_events]
+            ownerId: user_3f1c9a
+            botIds: [general-assistant]
+            usableOnYourBots: true
+          - slug: weekly-report
+            title: Weekly report
+            summary: Sum up the week's work for the team.
+            instructions: Read this week's closed issues and merged pull requests and write a short report.
+            tools: []
+            ownerId: null
+            botIds: [general-assistant, research-assistant]
+            usableOnYourBots: false
+        nextCursor: null
+    SkillTeamGrantsExample:
+      summary: Granted to one team.
+      value:
+        teams: [Tm4Qx8LpV2nWc7RbY1sKd0Ze]
+    SkillExample:
+      summary: A person's own skill, offered by one Bot.
+      value:
+        slug: standup
+        title: Standup
+        summary: Write today's standup from my calendar and my pull requests.
+        instructions: Read my calendar for today and my open pull requests, then write three short lines.
+        tools: [google-calendar/list_events]
+        ownerId: user_3f1c9a
+        botIds: [general-assistant]
+        usableOnYourBots: true

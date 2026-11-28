@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { RENAMED_SKIN_IDS } from "@openbot/shared/user-preferences";
 import { SKINS } from "../src/skins/registry";
 import {
   applySkin,
@@ -8,12 +9,19 @@ import {
   reconcileSkin,
   SKIN_STORAGE_KEY,
 } from "../src/skins/store";
-import { SKIN_IDS } from "../src/skins/types";
+import { SKIN_IDS, skinDrawsOwnFrame } from "../src/skins/types";
 
 const read = (path: string) =>
   readFileSync(new URL(path, import.meta.url), "utf8");
 
 const skinned = SKIN_IDS.filter((id) => id !== DEFAULT_SKIN);
+
+describe("skin frames", () => {
+  test("skinDrawsOwnFrame agrees with which skins define a Frame", () => {
+    for (const id of SKIN_IDS)
+      expect(skinDrawsOwnFrame(id)).toBe(Boolean(SKINS[id].Frame));
+  });
+});
 
 describe("skin preference", () => {
   test("a stored skin is used only when OpenBot ships it", () => {
@@ -47,8 +55,20 @@ describe("skin preference", () => {
     const setRootSkin = (id: string | null) => roots.push(id);
 
     expect(reconcileSkin("retired-skin", { setRootSkin })).toBe(DEFAULT_SKIN);
-    expect(reconcileSkin("openmuse", { setRootSkin })).toBe("openmuse");
-    expect(roots).toEqual([null, "openmuse"]);
+    expect(reconcileSkin("openfuse", { setRootSkin })).toBe("openfuse");
+    expect(roots).toEqual([null, "openfuse"]);
+  });
+
+  test("a skin saved under the id it was renamed from is drawn as its new skin", () => {
+    const roots: Array<string | null> = [];
+    const setRootSkin = (id: string | null) => roots.push(id);
+
+    for (const [old, now] of Object.entries(RENAMED_SKIN_IDS)) {
+      expect(parseStoredSkin(old)).toBe(now);
+      expect(reconcileSkin(old, { setRootSkin })).toBe(now);
+    }
+    expect(parseStoredSkin("openmuse")).toBe("openfuse");
+    expect(roots).toEqual(Object.values(RENAMED_SKIN_IDS));
   });
 
   test("every skin is registered under its own id", () => {
@@ -62,6 +82,35 @@ describe("pre-paint skin boot", () => {
   test("the boot script reads the same storage key the app writes", () => {
     expect(html).toContain(SKIN_STORAGE_KEY);
     expect(html).toContain("dataset.skin");
+  });
+
+  /** Runs the inline boot script with `stored` under the skin key, and returns `<html data-skin>`. */
+  function bootWith(stored: string | null): string | undefined {
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    if (!script) throw new Error("index.html has no inline boot script");
+    const root = {
+      classList: { toggle: () => {} },
+      style: {} as Record<string, string>,
+      dataset: {} as Record<string, string>,
+    };
+    const window = {
+      localStorage: {
+        getItem: (key: string) => (key === SKIN_STORAGE_KEY ? stored : null),
+      },
+    };
+    new Function("window", "document", script)(window, {
+      documentElement: root,
+    });
+    return root.dataset.skin;
+  }
+
+  test("the boot script paints the skin saved, and a renamed skin under its new id", () => {
+    for (const id of skinned) expect(bootWith(id)).toBe(id);
+    expect(bootWith(DEFAULT_SKIN)).toBeUndefined();
+    expect(bootWith(null)).toBeUndefined();
+    for (const [old, now] of Object.entries(RENAMED_SKIN_IDS)) {
+      expect(bootWith(old)).toBe(now);
+    }
   });
 });
 

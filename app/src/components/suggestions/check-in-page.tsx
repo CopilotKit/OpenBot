@@ -12,9 +12,12 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { routinesOf } from "@/components/routines/new-routine-page";
 import { DeleteRow } from "@/components/routines/delete-row";
-import { RoutineDetailMissing } from "@/components/routines/routine-detail-missing";
+import { routinesOf } from "@/components/routines/new-routine-page";
+import {
+  RoutineDetailMissing,
+  useDeletedHere,
+} from "@/components/routines/routine-detail-missing";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -44,10 +47,13 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
+  changeProactiveSettingMutationKey,
   changeProactiveSettingMutationOptions,
+  type ProactiveChange,
   type ProactiveSetting,
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import {
@@ -57,6 +63,7 @@ import {
   lastCheckInLine,
   useCheckInsBlocked,
 } from "./proactive-panel";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * A check-in's page at `/routines/check-ins/$checkInId`, reached from its row on a Routines list,
@@ -76,12 +83,21 @@ export function CheckInRoutePage({
   const bots = useQuery(agentListQueryOptions());
   const hidden = useQuery(agentListQueryOptions(true));
   const blocked = useCheckInsBlocked();
+  const deleted = useDeletedHere<{
+    setting: { id: string };
+    change: ProactiveChange;
+  }>(
+    changeProactiveSettingMutationKey,
+    ({ setting, change }) =>
+      change.kind === "remove" && setting.id === checkInId,
+  );
   const back = routinesOf(agentId);
   const setting = settings.data?.find((row) => row.id === checkInId);
   if (!setting)
     return (
       <RoutineDetailMissing
         back={back}
+        deleted={deleted}
         icon={IconRadar}
         kind="check-in"
         read={settings}
@@ -89,7 +105,7 @@ export function CheckInRoutePage({
     );
   const botName =
     [...(bots.data ?? []), ...(hidden.data ?? [])].find(
-      (bot) => bot.id === setting.agentId,
+      (bot) => bot.id === setting.botId,
     )?.name ?? "A Bot";
   return (
     <CheckInPage
@@ -204,9 +220,11 @@ export function CheckInPage({
             render={
               <button
                 disabled={!setting.enabled || !!blocked || change.isPending}
-                onClick={() =>
-                  change.mutate({ setting, change: { kind: "run" } })
-                }
+                onClick={() => {
+                  // Bots can't run until a card is added: the dialog says why, in place of a run.
+                  if (stopIfNeedsCard()) return;
+                  change.mutate({ setting, change: { kind: "run" } });
+                }}
                 type="button"
               />
             }
@@ -277,7 +295,7 @@ export function CheckInPage({
         </PageRows>
         {change.error && !confirming ? (
           <p className="mt-3 text-destructive text-sm" role="alert">
-            {change.error.message}
+            {failureSaid(change.error)}
           </p>
         ) : null}
       </PageSection>
@@ -293,7 +311,7 @@ export function CheckInPage({
           {change.error ? (
             <DialogBody className="mt-4">
               <p className="text-destructive text-sm" role="alert">
-                {change.error.message}
+                {failureSaid(change.error)}
               </p>
             </DialogBody>
           ) : null}
@@ -311,7 +329,9 @@ export function CheckInPage({
               onClick={() =>
                 change.mutate(
                   { setting, change: { kind: "remove" } },
-                  { onSuccess: () => navigate(back) },
+                  // Usually the route has gone back already, on the list without it. This is
+                  // for a list that couldn't be read again.
+                  { onSuccess: () => navigate({ ...back, replace: true }) },
                 )
               }
               size="sm"

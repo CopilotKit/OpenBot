@@ -8,6 +8,7 @@
  * Unknown is never shown as ready. The Intelligence row is ready only when the CLI itself reports
  * readiness "ready" and licence "valid"; a CLI that reports neither leaves it unknown.
  */
+import { SECURITY_FLOOR_SENTENCE } from "../../shared/security-floor";
 import {
   type ChatGateInput,
   chatGate,
@@ -16,6 +17,7 @@ import {
   type LocalReason,
   licenceExpiresSoon,
   onInstalledRelease,
+  type PodmanPlan,
   type Shortfall,
 } from "./localEvalCli";
 
@@ -144,7 +146,7 @@ function shortfallSaid(
   // Docker Desktop is where the person raises Docker's limits, so it is named. OpenBot's own Podman
   // machine is OpenBot to them, except in the command that raises its limits.
   const engine = shortfall.podman ? "OpenBot" : "Docker Desktop";
-  // "OpenBot has 2 free CPUs. It needs 4." rather than naming OpenBot twice.
+  // "OpenBot has 2 CPUs. It needs 4." rather than naming OpenBot twice.
   const needsWho = shortfall.podman ? "It needs" : "OpenBot needs";
   const short = (["cpu", "memory", "disk"] as const).filter(
     (resource) => shortfall[resource],
@@ -153,6 +155,14 @@ function shortfallSaid(
   if (shortfall.recovering && short.length === 0) {
     return `OpenBot is recovering from low disk space. Wait a few minutes, then ${then}.`;
   }
+  // An update the computer has no room for: what is free where it ran short, beside what the
+  // update needs there. CPUs or memory short too are said after it.
+  if (shortfall.updating && shortfall.disk && shortfall.diskGb) {
+    const rest = { ...shortfall, disk: false, updating: false };
+    const others =
+      rest.cpu || rest.memory ? ` ${shortfallSaid(rest, needs, then)}` : "";
+    return `${updateRoomSaid(shortfall, engine, then)}${others}`;
+  }
   if (short.length === 0) {
     const fix = shortfall.podman
       ? "Stop your Podman machine, raise them with podman machine set, start it again"
@@ -160,16 +170,17 @@ function shortfallSaid(
     return `${shortfall.podman ? "This computer doesn't give OpenBot" : "Docker Desktop doesn't give OpenBot"} enough CPUs, memory or disk space. ${fix}, then ${then}.`;
   }
   // The drive under OpenBot's machine ran short, on Windows: said as the person sees it in File
-  // Explorer, and as the first screen says it. "OpenBot has 13.2 GB of free disk" read badly.
+  // Explorer, and as the first screen says it. "OpenBot has 13.2 GB of free disk" read badly. On a
+  // Mac, its own disk.
   if (
     short.length === 1 &&
     shortfall.disk &&
     shortfall.freeOnDrive &&
-    shortfall.drive &&
+    (shortfall.drive || shortfall.mac) &&
     shortfall.diskGb &&
     !shortfall.nearlyFull
   ) {
-    return `This computer has ${shortfall.diskGb} GB of free space on drive ${shortfall.drive}, and OpenBot needs ${needed.disk}. Free up some space, then ${then}.`;
+    return `${onTheDrive(shortfall)}, and OpenBot needs ${needed.disk}. Free up some space, then ${then}.`;
   }
   const fix = shortfall.podman
     ? podmanFix(short, shortfall)
@@ -187,7 +198,8 @@ function shortfallSaid(
   }
   // The CLI's own numbers, when its error gave one for every resource that is short.
   const measured: Record<Resource, string | undefined> = {
-    cpu: shortfall.cpus && `${shortfall.cpus} free CPUs`,
+    // The CLI counts every CPU the engine has (its `NCPU`), not the ones left free.
+    cpu: shortfall.cpus && `${shortfall.cpus} CPUs`,
     memory: shortfall.memoryGb && `${shortfall.memoryGb} GB of free memory`,
     disk: shortfall.diskGb && `${shortfall.diskGb} GB of free disk space`,
   };
@@ -228,6 +240,35 @@ function podmanFix(short: Resource[], shortfall: Shortfall): string {
   return set || "";
 }
 
+/** What is free on the drive that ran short: "This Mac has 7.5 GB of free space". */
+function onTheDrive(shortfall: Shortfall): string {
+  return shortfall.mac || !shortfall.drive
+    ? `This ${shortfall.mac ? "Mac" : "computer"} has ${shortfall.diskGb} GB of free space`
+    : `This computer has ${shortfall.diskGb} GB of free space on drive ${shortfall.drive}`;
+}
+
+/**
+ * An update not started for lack of room (`local_eval::update_room`), with what is free where it
+ * ran short and what the update needs there: on the computer's own drive, which the person frees,
+ * or inside Docker Desktop or OpenBot's machine, which is raised or freed there.
+ */
+function updateRoomSaid(
+  shortfall: Shortfall,
+  engine: string,
+  then: string,
+): string {
+  const needs = shortfall.neededGb
+    ? `about ${shortfall.neededGb} GB to update`
+    : "more space to update";
+  if (shortfall.freeOnDrive) {
+    return `${onTheDrive(shortfall)}, and OpenBot needs ${needs}. Free up some space, then ${then}.`;
+  }
+  const fix = shortfall.podman
+    ? podmanFix(["disk"], shortfall)
+    : "Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker";
+  return `${engine} has ${shortfall.diskGb} GB of free disk space, and ${shortfall.podman ? "it" : "OpenBot"} needs ${needs}. ${fix}, then ${then}.`;
+}
+
 // What the CLI requires free, beside its own numbers: "Docker has 0 GB of free disk. OpenBot
 // needs 40 GB."
 const needed: Record<Resource, string> = {
@@ -236,25 +277,106 @@ const needed: Record<Resource, string> = {
   disk: "40 GB",
 };
 const neededFully: Record<Resource, string> = {
-  cpu: "4 free CPUs",
+  cpu: "4 CPUs",
   memory: "4 GB of free memory",
   disk: "40 GB of free disk space",
 };
 
 /**
- * The CLI's resource check at Start: 4 free CPUs, 4 GB of free memory and 40 GB of free disk, with
- * OpenBot's own containers running.
+ * The CLI's resource check at Start: 4 CPUs in all, and 4 GB of free memory and 40 GB of free disk
+ * with OpenBot's own containers running.
  */
 export function resourcesShortSaid(shortfall: Shortfall): string {
   return shortfallSaid(
     shortfall,
     {
-      cpu: "4 free CPUs",
+      cpu: "4 CPUs",
       memory: "4 GB of free memory",
       disk: "40 GB free",
     },
     "Retry",
   );
+}
+
+/**
+ * An update this computer has no room for: the screen's heading, and the few words the row that
+ * stopped says. The figures are the sentence under the heading (`resourcesShortSaid`).
+ */
+export const ROOM_HEADING = "OpenBot needs more free space to update";
+export const ROOM_REASON = "Not enough free space to update.";
+
+/**
+ * The shortfall of an update not started for lack of room (`local_eval::update_room`), from
+ * whichever place said it: OpenBot's own update, or the back end's. Null for anything else.
+ */
+export function updateRoomShort(
+  ...said: (Shortfall | null | undefined)[]
+): Shortfall | null {
+  return said.find((short) => short?.updating && short.disk) ?? null;
+}
+
+/** MiB as the GB a person reads: 6144 is "6", 3277 is "3.2". */
+function gb(mib: number): string {
+  const tenths = Math.floor((mib / 1024) * 10) / 10;
+  return tenths.toFixed(1).replace(/\.0$/, "");
+}
+
+/**
+ * What happened, when setup found the person's Podman machine too small and OpenBot knows its size
+ * (`podmanMachinePlan`): its own size, beside what OpenBot needs. What to do is the fix card's
+ * (`PodmanTooSmall`), so it is not said here. CPUs are the machine's in all, as the CLI counts them;
+ * memory is what is free in it.
+ */
+export function podmanTooSmallSaid(
+  shortfall: Shortfall,
+  plan: PodmanPlan,
+): string {
+  const has = "Your Podman machine has";
+  if (shortfall.disk) {
+    const short = (["cpu", "memory", "disk"] as const).filter(
+      (resource) => shortfall[resource],
+    );
+    return `Your Podman machine doesn't have enough ${listed(short.map((resource) => resourceName[resource]))} for OpenBot.`;
+  }
+  if (shortfall.cpu && shortfall.memory) {
+    return shortfall.memoryGb
+      ? `${has} ${plan.cpus} CPUs and ${shortfall.memoryGb} GB of free memory. OpenBot needs 4 CPUs and 4 GB of free memory.`
+      : `${has} ${plan.cpus} CPUs and ${gb(plan.memoryMib)} GB of memory. OpenBot needs 4 CPUs and 4 GB of free memory.`;
+  }
+  if (shortfall.cpu) return `${has} ${plan.cpus} CPUs. OpenBot needs 4.`;
+  return shortfall.memoryGb
+    ? `${has} ${gb(plan.memoryMib)} GB of memory, and ${shortfall.memoryGb} GB of it is free. OpenBot needs 4 GB free.`
+    : `${has} ${gb(plan.memoryMib)} GB of memory. OpenBot needs 4 GB free.`;
+}
+
+/** What OpenBot gives the machine, in words: "6 CPUs and 8 GB of memory". */
+export function podmanRaisedSaid(plan: PodmanPlan): string {
+  const raised = [
+    plan.toCpus > plan.cpus && `${plan.toCpus} CPUs`,
+    plan.toMemoryMib > plan.memoryMib && `${gb(plan.toMemoryMib)} GB of memory`,
+  ].filter((said): said is string => Boolean(said));
+  return listed(raised);
+}
+
+/**
+ * The three commands that make the machine bigger by hand, for when OpenBot can't: stop it, set
+ * what is short, start it. Named by the machine, since `podman machine set` without a name changes
+ * `podman-machine-default`, which may not be the one OpenBot uses.
+ */
+export function podmanResizeCommands(
+  shortfall: Shortfall,
+  plan: PodmanPlan,
+): { stop: string; set: string; start: string } {
+  const flags = [
+    plan.toCpus > plan.cpus && `--cpus ${plan.toCpus}`,
+    plan.toMemoryMib > plan.memoryMib && `--memory ${plan.toMemoryMib}`,
+    shortfall.disk && podmanFlag.disk,
+  ].filter(Boolean);
+  return {
+    stop: `podman machine stop ${plan.machine}`,
+    set: `podman machine set ${flags.join(" ")} ${plan.machine}`,
+    start: `podman machine start ${plan.machine}`,
+  };
 }
 
 /** OpenBot's own check before Start: the engine's totals, with room for its own containers. */
@@ -287,8 +409,10 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
   "unsupported-engine": blocked(
     "OpenBot can't run on this computer as it's set up.",
   ),
+  // The CLI could not reach Docker's API: stopped, or running and unreachable, which it cannot tell
+  // apart. Retry starts it, or stops and starts one that runs and does not answer.
   "docker-unavailable": blocked(
-    "The software OpenBot runs on isn't running. Retry to start it.",
+    "OpenBot can't reach the software it runs on. Retry to start it again.",
     "retry",
   ),
   "port-unavailable": blocked(
@@ -321,6 +445,12 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
   // Honest about what is gone, and the one way on.
   "stack-lost": blocked(
     "OpenBot's saved data on this computer is gone, with your Bots and conversations. Start fresh to set OpenBot up again. Your sign-in and AI connection stay.",
+    "start-fresh",
+  ),
+  // Only the backend went, as when a prune of stopped containers removed it. OpenBot's own data
+  // is still there, so this says what went and what stays.
+  "backend-gone": blocked(
+    "Your conversations and what your Bots remember are gone from this computer. Set up again to carry on. Your Bots, settings, sign-in and AI connection stay.",
     "start-fresh",
   ),
   unrecognized: couldNotStart,
@@ -383,6 +513,8 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
     "The download stopped. Retry continues where it left off.",
     "retry",
   ),
+  // Below the security floor nothing of OpenBot starts here until the app is updated.
+  "below-security-floor": blocked(SECURITY_FLOOR_SENTENCE),
 };
 
 function intelligenceRow(
@@ -464,7 +596,9 @@ function runtimeRow(
     intelligence !== null && typeof intelligence !== "string"
       ? intelligence.reason
       : null;
-  if (reason === "docker-unavailable") return notRunning;
+  if (reason === "docker-unavailable") {
+    return blocked("OpenBot can't reach the software it runs on.", "retry");
+  }
   if (reason === "unsupported-engine") {
     return blocked("OpenBot can't run on this computer as it's set up.");
   }

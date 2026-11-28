@@ -32,6 +32,7 @@ export const localFailures = [
   "invalid-acceptance",
   "rootless-podman",
   "download-stalled",
+  "below-security-floor",
 ] as const;
 export type LocalFailure = (typeof localFailures)[number];
 
@@ -60,6 +61,10 @@ export type LocalReason =
   // Not the CLI's: OpenBot's own finding that the backend it set up here is gone, cluster and all
   // (`local_eval::Reason::StackLost`). Start fresh sets it up again.
   | "stack-lost"
+  // OpenBot's own finding too: the backend's cluster is gone from the engine, as after
+  // `docker container prune` removed its stopped node, and OpenBot's own database is still there
+  // (`local_eval::Reason::BackendGone`). Set up again makes the backend again.
+  | "backend-gone"
   | "unrecognized";
 
 /** `local_eval::Readiness`: the CLI's own end-to-end check. Running pods are not this. */
@@ -110,7 +115,18 @@ export type Shortfall = {
   drive?: string;
   /** `diskGb` is what is free on `drive`, which ran short rather than the machine's own disk. */
   freeOnDrive?: boolean;
+  /** That drive is this Mac's own disk, under Docker Desktop's or Podman's machine disk. */
+  mac?: boolean;
+  /**
+   * What is short is room for an update (`local_eval::update_room`): `neededGb` is what the
+   * update needs free where `diskGb` was measured.
+   */
+  updating?: boolean;
+  neededGb?: string;
 };
+
+/** How far an unfinished update got, as the CLI recorded it (`local_eval::UpdateState`). */
+export type UpdateState = "prepared" | "migrating" | "migrated" | "other";
 
 export type LocalReport = {
   outcome: LocalOutcome;
@@ -131,6 +147,12 @@ export type LocalReport = {
       to: string;
       /** No migration started: the release that answers is `installedRelease`. */
       prepared: boolean;
+      /**
+       * How far it got (`local_eval::UpdateState`). `migrating`: part-way through updating the data.
+       * `migrated`: the data is on the new release, and its services had not finished starting.
+       * Absent from an older build's answer.
+       */
+      state?: UpdateState;
       stoppedDownloading: boolean;
       /** The CLI's name for the step that failed, such as `update-quiesce`, when it recorded one. */
       failedStep?: string;
@@ -200,10 +222,24 @@ export function runLocalEval(
     attempt,
     action,
     stack,
-  }).catch((rejection: unknown) => {
-    throw failure(rejection);
-  });
+  })
+    .finally(() => answerLanded(attempt, action))
+    .catch((rejection: unknown) => {
+      throw failure(rejection);
+    });
   return { attempt, report };
+}
+
+/**
+ * Tells the log when a `run_local_eval` answer reached this window, by this window's clock, so a
+ * stalled Start says whether the answer or the next call was held (`local_eval_answer_landed`).
+ */
+function answerLanded(attempt: string, action: LocalAction): void {
+  invoke("local_eval_answer_landed", {
+    attempt,
+    action,
+    landedAtMs: Date.now(),
+  }).catch(() => {});
 }
 
 /** Lists recorded stacks, so a stack id comes from the CLI. Cancel it like any other call. */
@@ -253,6 +289,46 @@ export function setUpLocalEval(
  */
 export function localEvalRoom(): Promise<Shortfall | null> {
   return invoke<Shortfall | null>("local_eval_room").catch(() => null);
+}
+
+/**
+ * `machine_size::Plan`: how the Podman machine OpenBot runs on would be made big enough for what
+ * setup found short. Memory in MiB, as Podman counts it. `forThem` when OpenBot can do it itself;
+ * otherwise the window gives the person the commands.
+ */
+export type PodmanPlan = {
+  machine: string;
+  cpus: number;
+  memoryMib: number;
+  toCpus: number;
+  toMemoryMib: number;
+  forThem: boolean;
+};
+
+/**
+ * The plan for a Podman machine the CLI found too few CPUs or too little memory in, or null when a
+ * bigger machine isn't the answer here (not a Mac, WSL, a computer with no more to give).
+ */
+export function podmanMachinePlan(
+  shortfall: Shortfall,
+): Promise<PodmanPlan | null> {
+  if (!shortfall.podman || !(shortfall.cpu || shortfall.memory))
+    return Promise.resolve(null);
+  return invoke<PodmanPlan | null>("podman_machine_plan", {
+    short: shortfall,
+  }).catch(() => null);
+}
+
+/**
+ * The person's yes: restart their Podman machine with the plan's CPUs and memory, and the
+ * containers that were running in it, and wait until it can download. Rejects with
+ * `{ said, resized }`: a plain sentence, and whether the machine is bigger and only not ready yet.
+ */
+export function resizePodmanMachine(plan: PodmanPlan): Promise<void> {
+  return invoke<void>("resize_podman_machine", {
+    cpus: plan.toCpus,
+    memoryMib: plan.toMemoryMib,
+  });
 }
 
 /**

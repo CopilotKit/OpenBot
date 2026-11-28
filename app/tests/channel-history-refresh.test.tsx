@@ -3,6 +3,7 @@ import type { Message, RunAgentInput } from "@ag-ui/core";
 import { RunAgentInputSchema } from "@ag-ui/core/schemas";
 import { CopilotKitProvider, useCopilotKit } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { taskReportMessageId } from "@openbot/shared/orchestration";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -17,13 +18,24 @@ import {
 import { applyChannelEvent } from "@/lib/channels/use-channel-events";
 import { generativeUiProviderOptions, OPENBOT_UI } from "@/lib/copilot/a2ui";
 import { queryClient } from "@/query-client";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
+import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 type ChannelCache = InfiniteData<ChannelPage>;
-const ActivityRequestSchema = z.object({
-  agentId: z.string().nullable(),
-  at: z.string(),
-  text: z.string(),
-});
+/**
+ * What the app sends to record activity, as the API reads it: the Bot is `botId`. The socket
+ * announces the same activity with the Bot as `agentId`, which is how it is kept here.
+ */
+const ActivityRequestSchema = z
+  .object({
+    botId: z.string().nullable(),
+    at: z.string(),
+    text: z.string(),
+  })
+  .strict()
+  .transform(({ botId, ...rest }) => ({ agentId: botId, ...rest }));
 type ActivityRequest = z.infer<typeof ActivityRequestSchema>;
 const NativeResponse = globalThis.Response;
 const channel: AgentChannel = {
@@ -61,6 +73,8 @@ let gatewaySnapshot: readonly Message[] = [];
 let runRequests: { path: string; input: RunAgentInput }[] = [];
 let activityRequests: ActivityRequest[] = [];
 let runEvents: (input: RunAgentInput) => unknown[];
+/** A run's response as it streams, when a test holds part of it back. */
+let runStream: ((input: RunAgentInput) => Response) | null = null;
 let core: ReturnType<typeof useCopilotKit>["copilotkit"] | undefined;
 
 function CoreProbe() {
@@ -92,18 +106,18 @@ beforeAll(() => {
             : input.url,
         "http://localhost",
       );
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
-      if (url.pathname === "/api/plugins/for/refresh-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
+      if (url.pathname === botGrantsPath("refresh-bot"))
+        return botGrantsResponse();
       // What the Bot's runs are offered is read from these, as the server answers them.
-      if (url.pathname === "/api/agents/refresh-bot")
+      if (url.pathname === botPath("refresh-bot"))
         return NativeResponse.json({
-          agent: { id: "refresh-bot", visibility: "public", canManage: true },
+          bot: { id: "refresh-bot", visibility: "public", canManage: true },
         });
-      if (url.pathname === "/api/components/for-agent/refresh-bot")
-        return NativeResponse.json({ components: [] });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === botComponentsPath("refresh-bot"))
+        return botComponentsResponse();
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
@@ -125,9 +139,13 @@ beforeAll(() => {
           input instanceof Request ? input : new Request(url, init);
         const body = RunAgentInputSchema.parse(await request.json());
         runRequests.push({ path: url.pathname, input: body });
-        return sse(runEvents(body));
+        return runStream ? runStream(body) : sse(runEvents(body));
       }
-      if (/\/api\/channels\/[^/]+\/activity$/.test(url.pathname)) {
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/activity$/.test(
+          url.pathname,
+        )
+      ) {
         const request =
           input instanceof Request ? input : new Request(url, init);
         activityRequests.push(
@@ -135,9 +153,17 @@ beforeAll(() => {
         );
         return new NativeResponse(null, { status: 204 });
       }
-      if (/\/api\/channels\/[^/]+\/busy$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/signal-busy$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
       const match = url.pathname.match(/\/threads\/([^/]+)\/messages$/);
       if (match) {
@@ -212,6 +238,7 @@ function mounting(
   gatewaySnapshot = snapshot;
   runRequests = [];
   activityRequests = [];
+  runStream = null;
   runEvents = (input) => [
     { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
     { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
@@ -390,7 +417,8 @@ test.each([
       async () => new NativeResponse("failed", { status: 500 }),
       snapshot,
     );
-    await view.findByText(unavailable);
+    // Said once the retries a failed read on opening gets have failed too.
+    await view.findByText(unavailable, {}, { timeout: 6000 });
     if (snapshot.length > 0)
       expect(view.getByText(initial.content)).toBeTruthy();
     const user = userEvent.setup({ document: view.container.ownerDocument });
@@ -577,6 +605,80 @@ test("a same-tab activity echo does not append a lagging durable partial beside 
   );
 });
 
+/*
+ * AN ANSWER STREAMED UNDER ONE ID AND HANDED BACK IN THE RUN'S SNAPSHOT UNDER ANOTHER IS SHOWN ONCE.
+ * LlamaIndex's AG-UI adapter (llama-index-protocols-ag-ui 0.5.0, agent.py: `resp_id = uuid4()` for
+ * the stream, and utils.py's `llama_index_message_to_ag_ui_message` minting a fresh id for the reply
+ * in every snapshot) streams its answer as chunks and then ends the run with a MESSAGES_SNAPSHOT that
+ * holds the same words under a new id. AG-UI's snapshot is the whole set of the roles it carries:
+ * the copies it repeats replace the client's, and the ones it leaves out are removed
+ * (docs.ag-ui.com/concepts/events, MessagesSnapshot). So the streamed copy is gone from the
+ * conversation, and the store, which compacts the thread's events the same way, drops it too once
+ * it has read that far. FOUND IN THE STOCK AG-UI CONFORMANCE SUITE: a read of the stored thread taken
+ * while the store was still part way through the stream held the streamed copy half written, the
+ * merge added it as a message the screen did not have, and the full answer sat over a second, cut-off
+ * copy of itself ("Order 4471 was shipp") until the conversation was opened again.
+ */
+test("an answer a run's snapshot handed back under a new id is shown once, even when a lagging read of the store still holds the streamed copy", async () => {
+  const words =
+    "Order 4471 was shipped with Parcelway, tracking number PW-88213. You have 42 packets of Moonglow tomato in stock. Over.";
+  const streamedId = "streamed-reply";
+  const snapshotId = "snapshot-reply";
+  const view = mounting(async () => stored([initial]), [initial]);
+  await view.findByText(initial.content);
+  runEvents = (input) => [
+    { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+    {
+      type: "TEXT_MESSAGE_CHUNK",
+      messageId: streamedId,
+      role: "assistant",
+      delta: words.slice(0, 20),
+    },
+    {
+      type: "TEXT_MESSAGE_CHUNK",
+      messageId: streamedId,
+      role: "assistant",
+      delta: words.slice(20),
+    },
+    {
+      type: "MESSAGES_SNAPSHOT",
+      messages: [
+        ...input.messages,
+        { id: snapshotId, role: "assistant", content: words },
+      ],
+    },
+    { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+  ];
+
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "Look up both at once",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await view.findByText(words);
+  await waitFor(() => expect(currentAgent().isRunning).toBe(false));
+  const sent = runRequests[0]?.input.messages ?? [];
+
+  // The store, a beat behind: it has read the stream part way, and not yet the snapshot.
+  history = async () =>
+    stored([
+      ...sent,
+      { id: streamedId, role: "assistant", content: words.slice(0, 20) },
+    ]);
+  await announce(5, channel, { text: words });
+  await waitFor(() => expect(historyReads.length).toBeGreaterThan(1));
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  expect(view.getAllByText(words)).toHaveLength(1);
+  expect(view.queryByText(words.slice(0, 20))).toBeNull();
+  expect(
+    currentAgent()
+      .messages.filter((message) => message.role === "assistant")
+      .map((message) => message.id),
+  ).toEqual([initial.id, snapshotId]);
+});
+
 test("a same-timestamp different activity after a self echo still refreshes durable history", async () => {
   const fullReply = {
     id: "local-live-reply",
@@ -715,6 +817,116 @@ test.each([
   },
 );
 
+/*
+ * A task the Bot handed off finishes while the person's own turn is still reaching this tab: the
+ * server says the task's result in the conversation the moment the turn lets go of it, and tells the
+ * roster, before the last of the turn's events has arrived here. The result is in the stored thread,
+ * and it must be on screen once the turn is over, not only after a reload.
+ */
+test("a task's result said while this tab's own turn is still ending stays on screen after the turn ends", async () => {
+  const reply = {
+    id: "orchestrator-reply",
+    role: "assistant",
+    content: "I'll calculate the monthly payment and show the formula.",
+  } satisfies Message;
+  const result = {
+    id: taskReportMessageId("result", "task-loan", "once-loan"),
+    role: "assistant",
+    content: "The monthly payment is $489.15.",
+  } satisfies Message;
+  const view = mounting(async () => stored([initial]), [initial]);
+  await view.findByText(initial.content);
+  // The turn's reply streams, and its end is held back until the test lets it go.
+  let finish: () => void = () => {
+    throw new Error("The run never started");
+  };
+  const ended = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  runStream = (input) => {
+    const line = (event: unknown) =>
+      new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
+    return new NativeResponse(
+      new ReadableStream({
+        async start(controller) {
+          for (const event of [
+            {
+              type: "RUN_STARTED",
+              threadId: input.threadId,
+              runId: input.runId,
+            },
+            {
+              type: "TEXT_MESSAGE_START",
+              messageId: reply.id,
+              role: "assistant",
+            },
+            {
+              type: "TEXT_MESSAGE_CONTENT",
+              messageId: reply.id,
+              delta: reply.content,
+            },
+            { type: "TEXT_MESSAGE_END", messageId: reply.id },
+          ])
+            controller.enqueue(line(event));
+          await ended;
+          // The endpoint ends its run with the thread as it was sent to it (ag-ui-langgraph does).
+          controller.enqueue(
+            line({
+              type: "MESSAGES_SNAPSHOT",
+              messages: [...input.messages, reply],
+            }),
+          );
+          controller.enqueue(
+            line({
+              type: "RUN_FINISHED",
+              threadId: input.threadId,
+              runId: input.runId,
+            }),
+          );
+          controller.close();
+        },
+      }),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+  };
+
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "Work out the monthly payment on a $25,000 loan.",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await view.findByText(reply.content);
+  const sent = runRequests[0]?.input.messages.at(-1);
+  if (sent?.role !== "user") throw new Error("Missing the person's message");
+
+  // The task's result is in the stored thread after the turn's reply, and the roster hears of it.
+  history = async () => stored([initial, sent, reply, result]);
+  await announce(30, channel, { text: result.content });
+  // Long enough for the read the announcement asks for to have been made and merged.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  // Then the last of the turn reaches this tab, and the tab reports the turn's reply as it ends.
+  await act(async () => {
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  await waitFor(() => expect(currentAgent().isRunning).toBe(false));
+  // Every retry of the read the announcement started has had its time.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+  });
+
+  expect(view.queryByText(result.content)).not.toBeNull();
+  expect(currentAgent().messages.map((message) => message.id)).toEqual([
+    initial.id,
+    sent.id,
+    reply.id,
+    result.id,
+  ]);
+}, 10000);
+
 test("a ready durable mount adds the newer turn beyond the gateway snapshot", async () => {
   const view = mounting(async () => stored([initial, fresh]), [initial]);
   await view.findByText(fresh.content);
@@ -782,7 +994,14 @@ test.each([false, true])(
   },
 );
 
-test("a stalled mount history read releases the send gate and shows unavailable history", async () => {
+/*
+ * A STALL RELEASES THE SEND GATE AT ONCE, AND IS SAID ONLY ONCE ASKING AGAIN HAS FAILED TOO. The
+ * read on opening gives up after its deadline, and the message waiting behind it goes then, as it
+ * always has. What changed is the notice: a read that was only slow (seen on a link busy with a
+ * 95MB picture) used to say "Couldn't load earlier messages" on its first deadline. It is asked
+ * again the way a refresh is, and the notice comes only when every try has failed.
+ */
+test("a stalled mount history read releases the send gate at once, and says so only after its retries fail", async () => {
   const pending = delayedResponse();
   const view = mounting((_threadId) => pending.promise, [initial]);
   await waitFor(() => expect(historyReads).toHaveLength(1));
@@ -793,8 +1012,12 @@ test("a stalled mount history read releases the send gate and shows unavailable 
   );
   await user.click(view.getByRole("button", { name: "Send message" }));
 
-  await view.findByText(unavailable, {}, { timeout: 4000 });
+  // Released by the first read's deadline, as before, and no notice yet: it is being asked again.
   await waitFor(() => expect(runRequests).toHaveLength(1), { timeout: 4000 });
+  expect(view.queryByText(unavailable)).toBeNull();
+
+  await view.findByText(unavailable, {}, { timeout: 12_000 });
+  expect(historyReads.length).toBeGreaterThanOrEqual(4);
   expect(runRequests[0]?.path).toBe("/api/copilotkit/agent/refresh-bot/run");
   expect(runRequests[0]?.input.threadId).toBe(channel.threadId);
   expect(runRequests[0]?.input.messages.slice(0, -1)).toEqual([initial]);
@@ -808,7 +1031,21 @@ test("a stalled mount history read releases the send gate and shows unavailable 
   expect(currentAgent().messages.map((message) => message.id)).not.toContain(
     fresh.id,
   );
-});
+}, 20_000);
+
+test("a mount history read that succeeds on a retry shows its messages and no notice", async () => {
+  let reads = 0;
+  const view = mounting(async () => {
+    reads += 1;
+    return reads === 1
+      ? new NativeResponse("failed", { status: 500 })
+      : stored([initial, fresh]);
+  });
+
+  await view.findByText(fresh.content, {}, { timeout: 6000 });
+  expect(view.queryByText(unavailable)).toBeNull();
+  expect(historyReads.length).toBeGreaterThanOrEqual(2);
+}, 10_000);
 
 test("a UI send waits for mount history before adding its message", async () => {
   const pending = delayedResponse();
@@ -1071,7 +1308,12 @@ test.each([false, true])(
         ? stored([initial])
         : new NativeResponse("failed", { status: 500 }),
     );
-    await view.findByText(prefixPresent ? initial.content : unavailable);
+    // A failed read on opening is said once its retries have failed too.
+    await view.findByText(
+      prefixPresent ? initial.content : unavailable,
+      {},
+      { timeout: 6000 },
+    );
     const user = userEvent.setup({ document: view.container.ownerDocument });
     const editor = view.getByRole("textbox", { name: "Message" });
     await user.type(editor, "Local turn after mount completed");
@@ -1155,7 +1397,8 @@ test.each(["mount", "refresh"])(
     ];
     const durable = [
       prefix,
-      { ...initial, content: "Stale opening content" },
+      // A store behind holds an older version of the reply: its start. It never cuts the reply short.
+      { ...initial, content: "Stored open" },
       interior,
       { ...secondAnchor, content: "Stale anchor content" },
       fresh,

@@ -14,7 +14,7 @@ export const SKIN_IDS = [
   "openbot",
   "openduet",
   "opendots",
-  "openmuse",
+  "openfuse",
 ] as const;
 
 export type SkinId = (typeof SKIN_IDS)[number];
@@ -25,6 +25,21 @@ export function isSkinId(value: unknown): value is SkinId {
   return SKIN_IDS.some((id) => id === value);
 }
 
+/**
+ * Ids a skin was saved under before it was renamed, and the skin each one is now. Accounts and
+ * browsers keep whatever was saved, so these are read as the new id rather than rewritten, and a
+ * build from before the rename still finds the id it knows.
+ */
+export const RENAMED_SKIN_IDS = {
+  openmuse: "openfuse",
+} as const satisfies Record<string, SkinId>;
+
+/** The skin a saved value means today: its own id, a renamed skin's new id, or undefined. */
+export function currentSkinId(value: unknown): SkinId | undefined {
+  if (isSkinId(value)) return value;
+  return Object.entries(RENAMED_SKIN_IDS).find(([old]) => old === value)?.[1];
+}
+
 export type UserPreferences = {
   /** Server-owned first new eligible conversation; shared by both starter Bots. */
   starterTourChannelId?: string;
@@ -33,6 +48,18 @@ export type UserPreferences = {
   messageListEmphasis: MessageListEmphasis;
   /** Whether this person closed the banner offering help self-hosting OpenBot. */
   selfHostBannerDismissed: boolean;
+  /**
+   * The notices this person answered, either way, by id (`notices.ts`). A notice here is never shown
+   * to them again, on any device they sign in from. Saving one adds it to the list; nothing takes
+   * one back off.
+   */
+  dismissedNotices: string[];
+  /**
+   * Server-owned: the notices OpenBot would show this person now, worked out on every read from the
+   * edition and how they have used OpenBot (`notices.ts`). Never one they dismissed. Absent from a
+   * server that works out none.
+   */
+  noticesDue?: readonly string[];
   /**
    * Whether this person narrates their recordings in OpenBot's Browser: the page listens to their microphone (hosted
    * OpenBot), or the Recorder in their browser does (OpenBot Desktop), only when it is `on`. Null until they chose, which
@@ -52,6 +79,7 @@ export type UserPreferences = {
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   messageListEmphasis: "thread",
   selfHostBannerDismissed: false,
+  dismissedNotices: [],
   narration: null,
   skin: DEFAULT_SKIN,
   proactive: "on",

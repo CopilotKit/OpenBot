@@ -12,6 +12,7 @@ import {
 import { componentListQueryOptions } from "@/lib/components/queries";
 import { galleryComponent } from "@/lib/copilot/gallery-registry";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 
 /**
  * What a Bot can draw, for the person it draws for.
@@ -32,8 +33,8 @@ export const Route = createFileRoute("/_authed/settings/components-gallery/")({
 
 /**
  * The intro and the empty state, by edition. The team edition has an admin who publishes components
- * and decides which Bot uses which. The personal edition has no Admin: every component is published
- * when OpenBot starts and every Bot can use all of them, so there is nothing to say an admin does.
+ * and decides which Bot uses which. In the personal edition every component is published when
+ * OpenBot starts and every Bot can use all of them, so there is nothing to say an admin does.
  */
 const WORDS = {
   team: {
@@ -47,7 +48,7 @@ const WORDS = {
       "Browse the components your Bots can show in conversations. Every Bot can use all of them.",
     emptyTitle: "No components yet",
     empty:
-      "Components show up here once OpenBot has loaded them. Reload the page if this stays empty.",
+      "Components show up here once OpenBot has loaded them. Check back in a moment if this stays empty.",
   },
 } as const;
 
@@ -63,7 +64,10 @@ function RouteComponent() {
     <PageShell description={words.intro} title="Components gallery">
       {components.isPending ? null : components.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load components. Reload the page.
+          {loadFailure(
+            components.error,
+            "Couldn't load components. Try again in a moment.",
+          )}
         </p>
       ) : published?.length === 0 ? (
         <Empty className="mt-12 min-h-[30dvh] border border-dashed">

@@ -25,6 +25,10 @@ import { DeleteConversationDialog } from "@/components/channels/delete-conversat
 import { BrandName } from "@/components/edition/brand-name";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
+import {
+  COMMAND_MENU_KEYS,
+  openCommandMenu,
+} from "@/components/navigation/command-menu";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -38,7 +42,7 @@ import { groupRoster } from "@/lib/agents/roster";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
-import { untitledLine } from "@/lib/channels/label";
+import { conversationTitle, untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
@@ -46,11 +50,13 @@ import {
 } from "@/lib/channels/queries";
 import { useOffersMemory } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
-import { memoriesQueryOptions } from "@/lib/memory";
 import {
-  COMMAND_MENU_KEYS,
-  openCommandMenu,
-} from "@/components/navigation/command-menu";
+  type Failure,
+  failureSaid,
+  isHeld,
+  loadFailure,
+} from "@/lib/load-failure";
+import { memoriesQueryOptions } from "@/lib/memory";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
@@ -164,7 +170,12 @@ export function latestChannelWith(
 /** The Bots a person can talk to, pinned and assigned first, then their own, then shared ones. */
 export function dotOrder(agents: readonly AgentProfile[]): AgentProfile[] {
   const roster = groupRoster(agents);
-  return [...roster.pinned, ...roster.yours, ...roster.shared];
+  return [
+    ...roster.pinned,
+    ...roster.yours,
+    ...roster.shared,
+    ...roster.included,
+  ];
 }
 
 function BotsSection({
@@ -200,7 +211,10 @@ function BotsSection({
       </NavLabel>
       {agents.isPending ? null : agents.error ? (
         <p className="px-3.5 py-1.5 text-[12px] text-destructive" role="alert">
-          Couldn't load your Bots. Reload the page.
+          {loadFailure(
+            agents.error,
+            "Couldn't load your Bots. Try again in a moment.",
+          )}
         </p>
       ) : dots.length === 0 ? (
         <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">
@@ -294,7 +308,7 @@ function ThreadRow({
   const navigate = useNavigate();
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
-  const [pinProblem, setPinProblem] = useState<string | null>(null);
+  const [pinProblem, setPinProblem] = useState<Failure | null>(null);
   const unread = isUnread(channel, open ? channel.id : undefined);
   const title = channel.summary || untitledLine(channel) || channel.name;
   const link: LinkProps =
@@ -344,7 +358,7 @@ function ThreadRow({
               setPinProblem(null);
               setPinned.mutate(
                 { channelId: channel.id, pinned: !channel.pinned },
-                { onError: (thrown) => setPinProblem(thrown.message) },
+                { onError: (thrown) => setPinProblem(thrown) },
               );
             }}
           >
@@ -362,15 +376,15 @@ function ThreadRow({
       </ContextMenu>
       {pinProblem ? (
         <p className="px-3 pb-1 text-[11px] text-destructive" role="alert">
-          {pinProblem}
+          {failureSaid(pinProblem)}
         </p>
       ) : null}
       <DeleteConversationDialog
         channelId={channel.id}
         leave={open ? () => navigate({ to: "/" }) : undefined}
-        name={channel.name}
         onOpenChange={setConfirming}
         open={confirming}
+        title={conversationTitle(channel)}
       />
     </>
   );
@@ -445,9 +459,20 @@ function RecentChats({
         ref={scrollRoot}
       >
         {channels.isPending ? null : channels.error ? (
-          <p className="px-3.5 py-1.5 text-[12px] text-(--opendots-error-ink)">
-            Couldn't load your conversations. Reload the page.
-          </p>
+          /*
+           * OpenBot holding off (a move, a brief outage) is said once in the sidebar: the Bots
+           * section above already says it when its own read is held too.
+           */
+          !agents.isPending &&
+          isHeld(agents.error) &&
+          isHeld(channels.error) ? null : (
+            <p className="px-3.5 py-1.5 text-[12px] text-(--opendots-error-ink)">
+              {loadFailure(
+                channels.error,
+                "Couldn't load your conversations. Try again in a moment.",
+              )}
+            </p>
+          )
         ) : visible.length === 0 ? (
           <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">
             {search.trim()
@@ -628,8 +653,8 @@ function UserRow() {
           disabled={signOut.isPending}
           label="Sign out"
           onClick={async () => {
-            await signOut.mutateAsync();
-            await navigate({ to: "/sign" });
+            const { leaving } = await signOut.mutateAsync();
+            if (!leaving) await navigate({ to: "/sign" });
           }}
         >
           <IconLogout />
@@ -657,9 +682,13 @@ export function OpenDotsSidebar({
     /*
      * In OpenBot Desktop on macOS the window's buttons sit over the sidebar's top-left corner
      * (`data-desktop-titlebar`, macOS only), so it then starts 32px lower, below them, level with
-     * the rail beside it. The drawer a narrow window opens is this sidebar too.
+     * the rail beside it, and that strip moves the window, as the rail's does (`data-desktop-drag`).
+     * The drawer a narrow window opens is this sidebar too.
      */
-    <div className="flex h-full min-h-0 flex-col px-3 pt-[23px] pb-3 max-md:overflow-y-auto in-data-[desktop-titlebar=overlay]:pt-[55px]">
+    <div
+      data-desktop-drag=""
+      className="flex h-full min-h-0 flex-col px-3 pt-[23px] pb-3 max-md:overflow-y-auto in-data-[desktop-titlebar=overlay]:pt-[55px]"
+    >
       <Wordmark onNavigate={onNavigate} />
       <Link
         {...newChat}

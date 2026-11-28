@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import {
+  DEFAULT_BOT_ENGINE,
   HARNESSES,
+  harnessForImage,
+  reachedThroughMastra,
   starterSubtitle,
   WEB_HARNESSES,
   withCurrentFrameworkNames,
@@ -12,17 +15,38 @@ test("carries every row the desktop picker offers, in its order", () => {
     "llamaindex",
     "agno",
     "langgraph",
+    "langgraph-ts",
     "google-adk",
     "antigravity",
     "pydantic-ai",
     "microsoft-agent-framework",
     "claude-agent-sdk",
+    "openai-agents-sdk",
     "strands",
     "ag2",
     "langroid",
     "mastra",
     "byo-url",
   ]);
+});
+
+/*
+ * A ChatGPT plan's Bot on OpenBot Desktop: OpenAI's Agents SDK, run on the plan's Sign in with
+ * ChatGPT sign-in. It runs only on that sign-in, so the web dialog, which makes Bots on whatever key
+ * the deployment holds, never offers it.
+ */
+test("runs a ChatGPT plan on the OpenAI Agents SDK, a row the web dialog never offers", () => {
+  const engine = HARNESSES.find((h) => h.id === "openai-agents-sdk");
+  expect(engine).toMatchObject({
+    name: "OpenAI Agents SDK",
+    image: "agent-openai-agents",
+    port: 4216,
+    healthPath: "/health",
+    runPath: "",
+    credential: "chatgpt-plan",
+    webCreate: false,
+  });
+  expect(WEB_HARNESSES.map((h) => h.id)).not.toContain("openai-agents-sdk");
 });
 
 test("leads the web list with the partners people look for, keeping the rest in order", () => {
@@ -34,11 +58,13 @@ test("leads the web list with the partners people look for, keeping the rest in 
     "crewai",
     "llamaindex",
     "agno",
+    "langgraph-ts",
     "pydantic-ai",
     "microsoft-agent-framework",
     "strands",
     "ag2",
     "langroid",
+    "mastra",
     "byo-url",
   ]);
 });
@@ -51,13 +77,17 @@ test("the brands with no usable mark carry none", () => {
 });
 
 /*
- * Mastra is the one row a plain AG-UI endpoint cannot stand in for: the server dials it through the
- * `@ag-ui/mastra` bridge as `remote_mastra` and needs a roster id, neither of which the web create
- * API can send. Offered there it would make a Bot that answers nothing.
+ * Mastra is the one row a plain AG-UI address cannot stand in for: the server dials it through the
+ * `@ag-ui/mastra` bridge. The web create names the framework, and the server proves a Mastra address
+ * against Mastra's own API and saves it as a Mastra Bot, so the dialog offers it with the rest.
  */
-test("marks Mastra as something the web dialog must not offer", () => {
+test("offers Mastra on the web, reached through Mastra's own API", () => {
   const notOfferable = HARNESSES.filter((h) => !h.webCreate).map((h) => h.id);
-  expect(notOfferable).toEqual(["mastra"]);
+  // Only the ChatGPT plan's engine, which runs on nothing but that plan's sign-in.
+  expect(notOfferable).toEqual(["openai-agents-sdk"]);
+  expect(
+    HARNESSES.filter((h) => reachedThroughMastra(h.id)).map((h) => h.id),
+  ).toEqual(["mastra"]);
 });
 
 test("gives a web-specific summary only where the installer's is false here", () => {
@@ -80,6 +110,37 @@ test("every named mark is vendored where both apps look for it", async () => {
   }
 });
 
+/*
+ * LangGraph (TypeScript) is the engine new Bots run on. Its row is fixed by the build contract the
+ * engine, the server and the packaging all read: an AG-UI endpoint at the root on 4215, any
+ * provider's key, OpenBot's own image, offered on the web like every other row.
+ */
+test("names the engine new Bots run on, at the image, port and paths it serves", () => {
+  expect(DEFAULT_BOT_ENGINE).toBe("langgraph-ts");
+  const engine = HARNESSES.find((h) => h.id === DEFAULT_BOT_ENGINE);
+  expect(engine).toEqual({
+    id: "langgraph-ts",
+    name: "LangGraph (TypeScript)",
+    summary: expect.any(String),
+    webSummary: null,
+    image: "agent-langgraph-ts",
+    port: 4215,
+    healthPath: "/health",
+    runPath: "",
+    credential: "any-provider",
+    maintainer: "first-party",
+    mark: "langgraph",
+    webCreate: true,
+  });
+  expect(
+    harnessForImage("ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:0f"),
+  ).toBe(engine);
+  // The Python harness keeps its own image: the two are told apart, not matched as a prefix.
+  expect(
+    harnessForImage("ghcr.io/copilotkit/openbot-agent-langgraph-agui:v1")?.id,
+  ).toBe("langgraph");
+});
+
 test("CrewAI uses its expected image, health endpoint and port", () => {
   const crewai = HARNESSES.find((h) => h.id === "crewai");
   expect(crewai?.image).toBe("agent-crewai");
@@ -91,7 +152,7 @@ test("CrewAI uses its expected image, health endpoint and port", () => {
  * Antigravity only ever runs on Gemini: its README says the harness requires a Gemini API key
  * wherever `base_url` points. `any-provider` would let a deployment holding only an OpenAI key
  * install it and get a Bot that cannot answer — the shape of failure `webCreate: false` exists to
- * stop for Mastra.
+ * stop.
  */
 test("marks Antigravity as needing Google's key rather than any provider's", () => {
   const antigravity = HARNESSES.find((h) => h.id === "antigravity");
@@ -104,7 +165,13 @@ test("marks Antigravity as needing Google's key rather than any provider's", () 
 });
 
 test("gives every row a credential the type actually names", () => {
-  const known = ["any-provider", "anthropic", "google", "their-endpoint"];
+  const known = [
+    "any-provider",
+    "anthropic",
+    "chatgpt-plan",
+    "google",
+    "their-endpoint",
+  ];
   for (const harness of HARNESSES) {
     expect(known).toContain(harness.credential);
   }
@@ -134,6 +201,15 @@ test("reads a subtitle OpenBot wrote under earlier names the way it writes it no
   expect(
     withCurrentFrameworkNames("Everyday life. Powered by Claude Agent SDK."),
   ).toBe(starterSubtitle("Claude Agent SDK"));
+  // A name with its own parentheses reads without them, so the subtitle's never nest.
+  const typescript =
+    "Everyday life agent. (powered by a LangGraph TypeScript agent; you can bring your own agent from any stack.)";
+  expect(starterSubtitle("LangGraph (TypeScript)")).toBe(typescript);
+  expect(
+    withCurrentFrameworkNames(
+      "Everyday life. Powered by LangGraph (TypeScript).",
+    ),
+  ).toBe(typescript);
   expect(withCurrentFrameworkNames("Powered by LangChain (LangGraph)")).toBe(
     "Powered by LangChain",
   );

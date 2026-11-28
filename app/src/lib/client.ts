@@ -12,6 +12,86 @@
  * guessed the envelope would be a client that had to be argued with.
  */
 
+import {
+  CAPABILITIES_HEADER,
+  COMPUTER_STEP_TAKEN,
+  CONVERSATION_WORK_TURN,
+  capabilitiesValue,
+} from "@openbot/shared/client-capabilities";
+import { CLIENT_HEADER, clientToken } from "@openbot/shared/client-version";
+import {
+  pendingWrite,
+  renewalRequired,
+  renewHostedSignIn,
+  SIGN_IN_HEADER,
+} from "@/lib/auth/renewal";
+import { noteRefusal } from "@/lib/client-version/refusal";
+import { watchRequest } from "@/lib/desktop/problems";
+import { noteAnswer, noteNoAnswer } from "@/lib/desktop/reachability";
+import { PLAN_REQUIRED, showCardNeeded } from "@/lib/plan/card-needed";
+
+/**
+ * This app as it names itself to its OpenBot: `web/<release>`, the release it was built from
+ * (shared/client-version.ts). The server refuses an app older than the oldest it serves.
+ */
+export const CLIENT_NAME = clientToken("web");
+
+/**
+ * The newer answers this app understands, as it lists them to its OpenBot (shared/
+ * client-capabilities.ts): a server sends a newer shape only to an app that names it.
+ *
+ * - `computer-step-taken`: a computer step the server already ran, or is running, is answered as
+ *   such, and never run here a second time (`approval-tools.tsx`, `lib/computers/call.ts`).
+ * - `conversation-work-turn`: a conversation's work names the person's own turn the server is
+ *   carrying on, and the conversation reads as working and follows it (`carriedByServer` in
+ *   channel-chat.tsx); its work rows draw nothing for it.
+ */
+export const PAGE_CAPABILITIES: readonly string[] = [
+  COMPUTER_STEP_TAKEN,
+  CONVERSATION_WORK_TURN,
+];
+
+/** {@link PAGE_CAPABILITIES} as the header and the conversation events socket carry it. */
+export const CAPABILITIES = capabilitiesValue(PAGE_CAPABILITIES);
+
+/**
+ * `headers` with this app named in them, and what it understands ({@link CAPABILITIES}), in the same
+ * shape they were given: a record, a `Headers`, or a list of pairs. For the few requests the app
+ * makes to OpenBot without the client: the runtime's, sign-in's and finishing a consent. A file's
+ * own address is read like a picture's, which carries no header either, and can be sent on to
+ * wherever the file is kept.
+ */
+export function withClientName(
+  headers: Record<string, string>,
+): Record<string, string>;
+export function withClientName(headers?: HeadersInit): HeadersInit;
+export function withClientName(headers?: HeadersInit): HeadersInit {
+  const own = new Set([
+    CLIENT_HEADER.toLowerCase(),
+    CAPABILITIES_HEADER.toLowerCase(),
+  ]);
+  if (headers instanceof Headers) {
+    const named = new Headers(headers);
+    named.set(CLIENT_HEADER, CLIENT_NAME);
+    named.set(CAPABILITIES_HEADER, CAPABILITIES);
+    return named;
+  }
+  if (Array.isArray(headers)) {
+    return [
+      ...headers.filter(([name]) => !own.has(name.toLowerCase())),
+      [CLIENT_HEADER, CLIENT_NAME],
+      [CAPABILITIES_HEADER, CAPABILITIES],
+    ];
+  }
+  const named: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (!own.has(name.toLowerCase())) named[name] = value;
+  }
+  named[CLIENT_HEADER] = CLIENT_NAME;
+  named[CAPABILITIES_HEADER] = CAPABILITIES;
+  return named;
+}
+
 export type ClientOptions = {
   /** Absent means GET. */
   method?: string;
@@ -26,17 +106,84 @@ export type ClientOptions = {
   fallback?: string;
   /** For the calls a Bot makes on a person's behalf, which are abandoned when the turn is. */
   signal?: AbortSignal;
+  /**
+   * Headers a request carries beside the content type: the organization a tab works in, for the
+   * runtime's addresses (lib/organizations/current.ts, `organizationHeaders`).
+   */
+  headers?: Record<string, string>;
 };
+
+/** What a person reads when a request got no answer at all. */
+export const NO_ANSWER =
+  "Couldn't reach OpenBot. Check your connection and try again.";
+
+/**
+ * A request that got no answer: the network failed, or OpenBot wasn't there. The browser's own
+ * error says so in its words ("Load failed" in Safari and the Mac window, "Failed to fetch" in
+ * Chromium), which a screen would show as they are. This carries OpenBot's sentence instead, and
+ * the browser's error as its cause.
+ *
+ * Still a TypeError, as `fetch`'s own is, so whatever tells a lost connection by that
+ * (`lib/desktop/reachability.ts`) keeps telling it.
+ */
+export class NoAnswerError extends TypeError {
+  constructor(cause: unknown) {
+    super(NO_ANSWER, { cause });
+    this.name = "NoAnswerError";
+  }
+}
+
+/**
+ * The one `fetch`. Each outcome is reported to `lib/desktop/reachability.ts`, which is how the app
+ * knows the OpenBot it is connected to stopped answering, and answers again.
+ *
+ * A 502 is read before it is handed back, so a read failing on the relay's own answer fails with
+ * the connection already known to be lost, and waits for OpenBot (`connection-lost.ts`).
+ *
+ * Every request names this app ({@link CLIENT_NAME}). A 400 is read before it is handed back too, so
+ * a refusal for being too old an app is known before the request fails, and the update screen shows
+ * in place of whatever failed (`lib/client-version/refusal.ts`).
+ *
+ * A request answered with a failure, one that got no answer, and one with no answer yet after 30
+ * seconds are each kept for the troubleshooting logs, and inside OpenBot Desktop handed to its log
+ * (`lib/desktop/problems.ts`): its method, its path without the query, and the server's request id.
+ */
+async function request(path: string, init: RequestInit): Promise<Response> {
+  // A request that fails, gets no answer, or is slow is kept for the troubleshooting logs.
+  const watch = watchRequest(path, init.method);
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      headers: withClientName(init.headers),
+      // The session's cookie, unless the caller asks as nobody (`readDeployment` for somebody in no organization).
+      credentials: init.credentials ?? "include",
+    });
+  } catch (error) {
+    watch.rejected(error);
+    noteNoAnswer(error);
+    // A request the page gave up on (an AbortError) is not this, and is handed back as it is.
+    if (error instanceof TypeError) throw new NoAnswerError(error);
+    throw error;
+  }
+  watch.answered(response);
+  const noted = noteAnswer(response);
+  if (response.status === 502) await noted;
+  if (response.status === 400) await noteRefusal(response);
+  return response;
+}
 
 /** Every request in this app is authenticated, and every one of them is JSON or nothing. */
 async function send(path: string, options: ClientOptions): Promise<Response> {
-  return fetch(path, {
+  const headers = {
+    ...options.headers,
+    ...(options.body === undefined
+      ? {}
+      : { "content-type": "application/json" }),
+  };
+  return request(path, {
     method: options.method,
-    credentials: "include",
-    headers:
-      options.body === undefined
-        ? undefined
-        : { "content-type": "application/json" },
+    headers: Object.keys(headers).length === 0 ? undefined : headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     ...(options.signal ? { signal: options.signal } : {}),
   });
@@ -60,11 +207,123 @@ export function tryClient(
 /** The server answered, and said no. `status` tells a refusal (4xx) from a server that broke (5xx). */
 export class ClientError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  /**
+   * The refusal's stable name, when the server gave one: the API's problem `code`
+   * (`LINKED_ACCOUNTS_UNAVAILABLE`), or the `code` a few of today's routes answer beside `error`.
+   */
+  readonly code: string | undefined;
+  /**
+   * What else the refusal said, when it was JSON: the members a problem carries beside its sentence,
+   * such as the rule that refused a Bot's action on its computer.
+   */
+  readonly body: Record<string, unknown> | undefined;
+  /**
+   * The server's own sentence, when it sent one: `error` today, `detail` in problem details. Undefined
+   * when the message is the caller's fallback.
+   */
+  readonly said: string | undefined;
+  /** How long the server asked to be left before it is asked again (`Retry-After`), when it said. */
+  readonly retryAfterMs: number | undefined;
+  constructor(
+    message: string,
+    status: number,
+    code?: string,
+    body?: Record<string, unknown>,
+    retryAfterMs?: number,
+  ) {
     super(message);
     this.name = "ClientError";
     this.status = status;
+    this.code = code;
+    this.body = body;
+    this.said =
+      typeof body?.error === "string"
+        ? body.error
+        : typeof body?.detail === "string"
+          ? body.detail
+          : undefined;
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+/**
+ * `Retry-After` as milliseconds from now: a number of seconds, or a date (RFC 9110). Undefined when
+ * there is none, or it is neither.
+ */
+function retryAfterOf(response: Response): number | undefined {
+  const value = response.headers.get("Retry-After")?.trim();
+  if (!value) return undefined;
+  if (/^\d+$/.test(value)) return Number(value) * 1000;
+  const at = Date.parse(value);
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now());
+}
+
+/**
+ * The error a refusal becomes, carrying the server's own sentence.
+ *
+ * The server's message is the useful one: it names the field or the permission that failed. Today's
+ * routes put it in `error`; the API's problem details (RFC 9457) put it in `detail`. The fallback is
+ * only for the cases where it sent neither, or sent something that is not JSON.
+ */
+async function refusal(
+  response: Response,
+  fallback: string | undefined,
+  /** The request that was refused, as it was sent, for a write a renewal sends again. */
+  sent?: { path: string; init: RequestInit },
+): Promise<ClientError> {
+  const body = (await response.json().catch(() => null)) as {
+    error?: unknown;
+    detail?: unknown;
+    code?: unknown;
+    appId?: unknown;
+  } | null;
+  const message =
+    typeof body?.error === "string"
+      ? body.error
+      : typeof body?.detail === "string"
+        ? body.detail
+        : undefined;
+  const error = new ClientError(
+    message ?? fallback ?? "That request failed.",
+    response.status,
+    typeof body?.code === "string" ? body.code : undefined,
+    body && typeof body === "object" && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : undefined,
+    retryAfterOf(response),
+  );
+  /*
+   * A run refused for want of a plan, from whichever screen asked for it: the one dialog that says
+   * why opens, so an action no screen checked first still tells the person (`lib/plan/card-needed.ts`).
+   */
+  if (error.code === PLAN_REQUIRED) showCardNeeded(error.body ?? {});
+  /*
+   * A hosted OpenBot's sign-in needing renewal, which is never being signed out: renewed in the
+   * background, and the write it interrupted is sent again once the page is back.
+   */
+  if (renewalRequired(error))
+    renewHostedSignIn(
+      response.headers.get(SIGN_IN_HEADER),
+      sent ? pendingWrite(sent.path, sent.init) : null,
+    );
+  return error;
+}
+
+/**
+ * A request the generated API client has already shaped: its method, headers and serialised body.
+ *
+ * For `lib/api/request.ts` only, which is how every operation in api/openapi.yaml reaches the server.
+ * It adds what every request here carries, the session cookie, and turns a refusal into the same
+ * `ClientError` with the same sentence `client` gives, so a screen cannot tell which one it called.
+ */
+export async function clientRequest(
+  path: string,
+  init: RequestInit,
+  fallback?: string,
+): Promise<Response> {
+  const response = await request(path, init);
+  if (!response.ok) throw await refusal(response, fallback, { path, init });
+  return response;
 }
 
 /**
@@ -94,20 +353,7 @@ export async function client<T>(
 
   const response = await send(path, options);
 
-  if (!response.ok) {
-    /*
-     * The server's message is the useful one: it names the field or the permission that failed. The
-     * fallback is only for the cases where it sent none, or sent something that is not JSON.
-     */
-    const message = await response
-      .json()
-      .then((body: { error?: string }) => body.error)
-      .catch(() => undefined);
-    throw new ClientError(
-      message ?? options.fallback ?? "That request failed.",
-      response.status,
-    );
-  }
+  if (!response.ok) throw await refusal(response, options.fallback);
 
   if (key === undefined) return response;
 

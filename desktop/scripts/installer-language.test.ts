@@ -5,7 +5,8 @@
  * from Tauri's English.nsh. Tauri 2 replaces that file with one named in
  * bundle > windows > nsis > customLanguageFiles (https://v2.tauri.app/reference/config/), so
  * src-tauri/windows/installer-english.nsh is Tauri's English.nsh with the three running-app
- * messages rewritten. The installer and the uninstaller both show them, with OK and Cancel.
+ * messages rewritten. The installer and the uninstaller both show them, with OK and Cancel. The
+ * lines the Installing page shows while it brings Microsoft's WebView2 Runtime are rewritten too.
  *
  * The file replaces Tauri's whole English table, so it has to define every string Tauri's
  * template uses. That list belongs to the Tauri CLI version it was copied from, which is pinned
@@ -122,6 +123,35 @@ test("installing over a running OpenBot asks to close it in plain words", () => 
   for (const name of ["appRunningOkKill", "appRunning", "failedToKillApp"]) {
     const text = strings.get(name) ?? "";
     expect(text).not.toMatch(/kill|running!|—/i);
+  }
+});
+
+/**
+ * Box H: on a computer without Microsoft's WebView2 Runtime, the Installing page said "Downloading
+ * WebView2 bootstrapper..." and "Installing WebView2...". The person reading it doesn't know what
+ * WebView2 or a bootstrapper is; they need to know it is part of Windows, that OpenBot needs it,
+ * and that it takes a minute.
+ */
+test("the installer says what it brings for OpenBot's window in plain words", () => {
+  const strings = englishStrings();
+  expect(strings.get("installingWebview2")).toBe(
+    "Installing a part of Windows that OpenBot's window needs. This takes a minute.",
+  );
+  for (const name of TAURI_STRINGS.filter((name) => /webview2/i.test(name))) {
+    const text = strings.get(name) ?? "";
+    expect({ name, text }).toEqual({
+      name,
+      text: expect.stringContaining(
+        "a part of Windows that OpenBot's window needs",
+      ),
+    });
+    expect({
+      name,
+      jargon: /webview|bootstrapper|error:|!|\u2014/i.test(text),
+    }).toEqual({
+      name,
+      jargon: false,
+    });
   }
 });
 

@@ -1,6 +1,6 @@
 [package]
 name = "openbot-desktop"
-version = "1.0.1"
+version = "1.2.1"
 description = "OpenBot Desktop"
 edition = "2021"
 rust-version = "1.90"
@@ -34,13 +34,17 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rand = "0.9"
 base64 = "0.22"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
+# `stream`: the relay hands a request's and a response's body on as it arrives. See `connected/relay.rs`.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json", "stream"] }
 flate2 = "1"
 # Checking the digest of an installer before running it. See `install.rs`.
 sha2 = "0.10"
 tar = "0.4"
 # Comparing the app's release with its deployment's. See `follow.rs`.
 semver = "1"
+# Verifying the signed security floor, strictly (RFC 8032, no malleable signatures). Default
+# features off: the app only verifies, never signs. See `security_floor.rs`.
+ed25519-dalek = { version = "3.0.0", default-features = false }
 # OpenBot's images downloaded before any engine answers: the registry's manifests, read as the OCI
 # Distribution spec says, for this computer's platform. The ORAS project's client. See
 # `early_images.rs`. Its blobs come through `early_downloads::fetch`, which resumes and checks them.
@@ -55,7 +59,6 @@ zip = { version = "2.4.2", default-features = false, features = ["deflate-flate2
 tauri-plugin-single-instance = { version = "2.0.0-rc.5", features = ["deep-link"] }
 # The `openbot://` links a click on a notification opens on Windows, registered by the installer.
 tauri-plugin-deep-link = "2"
-portable-pty = "0.9.0"
 tauri-plugin-opener = "2.5.5"
 tauri-plugin-dialog = "2"
 # Puts each window back where the person left it: its size, its place and whether it was maximized.
@@ -79,29 +82,53 @@ log = "0.4"
 regex = "1"
 # The log's UTC timestamps, and the local offset its first line says. The version Tauri already uses.
 time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
+# The sign-in to an OpenBot that runs elsewhere, kept in the system's own credential store: Keychain
+# on macOS, Credential Manager on Windows, the Secret Service on Linux. See `connected/credentials.rs`.
+keyring = "4.2"
+# The entry type `keyring` hands back, and the in-memory store its own tests use, which this
+# crate's tests use in place of the real keychain. The version `keyring` already builds.
+keyring-core = "1"
+# The loopback relay between the window and that OpenBot: an HTTP/1 server on 127.0.0.1, with the
+# runtime, bodies and streams reqwest and Tauri already build. See `connected/relay.rs`.
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# Verifying the ChatGPT sign-in's ID token (RS256) against OpenAI's published keys. The version
+# rustls already builds. See `chatgpt_sign_in.rs`.
+ring = "0.17"
+# This computer's Sign in with ChatGPT host id, a UUIDv4. The version Tauri already builds.
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# The macOS quit OpenBot did not start (Dock, AppleScript, log out) routed through its own Quit.
-# The version Tauri already uses. See `macos_quit` in main.rs.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
+# The macOS quit OpenBot did not start (Dock, AppleScript, log out) routed through its own Quit.
+# The version Tauri already uses. See `macos_quit` in main.rs. `exception`: an AppKit exception
+# caught as an error, never unwound into a Rust thread (`reveal_in_file_manager`); Tauri's objc2
+# already builds it.
+objc2 = { version = "0.6", features = ["exception"] }
 # Narration on the Mac: on-device speech recognition from the microphone. See `speech/macos.rs`.
 # The same objc2 generation Tauri and wry already use.
 block2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSLocale", "NSOperation", "NSString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSError", "NSLocale", "NSOperation", "NSString"] }
 objc2-speech = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-avf-audio", "SFSpeechRecognizer", "SFSpeechRecognitionRequest", "SFSpeechRecognitionResult", "SFSpeechRecognitionTask", "SFTranscription"] }
 objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "AVAudioEngine", "AVAudioNode", "AVAudioIONode", "AVAudioFormat", "AVAudioBuffer", "AVAudioTime", "AVAudioTypes"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
-# The shell's own messages in an alert with OpenBot's icon. See `native_alert.rs`.
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSView", "NSWindow"] }
+# The shell's own messages in an alert with OpenBot's icon. See `native_alert.rs`. `NSAppearance`:
+# the system's light or dark before the main window exists (`first_paint::system_dark`).
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSAppearance", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSView", "NSWindow"] }
 
 # Narration on Windows: the SAPI in-process recognizer. See `speech/sapi.rs`. The version Tauri uses.
 [target.'cfg(windows)'.dependencies]
 # `Win32_System_Pipes` and `Win32_Security`: holding Docker's default pipe name while OpenBot's
-# Podman machine starts. See `acquire::start_machine`.
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Media_Speech", "Win32_System_Com", "Data_Xml_Dom", "UI_Notifications", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Pipes"] }
+# Podman machine starts. See `acquire::start_machine`. `Win32_Graphics_Gdi`, `Win32_UI_Accessibility`,
+# `Win32_UI_HiDpi`, `Win32_UI_Shell`, `Win32_System_LibraryLoader` and `Win32_System_SystemInformation`:
+# the main window's "Getting OpenBot ready" until its page paints. See `first_paint`.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Media_Speech", "Win32_System_Com", "Data_Xml_Dom", "UI_Notifications", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Pipes", "Win32_Graphics_Gdi", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_System_LibraryLoader", "Win32_System_SystemInformation"] }
 # Where WSL keeps a Podman machine's disk, so its drive's free space is checked before Start. See
 # `windows::podman_machine_drive`. The version reqwest already uses.
 windows-registry = "0.6"
@@ -113,6 +140,9 @@ harness = false
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+# A real WebSocket client and server at each end of the relay in its tests.
+tokio-tungstenite = "0.30"
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 
 # Every local evaluation CLI call checks the pinned runtime and script against their digests,
 # about 150 MB. Unoptimized, that hash alone took 4.9 s per call in a debug build; optimized, 0.3 s.

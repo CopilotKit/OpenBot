@@ -32,7 +32,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use crate::quiet::command;
 
@@ -45,8 +45,9 @@ use serde::{Deserialize, Serialize};
 /// OpenBot's. The setup window then says the line on whichever screen the person is on, and OpenBot
 /// comes back to the front once that window is done with.
 ///
-/// `asks` when the step waits for the person's go-ahead in OpenBot's own window before it raises
-/// such a prompt (`install::GoAhead`). The window explains what comes next, with one button.
+/// `asks` when the step waits for the person's go-ahead in OpenBot's own window (`install::GoAhead`):
+/// before it raises such a prompt (`before_prompt`, with Continue), or after the person closed one
+/// (with Try again). The window explains what comes next, with one button.
 ///
 /// `said` is what the person reads, in plain words: what OpenBot is doing for them. `detail` is the
 /// same moment in the log's words, with the names a person never needs on screen (Podman, the
@@ -60,6 +61,10 @@ pub struct StepLine {
     /// The engine itself is being updated (`engine_versions`): the window asks nothing of it until
     /// the update is done. An engine being updated refuses what is asked of it.
     pub updating: bool,
+    /// With `asks`: the go-ahead is for the system's password prompt, which comes up only once the
+    /// person chooses Continue (`install::install_with_password`). Without it, an `asks` line is a
+    /// wait after a prompt the person closed, with Try again.
+    pub before_prompt: bool,
     pub detail: Option<String>,
 }
 
@@ -71,6 +76,7 @@ impl StepLine {
             elsewhere: false,
             asks: false,
             updating: false,
+            before_prompt: false,
             detail: None,
         }
     }
@@ -82,6 +88,7 @@ impl StepLine {
             elsewhere: true,
             asks: false,
             updating: false,
+            before_prompt: false,
             detail: None,
         }
     }
@@ -93,7 +100,17 @@ impl StepLine {
             elsewhere: false,
             asks: true,
             updating: false,
+            before_prompt: false,
             detail: None,
+        }
+    }
+
+    /// A line about a step that waits for the person's Continue in OpenBot's window before the
+    /// system's password prompt comes up: see `before_prompt`.
+    pub fn before_prompt(said: impl Into<String>) -> Self {
+        Self {
+            before_prompt: true,
+            ..Self::asks(said)
         }
     }
 
@@ -374,6 +391,20 @@ impl Address {
             .map(|out| out.status.success() && !out.stdout.is_empty())
             .unwrap_or(false)
     }
+
+    /// `responds`, giving up after `limit`: `None` when it was still running then, which is not
+    /// answering either.
+    pub fn responds_within(&self, limit: std::time::Duration) -> Option<bool> {
+        match crate::quiet::output_within(
+            self.command()
+                .args(["version", "--format", "{{.Server.APIVersion}}"]),
+            limit,
+        ) {
+            Ok(out) => Some(out.status.success() && !out.stdout.is_empty()),
+            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => None,
+            Err(_) => Some(false),
+        }
+    }
 }
 
 fn nonsecret_endpoint(value: String) -> Result<String, String> {
@@ -416,11 +447,24 @@ fn running_machine(preferred: &str) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    let machines: Vec<MachineListing> = serde_json::from_slice(&output.stdout).ok()?;
+    running_machine_in(&output.stdout, preferred, &crate::acquire::podman)
+}
+
+/// `running_machine`, from what `podman machine list --format json` said, with every other podman
+/// command run by `run`.
+fn running_machine_in(
+    listing: &[u8],
+    preferred: &str,
+    run: &dyn Fn(&[&str]) -> Result<String, String>,
+) -> Option<String> {
+    let machines: Vec<MachineListing> = serde_json::from_slice(listing).ok()?;
     usable_running_machine(&machines, preferred, |name| {
-        passed_over(name, std::env::consts::OS, crate::acquire::machine_behind).is_some()
+        passed_over(name, std::env::consts::OS, |connection| {
+            crate::acquire::machine_behind_with(connection, run)
+        })
+        .is_some()
     })
-    .map(|name| crate::acquire::connection_of_machine(&name))
+    .map(|name| crate::acquire::connection_of_machine_with(&name, run))
 }
 
 /// The running machine to use, by name: `preferred` when it runs, else the first running one that
@@ -478,6 +522,46 @@ pub fn passed_over_machine(address: &Address) -> Option<String> {
     )
 }
 
+/// `passed_over_machine`, with every podman command run by `run`, the default connection
+/// included: `pin` asks for it with no time limit.
+fn passed_over_machine_with(
+    address: &Address,
+    run: &dyn Fn(&[&str]) -> Result<String, String>,
+) -> Option<String> {
+    if address.engine != Engine::Podman || !matches!(std::env::consts::OS, "macos" | "windows") {
+        return None;
+    }
+    let env = |name| std::env::var(name).ok().filter(|value| !value.is_empty());
+    let connection = match (&address.connection, env("CONTAINER_CONNECTION")) {
+        (Some(connection), _) => connection.clone(),
+        (None, Some(connection)) => connection,
+        // A URL, as `pin` keeps it: not a machine's connection.
+        (None, None) if env("CONTAINER_HOST").is_some() => return None,
+        (None, None) => {
+            let listed = run(&[
+                "system",
+                "connection",
+                "list",
+                "--format",
+                "{{if .Default}}{{.Name}}{{end}}",
+            ])
+            .ok()?;
+            let names: Vec<&str> = listed
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect();
+            match names.as_slice() {
+                [name] => (*name).to_owned(),
+                _ => return None,
+            }
+        }
+    };
+    passed_over(&connection, std::env::consts::OS, |connection| {
+        crate::acquire::machine_behind_with(connection, run)
+    })
+}
+
 /// `passed_over_machine` for the connection `connection` on `os`, with the machine behind it read
 /// by `machine_behind`.
 pub(crate) fn passed_over(
@@ -529,6 +613,66 @@ pub fn tools_dir_under(downloads: &Path) -> PathBuf {
 
 fn tools_dir() -> Option<&'static PathBuf> {
     TOOLS.get()
+}
+
+/// The folder that holds OpenBot's Podman machine disk on Windows: `<install>\engine`.
+///
+/// A Mutex and not a OnceLock, because Install can set it again. Unset in tests and wherever no
+/// install folder is known, so Podman then uses its default place.
+static MACHINE_HOME: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Tell this module where OpenBot's Podman machine keeps its disk.
+pub fn machine_home_is(home: Option<PathBuf>) {
+    *MACHINE_HOME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = home;
+}
+
+/// Where OpenBot's Podman machine keeps its disk, if it is known.
+pub fn machine_home() -> Option<PathBuf> {
+    MACHINE_HOME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
+/**
+The environment variable that puts the disk of a new Podman machine in `home`, for the `podman`
+command `args` on `os`. Only `podman machine init` on Windows gets it.
+
+On Windows, Podman puts a new machine's WSL disk under `XDG_DATA_HOME`, else under
+`%USERPROFILE%\.local\share` (`env.DataDirPrefix` and `provisionWSLDist` in Podman 6.1.1). No flag
+or containers.conf key changes this. Init is the only command that places the disk: every later
+command finds it through WSL's registration and the absolute paths in the machine's config, which
+stays in `%USERPROFILE%\.config`.
+
+Every other command keeps Podman's default data folder, because Podman keeps state there that is
+shared with the person's own Podman and with uninstall, which runs without this variable:
+- the API proxy's record, `wsl\win-sshproxy.tid` (`pkg/machine/machine_windows.go`). Start writes
+  it and stop reads it to end the proxy that holds `\\.\pipe\podman-openbot`. A stop that looks in
+  another folder than the start leaves the proxy running, and a reinstall then fails on Compose;
+- the user-mode networking distribution's count of machines and its lock,
+  `wsl\podman-net-usermode\entries` (`pkg/machine/wsl/usermodenet.go`). Two folders mean two
+  counts, and stopping one machine can stop the networking under the other;
+- the lock that keeps two machines from starting at once, and the machines' port allocations.
+*/
+fn data_home_env(os: &str, args: &[&str], home: Option<&Path>) -> Option<(&'static str, PathBuf)> {
+    if os != "windows" || !matches!(args, ["machine", "init", ..]) {
+        return None;
+    }
+    home.map(|home| ("XDG_DATA_HOME", home.to_path_buf()))
+}
+
+/// `podman` with `args`, wherever Podman is. `podman machine init` on Windows also puts the new
+/// machine's disk in the machine home (`data_home_env`).
+pub fn podman_command(args: &[&str]) -> Command {
+    let mut built = tool(Engine::Podman);
+    built.args(args);
+    if let Some((name, home)) = data_home_env(std::env::consts::OS, args, machine_home().as_deref())
+    {
+        built.env(name, home);
+    }
+    built
 }
 
 /// A command that runs this engine's binary, wherever it actually is.
@@ -784,6 +928,66 @@ pub fn detect() -> EngineStatus {
     detect_among(&[Engine::Docker, Engine::Podman])
 }
 
+/**
+`detect`, with every engine command it runs stopped at `deadline` and none started after it:
+nothing when one was still running then, since an engine that hangs is neither answering nor
+absent. For troubleshooting logs, which must not wait on a stalled engine.
+*/
+pub fn detect_by(deadline: std::time::Instant) -> Option<EngineStatus> {
+    let left = || deadline.saturating_duration_since(std::time::Instant::now());
+    let timed_out = std::cell::Cell::new(false);
+    // Past the deadline nothing more is started: it would only be stopped at once.
+    let out_of_time = || {
+        let out = left().is_zero();
+        if out {
+            timed_out.set(true);
+        }
+        out
+    };
+    // Every podman command the detection runs: `machine list`, `machine inspect`, the default
+    // connection and the `volume ls` that finds where OpenBot's database is.
+    let podman = |args: &[&str]| -> Result<String, String> {
+        if out_of_time() {
+            return Err("no time left".to_owned());
+        }
+        match crate::quiet::output_within(&mut podman_command(args), left()) {
+            Ok(out) if out.status.success() => {
+                Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+            }
+            Ok(out) => Err(crate::quiet::said(&out.stderr)),
+            Err(error) => {
+                if error.kind() == std::io::ErrorKind::TimedOut {
+                    timed_out.set(true);
+                }
+                Err(error.to_string())
+            }
+        }
+    };
+    let status = detect_among_with(
+        &[Engine::Docker, Engine::Podman],
+        own_machine_only(std::env::consts::OS),
+        |address| {
+            if out_of_time() {
+                return false;
+            }
+            match address.responds_within(left()) {
+                Some(answered) => answered,
+                None => {
+                    timed_out.set(true);
+                    false
+                }
+            }
+        },
+        |address| passed_over_machine_with(address, &podman),
+        || {
+            let listing = podman(&["machine", "list", "--format", "json"]).ok()?;
+            running_machine_in(listing.as_bytes(), crate::acquire::MACHINE, &podman)
+        },
+        |engine| program(engine).is_some(),
+    );
+    (!timed_out.get()).then_some(status)
+}
+
 /// What is here of the engine an installation was set up on, or of either when it saved none.
 ///
 /// The other engine is never looked at: an installation on Podman that found an answering Docker
@@ -1016,6 +1220,91 @@ fn main() {
         );
         assert!(owned.join("contexts/meta").is_dir());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn podman_machine_init_on_windows_puts_the_disk_in_the_machine_home() {
+        let home = PathBuf::from(r"D:\OpenBot\engine");
+        assert_eq!(
+            data_home_env(
+                "windows",
+                &["machine", "init", "openbot", "--rootful"],
+                Some(&home)
+            ),
+            Some(("XDG_DATA_HOME", PathBuf::from(r"D:\OpenBot\engine")))
+        );
+    }
+
+    /// Podman keeps the API proxy's record, the user-mode networking count and lock, the start lock
+    /// and the port allocations in its data folder. The person's own Podman and uninstall look for
+    /// them in the default one, so only init may move it. With every command moved, a stop missed
+    /// the record its start wrote in the default folder and left the proxy holding the pipe.
+    #[test]
+    fn every_podman_command_but_init_keeps_podmans_default_data_folder() {
+        let home = PathBuf::from(r"D:\OpenBot\engine");
+        for args in [
+            &["machine", "start", "openbot"][..],
+            &["machine", "stop", "openbot"],
+            &["machine", "rm", "-f", "openbot"],
+            &["machine", "set", "--user-mode-networking", "openbot"],
+            &["machine", "inspect", "openbot"],
+            &["machine", "list", "--format", "json"],
+            &["machine", "ssh", "openbot", "true"],
+            &["system", "connection", "list", "--format", "json"],
+            &["--version"],
+        ] {
+            assert_eq!(
+                data_home_env("windows", args, Some(&home)),
+                None,
+                "{args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn podman_outside_windows_gets_no_data_home() {
+        let home = PathBuf::from("/opt/openbot/engine");
+        assert_eq!(
+            data_home_env("macos", &["machine", "init", "openbot"], Some(&home)),
+            None
+        );
+    }
+
+    #[test]
+    fn podman_without_a_machine_home_gets_no_data_home() {
+        assert_eq!(
+            data_home_env("windows", &["machine", "init", "openbot"], None),
+            None
+        );
+    }
+
+    /// The command OpenBot runs: init carries `XDG_DATA_HOME`, a stop does not, and neither does
+    /// the plain `tool`.
+    #[cfg(windows)]
+    #[test]
+    fn only_podman_machine_init_on_windows_carries_the_machine_home() {
+        if crate::test_support::isolated_process(
+            "engine::tests::only_podman_machine_init_on_windows_carries_the_machine_home",
+        ) {
+            return;
+        }
+        machine_home_is(Some(PathBuf::from(r"D:\OpenBot\engine")));
+        let data_home = |command: &Command| {
+            command
+                .get_envs()
+                .find(|(key, _)| *key == "XDG_DATA_HOME")
+                .and_then(|(_, value)| value.map(std::ffi::OsStr::to_os_string))
+        };
+
+        assert_eq!(
+            data_home(&podman_command(&["machine", "init", "openbot"])),
+            Some(OsString::from(r"D:\OpenBot\engine"))
+        );
+        assert_eq!(
+            data_home(&podman_command(&["machine", "stop", "openbot"])),
+            None
+        );
+        assert_eq!(data_home(&tool(Engine::Podman)), None);
     }
 
     #[cfg(unix)]

@@ -371,6 +371,12 @@ test("desktop-build.yml restores no cache for a release", () => {
     step.uses?.startsWith("Swatinem/rust-cache@"),
   );
   expect(rust?.if).toBe("inputs.channel != 'release'");
+  // Any other cache, the Linux system libraries' among them, is skipped for a release too.
+  const caches = steps.filter((step) => step.uses?.startsWith("actions/cache"));
+  expect(caches.length).toBeGreaterThan(0);
+  for (const cache of caches) {
+    expect(cache.if ?? "").toContain("inputs.channel != 'release'");
+  }
 });
 
 // Since 2026-11-11 every startup (windows-latest) run failed in setup-bun with "Unable to locate

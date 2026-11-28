@@ -22,7 +22,14 @@ import {
   type AppAccessRequest,
   appAccessInboxQueryOptions,
 } from "@/lib/app-access/queries";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
+import {
+  DELETED_USER,
+  isDeletedUser,
+  personLabel,
+} from "@/lib/people/deleted-user";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
 
@@ -41,10 +48,12 @@ import { queryClient } from "@/query-client";
  * to connect — and the request stays pending. That sentence is drawn on the row it is about, because
  * the screen's own banner is a long way from the button that was pressed.
  *
- * A GRANT IS READ-ONLY UNTIL SOMEBODY CHOOSES MORE. One press is not a decision about every action an
- * app offers — Gmail's include sending and deleting mail — so approving gives the Bot the app's
- * read-only actions and nothing else, and an app with none is refused with a sentence pointing at the
- * Bot's page. The row says so before the press, and links to that page where it can.
+ * WHAT A GRANT GIVES FOLLOWS THE ORGANIZATION'S APPS SETTING (`useAppsOpen`), as the server's one
+ * press does (`ownersOnePress` in openbot-backend). Open, the default: every action the app offers,
+ * each write still behind its approvals. Locked down: the app's read-only actions and nothing else,
+ * and an app with none is refused with a sentence pointing at the Bot's page. The row says which
+ * before the press, and links to that page where it can. A request a Bot's card filed for actions it
+ * needs names them, and approving gives those and nothing else, in either mode.
  *
  * REQUESTS, NOT CONNECTIONS. Each row names who asked, because they asked; nothing here says who has
  * connected what, which stays private to each person (see the note on `admin/plugins/$key.tsx`).
@@ -54,12 +63,17 @@ import { queryClient } from "@/query-client";
  */
 export function AccessRequestsSection({ app }: { app?: string }) {
   const inbox = useQuery(appAccessInboxQueryOptions(true, app));
-  if (inbox.isPending) return null;
+  // Read before a row draws, so a grant's row says what approving gives here and never changes it.
+  const open = useAppsOpen();
+  if (inbox.isPending || open === undefined) return null;
   if (inbox.error)
     return (
       <PageSection title="Requests">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load access requests. Reload the page.
+          {loadFailure(
+            inbox.error,
+            "Couldn't load access requests. Try again in a moment.",
+          )}
         </p>
       </PageSection>
     );
@@ -78,7 +92,7 @@ export function AccessRequestsSection({ app }: { app?: string }) {
         {requests.map((request, index) => (
           <Fragment key={request.id}>
             {index > 0 ? <Separator /> : null}
-            <AccessRequestRow request={request} />
+            <AccessRequestRow open={open} request={request} />
           </Fragment>
         ))}
       </PageRows>
@@ -91,15 +105,29 @@ export function askedFor(request: AppAccessRequest): string {
   const bot = request.botName ?? "a Bot";
   switch (request.kind) {
     case "enable":
-      return `Turn on ${request.appTitle} for ${bot}`;
-    case "grant":
+      // Asked from Connections, with no Bot named: the app, added for everyone.
+      return request.agentId === null
+        ? `Add ${request.appTitle} for everyone`
+        : `Turn on ${request.appTitle} for ${bot}`;
+    case "grant": {
+      // Asked from a card a Bot that holds the app put up for actions it wasn't given.
+      const count = request.actions.length;
+      if (count > 0)
+        return `Give ${bot} ${count} more ${request.appTitle} ${count === 1 ? "action" : "actions"}`;
       return `Give ${request.appTitle} to ${bot}`;
+    }
     case "connect_shared":
       return `Connect the shared ${request.appTitle} account`;
   }
 }
 
-function AccessRequestRow({ request }: { request: AppAccessRequest }) {
+function AccessRequestRow({
+  request,
+  open,
+}: {
+  request: AppAccessRequest;
+  open: boolean;
+}) {
   // One pair per row, so a refusal is drawn under the request it is about and nowhere else.
   const approve = useMutation(
     approveAppAccessRequestMutationOptions(queryClient),
@@ -109,7 +137,13 @@ function AccessRequestRow({ request }: { request: AppAccessRequest }) {
   );
   const busy = approve.isPending || dismiss.isPending;
   const error = approve.error ?? dismiss.error;
-  const who = request.requesterName ?? request.requesterEmail ?? "Somebody";
+  // Named by a pseudonym, or with neither a name nor an address: they deleted their account.
+  const who = isDeletedUser(request.requestedBy)
+    ? DELETED_USER
+    : personLabel({
+        name: request.requesterName,
+        email: request.requesterEmail,
+      });
   return (
     <Item data-request={request.id} size="sm">
       <ItemMedia variant="icon">
@@ -122,7 +156,7 @@ function AccessRequestRow({ request }: { request: AppAccessRequest }) {
           {request.kind === "connect_shared" && request.botName
             ? `, for ${request.botName}`
             : ""}
-          . <GrantNote request={request} />
+          . <GrantNote open={open} request={request} />
         </ItemDescription>
       </ItemContent>
       <ItemActions>
@@ -151,7 +185,7 @@ function AccessRequestRow({ request }: { request: AppAccessRequest }) {
       {error ? (
         <ItemFooter>
           <p className="text-destructive text-sm" role="alert">
-            {error.message}
+            {failureSaid(error)}
           </p>
         </ItemFooter>
       ) : null}
@@ -160,11 +194,22 @@ function AccessRequestRow({ request }: { request: AppAccessRequest }) {
 }
 
 /**
- * What approving gives a Bot, for a request that grants one: the app's read-only actions, with the
- * rest chosen on the Bot's page under the app. Linked there for a grant, whose app is already on
- * and so has that page; an app still to be switched on has none until the press that switches it on.
+ * What approving gives a Bot, for a request that grants one. While the organization's apps are open:
+ * every action of the app, fewer chosen on the Bot's page under the app. Locked
+ * down: the app's read-only actions, with the rest chosen on that page. Linked there for a grant,
+ * whose app is already on and so has that page; an app still to be switched on has none until the
+ * press that switches it on.
+ *
+ * A request that names actions gives exactly those, listed by their own names: this is an admin's
+ * page, and the admin is deciding about those actions, not about the app.
  */
-function GrantNote({ request }: { request: AppAccessRequest }) {
+function GrantNote({
+  request,
+  open,
+}: {
+  request: AppAccessRequest;
+  open: boolean;
+}) {
   const paths = useManagePaths();
   if (request.kind === "connect_shared" || !request.agentId) return null;
   const bot = request.botName ?? "the Bot";
@@ -175,12 +220,37 @@ function GrantNote({ request }: { request: AppAccessRequest }) {
     ) : (
       where
     );
+  if (request.actions.length > 0)
+    return (
+      <>
+        Approving gives {bot} only {actionNames(request.actions)}. Choose any
+        others on {page}.
+      </>
+    );
+  if (open)
+    return (
+      <>
+        Approving gives {bot} every {request.appTitle} action. Choose fewer on{" "}
+        {page}.
+      </>
+    );
   return (
     <>
       Approving gives {bot} only {request.appTitle}'s read-only actions. Choose
       any others on {page}.
     </>
   );
+}
+
+/** The actions' own names, without the app id each is written under: "A, B and C". */
+function actionNames(actions: readonly string[]): string {
+  const names = actions.map((action) => {
+    const slash = action.indexOf("/");
+    return slash < 0 ? action : action.slice(slash + 1);
+  });
+  return names.length > 1
+    ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+    : (names[0] ?? "");
 }
 
 /**

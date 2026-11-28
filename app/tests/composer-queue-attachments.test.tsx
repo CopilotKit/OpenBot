@@ -20,11 +20,13 @@ import { useCallback } from "react";
 import { Composer } from "@/components/channels/composer/composer";
 import type { ComposerDraft } from "@/components/channels/composer/draft";
 import { ConversationView } from "@/components/channels/conversation-view";
-import {
-  attachmentUrl,
-  MAX_ATTACHMENTS_PER_MESSAGE,
-} from "@/lib/channels/attachments";
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/channels/attachments";
+import { attachmentPath, problem } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
+
+/** What the server answers here: an upload to a conversation, and an attachment by its id. */
+const SERVED =
+  /^\/api\/v2\/organizations\/default\/(conversations\/[^/]+\/attachments|attachments\/[^/]+)$/;
 
 /**
  * WHAT THE QUEUE DOES TO AN ATTACHMENT BEHIND SOMEBODY'S BACK, AT BOTH ENDS OF THE SAME ROW.
@@ -152,6 +154,8 @@ beforeEach(() => {
   deletes = [];
   uploads = [];
   global.fetch = (async (path: string, init: RequestInit) => {
+    // Only the API's addresses answer: an upload to a conversation, or an attachment given back.
+    if (!SERVED.test(path)) return problem(404, "Not found.");
     if (init?.method === "DELETE") {
       deletes.push(path);
       return new Response(null, { status: 204 });
@@ -166,6 +170,7 @@ beforeEach(() => {
         id: `stored-${file.name}`,
         name: file.name,
         mimeType: "text/plain",
+        sizeBytes: file.size,
       }),
       { status: 201, headers: { "content-type": "application/json" } },
     );
@@ -268,7 +273,7 @@ test("queuing a correction mid-send removes only what it takes, never sweeps the
   await waitFor(() => expect(form.getAttribute("aria-busy")).toBe("false"));
 });
 
-test("removing a ready attachment issues the DELETE through attachmentUrl(), not a hand-typed path", async () => {
+test("removing a ready attachment issues the DELETE at the API's address for it, not a hand-typed path", async () => {
   const view = render(
     <Composer channelId="channel-1" compact onSubmit={() => {}} />,
   );
@@ -284,7 +289,7 @@ test("removing a ready attachment issues the DELETE through attachmentUrl(), not
   // Built from the same helper the server-side comment and `chat-transcript.tsx` both insist on:
   // a hand-typed literal here is exactly the fifth spelling this repository forbids.
   await waitFor(() =>
-    expect(deletes).toEqual([attachmentUrl("stored-notes.txt")]),
+    expect(deletes).toEqual([attachmentPath("stored-notes.txt")]),
   );
   expect(queryByLabelText("Remove notes.txt")).toBeNull();
 });
@@ -363,7 +368,7 @@ test("taking a queued message back releases the rows it was carrying", async () 
   // Without this the row sits with `attachedAt IS NULL` until the 24-hour sweep, counted against
   // this person's per-channel limit and surfacing as a 409 naming a file on nobody's screen.
   await waitFor(() =>
-    expect(deletes).toEqual([attachmentUrl("stored-notes.txt")]),
+    expect(deletes).toEqual([attachmentPath("stored-notes.txt")]),
   );
 
   // AND THE PERSON IS TOLD, which is the other half of the same finding: a file that leaves with
@@ -543,7 +548,7 @@ test("a drained turn whose send fails puts the queue back instead of releasing i
     ) as HTMLElement,
   );
   await waitFor(() =>
-    expect(deletes).toEqual([attachmentUrl("stored-notes.txt")]),
+    expect(deletes).toEqual([attachmentPath("stored-notes.txt")]),
   );
 });
 
@@ -590,7 +595,7 @@ test("walking away with a message still parked releases the rows it was holding"
   view.unmount();
 
   await waitFor(() =>
-    expect(deletes).toEqual([attachmentUrl("stored-notes.txt")]),
+    expect(deletes).toEqual([attachmentPath("stored-notes.txt")]),
   );
 });
 

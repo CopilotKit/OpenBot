@@ -11,6 +11,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { useVoiceArchive } from "../src/lib/voice/archive";
 import { queryClient } from "../src/query-client";
+import { conversationPath, problem } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -35,9 +36,17 @@ afterAll(async () => {
   GlobalRegistrator.unregister();
 });
 
+/** Answers the read of the conversation's saved voice chats, at the API's address, and nothing else. */
 function answerFetch(answer: () => Promise<Response>) {
   spyOn(globalThis, "fetch").mockImplementation(
-    Object.assign(answer, { preconnect: globalThis.fetch.preconnect }),
+    Object.assign(
+      (input: RequestInfo | URL) =>
+        String(input).split("?")[0] ===
+        conversationPath("channel-1", "/voice-sessions")
+          ? answer()
+          : Promise.resolve(problem(404, "Not found.")),
+      { preconnect: globalThis.fetch.preconnect },
+    ),
   );
 }
 
@@ -61,9 +70,7 @@ test("not pending once loaded", async () => {
 });
 
 test("not pending after a failed load", async () => {
-  answerFetch(async () =>
-    Response.json({ error: "Down for maintenance." }, { status: 500 }),
-  );
+  answerFetch(async () => problem(500, "Down for maintenance."));
 
   const { result } = renderHook(() => useVoiceArchive("channel-1"));
 

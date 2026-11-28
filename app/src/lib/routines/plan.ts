@@ -20,8 +20,8 @@ export type RoutinePlan =
   | {
       kind: "goal";
       goal: {
-        agentId: string;
-        channelId: string;
+        botId: string;
+        conversationId: string;
         title: string;
         instruction: string;
         successCriteria: string;
@@ -36,8 +36,8 @@ export type RoutinePlan =
   | {
       kind: "check-in";
       checkIn: {
-        agentId: string;
-        channelId: string;
+        botId: string;
+        conversationId: string;
         focus: string;
         subject: string;
         intervalMinutes: number;
@@ -68,11 +68,12 @@ export function checkInSubject(
 
 /**
  * What the form's answers make. TanStack Form hands `onSubmit` the raw values, not zod's trimmed
- * output, so the text answers are trimmed here.
+ * output, so the text answers are trimmed here. A `cron` given is used in place of the form's own.
  */
 export function planRoutine(
   values: RoutineFormValues,
   timezone: string,
+  cron?: string,
 ): RoutinePlan {
   const { agentId, channelId } = values;
   const instruction = values.instruction.trim();
@@ -83,8 +84,8 @@ export function planRoutine(
     return {
       kind: "check-in",
       checkIn: {
-        agentId,
-        channelId,
+        botId: agentId,
+        conversationId: channelId,
         focus: instruction,
         subject: checkInSubject(values),
         intervalMinutes: Number(values.interval),
@@ -96,11 +97,11 @@ export function planRoutine(
     return {
       kind: "routine",
       routine: {
-        agentId,
-        channelId,
+        botId: agentId,
+        conversationId: channelId,
         instruction,
         ...(title ? { title } : {}),
-        cron: cronFrom(values),
+        cron: cron ?? cronFrom(values),
         timezone,
       },
     };
@@ -111,8 +112,8 @@ export function planRoutine(
   const goalTitle =
     title || cutToUnits(instruction.replace(/\s+/g, " "), 160).trim();
   const goal = {
-    agentId,
-    channelId,
+    botId: agentId,
+    conversationId: channelId,
     title: goalTitle,
     instruction,
     successCriteria: doneWhen,
@@ -122,7 +123,7 @@ export function planRoutine(
     return {
       kind: "goal",
       goal: { ...goal, subscriptions: [], recurring: false, endsWhenMet: true },
-      schedule: { cron: cronFrom(values), timezone },
+      schedule: { cron: cron ?? cronFrom(values), timezone },
       runNow: false,
     };
   }

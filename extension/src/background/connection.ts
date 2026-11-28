@@ -1,9 +1,4 @@
 import {
-  type ExchangeResponse,
-  type RecorderMe,
-  recorderPaths,
-} from "@openbot/shared/recorder-api";
-import {
   RECORDER_CONNECT_STATUS,
   type TrustedConnectRule,
 } from "@openbot/shared/recorder-page";
@@ -14,7 +9,18 @@ import type {
   PageToBackground,
 } from "../protocol/messages";
 import { defaultBrowserName } from "../shared/browser-name";
-import { OpenBotError, openbotJson } from "../shared/openbot-client";
+import {
+  deleteCurrentRecorderConnection,
+  exchangeRecorderConnectCode,
+  getRecorderIdentity,
+  type RecorderConnectionGrant,
+} from "../shared/generated/recorder";
+import {
+  OpenBotError,
+  DEFAULT_ORGANIZATION_ID,
+  organizationOf,
+  updateRequiredSentence,
+} from "../shared/openbot-client";
 import { normaliseOpenBotOrigin } from "../shared/origin";
 import {
   allowsOpenBot,
@@ -39,6 +45,7 @@ import {
   askDesktopForHandoff,
   desktopAddress,
   desktopAvailable,
+  desktopEntry,
 } from "./native-host";
 
 /** A connection that ended without the person's Disconnect, for the recording controller (index.ts wires it in): OpenBot
@@ -60,6 +67,9 @@ type ConnectionDeps = {
   desktopAvailable: () => Promise<boolean>;
   /** OpenBot Desktop's own OpenBot address, as its native host confirms it (native-host.ts `desktopAddress`). */
   desktopAddress: () => Promise<string | null>;
+  /** Where to open a path of OpenBot Desktop's own OpenBot in this browser, as its native host answers it (native-host.ts
+   * `desktopEntry`). */
+  desktopEntry: (path: string) => Promise<string | null>;
   readPolicy: () => Promise<RecorderPolicy>;
   openTab: (url: string) => Promise<number | undefined>; // the new tab's id, kept in pendingConnect.tabId
   /** Stops what the lost connection still has running: the live recording and whatever the document sends with its
@@ -70,6 +80,22 @@ type ConnectionDeps = {
    * sent. The popup's own Desktop connect reaches it through the router, as an approved Connect does. */
   connected: () => Promise<void>;
 };
+
+/**
+ * The organization a grant says the connection was made in, kept on the stored connection so every later request goes
+ * there. A code is exchanged at `default`, because the code itself names the organization it was made for. A grant that
+ * names none (an OpenBot older than organizations) keeps nothing, and the connection works in `default` as before.
+ */
+function grantOrganization(
+  grant: RecorderConnectionGrant,
+): Pick<ConnectionRecord, "organizationId" | "organizationName"> {
+  return {
+    ...(grant.organizationId ? { organizationId: grant.organizationId } : {}),
+    ...(grant.organizationName
+      ? { organizationName: grant.organizationName }
+      : {}),
+  };
+}
 
 const PENDING_MAX_AGE_MS = 5 * 60 * 1000;
 const OUT_OF_DATE =
@@ -110,6 +136,7 @@ const defaultDeps: ConnectionDeps = {
   askDesktop: askDesktopForHandoff,
   desktopAvailable,
   desktopAddress,
+  desktopEntry,
   readPolicy,
   openTab: async (url) => (await chrome.tabs.create({ url })).id,
   connectionLost: async (loss) => {
@@ -180,7 +207,9 @@ async function keepAlive(deps: ConnectionDeps): Promise<void> {
   const connection = await currentConnection();
   if (!connection) return;
   try {
-    await openbotJson<RecorderMe>(connection, recorderPaths.me);
+    await getRecorderIdentity(organizationOf(connection), {
+      target: connection,
+    });
   } catch (error) {
     if (error instanceof OpenBotError && error.signedOut)
       await deps.connectionLost({
@@ -280,8 +309,54 @@ export async function handleConnectionMessage(
       return { ok: true, available: await resolved.desktopAvailable() };
     case "page.connect.desktop":
       return { ok: true, ...(await connectThroughDesktop(resolved)) };
+    case "page.openbot.open":
+      return openOpenBotPage(message.url, resolved);
     default:
       return undefined;
+  }
+}
+
+const NOT_AN_OPENBOT_PAGE = "The Recorder cannot open that address.";
+
+/** Opens a page of an OpenBot in a new tab, at the address `openBotPageAddress` gives it. Only an http or https address. */
+async function openOpenBotPage(
+  raw: string,
+  deps: ConnectionDeps,
+): Promise<PageResponse> {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { ok: false, error: NOT_AN_OPENBOT_PAGE };
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:")
+    return { ok: false, error: NOT_AN_OPENBOT_PAGE };
+  await deps.openTab(await openBotPageAddress(url, deps));
+  return { ok: true };
+}
+
+/**
+ * Where a page of an OpenBot opens in this browser. The personal edition only admits requests carrying its install's
+ * token, and this browser has none, so a page of OpenBot Desktop's own OpenBot opens through the entry address its
+ * native host answers, which carries it. Every other OpenBot, and OpenBot Desktop's when the host is not there or
+ * answers nothing, opens at `url` itself, as it always did. The host answers for its own OpenBot whatever was asked, so
+ * its answer is used only when it is on `url`'s own origin; and OpenBot Desktop serves only plain http on this computer,
+ * so an https OpenBot is never asked about.
+ */
+async function openBotPageAddress(
+  url: URL,
+  deps: Pick<ConnectionDeps, "desktopEntry">,
+): Promise<string> {
+  const plain = url.toString();
+  if (url.protocol !== "http:") return plain;
+  const entry = await deps.desktopEntry(
+    `${url.pathname}${url.search}${url.hash}`,
+  );
+  if (entry === null) return plain;
+  try {
+    return new URL(entry).origin === url.origin ? entry : plain;
+  } catch {
+    return plain;
   }
 }
 
@@ -296,28 +371,27 @@ async function approve(
     await clearPendingConnect(pending);
     return { ok: false, error: POLICY_REFUSED };
   }
-  let exchanged: ExchangeResponse;
+  let exchanged: RecorderConnectionGrant;
   try {
-    exchanged = await openbotJson<ExchangeResponse>(
-      { openbotUrl: pending.origin },
-      recorderPaths.connections,
+    exchanged = await exchangeRecorderConnectCode(
+      DEFAULT_ORGANIZATION_ID,
       {
-        body: {
-          code: pending.code,
-          label,
-          installId: await installIdFor(pending.origin),
-        },
+        code: pending.code,
+        label,
+        installId: await installIdFor(pending.origin),
       },
+      { target: { openbotUrl: pending.origin } },
     );
   } catch (error) {
     // The Recorder's own sentence for what OpenBot answered (EXCHANGE_REFUSED), or a plain one: a network failure's
-    // message ("Failed to fetch") means nothing here.
+    // message ("Failed to fetch") means nothing here. An OpenBot that serves only newer Recorders says to update.
     return {
       ok: false,
       error:
-        error instanceof OpenBotError
+        updateRequiredSentence(error) ??
+        (error instanceof OpenBotError
           ? (EXCHANGE_REFUSED[error.status] ?? EXCHANGE_FAILED)
-          : UNREACHABLE,
+          : UNREACHABLE),
     };
   }
   const connection: ConnectionRecord = {
@@ -327,6 +401,7 @@ async function approve(
     user: exchanged.user,
     via: pending.via,
     connectedAt: Date.now(),
+    ...grantOrganization(exchanged),
   };
   // Checked again in the job that stores it: a pin that landed during the exchange keeps it out, and the token OpenBot
   // just made is revoked there. The connection it replaces is read in the same job.
@@ -345,7 +420,10 @@ async function approve(
   await clearPendingConnect(pending);
   if ((await readLocal("notice"))?.kind === "signed-out")
     await removeLocal("notice");
-  return { ok: true };
+  // The Connect page says where this browser now records.
+  return connection.organizationName
+    ? { ok: true, organizationName: connection.organizationName }
+    : { ok: true };
 }
 
 /**
@@ -576,17 +654,17 @@ async function trustedConnect(
   code: string,
   deps: ConnectionDeps,
 ): Promise<ExternalResponse> {
-  let exchanged: ExchangeResponse;
+  let exchanged: RecorderConnectionGrant;
   try {
-    exchanged = await openbotJson<ExchangeResponse>(
-      { openbotUrl: origin },
-      recorderPaths.connections,
+    exchanged = await exchangeRecorderConnectCode(
+      DEFAULT_ORGANIZATION_ID,
       {
-        body: {
-          code,
-          label: defaultBrowserName(),
-          installId: await installIdFor(origin),
-        },
+        code,
+        label: defaultBrowserName(),
+        installId: await installIdFor(origin),
+      },
+      {
+        target: { openbotUrl: origin },
         signal: AbortSignal.timeout(DESKTOP_EXCHANGE_WAIT_MS),
       },
     );
@@ -606,6 +684,7 @@ async function trustedConnect(
     user: exchanged.user,
     via: "web",
     connectedAt: Date.now(),
+    ...grantOrganization(exchanged),
   };
   const kept = await serially(async (): Promise<ExternalResponse | null> => {
     if (!allowsOpenBot(await deps.readPolicy(), origin))
@@ -743,8 +822,8 @@ function sameOrigin(raw: string, origin: string): boolean {
 /** Best effort: OpenBot revokes the token (the person can also revoke it in OpenBot). */
 async function revoke(connection: ConnectionRecord): Promise<void> {
   try {
-    await openbotJson(connection, recorderPaths.currentConnection, {
-      method: "DELETE",
+    await deleteCurrentRecorderConnection(organizationOf(connection), {
+      target: connection,
     });
   } catch {
     // Unreachable, or already revoked.
@@ -827,24 +906,28 @@ async function desktopConnect(
   if (!allowsOpenBot(policy, checked.origin))
     return refused("pinned-elsewhere");
   if (await launched()) return refused("launched");
-  let exchanged: ExchangeResponse;
+  let exchanged: RecorderConnectionGrant;
   try {
-    exchanged = await openbotJson<ExchangeResponse>(
-      { openbotUrl: checked.origin },
-      recorderPaths.connections,
+    exchanged = await exchangeRecorderConnectCode(
+      DEFAULT_ORGANIZATION_ID,
       {
-        body: {
-          code: handoff.code,
-          label: defaultBrowserName(),
-          installId: await installIdFor(checked.origin),
-        },
+        code: handoff.code,
+        label: defaultBrowserName(),
+        installId: await installIdFor(checked.origin),
+      },
+      {
+        target: { openbotUrl: checked.origin },
         signal: AbortSignal.timeout(DESKTOP_EXCHANGE_WAIT_MS),
       },
     );
   } catch (error) {
     return refused(
       error instanceof OpenBotError
-        ? "exchange-refused"
+        ? error.updateRequired
+          ? error.securityUpdateRequired
+            ? "client-security-update-required"
+            : "client-update-required"
+          : "exchange-refused"
         : "openbot-unreachable",
     );
   }
@@ -855,6 +938,7 @@ async function desktopConnect(
     user: exchanged.user,
     via: "desktop",
     connectedAt: Date.now(),
+    ...grantOrganization(exchanged),
   };
   // This job is the queued one that stores it: the launcher's connection, or a pin elsewhere, that came while OpenBot
   // answered keeps it out, and the token OpenBot just made is revoked.

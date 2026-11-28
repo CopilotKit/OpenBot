@@ -178,6 +178,11 @@ async function collectBuildInputs(
     include: (path) => hasSourceExtension(path),
     skipDirectory: (path) => basename(path) === "node_modules",
   });
+  // The files the build copies as they are (the icons and the manifest), whatever their extension.
+  const publicFiles = await collectFiles(join(resolvedApp, "public"), {
+    prefix: "app/public",
+    include: () => true,
+  });
   const tenantFiles = await collectFiles(tenantDir, {
     prefix: `tenant/${slashPath(relative(resolvedRoot, tenantDir))}`,
     include: (path) => hasSourceExtension(path),
@@ -188,6 +193,7 @@ async function collectBuildInputs(
     ...explicitFiles,
     ...sourceFiles,
     ...sharedFiles,
+    ...publicFiles,
     ...tenantFiles,
   ].sort((left, right) => left.path.localeCompare(right.path));
 }

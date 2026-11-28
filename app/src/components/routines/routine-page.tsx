@@ -5,6 +5,7 @@ import {
   IconHistory,
   IconMessage,
   IconMessageOff,
+  IconPencil,
   IconPlayerPlay,
   IconRobot,
   IconWorld,
@@ -19,8 +20,13 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { DeleteRow } from "@/components/routines/delete-row";
+import { EditRoutineDialog } from "@/components/routines/edit-routine-dialog";
 import { routinesOf } from "@/components/routines/new-routine-page";
-import { RoutineDetailMissing } from "@/components/routines/routine-detail-missing";
+import {
+  RoutineDetailMissing,
+  useDeletedHere,
+} from "@/components/routines/routine-detail-missing";
+import { useRoutineRuns } from "@/components/routines/use-routine-runs";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -42,9 +48,13 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { deleteQuestion } from "@/lib/delete-question";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { routineDoes } from "@/lib/routines/merged";
 import {
+  deleteRoutineMutationKey,
   deleteRoutineMutationOptions,
   runRoutineNowMutationOptions,
   setRoutineEnabledMutationOptions,
@@ -52,66 +62,17 @@ import {
 import {
   type RoutineRecord,
   type RoutineRunRecord,
-  routineRunsQueryOptions,
   routinesQueryOptions,
 } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
+import { lastRunLabel } from "@/lib/routines/words";
 import { queryClient } from "@/query-client";
 
-/** The browser's own time zone, for saying a schedule's only where it differs. */
-export function viewerTimeZone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone;
-  } catch {
-    return "UTC";
-  }
-}
-
-/**
- * When a routine starts, as its row says it: the schedule, with its time zone only where it isn't
- * the reader's own. "Weekdays at 09:00" in Madrid, read in Madrid, needs no zone; read in New York
- * it does. The details always name the zone.
- */
-export function scheduleWords(
-  routine: Pick<RoutineRecord, "schedule" | "timezone">,
-  localZone: string = viewerTimeZone(),
-): string {
-  return routine.timezone === localZone
-    ? routine.schedule
-    : `${routine.schedule} · ${routine.timezone}`;
-}
-
-/**
- * What the last-run cell says, and in what tone.
- *
- * `lastRun === null` and `lastRun.status === null` are different facts, and saying the wrong one
- * invents news: the first is "this routine has never finished a run," the second is "one is open
- * right now" — which is also what a run stuck open after repeated dispatch failures looks like from
- * here. Neither is a failure, so neither gets the destructive tone; only `status: "failed"` does.
- */
-export function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
-  text: string;
-  className: string;
-} {
-  if (lastRun === null)
-    return { text: "Hasn't run yet", className: "text-muted-foreground" };
-  if (lastRun.status === null)
-    return { text: "Running…", className: "text-muted-foreground" };
-  const when = lastRun.at ? relativeTime(lastRun.at) : "recently";
-  if (lastRun.status === "failed")
-    return { text: `Failed ${when}`, className: "text-destructive" };
-  if (lastRun.status === "skipped")
-    return {
-      text: `Skipped ${when}`,
-      className: "text-amber-600 dark:text-amber-500",
-    };
-  if (lastRun.status === "succeeded")
-    return { text: `Ran ${when}`, className: "text-muted-foreground" };
-  // An outcome this DTO doesn't recognise degrades to a neutral label rather than an invented
-  // success: the contract typing makes a fourth outcome a build-time error, and this is the runtime
-  // fallback if that ever slips through.
-  return { text: `Finished ${when}`, className: "text-muted-foreground" };
-}
+export {
+  lastRunLabel,
+  scheduleWords,
+  viewerTimeZone,
+} from "@/lib/routines/words";
 
 /**
  * When it runs next. Enabled only: the store recomputes nextRunAt on a schedule change or
@@ -124,7 +85,7 @@ function nextRunWords(routine: RoutineRecord): {
 } {
   if (!routine.enabled) return { text: "Paused" };
   if (new Date(routine.nextRunAt).getTime() <= Date.now())
-    return { text: "Due", className: "text-amber-600 dark:text-amber-500" };
+    return { text: "Due", className: "text-warning" };
   return { text: relativeTime(routine.nextRunAt) };
 }
 
@@ -135,12 +96,19 @@ const RUN_STATUS: Record<
   running: { text: "Running", className: "" },
   succeeded: {
     text: "Succeeded",
-    className: "text-emerald-600 dark:text-emerald-500",
+    className: "text-success",
   },
   failed: { text: "Failed", className: "text-destructive" },
-  skipped: { text: "Skipped", className: "text-amber-600 dark:text-amber-500" },
+  skipped: { text: "Skipped", className: "text-warning" },
   waiting: { text: "Waiting for you", className: "" },
 };
+
+/** How a run's status reads on its row. Nothing for one a newer server sends that this app doesn't know. */
+export function runStatusOf(status: string) {
+  const known: Partial<Record<string, (typeof RUN_STATUS)["running"]>> =
+    RUN_STATUS;
+  return known[status] ?? null;
+}
 
 const RUN_SOURCE: Record<RoutineRunRecord["source"], string> = {
   run_now: "Run now",
@@ -154,7 +122,7 @@ const RUN_SOURCE: Record<RoutineRunRecord["source"], string> = {
  * status. Polled with the routine's runs read, so the one Run now started appears without a reload.
  */
 function RoutineRuns({ routine }: { routine: RoutineRecord }) {
-  const runs = useQuery(routineRunsQueryOptions(routine.id));
+  const runs = useRoutineRuns(routine.id);
   return (
     <PageSection title="Runs">
       {runs.isPending ? (
@@ -162,7 +130,7 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
       ) : runs.error ? (
         <div className="mt-4 flex flex-wrap items-center gap-3" role="alert">
           <p className="text-destructive text-sm">
-            Couldn't load its runs. Try again.
+            {loadFailure(runs.error, "Couldn't load its runs. Try again.")}
           </p>
           <Button
             disabled={runs.isFetching}
@@ -177,7 +145,7 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
       ) : runs.data.length ? (
         <PageRows>
           {runs.data.map((run, index) => {
-            const status = RUN_STATUS[run.status] ?? RUN_STATUS.skipped;
+            const status = runStatusOf(run.status);
             return (
               <Fragment key={run.id}>
                 {index > 0 ? <Separator /> : null}
@@ -186,9 +154,11 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
                     <IconHistory />
                   </ItemMedia>
                   <ItemContent>
-                    <ItemTitle className={status.className}>
-                      {status.text}
-                    </ItemTitle>
+                    {status ? (
+                      <ItemTitle className={status.className}>
+                        {status.text}
+                      </ItemTitle>
+                    ) : null}
                     <ItemDescription>
                       {RUN_SOURCE[run.source] ?? "Scheduled"} ·{" "}
                       {relativeTime(run.startedAt)}
@@ -199,11 +169,11 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
                       </ItemDescription>
                     ) : null}
                   </ItemContent>
-                  {routine.channel.gone ? null : (
+                  {routine.conversation.gone ? null : (
                     <ItemActions>
                       <Link
                         className="text-sm underline"
-                        params={{ channelId: routine.channel.id }}
+                        params={{ channelId: routine.conversation.id }}
                         to="/channel/$channelId"
                       >
                         Open conversation
@@ -239,12 +209,17 @@ export function RoutineRoutePage({
   const routines = useQuery(routinesQueryOptions());
   const bots = useQuery(agentListQueryOptions());
   const hidden = useQuery(agentListQueryOptions(true));
+  const deleted = useDeletedHere<string>(
+    deleteRoutineMutationKey,
+    (id) => id === routineId,
+  );
   const back = routinesOf(agentId);
   const routine = routines.data?.routines.find((row) => row.id === routineId);
   if (!routine)
     return (
       <RoutineDetailMissing
         back={back}
+        deleted={deleted}
         icon={IconCalendarTime}
         kind="routine"
         read={routines}
@@ -252,14 +227,14 @@ export function RoutineRoutePage({
     );
   // A routine outlives hiding its Bot, so a hidden Bot still names it.
   const botName = [...(bots.data ?? []), ...(hidden.data ?? [])].find(
-    (bot) => bot.id === routine.agentId,
+    (bot) => bot.id === routine.botId,
   )?.name;
   return (
     <RoutinePage
       back={back}
       bot={
         agentId === undefined
-          ? { id: routine.agentId, name: botName ?? "A Bot" }
+          ? { id: routine.botId, name: botName ?? "A Bot" }
           : undefined
       }
       key={routine.id}
@@ -269,9 +244,10 @@ export function RoutineRoutePage({
 }
 
 /**
- * Everything about one scheduled routine: switched, run, read back and deleted, each the same write
- * it always was. The switch takes effect when switched, Run now does real work, and Delete, the last
- * row of the actions, asks first, then returns to the list.
+ * Everything about one scheduled routine: switched, run, changed, read back and deleted, each the
+ * same write it always was. The switch takes effect when switched, Run now does real work, Edit
+ * routine opens the fields New routine asks for, and Delete, the last row of the actions, asks first,
+ * then returns to the list.
  */
 export function RoutinePage({
   routine,
@@ -289,9 +265,12 @@ export function RoutinePage({
   const runNow = useMutation(runRoutineNowMutationOptions(queryClient));
   const remove = useMutation(deleteRoutineMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
+  const [editing, setEditing] = useState(false);
   const lastRun = lastRunLabel(routine.lastRun);
   const next = nextRunWords(routine);
   const does = routineDoes(routine);
+  // What the page's heading and the Routines list call it.
+  const named = routine.title ?? does;
   const facts = [
     {
       key: "schedule",
@@ -328,7 +307,7 @@ export function RoutinePage({
           ? `${routine.schedule} · ${routine.timezone} · Acts`
           : "Paused. Nothing starts it until you turn it on."
       }
-      title={routine.title ?? does}
+      title={named}
     >
       {/* What can be done to it now. The page title names it, so this section has no heading. */}
       <PageSection>
@@ -363,7 +342,11 @@ export function RoutinePage({
               <button
                 aria-label={`Run the routine scheduled ${routine.schedule} now`}
                 disabled={!routine.enabled || runNow.isPending}
-                onClick={() => runNow.mutate(routine.id)}
+                onClick={() => {
+                  // Bots can't run until a card is added: the dialog says why, in place of a run.
+                  if (stopIfNeedsCard()) return;
+                  runNow.mutate(routine.id);
+                }}
                 type="button"
               />
             }
@@ -373,7 +356,9 @@ export function RoutinePage({
               <IconPlayerPlay />
             </ItemMedia>
             <ItemContent>
-              <ItemTitle>Run now</ItemTitle>
+              <ItemTitle>
+                {runNow.isPending ? "Starting…" : "Run now"}
+              </ItemTitle>
               <ItemDescription>
                 {routine.enabled
                   ? "Runs it now, for real. The Bot does the work and posts in the conversation."
@@ -382,7 +367,26 @@ export function RoutinePage({
             </ItemContent>
           </Item>
           <Separator />
-          {routine.channel.gone ? (
+          {/* More than one value, so a dialog: the same fields New routine asks for. */}
+          <Item
+            render={<button onClick={() => setEditing(true)} type="button" />}
+            size="sm"
+          >
+            <ItemMedia variant="icon">
+              <IconPencil />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Edit routine</ItemTitle>
+              <ItemDescription>
+                Change its name, what it does, or when it runs.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <IconChevronRight className="size-4 text-muted-foreground" />
+            </ItemActions>
+          </Item>
+          <Separator />
+          {routine.conversation.gone ? (
             <Item size="sm">
               <ItemMedia variant="icon">
                 <IconMessageOff />
@@ -400,7 +404,7 @@ export function RoutinePage({
             <Item
               render={
                 <Link
-                  params={{ channelId: routine.channel.id }}
+                  params={{ channelId: routine.conversation.id }}
                   to="/channel/$channelId"
                 />
               }
@@ -412,7 +416,7 @@ export function RoutinePage({
               <ItemContent>
                 <ItemTitle>Open conversation</ItemTitle>
                 <ItemDescription>
-                  {routine.channel.title ?? "Untitled conversation"}
+                  {routine.conversation.title ?? "Untitled conversation"}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
@@ -460,7 +464,29 @@ export function RoutinePage({
         </PageRows>
         {setEnabled.error || runNow.error ? (
           <p className="mt-3 text-destructive text-sm" role="alert">
-            {setEnabled.error?.message ?? runNow.error?.message}
+            {failureSaid(setEnabled.error ?? runNow.error)}
+          </p>
+        ) : null}
+        {/*
+         * The press is answered here, as the check-in page answers its own Run now: it started, and
+         * where to watch it. The link sits outside the Run now row, which is a button.
+         */}
+        {runNow.isSuccess ? (
+          <p className="mt-3 text-sm" role="status">
+            {routine.conversation.gone ? (
+              "Started. It shows under Runs."
+            ) : (
+              <>
+                Started. The Bot posts in the conversation as it works.{" "}
+                <Link
+                  className="underline"
+                  params={{ channelId: routine.conversation.id }}
+                  to="/channel/$channelId"
+                >
+                  Open conversation
+                </Link>
+              </>
+            )}
           </p>
         ) : null}
       </PageSection>
@@ -502,11 +528,19 @@ export function RoutinePage({
 
       <RoutineRuns routine={routine} />
 
-      {/* It names the schedule, the words a person reads first on the row. */}
+      <EditRoutineDialog
+        onOpenChange={setEditing}
+        open={editing}
+        routine={routine}
+      />
+
+      {/* It names the routine as its heading and its row do, never its schedule, which two can share. */}
       <Dialog onOpenChange={setConfirming} open={confirming}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete "{routine.schedule}"?</DialogTitle>
+            <DialogTitle>
+              {deleteQuestion(named, "Delete this routine?")}
+            </DialogTitle>
             <DialogDescription>
               This routine stops for good. You can't undo this.
             </DialogDescription>
@@ -514,7 +548,7 @@ export function RoutinePage({
           {remove.error ? (
             <DialogBody className="mt-4">
               <p className="text-destructive text-sm" role="alert">
-                {remove.error.message}
+                {failureSaid(remove.error)}
               </p>
             </DialogBody>
           ) : null}
@@ -531,7 +565,9 @@ export function RoutinePage({
               disabled={remove.isPending}
               onClick={() =>
                 remove.mutate(routine.id, {
-                  onSuccess: () => navigate(back),
+                  // Usually the route has gone back already, on the list without it. This is
+                  // for a list that couldn't be read again.
+                  onSuccess: () => navigate({ ...back, replace: true }),
                 })
               }
               size="sm"

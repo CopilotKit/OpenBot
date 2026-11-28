@@ -1,16 +1,16 @@
 import { expect, test } from "bun:test";
 import { managePaths } from "@/lib/manage-paths";
+import type { AppSetup } from "@/lib/api/generated/model";
 import {
   brokeredConnectionDescription,
   brokeredDisconnectNote,
-  brokeredProvenance,
   brokeredReach,
   directoryRouteDecision,
+  fromDirectory,
   moreAppsRow,
   moreAppsSectionDescription,
   providerVocabulary,
 } from "@/lib/plugins/provider-vocabulary";
-import type { PluginsPage } from "@/lib/plugins/queries";
 
 /**
  * The Plugins screens name no broker at all: a person, the admin included, connects apps through
@@ -19,12 +19,11 @@ import type { PluginsPage } from "@/lib/plugins/queries";
  */
 
 const page = (provider?: "composio" | "arcade") =>
-  ({ provider }) as PluginsPage;
+  ({ directoryProvider: provider ?? null }) as AppSetup;
 
 const everythingSaid = (provider: "composio" | "arcade") =>
   JSON.stringify([
     providerVocabulary(provider).directoryLabel,
-    providerVocabulary(provider).directoryDescription,
     moreAppsRow(provider, true),
     moreAppsRow(provider, false).title,
     moreAppsSectionDescription(provider),
@@ -40,22 +39,21 @@ test("no sentence names either broker", () => {
   expect(managePaths("team").brokerDirectory("arcade").to).toBe(
     "/admin/plugins/arcade",
   );
-  expect(brokeredProvenance("arcade")).toBe(true);
+  expect(fromDirectory({ source: "directory" })).toBe(true);
 });
 
 test("a Composio deployment's words are OpenBot's", () => {
   expect(providerVocabulary("composio")).toEqual({
     directoryLabel: "Browse apps",
     envVar: "COMPOSIO_API_KEY",
-    directoryDescription:
-      "A few hundred apps. Each person connects their own account.",
   });
   expect(moreAppsSectionDescription("composio")).toBe(
     "More apps people can connect through OpenBot. Nobody here has reviewed them.",
   );
   expect(moreAppsRow("composio", true)).toEqual({
     title: "Browse apps",
-    description: "A few hundred apps. Each person connects their own account.",
+    description:
+      "Apps nobody here has reviewed. Each person connects their own account.",
     linked: true,
   });
   expect(moreAppsRow("composio", false)).toEqual({
@@ -93,7 +91,7 @@ test("the variable an admin sets follows the provider rather than being hard-cod
 test("a configured deployment links to its own directory, whichever provider it is", () => {
   expect(moreAppsRow("arcade", true)).toEqual({
     title: "Browse apps",
-    // Arcade's own sentence: it claims no app count, because nobody here has counted Arcade's.
+    // No app count, on either provider: nobody here counts the directory, and it keeps growing.
     description:
       "Apps nobody here has reviewed. Each person connects their own account.",
     linked: true,
@@ -113,11 +111,10 @@ test("each provider's directory path is its own route", () => {
   );
 });
 
-test("brokered-ness is read off the row and needs no provider", () => {
-  expect(brokeredProvenance("composio")).toBe(true);
-  expect(brokeredProvenance("arcade")).toBe(true);
-  expect(brokeredProvenance("custom")).toBe(false);
-  expect(brokeredProvenance("first-party")).toBe(false);
+test("coming from the directory is read off the app and needs no provider", () => {
+  expect(fromDirectory({ source: "directory" })).toBe(true);
+  expect(fromDirectory({ source: "address" })).toBe(false);
+  expect(fromDirectory({ source: "catalogue" })).toBe(false);
 });
 
 test("the Composio directory route does not answer on an Arcade deployment", () => {

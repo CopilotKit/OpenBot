@@ -1,12 +1,10 @@
+import { translateApprovalRules as translateApprovalRulesRequest } from "@/lib/api/generated/approval-rules/approval-rules";
+import type { ApprovalRuleDraftProblem } from "@/lib/api/generated/model";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { ApprovalRuleInput } from "@/lib/approvals";
-import { client } from "@/lib/client";
 
 /** What is wrong with one field of one rule, counted from 1 as the screen counts them. */
-export type RuleRowProblem = {
-  row: number;
-  field: keyof ApprovalRuleInput;
-  message: string;
-};
+export type RuleRowProblem = ApprovalRuleDraftProblem;
 
 /**
  * Whether rules match real tools, kinds of action and Bots with the gate's own matcher, and what is
@@ -38,10 +36,14 @@ export type ApprovalRuleTranslation = {
 export async function translateApprovalRules(
   text: string,
 ): Promise<ApprovalRuleTranslation> {
-  const response = await client("/api/approvals/team/rules/translate", {
-    method: "POST",
-    body: { text },
-    fallback: "Couldn't write the rules. Try again, or add the rule by hand.",
-  });
-  return (await response.json()) as ApprovalRuleTranslation;
+  const translation = await translateApprovalRulesRequest(
+    organizationId(),
+    { text },
+    { "Idempotency-Key": idempotencyKey() },
+    {
+      fallback: "Couldn't write the rules. Try again, or add the rule by hand.",
+    },
+  );
+  // Rules that don't check come back as the model wrote them, for the admin to fix; `check` says so.
+  return translation as ApprovalRuleTranslation;
 }

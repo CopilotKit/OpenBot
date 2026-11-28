@@ -9,21 +9,45 @@ import {
 } from "@tanstack/react-router";
 import { createRoot } from "react-dom/client";
 import { PageShell } from "@/components/layout/page-shell";
+import { setCurrentOrganization } from "@/lib/organizations/current";
 import { SKINS } from "@/skins/registry";
 import type { SkinId } from "@/skins/types";
+import { ME_PATH, meBody, PREFERENCES_PATH } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import { answerBotAttention, answerBotsList, attentionOf } from "./bots-api";
+import { CONVERSATIONS_PATH, conversationPage } from "./conversations-api";
 
 /**
  * A skin's frame around a page, as `_authed/_app` draws it, as a page of its own for
  * skins-window-buttons.test.tsx to bundle and load in Chromium. OpenBot's API is a fake that
  * answers in the shapes the real endpoints return, and the live socket never connects.
  *
- * `?skin=<id>&path=<path>` picks the skin and the page the frame opens on.
+ * `?skin=<id>&path=<path>` picks the skin and the page the frame opens on. `&attention=dot` gives
+ * one Bot an unread message, so the Bots badge is a dot, and `&attention=<n>` gives it n things
+ * waiting on the person, so the badge is a count.
+ *
+ * The page has no sign-in in front of it, so it starts in `default`, the organization the fake
+ * answers for, as every test does (preload.ts, which a page loaded in a browser does not run).
  */
+setCurrentOrganization("default");
+
 const params = new URLSearchParams(location.search);
 const skinId = (params.get("skin") ?? "openduet") as SkinId;
 const path = params.get("path") ?? "/";
 
 const now = "2026-10-27T10:00:00.000Z";
+
+/** What the Bots badge reads: nothing waiting, an unread message, or n things waiting on you. */
+function attention(asked: string | null) {
+  if (!asked) return [];
+  const waiting = asked === "dot" ? 0 : Number(asked);
+  return [
+    attentionOf("b-1", "Inbox Bot", {
+      unread: asked === "dot" ? 1 : 0,
+      tasks: { needsInput: 0, ready: waiting, failed: 0 },
+    }),
+  ];
+}
 
 function channel(id: string, agentIds: string[], summary: string) {
   return {
@@ -43,7 +67,7 @@ function channel(id: string, agentIds: string[], summary: string) {
 }
 
 const bodies: Record<string, unknown> = {
-  "/api/me": {
+  [ME_PATH]: meBody({
     user: {
       id: "u-1",
       name: "Pat Example",
@@ -51,32 +75,31 @@ const bodies: Record<string, unknown> = {
       role: "admin",
       onboarding: null,
     },
+  }),
+  [DEPLOYMENT_PATH]: { transcription: true },
+  [PREFERENCES_PATH]: {
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: true,
   },
-  "/api/capabilities": { transcription: true },
-  "/api/settings/preferences": {
-    preferences: {
-      messageListEmphasis: "thread",
-      selfHostBannerDismissed: true,
-    },
-  },
-  "/api/channels": {
-    channels: [
-      channel("c-1", ["b-1"], "Renewal for the studio policy"),
-      channel("g-1", ["b-1", "b-2"], "Kiln repair plan"),
-    ],
-    nextCursor: null,
-  },
-  "/api/bots/attention": { bots: [], lastPingId: null },
-  "/api/agents": {
-    agents: [
+  [CONVERSATIONS_PATH]: conversationPage([
+    channel("c-1", ["b-1"], "Renewal for the studio policy"),
+    channel("g-1", ["b-1", "b-2"], "Kiln repair plan"),
+  ]),
+};
+
+window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = new URL(String(input), location.href);
+  const bots = answerBotsList(url, init, {
+    visible: [
       { id: "b-1", name: "Inbox Bot" },
       { id: "b-2", name: "Ops Bot" },
     ],
-  },
-};
-
-window.fetch = (async (input: RequestInfo | URL) => {
-  const url = new URL(String(input), location.href);
+  });
+  if (bots) return bots;
+  const waiting = answerBotAttention(url, init, {
+    bots: attention(params.get("attention")),
+  });
+  if (waiting) return waiting;
   if (url.pathname in bodies) return Response.json(bodies[url.pathname]);
   return Response.json({ error: "not served" }, { status: 404 });
 }) as typeof fetch;

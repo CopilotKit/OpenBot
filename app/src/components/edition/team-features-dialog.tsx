@@ -3,6 +3,8 @@ import {
   IconAdjustments,
   IconArrowUpRight,
   IconChecks,
+  IconCloudComputing,
+  IconCode,
   IconDeviceDesktop,
   IconHistory,
   IconListCheck,
@@ -30,69 +32,55 @@ import { buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { NavigationItem } from "@/lib/navigation";
-import { BUSINESS_URL } from "@/lib/openbot-for-business";
+import {
+  type AppBusinessPlace,
+  BUSINESS_URL,
+} from "@/lib/openbot-for-business";
 import { cn } from "@/lib/utils";
+import {
+  BOOK_A_DEMO_LINE,
+  BUSINESS_FEATURE_GROUPS,
+  BUSINESS_FEATURES_MORE,
+  type BusinessFeatureIcon,
+} from "@openbot/shared/openbot-for-business";
 
-/** The dialog's first line, in big letters: where OpenBot for Business runs. */
-export const DEPLOY_LINE =
-  "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.";
+/** Each feature's icon. Desktop's first screen draws the same features with the same icons. */
+const FEATURE_ICONS: Record<BusinessFeatureIcon, Icon> = {
+  deploy: IconCloudComputing,
+  agents: IconCode,
+  "sign-in": IconLogin2,
+  people: IconUsers,
+  "shared-bots": IconUsersGroup,
+  learning: IconSchool,
+  chat: IconMessages,
+  computer: IconDeviceDesktop,
+  controls: IconAdjustments,
+  rules: IconListCheck,
+  policies: IconSparkles,
+  governance: IconChecks,
+  audit: IconHistory,
+};
 
 /**
- * What the team edition has and the personal edition does not, one short line each, in the three
- * things a team gets: its people, where its Bots work, and control over both.
+ * What the team edition has and the personal edition does not (`BUSINESS_FEATURE_GROUPS`), with
+ * the app's icons.
  *
  * Shown where Admin would be: the list, beside the calendar to book a demo.
  */
 export const TEAM_FEATURE_GROUPS: readonly {
   title: string;
   features: readonly { title: string; icon: Icon }[];
-}[] = [
-  {
-    title: "For your whole team",
-    features: [
-      {
-        title: "Sign-in with Google, Microsoft or custom SSO",
-        icon: IconLogin2,
-      },
-      { title: "People, roles and admins", icon: IconUsers },
-      { title: "Bots shared with your whole team", icon: IconUsersGroup },
-      { title: "Learning shared across the team", icon: IconSchool },
-    ],
-  },
-  {
-    title: "Where your Bots work",
-    features: [
-      { title: "Bots in Slack and Microsoft Teams", icon: IconMessages },
-      { title: "A computer for each Bot", icon: IconDeviceDesktop },
-    ],
-  },
-  {
-    title: "In control",
-    features: [
-      {
-        title: "Controls over models, apps and networks",
-        icon: IconAdjustments,
-      },
-      { title: "Rules every Bot follows", icon: IconListCheck },
-      /*
-       * Boundaries, team approval rules, auto-review guidance, permissions, the network allowlist
-       * and one Bot's app actions are each described in words on their Admin screen, and each
-       * replays the result over recorded activity before it is saved.
-       */
-      {
-        title: "Policies in plain English, tested on past activity",
-        icon: IconSparkles,
-      },
-      { title: "Governance for everyone", icon: IconChecks },
-      { title: "A full audit trail, with export", icon: IconHistory },
-    ],
-  },
-];
+}[] = BUSINESS_FEATURE_GROUPS.map((group) => ({
+  title: group.title,
+  features: group.features.map((feature) => ({
+    title: feature.title,
+    icon: FEATURE_ICONS[feature.icon],
+  })),
+}));
 
 export const TEAM_FEATURES = TEAM_FEATURE_GROUPS.flatMap(
   (group) => group.features,
@@ -102,8 +90,12 @@ export const TEAM_FEATURES = TEAM_FEATURE_GROUPS.flatMap(
  * Open or closed, for the one dialog the signed-in layout mounts. Module state so any entry in any
  * skin (the navigation, the home page's link, a Bot's computer line, the self-host banner) can open
  * it without a provider of its own.
+ *
+ * With where it was opened from, which its calendar is tagged with and counts (`BookingCalendar`).
+ * The calendar is drawn only while the dialog is open, so it reads the entry that opened it.
  */
 let open = false;
+let openedFrom: AppBusinessPlace = "account_menu";
 const listeners = new Set<() => void>();
 
 function setOpen(next: boolean) {
@@ -111,7 +103,8 @@ function setOpen(next: boolean) {
   for (const listener of listeners) listener();
 }
 
-export function openTeamFeatures() {
+export function openTeamFeatures(from: AppBusinessPlace) {
+  openedFrom = from;
   setOpen(true);
 }
 
@@ -154,9 +147,6 @@ export function TeamFeaturesDialog() {
                 <OpenBotLogo className="size-6" />
                 <BrandName>OpenBot for Business</BrandName>
               </DialogTitle>
-              <DialogDescription className="font-semibold text-2xl text-balance text-foreground tracking-tight">
-                {DEPLOY_LINE}
-              </DialogDescription>
             </DialogHeader>
             {TEAM_FEATURE_GROUPS.map((group) => (
               <section className="flex flex-col gap-3" key={group.title}>
@@ -175,7 +165,9 @@ export function TeamFeaturesDialog() {
                 </ul>
               </section>
             ))}
-            <p className="text-muted-foreground text-sm">And tons more…</p>
+            <p className="text-muted-foreground text-sm">
+              {BUSINESS_FEATURES_MORE}
+            </p>
           </div>
           <BookDemo />
         </div>
@@ -192,6 +184,7 @@ export function TeamFeaturesDialog() {
  * OpenBot for Business page in a new tab (on the Desktop, in the person's browser).
  */
 function BookDemo() {
+  const [place] = useState(() => openedFrom);
   const [failed, setFailed] = useState(false);
   const fail = useCallback(() => setFailed(true), []);
   // Calendly shows its own confirmation in the frame; there is nothing more to say here.
@@ -207,7 +200,7 @@ function BookDemo() {
           Book a demo
         </h3>
         <p className="text-muted-foreground text-sm text-pretty">
-          Pick a time to see a demo or scope a proof of concept with us.
+          {BOOK_A_DEMO_LINE}
         </p>
       </div>
       <div className="relative">
@@ -228,7 +221,7 @@ function BookDemo() {
             </a>
           </div>
         ) : (
-          <BookingCalendar onBooked={booked} onFailed={fail} />
+          <BookingCalendar onBooked={booked} onFailed={fail} place={place} />
         )}
       </div>
     </section>
@@ -256,7 +249,7 @@ export function navigationRender(
         className={cn("w-full text-left", props.className)}
         onClick={(event) => {
           props.onClick?.(event);
-          openTeamFeatures();
+          openTeamFeatures("account_menu");
         }}
         type="button"
       />
@@ -289,7 +282,7 @@ export function NavigationTarget({
         className={cn("w-full text-left", props.className)}
         onClick={(event) => {
           onClick?.(event);
-          openTeamFeatures();
+          openTeamFeatures("account_menu");
         }}
         type="button"
       />
@@ -301,14 +294,18 @@ export function NavigationTarget({
 }
 
 /**
- * The personal edition's way to learn about a computer for each Bot. It opens the OpenBot for
- * Business dialog, over whatever it sits in.
+ * The way to learn about a computer for each Bot, in the personal edition and on OpenBot Cloud. It
+ * opens the OpenBot for Business dialog, over whatever it sits in. Under a row's description it
+ * takes that description's size (`className="text-xs"`).
  */
-export function BusinessComputerLink() {
+export function BusinessComputerLink({ className }: { className?: string }) {
   return (
     <button
-      className="w-fit text-left text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-      onClick={openTeamFeatures}
+      className={cn(
+        "w-fit text-left text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground",
+        className,
+      )}
+      onClick={() => openTeamFeatures("computer_line")}
       type="button"
     >
       Give each Bot its own computer with OpenBot for Business.

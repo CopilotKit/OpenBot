@@ -1,5 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { batchUpdateBotGrants } from "@/lib/api/generated/bot-grants/bot-grants";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { invalidatePlugins } from "@/lib/plugins/mutations";
 import {
   type SharedUseApproval,
@@ -28,18 +29,18 @@ export const saveAppGrantsMutationOptions = (queryClient: QueryClient) =>
       /** Who may use a Shared app's one account through this Bot, when none is approved yet. */
       approval?: SharedUseApproval;
     }) =>
-      client(
-        `/api/plugins/for/${encodeURIComponent(variables.agentId)}/apps/${encodeURIComponent(variables.app)}/grants`,
+      batchUpdateBotGrants(
+        organizationId(),
+        variables.agentId,
         {
-          method: "POST",
-          body: {
-            add: variables.add,
-            remove: variables.remove,
-            ...(variables.authoring ? { authoring: variables.authoring } : {}),
-            ...(variables.approval ? { approval: variables.approval } : {}),
-          },
-          fallback: FALLBACK,
+          appId: variables.app,
+          add: variables.add,
+          remove: variables.remove,
+          ...(variables.authoring ? { authoring: variables.authoring } : {}),
+          ...(variables.approval ? { approval: variables.approval } : {}),
         },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: FALLBACK },
       ),
     onSuccess: (_response, variables) =>
       Promise.all([
