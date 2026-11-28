@@ -3,6 +3,7 @@ import { useRouterState } from "@tanstack/react-router";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { channelQueryOptions } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
+import { underConnections } from "@/lib/moves/moved-apps";
 
 /** Which part of OpenDots' sidebar a page belongs to, so the right row is lit. */
 export type Section =
@@ -109,9 +110,6 @@ export function parsePlace(
   if (path === "/bots") {
     return { section: "bots", label: "All Bots", ownsWatch: false };
   }
-  if (path === "/agents") {
-    return { section: "bots", label: "Agents", ownsWatch: false };
-  }
   if (path === "/s/routines" || path === "/routines") {
     return { section: "routines", label: "Routines", ownsWatch: false };
   }
@@ -121,7 +119,7 @@ export function parsePlace(
   if (path === "/skills" || path.startsWith("/skills/")) {
     return { section: "skills", label: "Skills", ownsWatch: false };
   }
-  if (path.startsWith("/connections")) {
+  if (path.startsWith("/connections") || underConnections(path)) {
     return { section: "connections", label: "Connections", ownsWatch: false };
   }
   return {

@@ -2,10 +2,11 @@ import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import type { GetPersonResponse } from "@/lib/api/generated/model";
 import { getPerson } from "@/lib/api/generated/people/people";
 import { ClientError } from "@/lib/client";
-import { knownRole } from "./roles";
 import { readDeployment } from "@/lib/deployment/queries";
 import { currentOrganizationId } from "@/lib/organizations/current";
 import { ensureCurrentOrganization } from "@/lib/organizations/queries";
+import { renewalRequired } from "./renewal";
+import { knownRole } from "./roles";
 
 /**
  * Where this person is in first-run onboarding.
@@ -38,6 +39,11 @@ export type AuthenticatedUser = {
    * one.
    */
   openbotVersion?: string | null;
+  /**
+   * The identity providers they have signed in through (getPerson's `providers`), such as "okta":
+   * where to send them to sign in again, for something that needs a recent sign-in.
+   */
+  providers?: string[];
 };
 
 /** Whether the gate holds: there is an onboarding to do and this person has not finished it. */
@@ -57,6 +63,8 @@ export type AuthProviderId = "google" | "microsoft" | "okta";
 /** What the sign-in screen may offer, answered by the process that knows. */
 export type SignInOptions = {
   providers: AuthProviderId[];
+  /** Whether people sign in through the hosted sign-in, with their account with OpenBot by CopilotKit. */
+  hosted: boolean;
   /**
    * Whether any enterprise identity provider is registered.
    *
@@ -73,6 +81,7 @@ async function signInOptions(): Promise<SignInOptions> {
   const body = await readDeployment({ fallback: "Could not load sign-in" });
   return {
     providers: body.authProviders,
+    hosted: body.hostedSignIn === true,
     sso: body.ssoConfigured,
     ssoRequired: body.ssoRequired,
   };
@@ -116,7 +125,13 @@ async function currentUser(
       fallback: "Could not load the current user",
     });
   } catch (error) {
-    if (error instanceof ClientError && error.status === 401) return null;
+    // Signed out, but never a sign-in that needs renewing (lib/auth/renewal.ts): that person is signed in.
+    if (
+      error instanceof ClientError &&
+      error.status === 401 &&
+      !renewalRequired(error)
+    )
+      return null;
     throw error;
   }
   const { person } = answer;
@@ -130,6 +145,7 @@ async function currentUser(
     role: knownRole(person.role),
     onboarding: person.onboarding,
     openbotVersion: answer.openbotVersion,
+    providers: person.providers ?? [],
   };
 }
 

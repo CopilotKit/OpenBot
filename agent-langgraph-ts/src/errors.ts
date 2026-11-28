@@ -17,6 +17,8 @@ export const MODEL_REFUSED = "OPENBOT_MODEL_REFUSED";
 export const MODEL_AUTH_REQUIRED = "OPENBOT_MODEL_AUTH_REQUIRED";
 export const MODEL_BILLING = "OPENBOT_MODEL_BILLING";
 export const MODEL_UNREACHABLE = "OPENBOT_MODEL_UNREACHABLE";
+/** The request was still too long after every way of making room: the latest message is. */
+export const MODEL_MESSAGE_TOO_LONG = "OPENBOT_MODEL_MESSAGE_TOO_LONG";
 
 /** What a person reads when a run fails for a reason that is not the provider's. */
 export const RUN_FAILED =
@@ -47,6 +49,18 @@ export class ModelDeclinedError extends Error {
   constructor(words: string) {
     super(words || "The model declined to answer this request.");
     this.name = "ModelDeclinedError";
+  }
+}
+
+/**
+ * The provider refused the request as too long even with every earlier result cleared and every
+ * earlier message cut (`context-room.ts`), so what is left is the latest message itself. Carries the
+ * provider's own words; the server says the rest.
+ */
+export class MessageTooLongError extends Error {
+  constructor(words: string) {
+    super(words || "The request is too long for the model.");
+    this.name = "MessageTooLongError";
   }
 }
 
@@ -283,6 +297,13 @@ export function runFailure(
         message: link.message,
         ...(link.code ? { code: link.code } : {}),
         ...(category ? { category } : {}),
+      };
+    }
+    if (link instanceof MessageTooLongError) {
+      return {
+        message: link.message,
+        code: MODEL_MESSAGE_TOO_LONG,
+        category: "invalid_request",
       };
     }
     if (link instanceof ModelDeclinedError) {

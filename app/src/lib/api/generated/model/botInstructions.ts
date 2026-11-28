@@ -3,8 +3,8 @@
  */
 
 /**
- * New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
+ * New instructions for the starter Bot, 1 to 5000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
  * @minLength 1
- * @maxLength 1000
+ * @maxLength 5000
  */
 export type BotInstructions = string;

@@ -14,6 +14,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { renameChannelMutationOptions } from "@/lib/channels/mutations";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** The server's cap on a chosen name, `MAX_CHOSEN_TITLE_GRAPHEMES`, so the field stops where it does. */
 const MAX_NAME_LENGTH = 60;
@@ -113,7 +114,7 @@ export function RenameConversationDialog({
           </form>
           {rename.error ? (
             <p className="mt-3 text-destructive text-sm" role="alert">
-              {rename.error.message}
+              {failureSaid(rename.error)}
             </p>
           ) : null}
         </DialogBody>

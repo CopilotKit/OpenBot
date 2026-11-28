@@ -6,6 +6,7 @@ import {
   IconTerminal2,
 } from "@tabler/icons-react";
 import { type ReactNode, useState } from "react";
+import { ToolLine } from "@/components/channels/tool-line";
 import { Badge, type Tone } from "@/components/gallery/frame";
 import { Button } from "@/components/ui/button";
 import { showComputerView } from "@/lib/computers/panel-view";
@@ -219,6 +220,92 @@ export function TerminalBlock({
       </div>
     </section>
   );
+}
+
+/**
+ * A command in the conversation: one line saying what ran and how it ended, which opens to its
+ * terminal block.
+ *
+ * FOLDED, AS EVERY STEP OF A BOT'S WORK IS. The block drew in full in the reply, so a Bot asked for
+ * the day's top five articles showed a terminal's worth of `curl` and Python output between the
+ * question and the answer, and the answer was the part nobody could find. The line is the same line
+ * a search or a page read draws (`ToolLine`), and opening it shows the block exactly as it was:
+ * the command, the end of what it printed, how it exited, and the way into the live terminal.
+ */
+export function TerminalStep(props: Parameters<typeof TerminalBlock>[0]) {
+  const { command, output, status } = props;
+  const { saysWhy, ...words } = terminalStepWords(status);
+  /*
+   * A command that ran is named by the command, on one line. One that did not run is named by why,
+   * in full, as every step that did not happen is: the block's output is that reason, in the
+   * person's words.
+   */
+  const reason = output.trim().split("\n")[0];
+  const detail = saysWhy ? reason || command : command;
+  return (
+    <ToolLine
+      bare
+      detailOnOneLine={!saysWhy}
+      icon={<IconTerminal2 aria-hidden className="size-4" />}
+      {...words}
+      {...(detail ? { detail } : {})}
+    >
+      <TerminalBlock {...props} />
+    </ToolLine>
+  );
+}
+
+/** What a command's line says, in the words every other step's line uses. */
+function terminalStepWords(status: TerminalBlockStatus): {
+  label: string;
+  attempted?: string;
+  failedLabel?: string;
+  running?: boolean;
+  refused?: boolean;
+  failed?: boolean;
+  notYet?: boolean;
+  byYou?: boolean;
+  /** It did not run, so the line says why rather than what. */
+  saysWhy?: boolean;
+} {
+  switch (status.state) {
+    case "running":
+      return { label: "Running a command", running: true };
+    case "starting":
+      return { label: "Run a command", notYet: true, saysWhy: true };
+    case "exited":
+      return status.timedOut
+        ? {
+            label: "Ran a command",
+            failed: true,
+            failedLabel: "Ran a command, stopped: too long",
+          }
+        : status.exitCode === 0
+          ? { label: "Ran a command" }
+          : {
+              label: "Ran a command",
+              failed: true,
+              failedLabel: `Ran a command, exit ${status.exitCode}`,
+            };
+    // "Blocked: Run a command  You declined it.", as a declined file step reads.
+    case "blocked":
+    case "declined":
+      return {
+        label: "Ran a command",
+        attempted: "Run a command",
+        refused: true,
+        saysWhy: true,
+      };
+    case "by-you":
+      return { label: "Ran a command", byYou: true };
+    case "failed":
+      return {
+        label: "Ran a command",
+        failed: true,
+        failedLabel: "Didn't run a command",
+        saysWhy: true,
+      };
+  }
 }
 
 /** What a command's result says about how it ended, for the block's badge. */

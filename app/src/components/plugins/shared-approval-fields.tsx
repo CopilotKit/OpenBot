@@ -18,6 +18,7 @@ import {
 } from "@/lib/plugins/shared-use";
 import { MISSING_TEAM } from "@/lib/teams/names";
 import { teamListQueryOptions } from "@/lib/teams/queries";
+import { failureSaid } from "@/lib/load-failure";
 
 export function sharedSectionSentence(
   effect: "read" | "write",
@@ -155,7 +156,7 @@ function NamedMembers({
         </p>
         {teams.isPending ? null : teams.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {teams.error.message}
+            {failureSaid(teams.error)}
           </p>
         ) : teams.data.teams.length === 0 ? (
           <p className="text-muted-foreground text-sm">

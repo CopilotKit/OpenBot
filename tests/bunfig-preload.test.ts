@@ -29,11 +29,41 @@ function preloadedScripts(bunfigPath: string): string[] {
 
 describe("bunfig preload", () => {
   const rootBunfig = resolve(repositoryRoot, "bunfig.toml");
-  const appBunfig = resolve(repositoryRoot, "app", "bunfig.toml");
 
-  test("the root and app configs preload the same scripts", () => {
-    expect(existsSync(appBunfig)).toBe(true);
-    expect(preloadedScripts(appBunfig)).toEqual(preloadedScripts(rootBunfig));
+  /*
+   * Every package whose tests render Base UI and are run from inside it as well as from the root. The extension went
+   * without one too: from inside extension/ the popup's Discard dialog never mounted, and its two tests failed there
+   * while passing from the root.
+   */
+  for (const directory of ["app", "extension"]) {
+    test(`the root and ${directory} configs preload the same scripts`, () => {
+      const bunfig = resolve(repositoryRoot, directory, "bunfig.toml");
+      expect(existsSync(bunfig)).toBe(true);
+      expect(preloadedScripts(bunfig)).toEqual(preloadedScripts(rootBunfig));
+    });
+  }
+
+  /*
+   * The desktop runs its own tests from inside desktop/ too, with all of the root's preloads but the
+   * network guard, and the app's preload through tests/support/app-preload-if-installed.ts, which
+   * leaves it out where only desktop/ is installed (desktop/bunfig.toml says why).
+   */
+  test("the desktop config preloads the root's scripts but the network guard", () => {
+    const bunfig = resolve(repositoryRoot, "desktop", "bunfig.toml");
+    const guard = resolve(repositoryRoot, "tests/support/network-guard.ts");
+    const appPreload = resolve(repositoryRoot, "app/tests/preload.ts");
+    const appPreloadIfInstalled = resolve(
+      repositoryRoot,
+      "tests/support/app-preload-if-installed.ts",
+    );
+    expect(preloadedScripts(bunfig)).toEqual(
+      preloadedScripts(rootBunfig)
+        .filter((script) => script !== guard)
+        .map((script) =>
+          script === appPreload ? appPreloadIfInstalled : script,
+        )
+        .sort(),
+    );
   });
 
   test("every preloaded script exists", () => {

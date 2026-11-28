@@ -1,25 +1,25 @@
 import { describe, expect, test } from "bun:test";
-import policy from "../../release-policy.json";
 import { version } from "../../package.json";
+import policy from "../../release-policy.json";
+import { countedClients } from "../api-deprecations";
 import {
   API_VERSIONS,
   belowMinimum,
   CLIENT_KINDS,
   type ClientKind,
   clientToken,
+  clientTokens,
   clientUpdateDetail,
   compareVersions,
   compatibility,
   EXTENSION_API,
+  FIRST_ONE_API_RELEASES,
   LAUNCHER_API,
   MINIMUM_CLIENTS,
   parseClientHeader,
   RELEASE,
   SECURITY_UPDATE_SENTENCE,
-  clientTokens,
-  FIRST_ONE_API_RELEASES,
 } from "../client-version";
-import { countedClients } from "../api-deprecations";
 import cases from "../fixtures/client-version/cases.json";
 
 describe("which app is asking", () => {
@@ -69,16 +69,16 @@ describe("release order", () => {
   });
 
   test("an app below a minimum is the one refused, and not one at it", () => {
-    // As a server whose admin raised Desktop to 1.2.0 (OPENBOT_MINIMUM_CLIENTS=desktop=1.2.0).
+    // As a server whose admin raised Desktop to 9.0.0 (OPENBOT_MINIMUM_CLIENTS=desktop=9.0.0).
     const raised = cases.deployments.raised.minimumClients;
     const named = parseClientHeader("web/1.1.0 desktop/1.1.0");
     expect(belowMinimum(named, raised)).toEqual({
       kind: "desktop",
       version: "1.1.0",
-      minimum: "1.2.0",
+      minimum: "9.0.0",
     });
     expect(
-      belowMinimum(parseClientHeader("desktop/1.2.0"), raised),
+      belowMinimum(parseClientHeader("desktop/9.0.0"), raised),
     ).toBeUndefined();
     // With no minimum, every app is served.
     expect(belowMinimum(named, MINIMUM_CLIENTS)).toBeUndefined();

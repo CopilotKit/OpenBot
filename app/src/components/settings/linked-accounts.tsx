@@ -37,6 +37,7 @@ import {
   type LinkedAccount,
   linkedAccountsQueryOptions,
 } from "@/lib/identity/queries";
+import { failureSaid, isHeld, loadFailure } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 export function linkedAccountDescription(account: LinkedAccount): string {
@@ -248,23 +249,30 @@ export function LinkedAccountSection({
       ) : null}
       {state.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          Couldn't load your account: {state.error}
+          {loadFailure(
+            links.error,
+            `Couldn't load your account: ${state.error}`,
+          )}
         </p>
       ) : null}
-      {state.providersError ? (
+      {/* OpenBot holding off both reads is said once, by the line above. */}
+      {state.providersError &&
+      !(state.error && isHeld(links.error) && isHeld(providers.error)) ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          Couldn't check whether you can link this account:{" "}
-          {state.providersError}
+          {loadFailure(
+            providers.error,
+            `Couldn't check whether you can link this account: ${state.providersError}`,
+          )}
         </p>
       ) : null}
       {issueCode.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          Couldn't create a Slack code: {issueCode.error.message}
+          Couldn't create a Slack code: {failureSaid(issueCode.error)}
         </p>
       ) : null}
       {connectGithub.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          Couldn't connect GitHub: {connectGithub.error.message}
+          Couldn't connect GitHub: {failureSaid(connectGithub.error)}
         </p>
       ) : null}
       <Dialog
@@ -390,7 +398,7 @@ function LinkedAccountRow({ account }: { account: LinkedAccount }) {
       </Item>
       {unlink.error ? (
         <p className="px-3 pb-2 text-destructive text-sm" role="alert">
-          Couldn't disconnect {account.title}: {unlink.error.message}
+          Couldn't disconnect {account.title}: {failureSaid(unlink.error)}
         </p>
       ) : null}
     </>

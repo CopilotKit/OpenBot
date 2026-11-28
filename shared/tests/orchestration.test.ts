@@ -243,12 +243,43 @@ describe("how a Bot that holds delegate is told to work", () => {
     expect(DELEGATING_GUIDANCE).toContain("never a task's");
   });
 
-  test("a reaction is the whole answer, with no words, not even the emoji", () => {
-    expect(DELEGATING_GUIDANCE).toContain("not even the emoji");
-    // The LangGraph Bot reacted 👀 to an ask it then handed to a task.
-    expect(DELEGATING_GUIDANCE).toContain("exactly one of these three things");
+  test("a Bot answers in words, never with only a reaction", () => {
+    /*
+     * A Bot was told to react to a message that needed only an acknowledgement, the reaction its
+     * whole answer, and it answered a "Hello" that opened a conversation with only a 👀. In a
+     * conversation a Bot answers in words; it is offered no react tool and told of none.
+     */
     expect(DELEGATING_GUIDANCE).toContain(
-      "Never react to a message you answer or hand to a task",
+      "Each turn, answer the person in words, in exactly one of these two ways, never both",
+    );
+    expect(DELEGATING_GUIDANCE).toContain(
+      "A greeting, a thank-you or an 'ok' is a short ask too: answer it in a few words of your own, never with only an emoji.",
+    );
+    expect(DELEGATING_GUIDANCE).not.toMatch(/\breact/i);
+    expect(DELEGATING_GUIDANCE).not.toContain("not even the emoji");
+    expect(DELEGATING_GUIDANCE).not.toContain("acknowledgement");
+  });
+
+  test("an answer to what a task reported goes to that task", () => {
+    // Found on the Desktop: a task reported a repository as probably private, the person said "it's
+    // private", and the Bot reacted 👍. That was the one fact the task needed.
+    const paragraphs = DELEGATING_GUIDANCE.split("\n\n");
+    const pointed =
+      paragraphs.find((paragraph) =>
+        paragraph.includes("pass it on with follow_up, naming that task"),
+      ) ?? "";
+    expect(pointed).toContain("or answers what it reported");
+    expect(pointed).toContain('"it\'s private"');
+  });
+
+  test("a brief asks for all the person asked for, never only what seems reachable", () => {
+    // Found on the Desktop: holding no GitHub tools, a Bot briefed its tasks to read a company's
+    // "public repositories", so neither task asked for GitHub and both missed the private one.
+    expect(DELEGATING_GUIDANCE).toContain(
+      "Brief all of what they asked for, never narrowed to what you guess can be reached, such as only what is public",
+    );
+    expect(DELEGATING_GUIDANCE).toContain(
+      "the task asks the person for an app it needs",
     );
   });
 
@@ -280,7 +311,7 @@ describe("how a Bot that holds delegate is told to work", () => {
      * passed into that task with follow_up, so "Stop the EU one" could only steer the task writing
      * both. Without "also" the same ask was a task of its own.
      */
-    // The paragraph about a task already started, after the three things a turn may do.
+    // The paragraph about a task already started, after the two ways a turn may answer.
     const pointed =
       DELEGATING_GUIDANCE.split("\n\n").find((paragraph) =>
         paragraph.includes("pass it on with follow_up"),

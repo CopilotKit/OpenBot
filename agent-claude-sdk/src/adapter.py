@@ -52,7 +52,16 @@ from claude_agent_sdk import (
 )
 from claude_agent_sdk.types import StreamEvent
 
-from .replay import RESULT_CHARS, cut_note, run_replayed_query, system_instructions
+from .replay import (
+    INTERRUPT_SECONDS,
+    RESULT_CHARS,
+    as_sent_to_model,
+    cut_note,
+    finish_regardless,
+    run_replayed_query,
+    system_instructions,
+)
+from .run_model_proxy import query_environment, refresh
 
 logger = logging.getLogger(__name__)
 
@@ -823,11 +832,24 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             input_data = input_data.model_copy(
                 update={"state": None, "forwarded_props": {}}
             )
-        options = super().build_options(input_data, thread_id)
+        # Nor does a full Bot take any. The server passes a run's forwarded props on as the browser
+        # sent them, less its own `openbot*` keys (read above), and upstream applies a list of them
+        # to Claude Code: `resume` and `fork_session` load another saved conversation, `model` and
+        # `fallback_model` pick a model the organization never allowed, and `betas`, `max_turns`,
+        # `max_budget_usd` and `output_format` change how it runs. None is the server's to send.
+        options = super().build_options(
+            input_data.model_copy(update={"forwarded_props": {}}) if input_data else None,
+            thread_id,
+        )
         if chosen:
-            # After the upstream merge, so the server's choice wins over a forwarded `model`.
             options.model, options.effort = chosen
-        options.env = {**(options.env or {}), UNKNOWN_MODEL_WINDOW: "1"}
+        # On the gateway, the query's calls come back through this harness with the newest run
+        # token of its thread. See run_model_proxy.py.
+        options.env = {
+            **(options.env or {}),
+            UNKNOWN_MODEL_WINDOW: "1",
+            **query_environment(thread_id),
+        }
         if once:
             options.env[MAX_RETRIES] = "0"
         options.max_buffer_size = MESSAGE_BUFFER_BYTES
@@ -1290,7 +1312,11 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             await turn.queue.put(event)
 
     async def run(self, input_data):
+        # Instructions and data apart before anything reads the run. See `as_sent_to_model`.
+        input_data = as_sent_to_model(input_data)
         thread_id, run_id = input_data.thread_id, input_data.run_id
+        # A query this run carries on sends its calls with this run's token from now.
+        refresh(thread_id)
         lock = self._segment_locks.setdefault(thread_id, asyncio.Lock())
         async with lock:
             answer_only = (
@@ -1411,7 +1437,10 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                         return
             finally:
                 if not released:
-                    await self.interrupt(thread_id)
+                    # A run whose request closed is cancelled here again at every await, which
+                    # stopped this at its first one and left the query running with nobody to
+                    # answer it. In a task of its own, the query is ended all the same.
+                    await finish_regardless(self.interrupt(thread_id))
 
     async def _follow_model_choice(self, thread_id, turn, input_data):
         """Move a running query to the model a tool result's run was sent with.
@@ -1445,8 +1474,12 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             turn.cancelled = True
             # Only this thread's own worker. Upstream interrupts every thread's worker when it is
             # given a thread it no longer holds, which a query that ended on its own no longer is.
+            # Bounded: the SDK waits a minute for Claude Code to answer, and one blocked on a tool
+            # call may never answer.
             if current in self._workers:
-                await super().interrupt(current)
+                with suppress(TimeoutError):
+                    async with asyncio.timeout(INTERRUPT_SECONDS):
+                        await super().interrupt(current)
             for result in turn.results.values():
                 if not result.done():
                     result.cancel()

@@ -185,7 +185,8 @@ test("a Bot's own check-ins say they are off for all your Bots, and won't run no
   expect(
     await view.findByText(/You turned off check-ins for all your Bots in/),
   ).toBeTruthy();
-  expect(view.getByRole("link", { name: "Routines" })).toBeTruthy();
+  const link = view.getByRole("link", { name: "Notifications" });
+  expect(link.getAttribute("href")).toBe("/settings/notifications");
   expect(
     view.getByText("Every hour · Tells you · Off for all your Bots"),
   ).toBeTruthy();

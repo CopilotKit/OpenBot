@@ -16,6 +16,7 @@ import { createOrganizationMutationOptions } from "@/lib/organizations/mutations
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
 import { useSwitchOrganization } from "./use-switch-organization";
+import { failureSaid } from "@/lib/load-failure";
 
 /** The API's cap on an organization's name, so the field stops where the server does. */
 const MAX_NAME_LENGTH = 100;
@@ -122,7 +123,7 @@ function NewOrganizationForm() {
           </form>
           {create.error ? (
             <p className="mt-3 text-destructive text-sm" role="alert">
-              {create.error.message}
+              {failureSaid(create.error)}
             </p>
           ) : null}
         </DialogBody>

@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The caller is not an administrator of the organization, or holds no role in it.
+ * The caller is not an administrator of the organization, or holds no role in it. Or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED).
  */
 export type AdminOnlyResponse = Problem;

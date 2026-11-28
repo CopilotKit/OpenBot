@@ -84,6 +84,8 @@ async function checkKnown(threadId: string): Promise<{
   known: boolean | undefined;
   unavailable: boolean;
   liveThreadId?: string;
+  /** What the check failed with, when it threw: a hold (a 503 that says when) is drawn calmly. */
+  failed?: unknown;
 }> {
   try {
     const status = await getConversationThread(organizationId(), threadId);
@@ -105,7 +107,7 @@ async function checkKnown(threadId: string): Promise<{
     // A 400 means the remembered id was not even a plausible thread id; a 502 means the check
     // itself failed to reach Intelligence. Either way there is no clean answer, and the safer
     // read is "unknown" rather than "gone" — see threadToUse for why.
-    return { known: undefined, unavailable: true };
+    return { known: undefined, unavailable: true, failed: error };
   }
 }
 
@@ -147,6 +149,12 @@ export type BotThread = {
    * answered or never needed asking.
    */
   history: "ready" | "unavailable";
+  /**
+   * What the check failed with, while `history` is `"unavailable"` because it threw. OpenBot holding
+   * off (moving the organization, its database briefly out of reach) is said calmly from it, not as
+   * a failure (lib/load-failure.tsx).
+   */
+  historyError?: unknown;
   /** Mints a fresh thread and starts using it from now on, independent of whatever was
    * remembered. */
   startNew: () => void;
@@ -162,6 +170,7 @@ export function useBotThread(agentId: string): BotThread {
     undefined,
   );
   const [history, setHistory] = useState<"ready" | "unavailable">("ready");
+  const [historyError, setHistoryError] = useState<unknown>(undefined);
   // Mirrors the effect's own `current` flag so `startNew` — which runs from an event handler, not
   // from the effect — can tell whether it is still safe to touch state: the agent may have changed
   // or the component may have unmounted while its mint was in flight.
@@ -182,6 +191,7 @@ export function useBotThread(agentId: string): BotThread {
     setThreadId(undefined);
     setLiveThreadId(undefined);
     setHistory("ready");
+    setHistoryError(undefined);
 
     const adoptFresh = () => {
       mintingRef.current = true;
@@ -196,6 +206,7 @@ export function useBotThread(agentId: string): BotThread {
         setLiveThreadId(minted?.liveThreadId);
         setThreadId(next);
         setHistory("ready");
+        setHistoryError(undefined);
       });
     };
 
@@ -218,6 +229,7 @@ export function useBotThread(agentId: string): BotThread {
           setLiveThreadId(outcome.liveThreadId);
           setThreadId(existing);
           setHistory(outcome.unavailable ? "unavailable" : "ready");
+          setHistoryError(outcome.failed);
         } else {
           adoptFresh();
         }
@@ -258,8 +270,9 @@ export function useBotThread(agentId: string): BotThread {
       setLiveThreadId(minted.liveThreadId);
       setThreadId(minted.threadId);
       setHistory("ready");
+      setHistoryError(undefined);
     });
   }, [agentId]);
 
-  return { threadId, liveThreadId, history, startNew };
+  return { threadId, liveThreadId, history, historyError, startNew };
 }

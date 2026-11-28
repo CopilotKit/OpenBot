@@ -10,6 +10,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { componentListQueryOptions } from "@/lib/components/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { cn } from "@/lib/utils";
 
 /**
@@ -36,7 +37,10 @@ function RouteComponent() {
        */}
       {components.isPending ? null : components.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load components. Try again in a moment.
+          {loadFailure(
+            components.error,
+            "Couldn't load components. Try again in a moment.",
+          )}
         </p>
       ) : components.data?.length === 0 ? (
         <Empty className="mt-12 min-h-[30dvh] border border-dashed">

@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * Single sign-on can't be required before an identity provider is registered, ssoRequired was sent in an organization other than `default`, or the Idempotency-Key was used for a different request.
+ * Single sign-on can't be required before an identity provider is registered, ssoRequired was sent in an organization other than the one this OpenBot keeps, people sign in here with their OpenBot by CopilotKit account so no organization requires it (HOSTED_SIGN_IN_ONLY), or the Idempotency-Key was used for a different request.
  */
 export type SettingsConflictResponse = Problem;

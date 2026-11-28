@@ -11,7 +11,10 @@ import {
   unpinBot,
   updateBot,
 } from "@/lib/api/generated/bots/bots";
-import type { CreateBotRequest } from "@/lib/api/generated/model";
+import type {
+  CreateBotRequest,
+  UpdateBotRequest,
+} from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { botAgentKeys } from "@/lib/bot-agents/queries";
 import { channelKeys } from "@/lib/channels/queries";
@@ -54,7 +57,7 @@ export function updateAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: {
       agentId: string;
-      input: AgentInput;
+      input: UpdateBotRequest;
     }): Promise<AgentProfile> =>
       (
         await updateBot(

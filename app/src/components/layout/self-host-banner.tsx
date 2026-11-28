@@ -47,7 +47,7 @@ export function SelfHostBanner() {
         <Button
           // Foreground, not the link variant's primary, which is a mid grey on the dark bar.
           className="px-0 text-foreground underline"
-          onClick={openTeamFeatures}
+          onClick={() => openTeamFeatures("self_host_banner")}
           size="sm"
           variant="link"
         >

@@ -12,6 +12,7 @@ import {
   Dialog,
   DialogBody,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -35,6 +36,11 @@ import {
 import { type ApiKey, apiKeyListQueryOptions } from "@/lib/api-keys/queries";
 import { desktopConnectionQueryOptions } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
+import {
+  ONLY_ORGANIZATION,
+  useOrganizationChoices,
+} from "@/lib/organizations/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
 import { copyText } from "./linked-accounts";
@@ -47,6 +53,22 @@ const day = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 /** What a key is called on screen. The API allows a key with no name; the screen never makes one. */
 function keyName(apiKey: ApiKey): string {
   return apiKey.name?.trim() || "Unnamed key";
+}
+
+/**
+ * The organization a key acts in, by name, for its row: the one it was made in (`organizationId`), or `default` for a
+ * key made before keys were bound to one (null). Null when there is nothing to say: the server names no organization
+ * (one older than organizations), the person's organizations are not listed (the personal edition has one), or the
+ * key's is not among them.
+ */
+export function apiKeyOrganization(
+  apiKey: ApiKey,
+  organizations: readonly { id: string; name: string }[] | undefined,
+): string | null {
+  if (apiKey.organizationId === undefined || !organizations) return null;
+  // A key made before keys were bound to an organization acts in `default`.
+  const id = apiKey.organizationId ?? ONLY_ORGANIZATION;
+  return organizations.find((one) => one.id === id)?.name ?? null;
 }
 
 /** A key's row, under its name: how it starts, when it was made, its last use, and its end if it has one. */
@@ -97,7 +119,10 @@ export function ApiKeysPage() {
       <PageSection>
         {list.isPending ? null : list.error ? (
           <p className="text-destructive text-sm" role="alert">
-            Couldn't load your API keys. Try again in a moment.
+            {loadFailure(
+              list.error,
+              "Couldn't load your API keys. Try again in a moment.",
+            )}
           </p>
         ) : list.data.state === "unavailable" ? (
           <PageEmpty
@@ -194,14 +219,26 @@ function ApiKeyRow({ apiKey }: { apiKey: ApiKey }) {
   const [asking, setAsking] = useState(false);
   const revoke = useMutation(revokeApiKeyMutationOptions(queryClient));
   const name = keyName(apiKey);
+  // Beside its name, as a member's row says You: the organization it acts in, where the person is in several.
+  const organization = apiKeyOrganization(
+    apiKey,
+    useOrganizationChoices()?.organizations,
+  );
   return (
     <>
       <Item size="sm">
         <ItemMedia variant="icon">
           <IconKey />
         </ItemMedia>
-        <ItemContent>
-          <ItemTitle>{name}</ItemTitle>
+        <ItemContent className="min-w-0">
+          <ItemTitle>
+            <span className="truncate">{name}</span>
+            {organization ? (
+              <span className="shrink-0 font-normal text-muted-foreground">
+                {organization}
+              </span>
+            ) : null}
+          </ItemTitle>
           <ItemDescription>{apiKeyDescription(apiKey)}</ItemDescription>
         </ItemContent>
         <ItemActions>
@@ -231,7 +268,7 @@ function ApiKeyRow({ apiKey }: { apiKey: ApiKey }) {
             </p>
             {revoke.error ? (
               <p className="mt-2 text-destructive" role="alert">
-                {revoke.error.message}
+                {failureSaid(revoke.error)}
               </p>
             ) : null}
           </DialogBody>
@@ -268,6 +305,11 @@ function CreateApiKeyDialog({
 }) {
   const [name, setName] = useState("");
   const create = useMutation(createApiKeyMutationOptions(queryClient));
+  // Where the person works now: a key is made in that organization and works there only.
+  const choices = useOrganizationChoices();
+  const organization = choices?.organizations.find(
+    (one) => one.id === choices.currentId,
+  );
   const trimmed = name.trim();
   const close = (next: boolean) => {
     if (!next) {
@@ -299,6 +341,11 @@ function CreateApiKeyDialog({
         >
           <DialogHeader>
             <DialogTitle>Create API key</DialogTitle>
+            {organization ? (
+              <DialogDescription>
+                It works in {organization.name} only.
+              </DialogDescription>
+            ) : null}
           </DialogHeader>
           <DialogBody className="mt-4">
             <Field>
@@ -318,7 +365,7 @@ function CreateApiKeyDialog({
             </Field>
             {create.error ? (
               <p className="mt-3 text-destructive text-sm" role="alert">
-                {create.error.message}
+                {failureSaid(create.error)}
               </p>
             ) : null}
           </DialogBody>

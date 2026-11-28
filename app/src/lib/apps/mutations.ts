@@ -7,9 +7,10 @@ import {
   setAppOAuthClient,
   updateApp,
 } from "@/lib/api/generated/apps/apps";
-import type { App } from "@/lib/api/generated/model";
+import type { AddAppFromDirectory, App } from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import type { Failure } from "@/lib/load-failure";
 import { invalidatePlugins } from "@/lib/plugins/mutations";
 import type { SharedUseApproval } from "@/lib/plugins/shared-use";
 
@@ -69,7 +70,8 @@ export type AddServerByUrlOutcome =
   | { added: true; server: App; signIn: boolean }
   | {
       added: false;
-      error: string;
+      /** The refusal kept whole, not as its words, so a hold is drawn calmly (`failureSaid`). */
+      error: Failure;
       /** `needs-key` or `not-approved`, when the refusal is one the screen can offer a step for. */
       code?: "needs-key" | "not-approved";
       /** The app already added at this address, when that is why. */
@@ -103,7 +105,7 @@ export function addServerByUrlMutationOptions(queryClient: QueryClient) {
         if (!(thrown instanceof ClientError)) throw thrown;
         return {
           added: false,
-          error: thrown.message,
+          error: thrown,
           ...(thrown.code === "APP_NEEDS_KEY"
             ? { code: "needs-key" as const }
             : thrown.code === "APP_NOT_APPROVED"
@@ -119,23 +121,48 @@ export function addServerByUrlMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/** A directory entry to add, and, for an entry listed as a sign-in in place of its key, `key`. */
+export type DirectoryAppInput = {
+  directoryEntryId: string;
+  /** Add it with its key instead, as its own app (the entry's `keyVersion`). */
+  connectsWith?: AddAppFromDirectory["connectsWith"];
+};
+
 /**
  * Add an app of the wider directory (createApp, from a directory entry), named by its entry's id.
  * An admin's. Answers the new app's id, which is what a sign-in started on the same press is asked
- * against.
+ * against, or the key form opened for the key version.
  */
 export function addDirectoryAppMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (input: {
-      directoryEntryId: string;
-    }): Promise<string> => {
-      const app = await createApp(
-        organizationId(),
-        { from: "directory", directoryEntryId: input.directoryEntryId },
-        { "Idempotency-Key": idempotencyKey() },
-        { fallback: "That app could not be added." },
-      );
-      return app.id;
+    mutationFn: async (input: DirectoryAppInput): Promise<string> => {
+      try {
+        const app = await createApp(
+          organizationId(),
+          {
+            from: "directory",
+            directoryEntryId: input.directoryEntryId,
+            ...(input.connectsWith ? { connectsWith: input.connectsWith } : {}),
+          },
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: "That app could not be added." },
+        );
+        return app.id;
+      } catch (thrown) {
+        /*
+         * ALREADY HERE IS THE ANSWER, NOT A FAILURE. An entry the directory offers as a sign-in
+         * (Fireflies, through its own server) is refused 409 where that server is already added,
+         * naming it. The press wanted that app, so it goes on with the app that stands: a Reconnect
+         * that re-added Fireflies was refused three times and never reached the connect.
+         */
+        if (
+          thrown instanceof ClientError &&
+          thrown.code === "APP_ALREADY_ADDED" &&
+          typeof thrown.body?.appId === "string"
+        )
+          return thrown.body.appId;
+        throw thrown;
+      }
     },
     onSettled: () => invalidatePlugins(queryClient),
   });
@@ -219,6 +246,25 @@ export function setOwnerGrantsMutationOptions(queryClient: QueryClient) {
         { ownerGrants: variables.ownerGrants },
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Couldn't change who can give this app." },
+      );
+    },
+    onSettled: () => invalidatePlugins(queryClient),
+  });
+}
+
+/**
+ * Give an app to every Bot in the organization, Bots made later included, or take back what giving
+ * it to every Bot gave (updateApp). What a Bot was given any other way stays. An admin's.
+ */
+export function setEveryBotMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: { serverId: string; everyBot: boolean }) => {
+      await updateApp(
+        organizationId(),
+        variables.serverId,
+        { everyBot: variables.everyBot },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't change which Bots can use this app." },
       );
     },
     onSettled: () => invalidatePlugins(queryClient),

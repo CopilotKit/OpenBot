@@ -30,10 +30,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from harness_contract import (
     EARLIER_QUESTION,
     LATEST_QUESTION,
+    RUN_KEY,
     STANDING_ROLE,
     conversation,
     missing_from,
     run_events,
+    with_run_key,
 )
 
 TOKEN = "contract-token"
@@ -175,6 +177,18 @@ def test_a_fresh_process_answers_from_the_whole_thread_in_its_role(monkeypatch, 
         body = run(conversation())
     assert missing_from(body) == []
     assert STANDING_ROLE in _system_instruction(body), "the standing role is a system instruction"
+
+
+def test_a_runs_gateway_token_never_reaches_gemini(monkeypatch, tmp_path):
+    """Gemini is reached with Google's own key: the run's token for OpenBot's gateway goes nowhere.
+
+    See `shared/run_model_key.py`.
+    """
+    with fresh_bot(monkeypatch, tmp_path) as run:
+        body = run(with_run_key(conversation(), "openai"))
+    assert missing_from(body) == []
+    assert RUN_KEY not in json.dumps(run.bodies)
+    assert "contract-organization" not in json.dumps(run.bodies)
 
 
 def test_a_live_session_is_not_sent_the_history_twice(monkeypatch, tmp_path):

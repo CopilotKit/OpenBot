@@ -10,7 +10,7 @@ export type BrokerDirectory = "composio" | "arcade";
  * Both render the same page components, so every link between those pages goes through here rather
  * than naming `/admin`.
  */
-export function managePaths(edition: "team" | "personal") {
+export function managePaths(edition: "team" | "personal", hosted = false) {
   if (edition === "personal") {
     return {
       /** What the list of apps is called where a back button names it. */
@@ -54,6 +54,8 @@ export function managePaths(edition: "team" | "personal") {
       deploymentName: "OpenBot",
       /** Which edition these paths are for, for the sentences that differ beyond a name. */
       edition: "personal" as const,
+      /** One person's own OpenBot is never a hosted one. */
+      hosted: false,
     };
   }
   return {
@@ -85,8 +87,17 @@ export function managePaths(edition: "team" | "personal") {
     computers: () => linkOptions({ to: "/admin/computers" }),
     auditLabel: "Activity",
     audit: () => linkOptions({ to: "/admin/audit" }),
-    deploymentName: "this deployment",
+    /*
+     * On a hosted OpenBot (`hostedSignIn`) the deployment is OpenBot by CopilotKit's, not this
+     * organization's admin's, so a sentence names the product.
+     */
+    deploymentName: hosted ? "OpenBot" : "this deployment",
     edition: "team" as const,
+    /**
+     * Whether this is a hosted OpenBot (`hostedSignIn`): OpenBot by CopilotKit runs it and holds its
+     * environment, so an organization admin is never told to set a variable or read its logs.
+     */
+    hosted,
   };
 }
 
@@ -115,5 +126,5 @@ export function personalAppsAddress(rest: string): string {
  */
 export function useManagePaths(): ManagePaths {
   const { data } = useQuery(deploymentCapabilitiesQueryOptions());
-  return managePaths(data?.edition ?? "team");
+  return managePaths(data?.edition ?? "team", data?.hostedSignIn === true);
 }

@@ -46,8 +46,8 @@ import { settleReactWork } from "./settle-react-work";
  *
  * The home screen starts a conversation with whichever Bot the message is routed to, so the picker
  * there starts on the catalogue default and the pick is saved with the conversation that Bot answers
- * in, before the first message runs, as `/channel/new` saves it. A Bot that hands work to agents
- * takes no pick: nothing is saved, and the person is told where its model is set.
+ * in, before the first message runs, as `/channel/new` saves it. A Bot connected from outside
+ * OpenBot takes no pick: nothing is saved, and the person is told the Bot picks its own model.
  *
  * Everything below the HTTP boundary is real: the home route, its composer and picker, routing, the
  * start sequence, the hand-over to `ChannelChat` and the run request. Only `fetch` is a fixture.
@@ -259,6 +259,7 @@ afterEach(() => {
   trail = [];
   saved = { model: null, effort: null };
   mode = "self";
+  bot.runsOnOpenBotModel = true;
 });
 
 afterAll(async () => {
@@ -365,7 +366,11 @@ test("a model picked on the home composer is saved with the routed Bot's convers
   expect(saved).toEqual({ model: "gpt-6.1-terra", effort: "xhigh" });
 });
 
-test("a routed Bot that hands work to agents keeps its own model, and says where it is set", async () => {
+/*
+ * Task threads are hidden for now (`TASK_THREADS_OFFERED`), and OpenBot runs every Bot as one that
+ * does the work itself, so a Bot set to hand work out takes the pick like any Bot on OpenBot's model.
+ */
+test("a routed Bot set to hand work to agents takes the pick, as a Bot that does the work itself", async () => {
   mode = "orchestrate";
   const view = renderHome();
   const user = userEvent.setup({ document });
@@ -375,16 +380,35 @@ test("a routed Bot that hands work to agents keeps its own model, and says where
   await user.keyboard("Plan the launch.{Enter}");
 
   await waitFor(() => expect(trail).toContain("run"), { timeout: 5000 });
-  expect(trail.slice(0, 3)).toEqual(["route", "create", "run"]);
-  expect(saved).toEqual({ model: null, effort: null });
+  expect(trail.slice(0, 4)).toEqual([
+    "route",
+    "create",
+    "save gpt-6.1-terra xhigh",
+    "run",
+  ]);
+  expect(saved).toEqual({ model: "gpt-6.1-terra", effort: "xhigh" });
+  expect(view.queryByText(/hands work to agents/)).toBeNull();
+});
 
+/*
+ * A Bot connected from outside OpenBot picks its own model. The pick is not saved, and the person is
+ * told so in words about the Bot, with nothing about agents or what runs it.
+ */
+test("a routed Bot that picks its own model saves no pick, and says so", async () => {
+  bot.runsOnOpenBotModel = false;
+  const view = renderHome();
+  const user = userEvent.setup({ document });
+
+  await pickTerraExtraHigh(view, user);
+  await user.click(await view.findByRole("textbox", { name: "Message" }));
+  await user.keyboard("Plan the launch.{Enter}");
+
+  await waitFor(() => expect(trail).toContain("run"), { timeout: 5000 });
+  expect(trail.some((step) => step.startsWith("save"))).toBe(false);
   expect(
     await view.findByText(
-      "Terra Bot hands work to agents, so it uses the model set on its Agents page.",
+      "Terra Bot picks its own model, so it doesn't use the one you picked.",
     ),
   ).toBeTruthy();
-  await user.click(await view.findByRole("button", { name: "Open Agents" }));
-  await waitFor(() =>
-    expect(view.router.state.location.pathname).toBe(`/bots/${BOT}/agents`),
-  );
+  expect(view.queryByText(/agent/i)).toBeNull();
 });
