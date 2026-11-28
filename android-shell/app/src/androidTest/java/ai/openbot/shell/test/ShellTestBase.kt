@@ -362,6 +362,25 @@ abstract class ShellTestBase {
         return false
     }
 
+    /** The on-screen rect of the page element labelled `label` (aria-label or exact text); debug builds. */
+    fun webRect(label: String): Rect? {
+        if (variant != "debug") return null
+        val raw = pageString(
+            "(function(t){var all=document.querySelectorAll('button,[role=button],a,[aria-label]');" +
+                "for(var i=0;i<all.length;i++){var e=all[i];if(e.getAttribute('aria-label')===t||(e.innerText||'').trim()===t){" +
+                "var r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return JSON.stringify({l:r.left,t:r.top,r:r.right,b:r.bottom,d:window.devicePixelRatio});}}" +
+                "return 'null';})(" + org.json.JSONObject.quote(label) + ")",
+        )
+        if (raw == "null" || raw.isEmpty()) return null
+        val json = try { org.json.JSONObject(raw) } catch (error: Exception) { return null }
+        val web = bounds(find("openbot_webview")) ?: return null
+        val d = json.optDouble("d", 1.0)
+        return Rect(
+            (web.left + json.optDouble("l") * d).toInt(), (web.top + json.optDouble("t") * d).toInt(),
+            (web.left + json.optDouble("r") * d).toInt(), (web.top + json.optDouble("b") * d).toInt(),
+        )
+    }
+
     /** Taps the message box near its top (where the text line is). */
     fun tapComposer(rect: Rect) {
         device.click(rect.centerX(), minOf(rect.top + 40, rect.centerY()))

@@ -553,6 +553,7 @@ class ShellController(
     // Tabs, back, chrome. ---------------------------------------------------------------------------
 
     fun selectTab(tab: ShellTab) {
+        activity.hideKeyboard()
         selectedTab = tab
         web.open(tab.path) { mode ->
             lastNavigation = mode

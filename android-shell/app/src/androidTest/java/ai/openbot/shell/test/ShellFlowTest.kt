@@ -359,6 +359,40 @@ class ShellFlowTest : ShellTestBase() {
         check(device.currentPackageName == pkg, "Back with the keyboard up left the app")
         sleep(1_000)
         screenshot("keyboard-dismissed")
+
+        // In a conversation: the message box and its send button above the keyboard; Back closes
+        // the keyboard first, then navigates; the web view then ends at the bar's top, no gap.
+        tab(Tab.CONVERSATIONS)?.click()
+        check(waitPageText("Quarterly forecast", 15_000), "no conversations list")
+        check(tapWeb("Quarterly forecast"), "no 'Quarterly forecast' row")
+        check(waitPageText("Here is the first draft.", 20_000) || waitPageText("Can you draft", 2_000), "the conversation did not open")
+        if (!keyboardShown()) waitComposerRect(10_000)?.let { tapComposer(it) }
+        check(waitKeyboard(true, 8_000), "the keyboard did not show in the conversation")
+        sleep(1_200)
+        val web = bounds(find("openbot_webview"))
+        val send = webRect("Send message")
+        val boxRect = composerRect()
+        val plus = webRect("Attach a file")
+        note("conversation with the keyboard: web view $web, message box $boxRect, send $send, attach $plus; ${debugState()}")
+        screenshot("conversation-keyboard-up")
+        if (web != null) {
+            check(send != null && send.bottom <= web.bottom + 1 && send.top >= web.top, "the send button is not above the keyboard (send $send, web view $web)")
+            check(plus == null || plus.bottom <= web.bottom + 1, "the attach button is behind the keyboard (attach $plus, web view $web)")
+            check(boxRect != null && boxRect.bottom <= web.bottom + 1, "the message box is behind the keyboard (box $boxRect, web view $web)")
+        }
+        check(!exists("bottom_nav"), "the bottom bar is up with the keyboard")
+        device.pressBack()
+        check(waitKeyboard(false, 5_000), "Back did not close the keyboard first")
+        check(waitForTab(Tab.CONVERSATIONS, 5_000) != null, "the bottom bar did not come back")
+        check(waitForState("path=/channel", 2_000) || pageText().contains("Here is the first draft."), "the first Back navigated instead of only closing the keyboard: ${debugState()}")
+        sleep(800)
+        val webAfter = bounds(find("openbot_webview"))
+        val bar = bounds(find("bottom_nav"))
+        if (webAfter != null && bar != null) check(kotlin.math.abs(webAfter.bottom - bar.top) <= 2, "a gap or overlap between the web view and the bar after the keyboard (web ${webAfter.bottom}, bar ${bar.top})")
+        screenshot("conversation-keyboard-dismissed")
+        device.pressBack()
+        check(waitPageText("Trip to Lisbon", 8_000), "the second Back did not go back to the list")
+        screenshot("conversation-back-to-list")
     }
 
     // The native loading skeleton: seen for real by delaying the first page load (debug hook).

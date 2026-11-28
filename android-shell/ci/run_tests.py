@@ -101,7 +101,7 @@ VIDEO_REAL_GOOGLE = [
     "RealBackendDebugTest#testRealGoogleSignInInCustomTab",
 ]
 LOG_TAGS = ("OPENBOT_DIAG", "SHELL_NOTE", "SHELL_PROBE", "TestRunner", "AndroidRuntime", "chromium", "cr_", "WebView")
-PER_TEST_S = 300
+PER_TEST_S = int(os.environ.get("PER_TEST_SECONDS", "300"))
 # The whole run's budget (the workflow step is capped at 25 minutes): no test starts after this.
 BUDGET_S = int(os.environ.get("TEST_BUDGET_SECONDS", "1380"))
 STATUS = {"0": "passed", "-1": "failed", "-2": "failed", "-3": "skipped", "-4": "skipped"}
@@ -262,6 +262,26 @@ def emulator_alive():
         return False
 
 
+def ensure_emulator():
+    """A known state before a run: the emulator answering (restarted if frozen or gone), no leftover
+    recording, the app stopped with its data cleared."""
+    if not emulator_alive():
+        print("  the emulator does not answer: restarting it", flush=True)
+        subprocess.run(["pkill", "-9", "-f", "qemu-system"], capture_output=True)
+        subprocess.run(["adb", "kill-server"], capture_output=True, timeout=30)
+        here = os.path.dirname(os.path.abspath(__file__))
+        try:
+            subprocess.run(["bash", os.path.join(here, "emulator.sh"), "boot"], timeout=200)
+            subprocess.run(["bash", os.path.join(here, "emulator.sh"), "prepare"], timeout=120)
+            for apk in ("debug/app-debug.apk", "androidTest/debug/app-debug-androidTest.apk"):
+                adb("install", "-r", "-g", os.path.join(here, "..", "app/build/outputs/apk", apk), timeout=120)
+        except subprocess.TimeoutExpired:
+            print("  the emulator did not come back", flush=True)
+    adb("shell", "pkill -INT screenrecord", timeout=20)
+    adb("shell", "am force-stop ai.openbot.shell", timeout=20)
+    adb("shell", "input keyevent KEYCODE_HOME", timeout=20)
+
+
 def not_run(test_id, results, why):
     results.append({"id": test_id, "test": test_id.split("#")[-1], "class": test_id.split("#")[0], "status": "failed",
                     "message": f"not run: {why}", "variant": "releaseTest" if test_id.startswith("RealBackendRelease") else "debug",
@@ -350,12 +370,16 @@ def main():
     os.makedirs(artifacts, exist_ok=True)
     os.makedirs(private, exist_ok=True)
     if MODE == "video":
+        ensure_emulator()
         plan = []
-        if VIDEO_PLAN in ("real", "both"):
-            plan += VIDEO_REAL_GOOGLE if GOOGLE else VIDEO_REAL
-        after_release = 1 if (GOOGLE and VIDEO_PLAN in ("real", "both")) else 0
+        # The demo (mock, deterministic) first, then the real journey.
         if VIDEO_PLAN in ("demo", "both"):
             plan += DEMO
+        after_release = -1
+        if VIDEO_PLAN in ("real", "both"):
+            if GOOGLE:
+                after_release = len(plan) + 1
+            plan += VIDEO_REAL_GOOGLE if GOOGLE else VIDEO_REAL
     else:
         plan = list(SUITE1_RELEASE)
         after_release = len(plan)
@@ -372,8 +396,12 @@ def main():
             not_run(test_id, results, f"the run's {BUDGET_S // 60}-minute budget was spent")
             continue
         if not emulator_alive():
-            not_run(test_id, results, "the emulator stopped answering adb")
+            qemu = subprocess.run(["pgrep", "-fa", "qemu-system"], capture_output=True, text=True).stdout.strip()
+            not_run(test_id, results, "the emulator stopped answering adb (" + ("its process is still running: frozen" if qemu else "its process is gone") + ")")
             continue
+        if MODE == "video" and test_id.startswith("RealBackendReleaseTest"):
+            here = os.path.dirname(os.path.abspath(__file__))
+            adb("install", "-r", "-g", os.path.join(here, "..", "app/build/outputs/apk/releaseTest/app-releaseTest.apk"), timeout=120)
         if index == after_release:
             # Two apps claiming openbotshell:// would make Chrome ask which one: the release-like
             # build leaves before the hand-off tests.

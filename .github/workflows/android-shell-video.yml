@@ -130,28 +130,29 @@ jobs:
           command -v ffmpeg > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null; }
           adb install -r -g android-shell/app/build/outputs/apk/debug/app-debug.apk
           adb install -r -g android-shell/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-          if [ "$GOOGLE_SIGN_IN" = "true" ]; then
-            adb install -r -g android-shell/app/build/outputs/apk/releaseTest/app-releaseTest.apk
-          fi
-
-      - name: Record the real-backend journey (private)
-        if: env.WHICH != 'demo'
-        timeout-minutes: 4
-        env:
-          RUN_MODE: video
-          VIDEO_PLAN: real
-          OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
-          OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}
-          OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
-          OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
-        run: python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
+          # The releaseTest build (Google run only) is installed by the runner right before its test:
+          # two apps claiming openbotshell:// would make Chrome ask which one during the demo.
 
       - name: Record the demo tour
-        if: always() && env.WHICH != 'real'
+        if: env.WHICH != 'real'
         timeout-minutes: 4
         env:
           RUN_MODE: video
           VIDEO_PLAN: demo
+          PER_TEST_SECONDS: "170"
+        run: python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
+
+      - name: Record the real-backend journey (private)
+        if: always() && env.WHICH != 'demo'
+        timeout-minutes: 6
+        env:
+          RUN_MODE: video
+          VIDEO_PLAN: real
+          PER_TEST_SECONDS: "150"
+          OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
+          OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}
+          OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
+          OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
         run: python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
 
       - name: Collect

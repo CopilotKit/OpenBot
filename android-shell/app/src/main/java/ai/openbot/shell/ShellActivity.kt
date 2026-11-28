@@ -144,7 +144,15 @@ class ShellActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        hideKeyboard()
         CookieManager.getInstance().flush()
+    }
+
+    /** The keyboard goes before a tab switch, the lock screen, signing out and the background. */
+    fun hideKeyboard() {
+        if (lastInsets?.isVisible(WindowInsetsCompat.Type.ime()) == true) {
+            WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.ime())
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -173,6 +181,7 @@ class ShellActivity : AppCompatActivity() {
         val launching = c.phase == Phase.LAUNCHING
         val busy = c.signIn != SignInStep.IDLE
 
+        if (c.showsSignInScreen && !signInScreen.isVisible) hideKeyboard()
         signInScreen.isVisible = c.showsSignInScreen
         signInLine.isVisible = !launching
         signInButton.isVisible = !launching
@@ -190,6 +199,7 @@ class ShellActivity : AppCompatActivity() {
         val item = bottomNav.menu.findItem(c.selectedTab.itemId)
         if (item != null && !item.isChecked) item.isChecked = true
 
+        if (c.showsLock && !lock.isVisible) hideKeyboard()
         lock.isVisible = c.showsLock
         val hidden = if (c.showsLock) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         content.importantForAccessibility = hidden

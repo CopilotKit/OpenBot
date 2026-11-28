@@ -37,11 +37,13 @@ boot() {
   set_config hw.ramSize 4096
   set_config disk.dataPartition.size 8G
   set_config hw.gpu.enabled yes
-  set_config hw.gpu.mode swiftshader_indirect
+  set_config hw.gpu.mode "${GPU_MODE:-guest}"
   set_config hw.camera.back none
   set_config hw.camera.front none
   set_config showDeviceFrame no
-  nohup emulator -avd shell -feature -Vulkan -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
+  # GPU in the guest: the host-side renderer (swiftshader_indirect) froze the emulator under the
+  # WebView in several runs ("Failed to find ColorBuffer", then adb silent).
+  nohup emulator -avd shell -feature -Vulkan -no-window -no-audio -no-boot-anim -no-snapshot -gpu "${GPU_MODE:-guest}" \
     -camera-back none -camera-front none -netdelay none -netspeed full > "$ARTIFACTS/emulator.log" 2>&1 &
   adb wait-for-device
   local started=$SECONDS
