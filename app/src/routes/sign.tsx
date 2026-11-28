@@ -17,7 +17,7 @@ import {
   signInWith,
   signInWithEmailDomain,
 } from "@/lib/auth/client";
-import { resumeUrlFor, verifierPathFor } from "@/lib/auth/resume";
+import { resumeUrlFor, signInResumePath } from "@/lib/auth/resume";
 import { appConfig } from "@/lib/generated/application-config";
 import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import { nativeShell } from "@/lib/native-shell/shell";
@@ -52,8 +52,13 @@ export const Route = createFileRoute("/sign")({
    */
   validateSearch: (
     search: Record<string, unknown>,
-  ): { flow_id?: string; "native-sign-in"?: string } => ({
+  ): {
+    flow_id?: string;
+    shell_handoff?: string;
+    "native-sign-in"?: string;
+  } => ({
     ...searchTextEntry("flow_id", search.flow_id),
+    ...searchTextEntry("shell_handoff", search.shell_handoff),
     ...searchTextEntry("native-sign-in", search["native-sign-in"]),
   }),
   beforeLoad: async ({ context, search }) => {
@@ -76,9 +81,9 @@ export const Route = createFileRoute("/sign")({
        * the verifier was ever made. `reloadDocument` makes this a document navigation, which is
        * the only kind that leaves the app and therefore the only kind that arrives.
        */
-      const verifier = verifierPathFor(search.flow_id);
-      throw verifier
-        ? redirect({ href: verifier, reloadDocument: true })
+      const resume = signInResumePath(search.flow_id, search.shell_handoff);
+      throw resume
+        ? redirect({ href: resume, reloadDocument: true })
         : redirect({ to: "/" });
     }
     // The phone app's native shell signs in on its own screen: nothing of this one is drawn.
@@ -107,7 +112,7 @@ function SignRoute() {
 }
 
 function SignScreen() {
-  const { flow_id: flowId } = Route.useSearch();
+  const { flow_id: flowId, shell_handoff: shellHandoff } = Route.useSearch();
   // Which provider is being opened, rather than whether one is: with three buttons, a single
   // boolean would put "Opening…" on all of them.
   const [opening, setOpening] = useState<AuthProviderId | "sso" | null>(null);
@@ -133,7 +138,7 @@ function SignScreen() {
       await signInWithEmailDomain(
         email,
         undefined,
-        resumeUrlFor(window.location.origin, flowId),
+        resumeUrlFor(window.location.origin, flowId, shellHandoff),
       );
     } catch (caughtError) {
       setError(
@@ -154,7 +159,7 @@ function SignScreen() {
       await signInWith(
         provider,
         undefined,
-        resumeUrlFor(window.location.origin, flowId),
+        resumeUrlFor(window.location.origin, flowId, shellHandoff),
       );
     } catch (caughtError) {
       setError(
