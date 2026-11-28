@@ -6,6 +6,13 @@ import AVFoundation
 import Foundation
 
 let args = CommandLine.arguments
+if args.count == 3, args[1] == "--duration" {
+    let asset = AVURLAsset(url: URL(fileURLWithPath: args[2]))
+    guard let duration = asset.tracks(withMediaType: .video).first?.timeRange.duration.seconds,
+          duration.isFinite, duration > 0 else { exit(1) }
+    print(duration)
+    exit(0)
+}
 guard args.count == 6, let start = Double(args[3]), let length = Double(args[4]), let width = Double(args[5]) else {
     FileHandle.standardError.write("usage: video_tool.swift in out start length width\n".data(using: .utf8)!)
     exit(2)

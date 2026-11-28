@@ -59,8 +59,12 @@ final class DemoTourUITests: ShellTestCase {
         } else {
             link = first
         }
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            link.exists && link.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed, "demo: confirmation was not tappable")
         pause(1.2)
-        link.tap()
+        link.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 30), "demo: no tabs after signing in")
         let composer = app.webViews.textViews.firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
@@ -70,7 +74,7 @@ final class DemoTourUITests: ShellTestCase {
         // The software keyboard: the tab bar hides, the message box sits on it.
         focusComposerForTyping(composer, in: app)
         let keyboard = app.keyboards.firstMatch
-        composer.typeText("What changed in competitor pricing?")
+        composer.typeText("Competitor pricing?")
         let send = webElement(app, label: "Send message")
         XCTAssertTrue(send.waitForExistence(timeout: 5))
         XCTAssertLessThanOrEqual(send.frame.maxY, keyboard.frame.minY + 1)
@@ -120,12 +124,12 @@ final class DemoTourUITests: ShellTestCase {
         app.terminate()
         scene("sign-out")
 
-        // The lock screen, then the connection comes back.
+        // End on the lock screen. The connectivity suite exercises live recovery.
         app = launch(base: ShellTestCase.mockA, moment: "tour-offline", reset: false,
-                     extra: ["OPENBOT_SHELL_FORCE_OFFLINE_SECONDS": "4"])
-        XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 8), "demo: no lock screen")
-        XCTAssertTrue(lockScreen(app).waitForNonExistence(timeout: 15), "demo: the lock did not lift")
-        pause(1.5)
+                     extra: ["OPENBOT_SHELL_FORCE_OFFLINE": "1"])
+        XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 25), "demo: no lock screen")
+        assertLockScreen(app, reason: "no-network")
+        pause(3)
         scene("lock")
     }
 }
