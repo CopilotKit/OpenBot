@@ -41,6 +41,27 @@ def _provider_app(seen, bodies):
     async def openai_chat(request: Request):
         body = await request.json()
         seen.append(("openai", body["model"]))
+        bodies.append(body)
+        # Strict OpenAI-compatible endpoints (including Google's Gemini endpoint) reject unknown
+        # Agno-internal fields under `tools[i].function` such as `external_execution`.
+        for idx, tool in enumerate(body.get("tools") or []):
+            fn = tool.get("function") if isinstance(tool, dict) else None
+            if isinstance(fn, dict):
+                for forbidden in ("external_execution", "requires_confirmation", "approval_type"):
+                    if forbidden in fn:
+                        return JSONResponse(
+                            {
+                                "error": {
+                                    "code": 400,
+                                    "message": (
+                                        f'Invalid JSON payload received. Unknown name "{forbidden}"'
+                                        f" at 'tools[{idx}].function': Cannot find field."
+                                    ),
+                                    "status": "INVALID_ARGUMENT",
+                                }
+                            },
+                            status_code=400,
+                        )
         if not body.get("stream"):
             return JSONResponse(
                 {
@@ -248,7 +269,44 @@ def test_a_claude_model_is_sent_a_temperature_and_no_top_p(monkeypatch, provider
     assert "top_p" not in bodies[0]
 
 
-def _run(monkeypatch, environment):
+def test_frontend_tools_strip_agno_internal_keys_for_strict_endpoints(monkeypatch, provider):
+    base, seen, bodies = provider
+    run_with_tool = {
+        **RUN,
+        "tools": [
+            {
+                "name": "lookup",
+                "description": "Look up a record",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        ],
+    }
+    response = _run(
+        monkeypatch,
+        {
+            "BOT_PROVIDER": "",
+            "BOT_MODEL": "gemini-3.8-flash",
+            "OPENAI_API_KEY": "test-key",
+            "OPENAI_BASE_URL": f"{base}/v1",
+            "ANTHROPIC_API_KEY": "",
+        },
+        run_with_tool,
+    )
+
+    assert response.status_code == 200
+    assert '"RUN_ERROR"' not in response.text
+    assert '"RUN_FINISHED"' in response.text
+    assert seen == [("openai", "gemini-3.8-flash")]
+    sent_tools = bodies[0]["tools"]
+    assert len(sent_tools) == 1
+    fn = sent_tools[0]["function"]
+    assert fn["name"] == "lookup"
+    assert "external_execution" not in fn
+    assert "requires_confirmation" not in fn
+    assert "approval_type" not in fn
+
+
+def _run(monkeypatch, environment, run=RUN):
     monkeypatch.delenv("OPENAI_API_BASE", raising=False)
     monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
     for key, value in environment.items():
@@ -257,4 +315,4 @@ def _run(monkeypatch, environment):
     from src import main
 
     main = importlib.reload(main)
-    return TestClient(main.app).post("/agui", json=RUN, headers={"x-openbot-agent-token": TOKEN})
+    return TestClient(main.app).post("/agui", json=run, headers={"x-openbot-agent-token": TOKEN})
