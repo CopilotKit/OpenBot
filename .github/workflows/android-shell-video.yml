@@ -42,14 +42,14 @@ jobs:
     name: Record the Android shell
     if: github.repository == 'CopilotKit/OpenBot'
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 13
     permissions:
       contents: read
     env:
       API_LEVEL: "35"
       ARTIFACTS: ${{ github.workspace }}/artifacts
       PRIVATE_ARTIFACTS: ${{ github.workspace }}/private-artifacts
-      VIDEO_PLAN: ${{ inputs.which || 'both' }}
+      WHICH: ${{ inputs.which || 'both' }}
       GOOGLE_SIGN_IN: ${{ inputs.real_google_sign_in || 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -66,7 +66,7 @@ jobs:
             android-shell/gradle/wrapper/gradle-wrapper.properties
 
       - name: Build the debug app and its tests
-        timeout-minutes: 25
+        timeout-minutes: 5
         working-directory: android-shell
         run: |
           mkdir -p "$ARTIFACTS" "$PRIVATE_ARTIFACTS"
@@ -81,14 +81,20 @@ jobs:
           done
           exit 1
 
+      - name: Free the build's memory for the emulator
+        run: |
+          (cd android-shell && ./gradlew --stop > /dev/null 2>&1) || true
+          pkill -f KotlinCompileDaemon || true
+          free -m
+
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: env.VIDEO_PLAN != 'real'
+        if: env.WHICH != 'real'
         with:
           bun-version: 1.4.3
 
       - name: Build the web app and start mock stack A
-        if: env.VIDEO_PLAN != 'real'
-        timeout-minutes: 15
+        if: env.WHICH != 'real'
+        timeout-minutes: 3
         run: |
           bun install --frozen-lockfile
           cp .env.example .env
@@ -101,6 +107,12 @@ jobs:
           done
           echo "mock stack A did not start"; tail -n 40 "$ARTIFACTS/mock-a.log" "$ARTIFACTS/app-a.log"; exit 1
 
+      - name: Cache the emulator's system image
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /usr/local/lib/android/sdk/system-images/android-35/google_apis/x86_64
+          key: android-system-image-35-google_apis-x86_64-v1
+
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -108,34 +120,44 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Boot the emulator (software keyboard on, animators on for the skeleton's shimmer)
-        timeout-minutes: 20
+        timeout-minutes: 4
         env:
           ANIMATOR_SCALE: "1"
         run: android-shell/ci/emulator.sh all
 
       - name: Install the apps
         run: |
+          command -v ffmpeg > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null; }
           adb install -r -g android-shell/app/build/outputs/apk/debug/app-debug.apk
           adb install -r -g android-shell/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
           if [ "$GOOGLE_SIGN_IN" = "true" ]; then
             adb install -r -g android-shell/app/build/outputs/apk/releaseTest/app-releaseTest.apk
           fi
 
-      - name: Record
-        timeout-minutes: 40
+      - name: Record the real-backend journey (private)
+        if: env.WHICH != 'demo'
+        timeout-minutes: 4
         env:
           RUN_MODE: video
+          VIDEO_PLAN: real
           OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
           OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}
           OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
           OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
-        run: |
-          command -v ffmpeg > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null; }
-          python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
+        run: python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
+
+      - name: Record the demo tour
+        if: always() && env.WHICH != 'real'
+        timeout-minutes: 4
+        env:
+          RUN_MODE: video
+          VIDEO_PLAN: demo
+        run: python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
 
       - name: Collect
         if: always()
         run: |
+          free -m; sudo dmesg 2>/dev/null | grep -i -E "killed process|out of memory" | tail -5 || true
           python3 android-shell/ci/summarize.py "$ARTIFACTS" > /dev/null || true
           python3 android-shell/ci/collect.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" || true
           ls -la "$ARTIFACTS/video" "$PRIVATE_ARTIFACTS/video" 2>/dev/null || true

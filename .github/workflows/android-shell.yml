@@ -88,6 +88,12 @@ jobs:
           done
           exit "$status"
 
+      - name: Free the build's memory for the emulator
+        run: |
+          (cd android-shell && ./gradlew --stop > /dev/null 2>&1) || true
+          pkill -f KotlinCompileDaemon || true
+          free -m
+
       - name: Check what ships
         working-directory: android-shell
         run: |
@@ -137,6 +143,12 @@ jobs:
           tail -n 40 "$ARTIFACTS"/mock-a.log "$ARTIFACTS"/app-a.log "$ARTIFACTS"/mock-b.log "$ARTIFACTS"/app-b.log "$ARTIFACTS"/probe-server.log
           exit 1
 
+      - name: Cache the emulator's system image
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /usr/local/lib/android/sdk/system-images/android-35/google_apis/x86_64
+          key: android-system-image-35-google_apis-x86_64-v1
+
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -172,6 +184,7 @@ jobs:
       - name: Write the summary and collect the screenshots
         if: always()
         run: |
+          free -m; sudo dmesg 2>/dev/null | grep -i -E "killed process|out of memory" | tail -5 || true
           python3 android-shell/ci/summarize.py "$ARTIFACTS" || true
           python3 android-shell/ci/collect.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" || true
           if [ -f "$ARTIFACTS/SUMMARY.md" ]; then cat "$ARTIFACTS/SUMMARY.md" >> "$GITHUB_STEP_SUMMARY"; fi

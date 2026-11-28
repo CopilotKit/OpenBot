@@ -22,7 +22,10 @@ if [ -n "${GITHUB_PATH:-}" ]; then echo "$SDK/platform-tools" >> "$GITHUB_PATH";
 
 boot() {
   yes | sdkmanager --licenses > /dev/null 2>&1 || true
-  sdkmanager --install "platform-tools" "emulator" "$IMAGE" > "$ARTIFACTS/sdkmanager.log" 2>&1 || {
+  # The system image may come from the workflow's cache.
+  local packages=("platform-tools" "emulator")
+  [ -f "$SDK/system-images/android-${API_LEVEL}/${IMAGE_TAG}/x86_64/system.img" ] || packages+=("$IMAGE")
+  sdkmanager --install "${packages[@]}" > "$ARTIFACTS/sdkmanager.log" 2>&1 || {
     tail -n 30 "$ARTIFACTS/sdkmanager.log"; exit 1; }
   echo no | avdmanager create avd --force -n shell -k "$IMAGE" -d pixel_7 > /dev/null
   local config="$ANDROID_AVD_HOME/shell.avd/config.ini"
@@ -31,14 +34,14 @@ boot() {
     if grep -q "^$1=" "$config"; then sed -i "s|^$1=.*|$1=$2|" "$config"; else echo "$1=$2" >> "$config"; fi
   }
   set_config hw.keyboard no
-  set_config hw.ramSize 6144
+  set_config hw.ramSize 4096
   set_config disk.dataPartition.size 8G
   set_config hw.gpu.enabled yes
   set_config hw.gpu.mode swiftshader_indirect
   set_config hw.camera.back none
   set_config hw.camera.front none
   set_config showDeviceFrame no
-  nohup emulator -avd shell -memory 6144 -cores 4 -feature -Vulkan -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
+  nohup emulator -avd shell -feature -Vulkan -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
     -camera-back none -camera-front none -netdelay none -netspeed full > "$ARTIFACTS/emulator.log" 2>&1 &
   adb wait-for-device
   local started=$SECONDS
@@ -57,7 +60,12 @@ prepare() {
   # tests (Settings.Global.HIDE_ERROR_DIALOGS), and a moment for the system to settle.
   adb shell settings put global hide_error_dialogs 1
   adb shell settings put global anr_show_background 0
-  sleep 20
+  # Wait (60 s at most) until the launcher has the focus, then close any system dialog.
+  local deadline=$((SECONDS + 60))
+  until adb shell dumpsys window 2>/dev/null | grep -m1 mCurrentFocus | grep -qi launcher; do
+    if [ $SECONDS -gt $deadline ]; then echo "the launcher did not take the focus in 60 s"; break; fi
+    sleep 1
+  done
   adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS > /dev/null 2>&1 || true
   adb shell settings put global window_animation_scale 0
   adb shell settings put global transition_animation_scale 0

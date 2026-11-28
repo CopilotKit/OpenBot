@@ -414,8 +414,11 @@ def main():
                 results.append({"id": f"video:{name}", "test": name, "class": "video", "variant": "debug",
                                 "status": video_status, "seconds": round(length), "message": message,
                                 "private": secret, "notes": [], "probe": []})
-    with open(os.path.join(artifacts, "results.json"), "w") as f:
-        json.dump(results, f, indent=2)
+    # Several runs (one per recording step) add to the same results file.
+    path = os.path.join(artifacts, "results.json")
+    earlier = json.load(open(path)) if os.path.exists(path) else []
+    with open(path, "w") as f:
+        json.dump(earlier + results, f, indent=2)
     failed = [r for r in results if r["status"] not in ("passed", "skipped")]
     print(f"{len(results)} results, {len(failed)} not passed or skipped")
     sys.exit(1 if failed else 0)
