@@ -122,7 +122,16 @@ function saveScroll(location: string) {
  * A list being put back where it was, while it is: the `route` for its page waits for it
  * (`whenScrollRestored`), so the app drops its snapshot only once nothing will jump.
  */
-let restoring: { done: Promise<void> } | null = null;
+let restoring: { done: Promise<void>; finish: () => void } | null = null;
+
+/**
+ * Ends a list's restore that is still under way: the page is moving on (a tab tap, another page),
+ * so whatever waits for it (the route of the page being left) is released, not held behind a list
+ * that is no longer on screen.
+ */
+function stopRestoring() {
+  restoring?.finish();
+}
 
 /** Puts `location`'s list back where it was, once it has drawn enough to scroll that far. */
 function restoreScroll(location: string) {
@@ -133,13 +142,14 @@ function restoreScroll(location: string) {
   const done = new Promise<void>((resolve) => {
     settle = resolve;
   });
-  const current = { done };
-  restoring = current;
   const finish = () => {
     if (restoring === current) restoring = null;
     settle();
   };
+  const current = { done, finish };
+  restoring = current;
   const tick = () => {
+    if (restoring !== current) return;
     const list = document.querySelector(LIST);
     if (list) {
       list.scrollTop = saved;
@@ -223,6 +233,7 @@ export function useTabNavigation(): void {
       pathOf(from) !== pathOf(to);
 
     history.push = (path, state, options) => {
+      stopRestoring();
       const from = here();
       saveScroll(from);
       stacks = signedOut(path)
@@ -233,6 +244,7 @@ export function useTabNavigation(): void {
       else announce("push", stacks, () => replace(path, state, options));
     };
     history.replace = (path, state, options) => {
+      stopRestoring();
       const from = here();
       stacks = signedOut(path)
         ? cleared()
@@ -242,6 +254,7 @@ export function useTabNavigation(): void {
       else announce("replace", stacks, () => replace(path, state, options));
     };
     apply = (next, direction) => {
+      if (next.show !== here()) stopRestoring();
       const from = here();
       if (next.show !== from) saveScroll(from);
       stacks = next.state;
