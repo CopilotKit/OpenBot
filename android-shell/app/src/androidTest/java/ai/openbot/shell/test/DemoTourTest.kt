@@ -61,7 +61,7 @@ class DemoTourTest : ShellTestBase() {
             }
             if (waitKeyboard(true, 4_000)) {
                 pause(500)
-                typeOnKeyboard("what changed in pricing")
+                typeOnKeyboard("pricing update", deadlineMs = 25_000)
                 val typed = pageString("document.activeElement ? (document.activeElement.innerText || document.activeElement.value || '') : ''")
                 note("demo: the message box holds ${typed.length} characters after typing")
                 pause(1_000)

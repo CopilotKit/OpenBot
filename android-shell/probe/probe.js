@@ -143,7 +143,7 @@
     }],
     ['user-agent', function () {
       var ua = navigator.userAgent;
-      return ua.indexOf('OpenBotShell-iOS') !== -1 ? pass(ua) : fail('no OpenBotShell-iOS marker: ' + ua);
+      return ua.indexOf('OpenBotShell-Android') !== -1 ? pass(ua) : fail('no OpenBotShell-Android marker: ' + ua);
     }],
     ['secure-context', function () { return info('window.isSecureContext = ' + window.isSecureContext); }],
     ['media-devices', function () {

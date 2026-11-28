@@ -1,6 +1,6 @@
 # Android web view shell (experiment)
 
-The Android twin of `ios-shell/`: a small native app around one `android.webkit.WebView` showing the
+The Android twin of the iOS shell (branch `ios-webview-shell`): a small native app around one `android.webkit.WebView` showing the
 OpenBot web app (https://my.open.bot by default). It is an experiment, not a product. The Expo app in
 `mobile/` is unchanged. It speaks the same bridge and the same server contracts as the iOS shell
 (`app/src/lib/native-shell/`, `app/workbench/mock-server.ts`), so a web build that works in one works
@@ -148,6 +148,14 @@ adb shell am start -n ai.openbot.shell/.ShellActivity \
   --es openbot.base_url http://localhost:3010 --es openbot.diagnostics 1
 ```
 
+## The probe
+
+`probe/` is a static test page plus `serve.py` (Python standard library) on two ports: 8765 plays
+the app's origin and 8766 a different-origin API. It checks cookies, CORS, a same-site cookie,
+localStorage, IndexedDB, server-sent events, a streaming fetch, WebSockets and the user agent;
+`persist.html` checks that a cookie and a localStorage value survive a cold relaunch. `ProbeTest`
+runs it in the debug build's plain mode.
+
 ## Diagnostics
 
 With `openbot.diagnostics=1` the app writes JSON lines to `files/diagnostics.jsonl` and logcat (tag
@@ -170,7 +178,7 @@ instead of the https callback. Not testable in CI.
 `.github/workflows/android-shell.yml` (pushes to `android-webview-shell` touching this folder, and by
 hand with `google_sign_in` and `real_backend_only`): builds debug, releaseTest and release, runs lint
 and the JVM unit tests, checks what ships, builds this branch's web app and starts the mock stacks
-(A with the hand-off on 3010, B without on 3011), the iOS probe site (8765/8766) and a silent server
+(A with the hand-off on 3010, B without on 3011), the probe site (`probe/`, copied from the iOS shell's, on 8765/8766) and a silent server
 (8797), boots an API 35 `google_apis` x86_64 emulator (KVM, software keyboard on, animations off,
 Chrome's first-run screens off through its command-line file), reaches the servers through
 `adb reverse` as `localhost`, and runs the instrumented tests one `am instrument` call per test

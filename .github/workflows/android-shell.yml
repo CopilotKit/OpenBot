@@ -2,8 +2,8 @@ name: Android shell
 
 # Builds the experimental Android shell in android-shell/ and runs its instrumented tests on an
 # emulator: against the hosted web app at my.open.bot (suite 1), against two mock stacks of this
-# branch's built web app (app/workbench/mock-server.ts, suite 2), and against the iOS shell's probe
-# site (web view basics). One job builds the APKs (a compile error stops everything there), one runs
+# branch's built web app (app/workbench/mock-server.ts, suite 2), and against the probe site in
+# android-shell/probe (web view basics). One job builds the APKs (a compile error stops everything there), one runs
 # lint, the unit tests and the release checks beside the tests, and two emulators run the
 # instrumented tests in parallel: "mock" (suite 2 and the hardening tests, against this branch's web
 # build) and "other" (the probe site and suite 1, the real backend).
@@ -217,7 +217,7 @@ jobs:
       - name: Start the probe and the silent server
         if: matrix.shard == 'other'
         run: |
-          nohup python3 ios-shell/Probe/serve.py > "$ARTIFACTS/probe-server.log" 2>&1 &
+          nohup python3 android-shell/probe/serve.py > "$ARTIFACTS/probe-server.log" 2>&1 &
           nohup python3 android-shell/ci/silent_server.py > "$ARTIFACTS/silent-server.log" 2>&1 &
           for _ in $(seq 1 30); do
             if curl -fsS -o /dev/null http://127.0.0.1:8765/; then echo "probe is up"; exit 0; fi

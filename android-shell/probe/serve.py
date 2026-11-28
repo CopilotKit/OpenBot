@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probe server for the iOS web view shell. Python 3 standard library only.
+"""Probe server for the Android web view shell (copied from the iOS shell's). Python 3 standard library only.
 
 Serves two origins on 127.0.0.1:
   APP port 8765 ("the web app origin"):
@@ -20,7 +20,7 @@ Serves two origins on 127.0.0.1:
     GET     /set-cookie       with CORS headers, sets probe_api (SameSite=Lax)
     GET     /echo-cookie      with CORS headers, returns the NAMES of the cookies it got
 
-Run: python3 ios-shell/Probe/serve.py   (PROBE_APP_PORT / PROBE_API_PORT override the ports)
+Run: python3 android-shell/probe/serve.py   (PROBE_APP_PORT / PROBE_API_PORT override the ports)
 """
 import json
 import os
