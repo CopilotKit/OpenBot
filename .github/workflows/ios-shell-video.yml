@@ -283,8 +283,12 @@ jobs:
         run: |
           echo "$(date +%s) build" >> "$RUNNER_TEMP/timing"
           set -o pipefail
+          # A Release build for tests reads its launch environment only with this flag (ShellConfig).
+          extra=()
+          if [ "$CONFIGURATION" = "Release" ]; then extra=(SWIFT_ACTIVE_COMPILATION_CONDITIONS=OPENBOT_TEST_ENVIRONMENT); fi
           xcodebuild build-for-testing -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration "$CONFIGURATION" \
             -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath "DerivedData-$CONFIGURATION" CODE_SIGNING_ALLOWED=NO \
+            "${extra[@]}" \
             2>&1 | tee xcodebuild-build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build.log
 

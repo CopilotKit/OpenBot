@@ -38,14 +38,27 @@ struct ShellConfig {
 
     static func fromEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> ShellConfig {
         let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0"
+        // A store build reads nothing from its launch environment: these four exist only in DEBUG
+        // builds and in the Release build CI tests with (OPENBOT_TEST_ENVIRONMENT, set on its
+        // xcodebuild command line). CI greps a plain Release binary for their names.
+        var diagnostics = false
+        var testName = ""
+        var ephemeral = false
+        var baseOverride: String?
+        #if DEBUG || OPENBOT_TEST_ENVIRONMENT
+        diagnostics = environment["OPENBOT_SHELL_DIAGNOSTICS"] == "1"
+        testName = environment["OPENBOT_SHELL_TEST_NAME"] ?? ""
+        ephemeral = environment["OPENBOT_SHELL_EPHEMERAL_SIGN_IN"] == "1"
+        baseOverride = environment["OPENBOT_BASE_URL"]
+        #endif
         var config = ShellConfig(
-            baseURL: resolveBaseURL(environment),
+            baseURL: resolveBaseURL(override: baseOverride),
             version: version,
-            diagnosticsEnabled: environment["OPENBOT_SHELL_DIAGNOSTICS"] == "1",
-            testName: environment["OPENBOT_SHELL_TEST_NAME"] ?? "",
-            ephemeralSignIn: environment["OPENBOT_SHELL_EPHEMERAL_SIGN_IN"] == "1"
+            diagnosticsEnabled: diagnostics,
+            testName: testName,
+            ephemeralSignIn: ephemeral
         )
-        if let value = environment["OPENBOT_BASE_URL"], let url = URL(string: value) { config.startURL = url }
+        if let value = baseOverride, let url = URL(string: value) { config.startURL = url }
         #if DEBUG
         config.plainWebView = environment["OPENBOT_SHELL_PLAIN_WEBVIEW"] == "1"
         config.resetDataStore = environment["OPENBOT_SHELL_RESET"] == "1"
@@ -76,11 +89,11 @@ struct ShellConfig {
         return config
     }
 
-    /// OPENBOT_BASE_URL in the environment wins (tests point the app at a local server with it), then
+    /// OPENBOT_BASE_URL in the environment (test builds only) wins (tests point the app at a local server with it), then
     /// the OpenBotBaseURL key in Info.plist, then my.open.bot. Reduced to scheme, host and port.
-    static func resolveBaseURL(_ environment: [String: String]) -> URL {
+    static func resolveBaseURL(override: String?) -> URL {
         var candidates: [String] = []
-        if let value = environment["OPENBOT_BASE_URL"], !value.isEmpty { candidates.append(value) }
+        if let value = override, !value.isEmpty { candidates.append(value) }
         if let value = Bundle.main.object(forInfoDictionaryKey: "OpenBotBaseURL") as? String { candidates.append(value) }
         for candidate in candidates {
             guard let url = URL(string: candidate), let host = url.host, !host.isEmpty,

@@ -198,8 +198,23 @@ jobs:
             -destination "platform=iOS Simulator,id=$SIM_UDID" \
             -derivedDataPath DerivedDataRelease \
             CODE_SIGNING_ALLOWED=NO \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS=OPENBOT_TEST_ENVIRONMENT \
             2>&1 | tee xcodebuild-build-release.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build-release.log
+          # The store build: Release as it is, without the test build's flag. It must read nothing from
+          # its launch environment, so none of those names may be in its binary.
+          xcodebuild build -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration Release \
+            -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath DerivedDataStore CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee xcodebuild-build-store.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" xcodebuild-build-store.log
+          store_app="$(ls -d DerivedDataStore/Build/Products/Release-iphonesimulator/OpenBotShell.app)"
+          store_found="$(strings -a "$store_app/OpenBotShell" | grep -E 'OPENBOT_BASE_URL|OPENBOT_SHELL_' || true)"
+          if [ -n "$store_found" ]; then
+            echo "::error::the store build reads its launch environment:"
+            echo "$store_found"
+            exit 1
+          fi
+          echo "the store build reads nothing from its launch environment"
           app="$(ls -d DerivedDataRelease/Build/Products/Release-iphonesimulator/OpenBotShell.app)"
           found="$(strings -a "$app/OpenBotShell" | grep -E 'OPENBOT_SHELL_(TEST_SESSION_COOKIE|TEST_PLAIN_SESSION_COOKIE|TEST_STALE_SESSION|FORCE_OFFLINE|FORCE_DARK|DELAY_FIRST_LOAD|TEST_KILL_CONTENT|HANDOFF_AUTO|DEBUG_SHEET_URL|PLAIN_WEBVIEW|RESET)|debug-state' || true)"
           if [ -n "$found" ]; then

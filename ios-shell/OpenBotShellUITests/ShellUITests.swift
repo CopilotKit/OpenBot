@@ -145,4 +145,51 @@ final class ShellUITests: ShellTestCase {
         XCTAssertEqual(secondVisit.label, "returning visitor: yes",
                        "cookie or localStorage did not survive relaunch: \(texts)")
     }
+
+    // Review items F, K, M and G on the probe's edges page (plain mode: the probe is the web app's
+    // origin here). Another site's dialog and a scheme opened by script are dropped; the page's own
+    // alert is titled OpenBot; a tapped scheme outside mailto/tel/sms opens nothing; a download never
+    // replaces the page; a 5xx on the web app's own origin shows the lock screen, not the error page.
+    func testEdgesDialogsSchemesDownloadsAndServerErrors() throws {
+        let app = launch(base: "http://127.0.0.1:8765/edges.html", moment: "edges", plain: true)
+        XCTAssertTrue(webText(app, "Edges").waitForExistence(timeout: 20), "the edges page did not load")
+        sleep(3)
+        XCTAssertFalse(app.alerts.firstMatch.exists, "another site's alert, or the scripted scheme, put up a dialog")
+        XCTAssertEqual(app.state, .runningForeground, "a scheme opened by script left the app")
+        screenshot("1-edges-no-dialog")
+
+        webElement(app, label: "Own alert").tap()
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "the page's own alert did not show")
+        XCTAssertEqual(alert.label, "OpenBot", "the page's alert is not titled OpenBot")
+        screenshot("2-own-alert")
+        alert.buttons["OK"].tap()
+
+        webElement(app, label: "Custom scheme link").tap()
+        sleep(2)
+        XCTAssertEqual(app.state, .runningForeground, "a tapped custom scheme left the app")
+        XCTAssertFalse(app.alerts.firstMatch.exists, "a tapped custom scheme put up a dialog")
+        XCTAssertFalse(XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch.exists,
+                       "a tapped custom scheme asked to open another app")
+
+        webElement(app, label: "Download a file").tap()
+        sleep(3)
+        screenshot("3-after-download")
+        XCTAssertTrue(webText(app, "Edges").exists, "the download replaced the page")
+        let share = firstExisting([app.otherElements["ActivityListView"], app.buttons["Save to Files"],
+                                   app.cells["Save to Files"], app.staticTexts["probe.txt"]], timeout: 5)
+        note("download: share sheet shown \(share != nil)")
+        XCTAssertNotNil(share, "no share sheet for the downloaded file")
+        if share != nil {
+            let close = firstExisting([app.buttons["Close"], app.navigationBars.buttons["Close"]], timeout: 2)
+            if let close = close { close.tap() } else { app.swipeDown() }
+            sleep(1)
+        }
+
+        webElement(app, label: "A server error page").tap()
+        XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 15), "a 503 on the web app's own origin did not lock")
+        XCTAssertFalse(webText(app, "Service Unavailable").exists, "the raw error page is on screen")
+        screenshot("4-server-error-lock")
+        assertLockScreen(app, reason: "load-failed")
+    }
 }

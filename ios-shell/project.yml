@@ -44,6 +44,9 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        # false brings back the keyboard's form-assistant bar (KeyboardAccessory.swift swaps a private
+        # WebKit class to hide it; turn this off if App Review objects).
+        OpenBotHideKeyboardAccessory: true
         NSMicrophoneUsageDescription: OpenBot uses the microphone when you talk to a Bot.
         NSCameraUsageDescription: OpenBot uses the camera when you share a photo or video with a Bot.
     postBuildScripts:

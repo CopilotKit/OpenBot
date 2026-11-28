@@ -51,11 +51,49 @@ What is native:
   downward 40 pt drag that did not start in a field. The system sign-in sheet is Safari's view, so
   its bar stays there.
 - **Orientation.** A phone stays in portrait; an iPad turns every way.
+- **What the web view lets through.** `enter` is loaded with the header `OpenBot-Shell: ios` and
+  never kept or loaded again (a retry or a restarted web process loads its `to`). Other schemes go
+  to the system only from a tap in the main frame, and only `mailto:`, `tel:` and `sms:`. Another
+  site's JavaScript dialogs are dropped; the web app's own are titled OpenBot. A file the page
+  downloads goes to the share sheet, never in place of the page. A 5xx page on the web app's own
+  origin is a load failure (the lock screen). Another site's page that fails (an identity provider
+  blocked on this network) sends the web view back to the web app's last page instead of locking.
+  Sign-out clears the site's data. Once a page has said `ready`, only its own `signed-out` or
+  `route` end the session; without the bridge, reaching `/sign` ends it only if the session cookie
+  is really gone.
 - **The bridge.** The page gets `window.__OPENBOT_NATIVE_SHELL__ = {platform: "ios", version, bridge: 1}`
   at document start (main frame, own origin only) and posts `ready`, `route` and `signed-out` to
   `window.webkit.messageHandlers.openbotShell` (`app/src/lib/native-shell/`). When the page says
   nobody is signed in, the app deletes the two session cookies (and no others) and shows its own
   sign-in screen.
+
+## Known gaps
+
+- **Script navigations to other sites** load in the app's one web view with no address shown, and
+  the web app's connect flows (an integration's OAuth page) are not adapted to the shell yet. A
+  tapped link to another site opens in an in-app Safari sheet; a page that sends itself elsewhere by
+  script does not. A bridge message for it is being assessed on the web side.
+- **The hosted sign-in's renewal** follows the server's contract (backend `docs/shell-sign-in.md`,
+  "Renewing the hosted sign-in"): the sheet opens `/api/auth/hosted/sign-in?returnTo=<hand-off>`
+  and `enter` returns to the web app's `returnTo`. The mock has no hosted sign-in route, so this is
+  proven by unit tests (`ShellURLsTests`, against the contract's worked example) only.
+- **History after sign-out.** Sign-out clears the site's data (cookies, storage, caches); the web
+  view's back-forward list stays, but while signed in back and forward never reach another site's
+  page or the sign-in page.
+
+## Before the App Store
+
+- No app icon set (`ASSETCATALOG_COMPILER_APPICON_NAME` is empty in `project.yml`).
+- `DEVELOPMENT_TEAM` is empty; the entitlements (associated domains for `my.open.bot`) do nothing in
+  an unsigned build, and the association file on the domain needs the Team ID.
+- `KeyboardAccessory.swift` swaps a private WebKit class at run time to hide the keyboard's
+  form-assistant bar, which App Review may object to. `OpenBotHideKeyboardAccessory` in Info.plist
+  (`project.yml`) set to false turns it off without a code change; the bar then comes back.
+- A store build is plain Release: it reads nothing from its launch environment. Only DEBUG builds
+  and the Release build CI tests with (`SWIFT_ACTIVE_COMPILATION_CONDITIONS=OPENBOT_TEST_ENVIRONMENT`
+  on the xcodebuild command line) read `OPENBOT_BASE_URL`, `OPENBOT_SHELL_DIAGNOSTICS`,
+  `OPENBOT_SHELL_TEST_NAME` and `OPENBOT_SHELL_EPHEMERAL_SIGN_IN`; CI builds the store
+  configuration too and fails if any of those names is in its binary.
 
 ## Run it on a Mac
 
@@ -121,10 +159,9 @@ ignores them.
 | `OPENBOT_SHELL_TEST_PLAIN_SESSION_COOKIE=<value>` | Sets `better-auth.session_token` (the http mock's name). |
 | `OPENBOT_SHELL_TEST_KILL_CONTENT_SECONDS=<n>` | Kills the web content process n seconds after a signed-in launch (WebKit's private `_killWebContentProcess`). |
 
-In every build, Release included (a launch environment cannot be set on a person's phone, so these
-change nothing there): `OPENBOT_BASE_URL`, `OPENBOT_SHELL_DIAGNOSTICS=1`, `OPENBOT_SHELL_TEST_NAME`, and
-`OPENBOT_SHELL_EPHEMERAL_SIGN_IN=1` (the sign-in sheet shares nothing with Safari, and iOS asks no
-consent). DEBUG builds also draw an invisible `debug-state` label with the model's state for UI tests.
+In DEBUG builds and the CI Release test build only (not in a store build): `OPENBOT_BASE_URL`,
+`OPENBOT_SHELL_DIAGNOSTICS=1`, `OPENBOT_SHELL_TEST_NAME`, and `OPENBOT_SHELL_EPHEMERAL_SIGN_IN=1` (the
+sign-in sheet shares nothing with Safari, and iOS asks no consent). DEBUG builds also draw an invisible `debug-state` label with the model's state for UI tests.
 
 ## The probe
 

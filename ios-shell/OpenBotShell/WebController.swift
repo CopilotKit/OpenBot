@@ -238,15 +238,28 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
 
     // MARK: - Drag down to put the keyboard away
 
-    /// The scroll view's interactive dismissal needs a page that pans, and the web app turns off
-    /// overscroll in the shell, so a page that does not scroll (Home) would never let the keyboard
-    /// go. This recognizer runs beside WebKit's own: a mostly downward drag of `dragDismissPoints`
-    /// that did not start on an editable element ends editing.
+    /// The scroll view's interactive dismissal (keyboardDismissMode) needs a page that pans, and the
+    /// web app turns off overscroll in the shell, so a page that does not scroll (Home) would never
+    /// let the keyboard go. This recognizer runs beside WebKit's own, as Messages behaves:
+    /// - a drag whose finger reaches the keyboard's top edge puts the keyboard away;
+    /// - a mostly downward drag of `dragDismissPoints` puts it away early only where nothing under
+    ///   the finger can still scroll that way (the page is at its top and no scroller under the
+    ///   finger has anything above), so rereading earlier messages keeps the keyboard;
+    /// - a drag that starts in a field never does.
     static let dragDismissPoints: CGFloat = 40
     private var dragStart: CGPoint?
     private var dragHandled = false
+    /// What is under the drag's start, read from the page when it begins (nil until it answers).
+    private var dragOnEditable: Bool?
+    private var dragOverScroller: Bool?
+    /// The drag's last finger position (window) and movement, for a page that answers late.
+    private var dragFinger: CGPoint = .zero
+    private var dragMove: CGPoint = .zero
     /// Set by the shell from the keyboard notifications.
     var keyboardIsUp = false
+    /// The keyboard's top edge in window coordinates while it is up.
+    private var keyboardTop: CGFloat = 0
+    private var keyboardObserver: NSObjectProtocol?
 
     private func installKeyboardDragDismiss() {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(keyboardDrag(_:)))
@@ -255,34 +268,68 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         pan.delaysTouchesEnded = false
         pan.delegate = self
         webView.addGestureRecognizer(pan)
+        keyboardObserver = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+            self?.keyboardTop = frame.minY
+        }
     }
 
     @objc private func keyboardDrag(_ pan: UIPanGestureRecognizer) {
         switch pan.state {
         case .began:
-            dragStart = pan.location(in: webView)
+            let start = pan.location(in: webView)
+            dragStart = start
             dragHandled = false
-        case .changed:
-            guard keyboardIsUp, !dragHandled, let start = dragStart else { return }
-            let move = pan.translation(in: webView)
-            guard move.y > WebController.dragDismissPoints, move.y > abs(move.x) * 1.5 else { return }
-            dragHandled = true
-            // Where the drag began, in the page's CSS pixels (the shell does not zoom the page).
+            dragOnEditable = nil
+            dragOverScroller = nil
+            guard keyboardIsUp else { return }
+            // The start point in the page's layout viewport: the visual viewport may be scaled or
+            // moved (WebKit shifts it while the keyboard is up).
             let script = """
             (function (x, y) {
-              var e = document.elementFromPoint(x, y);
-              return !!(e && e.closest && e.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]'));
+              var v = window.visualViewport, s = v ? v.scale : 1;
+              var e = document.elementFromPoint(x / s + (v ? v.offsetLeft : 0), y / s + (v ? v.offsetTop : 0));
+              if (!e) return JSON.stringify({ editable: false, scroller: false });
+              var editable = !!(e.closest && e.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]'));
+              var scroller = false;
+              for (var n = e; n && n !== document.documentElement && n !== document.body; n = n.parentElement) {
+                var cs = getComputedStyle(n);
+                if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && n.scrollHeight > n.clientHeight + 1 && n.scrollTop > 0) { scroller = true; break; }
+              }
+              return JSON.stringify({ editable: editable, scroller: scroller });
             })(\(Double(start.x)), \(Double(start.y)))
             """
             webView.evaluateJavaScript(script) { [weak self] result, _ in
-                guard let self = self else { return }
-                let onEditable = (result as? Bool) ?? false
-                self.diagnostics.log("keyboard-drag", ["onEditable": onEditable])
-                if !onEditable { self.endEditing() }
+                guard let self = self, let text = result as? String, let data = text.data(using: .utf8),
+                      let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Bool] else { return }
+                self.dragOnEditable = object["editable"] ?? false
+                self.dragOverScroller = object["scroller"] ?? false
+                // A quick drag can end before the page answers.
+                self.considerKeyboardDismiss()
             }
+        case .changed, .ended:
+            dragFinger = pan.location(in: nil)
+            dragMove = pan.translation(in: webView)
+            considerKeyboardDismiss()
         default:
-            dragStart = nil
+            break
         }
+    }
+
+    private func considerKeyboardDismiss() {
+            guard keyboardIsUp, !dragHandled, dragStart != nil, dragOnEditable == false else { return }
+            let finger = dragFinger
+            let move = dragMove
+            let reachesKeyboard = keyboardTop > 0 && finger.y >= keyboardTop - 12
+            let pageAtTop = webView.scrollView.contentOffset.y <= 0
+            let early = move.y > WebController.dragDismissPoints && move.y > abs(move.x) * 1.5
+                && pageAtTop && dragOverScroller == false
+            guard reachesKeyboard || early else { return }
+            dragHandled = true
+            diagnostics.log("keyboard-drag", ["reachedKeyboard": reachesKeyboard, "early": early])
+            endEditing()
     }
 
     func stop() {
@@ -732,7 +779,19 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
 
     private var lastAccessoryResult = ""
 
+    /// The form-assistant bar is hidden by swapping a private WebKit class at run time
+    /// (KeyboardAccessory.swift). Info.plist's `OpenBotHideKeyboardAccessory` (project.yml) turns that
+    /// off without a code change, should App Review object: the bar then comes back.
+    static let hidesKeyboardAccessory = (Bundle.main.object(forInfoDictionaryKey: "OpenBotHideKeyboardAccessory") as? Bool) ?? true
+
     private func hideKeyboardAccessory(when: String) {
+        guard WebController.hidesKeyboardAccessory else {
+            if lastAccessoryResult != "off" {
+                lastAccessoryResult = "off"
+                diagnostics.log("keyboard-accessory", ["result": "switched off in Info.plist", "when": when])
+            }
+            return
+        }
         let result = KeyboardAccessory.hide(in: webView)
         if result != lastAccessoryResult {
             lastAccessoryResult = result
