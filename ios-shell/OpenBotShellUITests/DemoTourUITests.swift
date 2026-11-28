@@ -87,8 +87,17 @@ final class DemoTourUITests: ShellTestCase {
         screenshot("conversation-reply")
         pause(1.5)
         if !keyboard.exists {
-            composer.tap()
-            XCTAssertTrue(keyboard.waitForExistence(timeout: 8))
+            // Send navigates from Home to a freshly mounted conversation editor. The reply can
+            // already be visible while the editor is still disabled during the stream.
+            let editor = app.webViews.textViews["Message"].firstMatch
+            let editable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                editor.exists && editor.isEnabled && editor.isHittable
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [editable], timeout: 20), .completed,
+                           "demo: the conversation editor did not become available")
+            // Tap the first line of the empty editable region on a tall message box.
+            editor.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.25)).tap()
+            XCTAssertTrue(keyboard.waitForExistence(timeout: 12), "demo: the conversation keyboard did not open")
         }
         app.webViews.firstMatch.swipeDown()
         XCTAssertTrue(keyboard.waitForNonExistence(timeout: 5), "demo: dragging down did not dismiss the keyboard")
