@@ -71,7 +71,8 @@ class ShellTestCase: XCTestCase {
     /// to disk lazily, and a kill seconds after signing in can lose the new session cookie.
     func leaveAndTerminate(_ app: XCUIApplication) {
         XCUIDevice.shared.press(.home)
-        sleep(5)
+        // 5 s in the background was not always enough (runs 46146892704, 46151172714).
+        sleep(10)
         app.terminate()
     }
 
