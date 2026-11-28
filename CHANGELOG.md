@@ -8,6 +8,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **Privatemode is an AI provider choice.** OpenBot Desktop's setup, Settings and Admin AI
+  providers offer Privatemode. Enter a Privatemode API key and OpenBot fills in
+  `https://proxyless-api.privatemode.ai/v1` and the `glm-latest` model. A model whose listing says
+  it can't chat and call tools isn't offered.
+
+- **The API takes Privatemode as an AI connection.** `replaceAiConnection` and the other AI
+  connection writes take `provider: privatemode` with `login: endpoint`, an address and a key.
+  `AiConnectionProviderAnswer` can name it. `signIns` keeps the values it had, since Privatemode
+  has no sign-in.
+
+- **Unbiased AI is no longer an AI provider choice.** OpenBot Desktop's setup, Settings and Admin
+  AI providers, Connect another AI, and the conversation and Bot model pickers no longer offer it,
+  and OpenBot Desktop's Sign in with Unbiased AI is gone. Settings saved for it and the model shown
+  on an existing conversation stay readable, but it can't be picked again. The API still names
+  `unbiased` as a provider, so a released client keeps working; only its examples changed.
+
 - **The app opens and changes page faster, and holds still.** The checks before every page are
   asked together and the page's code downloads while they run, so Home is ready about a third
   sooner on a real network; somebody signed in last time sees the app's frame at once instead of a
@@ -63,16 +79,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   and after a reload. It used to go as soon as the next turn started, and the message sat in the
   conversation with nothing under it. `listRefusedTurns` gains the code `BOT_ENGINE_UNAVAILABLE`, and
   the run's RUN_ERROR carries the same code.
-
-### OpenBot Desktop
-
-- **Privatemode is on the Connect your AI screen** and in AI settings. Enter a Privatemode API
-  key and OpenBot fills in `https://proxyless-api.privatemode.ai/v1` and `glm-latest`.
-
-### API
-
-- **Privatemode as an AI connection.** `replaceAiConnection` takes `provider: privatemode`
-  with `login: endpoint`, an address and a key.
 
 ## 1.2.1
 
@@ -4781,7 +4787,7 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
   Unbiased AI's approval page in the browser, where a person signs in or creates an account, and
   OpenBot receives an API key for the `pareto` model on Unbiased AI's OpenAI-compatible gateway. The
   key is stored on this computer the way a typed endpoint key is, and an Unbiased AI API key can be
-  pasted instead. See [Model provider OAuth](desktop/PROVIDER_OAUTH.md#unbiased-ai).
+  pasted instead.
 
 ## 0.3.2
 

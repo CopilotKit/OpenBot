@@ -8,7 +8,7 @@ beforeEach(() => nativeControl().reset());
 
 const firstRun = { hash: "", search: "" };
 
-test("providers lists the eight providers in order", () => {
+test("providers lists the seven providers in order", () => {
   const providers = stateAnswer(firstRun)("providers", undefined) as {
     id: string;
   }[];
@@ -17,7 +17,6 @@ test("providers lists the eight providers in order", () => {
     "anthropic",
     "google",
     "xai",
-    "unbiased",
     "trustedrouter",
     "privatemode",
     "openai-compatible",

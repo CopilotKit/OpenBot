@@ -129,8 +129,8 @@ import { queryClient } from "@/query-client";
  * TWO KINDS OF CONNECTION. `organization` is the AI every Bot in the organization runs on, which an
  * admin changes in Settings; inside OpenBot Desktop it may be a plan or a provider sign-in Desktop
  * holds. `personal` is a person's own AI on OpenBot Cloud: a key or an address for every provider,
- * and first the setup window's sign-in (a ChatGPT or Claude plan, an xAI or Unbiased AI
- * sign-in) wherever the server runs it itself (`signIns`). The server keeps that sign-in for the
+ * and first the setup window's sign-in (a ChatGPT or Claude plan, or an xAI sign-in) wherever the
+ * server runs it itself (`signIns`). The server keeps that sign-in for the
  * person and renews it, so never a Desktop-held one there, even inside Desktop: the server runs
  * the person's Bots. Inside Desktop, Desktop only listens for a Claude or ChatGPT plan's redirect,
  * so the person pastes nothing (lib/ai-connection/sign-in-redirect.ts); the sign-in stays the
@@ -458,8 +458,6 @@ export function ChooseConnection({
    * before it took the port): its sign-in is finished by paste, as in a browser.
    */
   const [pasteBack, setPasteBack] = useState(false);
-  // The key an Unbiased AI sign-in in Desktop mints: held for the one request that sends it, never drawn.
-  const minted = useRef<string | null>(null);
   const attempt = useRef<{
     plan?: Plan;
     attemptId?: string;
@@ -529,7 +527,6 @@ export function ChooseConnection({
     setSignInCode("");
     setChatGptWay(firstChatGptWay);
     setPasteBack(false);
-    minted.current = null;
   }
   chooseLatest.current = choose;
 
@@ -592,16 +589,13 @@ export function ChooseConnection({
 
   /**
    * The model this provider's sign-in already names, in the list or as the connection in use.
-   * Unbiased AI's sign-in is kept as a key for its own address, so its address names it.
    */
   function ownModel(id: AiProvider["id"]): string | null {
-    const signedInBefore = (login: AiConnectionLogin | null) =>
-      login === "oauth" || (id === "unbiased" && login === "endpoint");
     const listed = adding?.connected.find(
-      (entry) => entry.provider === id && signedInBefore(entry.login),
+      (entry) => entry.provider === id && entry.login === "oauth",
     );
     if (listed) return listed.model;
-    return connection?.provider === id && signedInBefore(connection.login)
+    return connection?.provider === id && connection.login === "oauth"
       ? connection.model
       : null;
   }
@@ -624,34 +618,6 @@ export function ChooseConnection({
             ? { apiKey: typedKey }
             : {}),
       };
-    /*
-     * Unbiased AI's sign-in, run by the server: its key is kept for the person, for the provider's
-     * own address. A plan or an xAI sign-in the server ran connects as itself, below.
-     */
-    if (
-      login === "oauth" &&
-      serverOwned &&
-      provider.id === "unbiased" &&
-      preset
-    )
-      return {
-        provider: provider.id,
-        login: "endpoint",
-        baseUrl: preset.baseUrl,
-        model: signInModel,
-        useSavedKey: true,
-      };
-    // Unbiased AI's sign-in ends in a key for its own address, sent exactly as a typed one is.
-    if (login === "oauth" && provider.id === "unbiased" && preset) {
-      if (!minted.current) return null;
-      return {
-        provider: provider.id,
-        login: "endpoint",
-        apiKey: minted.current,
-        baseUrl: preset.baseUrl,
-        model: signInModel,
-      };
-    }
     if (login === "oauth")
       return { provider: provider.id, login, model: signInModel };
     return { provider: provider.id, login };
@@ -789,9 +755,7 @@ export function ChooseConnection({
         // Otherwise the browser comes back to Desktop, and it finishes on its own.
         await finishPlanSignIn(plan);
       } else {
-        const begun = await beginProviderSignIn(
-          provider.id as "xai" | "unbiased",
-        );
+        const begun = await beginProviderSignIn();
         if (!current()) {
           void cancelProviderSignIn(begun.attemptId).catch(() => {});
           return;
@@ -803,15 +767,14 @@ export function ChooseConnection({
           attemptId: begun.attemptId,
         });
         window.open(begun.url, "_blank", "noopener");
-        const finished = await finishProviderSignIn(begun.attemptId);
-        if (!current()) return;
-        minted.current = finished?.apiKey ?? null;
+        await finishProviderSignIn(begun.attemptId);
       }
       if (!current()) return;
       attempt.current = null;
       setWaiting(null);
       setSignedIn(true);
       setSigningIn(false);
+      connectSignedIn();
     } catch (error) {
       if (!current()) return;
       attempt.current = null;
@@ -851,6 +814,7 @@ export function ChooseConnection({
       setWaiting(null);
       setSignInCode("");
       setSignedIn(true);
+      connectSignedIn();
     } catch (error) {
       if (run.current !== mine) return;
       setSignInFailure(failureOf(error, "Couldn't sign in. Try again."));
@@ -871,6 +835,19 @@ export function ChooseConnection({
   function submit() {
     const body = input();
     if (!ready || !body) return;
+    send(body);
+  }
+
+  /**
+   * A sign-in that just succeeded connects at once, with the call Connect makes: a sign-in looked
+   * finished, and a person who left the page then lost it, since nothing is saved until the
+   * connection is. A connect that fails says why under the sign-in, and Connect tries it again.
+   * Sharing the admin's own sign-in with everyone still waits for its own button, which says so.
+   */
+  function connectSignedIn() {
+    if (share) return;
+    const body = input();
+    if (!body || (login === "oauth" && signInModel.length === 0)) return;
     send(body);
   }
 
@@ -897,7 +874,6 @@ export function ChooseConnection({
       { input: body, desktop: inDesktop, onPhase: setPhase },
       {
         onSuccess: (connected) => {
-          minted.current = null;
           setApiKey("");
           onConnected(connected);
         },
@@ -1316,8 +1292,6 @@ const SIGN_IN_SAYS: Record<string, string> = {
   openai:
     "OpenAI opens in your browser. It finishes on its own once you approve.",
   xai: "Authorize OpenBot to use models available to your xAI account.",
-  unbiased:
-    "Sign in or create an Unbiased AI account in your browser and approve the code shown here.",
 };
 
 /**

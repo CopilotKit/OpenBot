@@ -253,7 +253,6 @@ fn endpoint_provider(base_url: &str) -> &'static str {
     match host.as_deref() {
         Some("generativelanguage.googleapis.com") => "google",
         Some("api.x.ai") => "xai",
-        Some("api.unbiased.ai") => "unbiased",
         Some("api.trustedrouter.com") => "trustedrouter",
         Some("proxyless-api.privatemode.ai") => "privatemode",
         _ => "openai-compatible",

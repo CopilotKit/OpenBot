@@ -441,7 +441,6 @@ describe.skipIf(!asked)("changing the AI connection in Settings", () => {
             "Anthropic",
             "Google Gemini",
             "xAI",
-            "Unbiased AI",
             "TrustedRouter",
             "Privatemode",
             "Any OpenAI-compatible endpoint",
