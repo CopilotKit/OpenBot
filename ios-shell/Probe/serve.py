@@ -11,6 +11,8 @@ Serves two origins on 127.0.0.1:
     POST /api/persist/set     sets probe_persist (HttpOnly, SameSite=Lax, Max-Age one year)
     POST /api/persist/clear   expires probe_persist
     GET  /api/persist/check   {"cookie": true|false}: did probe_persist come back
+    GET  /status/503          an HTML error page with status 503
+    GET  /download            a text file sent as an attachment (Content-Disposition)
   API port 8766 ("a different-origin API"), nothing static:
     GET     /nocors           JSON with no CORS headers (a cross-origin fetch must be blocked)
     GET     /cors             JSON with Access-Control-Allow-Origin: <the app origin> and
@@ -19,6 +21,7 @@ Serves two origins on 127.0.0.1:
     POST    /cors             echoes whether X-Probe arrived and how many preflights were seen
     GET     /set-cookie       with CORS headers, sets probe_api (SameSite=Lax)
     GET     /echo-cookie      with CORS headers, returns the NAMES of the cookies it got
+    GET     /alert.html       a page that calls alert() as it loads (another site's dialog)
 
 Run: python3 ios-shell/Probe/serve.py   (PROBE_APP_PORT / PROBE_API_PORT override the ports)
 """
@@ -72,6 +75,16 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_body(self, status, content_type, text, headers=()):
+        body = text.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        for key, value in headers:
+            self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(body)
+
     def send_slowly(self, content_type, pieces):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
@@ -113,6 +126,9 @@ class Handler(SimpleHTTPRequestHandler):
                                       + [("Set-Cookie", "probe_api=1; Path=/; SameSite=Lax")])
             if path == "/echo-cookie":
                 return self.send_json({"cookieNames": self.cookie_names()}, headers=self.cors_headers())
+            if path == "/alert.html":
+                return self.send_body(200, "text/html; charset=utf-8",
+                                      "<!doctype html><script>alert('from another site')</script>")
             return self.send_json({"error": "not found"}, 404)
 
         if path == "/api/set-cookie":
@@ -128,6 +144,12 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_slowly("text/plain; charset=utf-8", [f"line {i}\n" for i in (1, 2, 3)])
         if path.startswith("/api/"):
             return self.send_json({"error": "not found"}, 404)
+        if path == "/status/503":
+            return self.send_body(503, "text/html; charset=utf-8",
+                                  "<!doctype html><title>503</title><h1>Service Unavailable</h1>")
+        if path == "/download":
+            return self.send_body(200, "text/plain; charset=utf-8", "probe download\n",
+                                  [("Content-Disposition", 'attachment; filename="probe.txt"')])
         return super().do_GET()
 
     def do_POST(self):

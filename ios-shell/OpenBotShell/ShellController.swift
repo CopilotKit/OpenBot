@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import UIKit
 import WebKit
@@ -32,6 +33,13 @@ final class ShellController: NSObject, WebControllerDelegate {
     private var failureSource: FailureSource?
     private var autoRetry: DispatchWorkItem?
     private var retryCount = 0
+    /// A page of the web app has said `ready` on the bridge: from then on only its own `signed-out`
+    /// and `route` messages end the session, never the URL alone.
+    private var bridgeSeen = false
+    /// Ends the skeleton at the latest this long after a page commits (a hung subresource).
+    static let skeletonDeadlineAfterCommit: TimeInterval = 15
+    private var commitDeadline: DispatchWorkItem?
+    private var phaseWatch: AnyCancellable?
 
     private var cookieStore: WKHTTPCookieStore { web.webView.configuration.websiteDataStore.httpCookieStore }
 
@@ -44,6 +52,7 @@ final class ShellController: NSObject, WebControllerDelegate {
         signInFlow = SignInFlow(diagnostics: diagnostics)
         super.init()
         web.delegate = self
+        phaseWatch = model.$phase.sink { [weak web = self.web] phase in web?.signedIn = phase == .signedIn }
         if config.plainWebView { model.phase = .plain }
         diagnostics.log("launch", [
             "baseURL": Diagnostics.redact(config.baseURL),
@@ -376,13 +385,27 @@ final class ShellController: NSObject, WebControllerDelegate {
         enterTimeout?.cancel()
         let timeout = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            self.diagnostics.log("enter-timeout", ["seconds": SignInFlow.timeoutSeconds])
-            self.failSignIn("Sign-in took too long. Try again.")
+            // The session may well be there (a web app slow to boot, or one without the bridge).
+            SessionCookies.present(in: self.cookieStore, host: self.config.baseHost) { [weak self] present, _ in
+                guard let self = self else { return }
+                self.diagnostics.log("enter-timeout", ["seconds": SignInFlow.timeoutSeconds, "cookie": present])
+                if present, self.model.signIn == .entering, !self.onSignPage {
+                    self.finishSignIn()
+                } else {
+                    self.failSignIn("Sign-in took too long. Try again.")
+                }
+            }
         }
         enterTimeout = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + SignInFlow.timeoutSeconds, execute: timeout)
-        web.load(enterURL(ticket: ticket, verifier: verifier, to: path))
+        // The header tells the server this request comes from the app (no session without it: a
+        // page elsewhere cannot make the web view sign in to someone else's account). A retry or a
+        // restarted web process loads `path`, never the one-time enter URL again.
+        web.load(enterURL(ticket: ticket, verifier: verifier, to: path),
+                 headers: [ShellController.shellHeader: "ios"], remember: config.url(path))
     }
+
+    static let shellHeader = "OpenBot-Shell"
 
     private func startWebSignIn() {
         model.signIn = .webFallback
@@ -430,11 +453,36 @@ final class ShellController: NSObject, WebControllerDelegate {
         SessionCookies.delete(in: cookieStore, host: config.baseHost) { [weak self] deleted in
             self?.diagnostics.log("session-cookies-deleted", ["count": deleted])
         }
+        clearSiteData()
+    }
+
+    /// Everything the web app's site stored (cookies, local storage, IndexedDB, caches) goes at sign
+    /// out, so the next person to sign in on this phone finds nothing of the last one.
+    private func clearSiteData() {
+        let store = web.webView.configuration.websiteDataStore
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        let host = config.baseHost
+        store.fetchDataRecords(ofTypes: types) { [weak self] records in
+            let mine = records.filter { host == $0.displayName || host.hasSuffix("." + $0.displayName) }
+            store.removeData(ofTypes: types, for: mine) {
+                self?.diagnostics.log("site-data-cleared", ["records": mine.count])
+            }
+        }
+    }
+
+    private var onSignPage: Bool {
+        guard let url = web.webView.url, config.isOwnOrigin(url) else { return false }
+        return url.path == "/sign" || url.path.hasPrefix("/sign/")
     }
 
     // MARK: - Tabs
 
     func selectTab(_ tab: ShellTab) {
+        // While the enter page loads, a tab would replace it and lose the sign-in.
+        guard model.signIn != .entering else {
+            diagnostics.log("tab-ignored", ["tab": tab.rawValue, "why": "entering"])
+            return
+        }
         web.endEditing()
         model.selectedTab = tab
         web.open(path: tab.path) { [weak self] mode in
@@ -547,6 +595,7 @@ final class ShellController: NSObject, WebControllerDelegate {
         let type = message["type"] as? String ?? ""
         switch type {
         case "ready":
+            bridgeSeen = true
             // The skeleton goes once the page really shows something (`checkPageDrawn`).
             pageSaidReady = true
             checkPageDrawn()
@@ -630,8 +679,30 @@ final class ShellController: NSObject, WebControllerDelegate {
         // A web app without the bridge (production today) says nothing: its URL tells.
         if model.signIn == .entering, onSignPage {
             failSignIn("Sign-in didn't finish. Try again.")
+        } else if model.signIn == .entering, !path.hasPrefix("/api/") {
+            // On the web app and not on the sign-in page: signed in if the cookie is there, without
+            // waiting for a `route` (a web app without shell mode never sends one).
+            SessionCookies.present(in: cookieStore, host: config.baseHost) { [weak self] present, _ in
+                guard let self = self, present, self.model.signIn == .entering, !self.onSignPage else { return }
+                self.diagnostics.log("signed-in-by-url", ["pathRoot": first, "while": "entering"])
+                self.finishSignIn()
+            }
         } else if model.phase == .signedIn, onSignPage, !renewing {
-            sessionEnded(reason: "url-sign")
+            if bridgeSeen {
+                // The page's own `signed-out` or `route` says whether the session ended; its /sign
+                // route sends a signed-in person on to "/".
+                diagnostics.log("sign-page-ignored", ["why": "bridge"])
+            } else {
+                // No bridge: ended only if the session cookie is really gone after a moment.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self = self, self.model.phase == .signedIn else { return }
+                    SessionCookies.present(in: self.cookieStore, host: self.config.baseHost) { [weak self] present, _ in
+                        guard let self = self, self.model.phase == .signedIn else { return }
+                        self.diagnostics.log("sign-page-cookie", ["present": present])
+                        if !present { self.sessionEnded(reason: "url-sign") }
+                    }
+                }
+            }
         } else if model.phase == .signedOut, model.signIn == .webFallback, !onSignPage, !path.hasPrefix("/api/") {
             SessionCookies.present(in: cookieStore, host: config.baseHost) { [weak self] present, _ in
                 guard let self = self, present, self.model.signIn == .webFallback else { return }
@@ -669,6 +740,17 @@ final class ShellController: NSObject, WebControllerDelegate {
            config.isOwnOrigin(url) || model.signIn == .webFallback, !model.pageLoading {
             beginPageLoad("commit")
         }
+        if model.pageLoading {
+            commitDeadline?.cancel()
+            let item = DispatchWorkItem { [weak self] in self?.endPageLoad("deadline-after-commit") }
+            commitDeadline = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + ShellController.skeletonDeadlineAfterCommit, execute: item)
+        }
         if failureSource == .some(.web) || failureSource == nil { clearLoadFailure() }
+    }
+
+    func webController(_ controller: WebController, otherSiteFailed url: URL) {
+        // The web view goes back to the web app's last page by itself; nothing locks.
+        diagnostics.log("other-site-failed-handled", ["webFallback": model.signIn == .webFallback])
     }
 }

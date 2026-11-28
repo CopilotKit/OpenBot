@@ -86,6 +86,8 @@ final class Diagnostics: NSObject, WKScriptMessageHandler {
         components.user = nil
         components.password = nil
         let base = components.string ?? (url.scheme ?? "")
+        // The sign-in hand-off's URLs carry a ticket and a verifier: not even their names.
+        if components.path.hasPrefix("/api/auth/shell/") { return base }
         return names.isEmpty ? base : base + "?" + names.joined(separator: "&")
     }
 

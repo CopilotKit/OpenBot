@@ -19,6 +19,8 @@ protocol WebControllerDelegate: AnyObject {
     func webControllerDidFinish(_ controller: WebController)
     /// WebKit's content process ended and the page is being loaded again.
     func webControllerContentProcessRestarted(_ controller: WebController)
+    /// Another site's page failed to load; the web view is going back to the web app's last page.
+    func webController(_ controller: WebController, otherSiteFailed url: URL)
     /// The web view's URL changed, by a load or by the page's own router (pushState).
     func webController(_ controller: WebController, didChangeURL url: URL?)
 }
@@ -44,6 +46,14 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     /// One hosted sign-in URL the shell decided to let through after all.
     private var allowHostedOnce: URL?
     private var urlObservation: NSKeyValueObservation?
+    /// The last page of the web app's own origin that committed (never a sign-in hand-off URL): where
+    /// the app goes back to after another site's page fails, and what a retry loads.
+    private(set) var lastOwnOriginURL: URL?
+    /// Set by the shell while someone is signed in: back and forward then never reach another
+    /// site's page or the sign-in page (they would walk back through the identity provider).
+    var signedIn = false
+    /// Files the page downloads, by download, until the share sheet has them.
+    private var downloadFiles: [ObjectIdentifier: URL] = [:]
 
     init(config: ShellConfig, diagnostics: Diagnostics) {
         self.config = config
@@ -135,13 +145,24 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
 
     // MARK: - Loading
 
-    /// Loads a path of the web app (or any URL) as a full page load.
-    func load(_ url: URL) {
-        lastRequestedURL = url
+    /// Loads a path of the web app (or any URL) as a full page load. `headers` go on this one
+    /// request; `remember` is what a retry or a restarted web process loads instead of `url` (the
+    /// sign-in hand-off's URL carries a one-time ticket and must never be loaded twice).
+    func load(_ url: URL, headers: [String: String] = [:], remember: URL? = nil) {
+        let keep = remember ?? url
+        lastRequestedURL = isHandoffURL(keep) ? lastOwnOriginURL : keep
         lastLoadFailed = false
         diagnostics.log("load", ["url": Diagnostics.redact(url)])
         armWatchdog(for: url)
-        webView.load(URLRequest(url: url))
+        var request = URLRequest(url: url)
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        webView.load(request)
+    }
+
+    /// A URL of the sign-in hand-off (`/api/auth/shell/...`): never kept, never loaded again.
+    func isHandoffURL(_ url: URL?) -> Bool {
+        guard let url = url, config.isOwnOrigin(url) else { return false }
+        return url.path.hasPrefix("/api/auth/shell/")
     }
 
     /// Loads about:blank (no network) and calls back when it has loaded, or after 3 s.
@@ -196,9 +217,12 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     }
 
     func retry() {
-        diagnostics.log("retry", ["url": lastRequestedURL.map(Diagnostics.redact) ?? ""])
-        if webView.url == nil || lastLoadFailed {
-            load(lastRequestedURL ?? config.baseURL)
+        // Only the web app's own pages are retried: another site's page that failed is left behind.
+        var target = lastRequestedURL
+        if let url = target, !config.isOwnOrigin(url) || isHandoffURL(url) { target = lastOwnOriginURL }
+        diagnostics.log("retry", ["url": target.map(Diagnostics.redact) ?? ""])
+        if webView.url == nil || lastLoadFailed || isHandoffURL(webView.url) || !(webView.url.map { self.config.isOwnOrigin($0) } ?? false) {
+            load(target ?? config.baseURL)
         } else {
             lastLoadFailed = false
             armWatchdog(for: webView.url)
@@ -327,6 +351,10 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
             self.watchdog = nil
             self.diagnostics.log("load-watchdog", ["url": url.map(Diagnostics.redact) ?? "", "seconds": WebController.watchdogSeconds])
             self.webView.stopLoading()
+            if let url = url, !self.config.isOwnOrigin(url) {
+                self.leaveFailedOtherSite(url, why: "watchdog")
+                return
+            }
             self.lastLoadFailed = true
             self.delegate?.webController(self, didFailLoad: "OpenBot didn't answer. Try again in a moment.")
         }
@@ -382,6 +410,18 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
             decisionHandler(.cancel)
             return
         }
+        // Signed in, back and forward stay on the web app's own pages and never reach the sign-in
+        // page: walking back after a web sign-in would go through the identity provider to /sign.
+        if signedIn, navigationAction.navigationType == .backForward, isMainFrame,
+           !config.isOwnOrigin(url) || url.path == "/sign" || url.path.hasPrefix("/sign/") || url.path.hasPrefix("/api/auth/") {
+            diagnostics.log("back-forward-refused", ["ownOrigin": config.isOwnOrigin(url)])
+            decisionHandler(.cancel)
+            return
+        }
+        if navigationAction.shouldPerformDownload {
+            decisionHandler(.download)
+            return
+        }
         if scheme == "http" || scheme == "https" {
             if isMainFrame, config.isOwnOrigin(url), url.path == "/api/auth/hosted/sign-in" {
                 if let allowed = allowHostedOnce, allowed == url {
@@ -407,9 +447,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
             decisionHandler(.allow)
             return
         }
-        // mailto:, tel: and app links go to the system.
-        diagnostics.log("open-external", ["scheme": scheme])
-        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        openExternal(url, mainFrame: isMainFrame, tapped: navigationAction.navigationType == .linkActivated)
         decisionHandler(.cancel)
     }
 
@@ -447,15 +485,48 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
             }
             diagnostics.log("navigation-response", entry)
         }
+        let http = navigationResponse.response as? HTTPURLResponse
+        let disposition = http?.value(forHTTPHeaderField: "Content-Disposition")?.lowercased() ?? ""
+        if navigationResponse.isForMainFrame, disposition.hasPrefix("attachment") || !navigationResponse.canShowMIMEType {
+            // A file: never in place of the app's page. Saved and handed to the share sheet.
+            diagnostics.log("download-response", ["mimeType": http?.mimeType ?? navigationResponse.response.mimeType ?? ""])
+            decisionHandler(.download)
+            return
+        }
+        if navigationResponse.isForMainFrame, let http = http, http.statusCode >= 500,
+           let url = http.url, config.isOwnOrigin(url) {
+            // The web app's own server failed: the lock screen and its retry, not the raw error page.
+            diagnostics.log("server-error", ["status": http.statusCode, "url": Diagnostics.redact(url)])
+            disarmWatchdog()
+            lastLoadFailed = true
+            decisionHandler(.cancel)
+            delegate?.webController(self, didFailLoad: "server-error")
+            return
+        }
         decisionHandler(.allow)
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        download.delegate = self
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         if let url = webView.url, url.absoluteString != "about:blank" {
-            lastRequestedURL = url
+            if !isHandoffURL(url) { lastRequestedURL = url }
             diagnostics.log("main-frame-start", ["url": Diagnostics.redact(url)])
         }
         armWatchdog(for: webView.url)
+    }
+
+    func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
+        guard let url = webView.url else { return }
+        diagnostics.log("server-redirect", ["url": Diagnostics.redact(url)])
+        if !isHandoffURL(url), url.absoluteString != "about:blank" { lastRequestedURL = url }
+        armWatchdog(for: url)
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
@@ -466,12 +537,17 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         if webView.url?.absoluteString == "about:blank", blankDone == nil,
            let requested = lastRequestedURL, ["http", "https"].contains(requested.scheme?.lowercased() ?? "") {
             diagnostics.log("blocked-load", ["url": Diagnostics.redact(requested)])
+            if !config.isOwnOrigin(requested) {
+                leaveFailedOtherSite(requested, why: "blocked")
+                return
+            }
             lastLoadFailed = true
             delegate?.webController(self, didFailLoad: "blocked")
             return
         }
         pageReady = false
         lastLoadFailed = false
+        if let url = webView.url, config.isOwnOrigin(url), !isHandoffURL(url) { lastOwnOriginURL = url }
         diagnostics.log("main-frame-commit", ["url": webView.url.map(Diagnostics.redact) ?? ""])
         delegate?.webControllerDidCommit(self)
     }
@@ -504,8 +580,8 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         diagnostics.log("content-process-terminated", [:])
         hideKeyboardAccessory(when: "process-terminated")
         delegate?.webControllerContentProcessRestarted(self)
-        if webView.url == nil {
-            load(lastRequestedURL ?? config.baseURL)
+        if webView.url == nil || isHandoffURL(webView.url) {
+            load(lastRequestedURL ?? lastOwnOriginURL ?? config.baseURL)
         } else {
             armWatchdog(for: webView.url)
             webView.reload()
@@ -528,6 +604,13 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         // WebKit reports "frame load interrupted" (102) when a download or policy change stops a
         // load; that is not something to show either.
         if nsError.domain == "WebKitErrorDomain" && nsError.code == 102 { return }
+        // Another site's page (an identity provider or a vendor blocked on this network): back to the
+        // web app's last page, which carries on. Only the web app's own pages lock the app.
+        if let failing = nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL,
+           ["http", "https"].contains(failing.scheme?.lowercased() ?? ""), !config.isOwnOrigin(failing) {
+            leaveFailedOtherSite(failing, why: phase)
+            return
+        }
         lastLoadFailed = true
         delegate?.webController(self, didFailLoad: nsError.localizedDescription)
     }
@@ -549,7 +632,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
             // Other sites open in an in-app Safari sheet.
             presentSafari(url)
         } else if scheme != "openbotshell" {
-            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+            openExternal(url, mainFrame: true, tapped: navigationAction.navigationType == .linkActivated)
         }
         return nil
     }
@@ -558,12 +641,12 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
                  runJavaScriptAlertPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo,
                  completionHandler: @escaping () -> Void) {
-        diagnostics.log("js-alert", [:])
-        guard let presenter = topViewController() else {
+        diagnostics.log("js-alert", ["ownOrigin": isOwnOrigin(frame)])
+        guard isOwnOrigin(frame), let presenter = topViewController() else {
             completionHandler()
             return
         }
-        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        let alert = UIAlertController(title: "OpenBot", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
         presenter.present(alert, animated: true)
     }
@@ -572,12 +655,12 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
                  runJavaScriptConfirmPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo,
                  completionHandler: @escaping (Bool) -> Void) {
-        diagnostics.log("js-confirm", [:])
-        guard let presenter = topViewController() else {
+        diagnostics.log("js-confirm", ["ownOrigin": isOwnOrigin(frame)])
+        guard isOwnOrigin(frame), let presenter = topViewController() else {
             completionHandler(false)
             return
         }
-        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        let alert = UIAlertController(title: "OpenBot", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completionHandler(false) })
         alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler(true) })
         presenter.present(alert, animated: true)
@@ -588,12 +671,12 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
                  defaultText: String?,
                  initiatedByFrame frame: WKFrameInfo,
                  completionHandler: @escaping (String?) -> Void) {
-        diagnostics.log("js-prompt", [:])
-        guard let presenter = topViewController() else {
+        diagnostics.log("js-prompt", ["ownOrigin": isOwnOrigin(frame)])
+        guard isOwnOrigin(frame), let presenter = topViewController() else {
             completionHandler(nil)
             return
         }
-        let alert = UIAlertController(title: nil, message: prompt, preferredStyle: .alert)
+        let alert = UIAlertController(title: "OpenBot", message: prompt, preferredStyle: .alert)
         alert.addTextField { field in field.text = defaultText }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completionHandler(nil) })
         alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
@@ -618,6 +701,34 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     }
 
     // MARK: - Helpers
+
+    /// A JavaScript dialog's frame is on the web app's own origin (other sites' dialogs are dropped).
+    private func isOwnOrigin(_ frame: WKFrameInfo) -> Bool {
+        let origin = frame.securityOrigin
+        return origin.host.lowercased() == config.baseHost
+            && origin.protocol.lowercased() == (config.baseURL.scheme ?? "").lowercased()
+    }
+
+    /// Schemes handed to the system, only from a tap in the main frame.
+    static let externalSchemes: Set<String> = ["mailto", "tel", "sms"]
+
+    private func openExternal(_ url: URL, mainFrame: Bool, tapped: Bool) {
+        let scheme = url.scheme?.lowercased() ?? ""
+        guard mainFrame, tapped, WebController.externalSchemes.contains(scheme) else {
+            diagnostics.log("external-dropped", ["scheme": scheme, "mainFrame": mainFrame, "tapped": tapped])
+            return
+        }
+        diagnostics.log("open-external", ["scheme": scheme])
+        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+    }
+
+    /// Another site's page did not load: back to the web app's last page, without the lock screen.
+    private func leaveFailedOtherSite(_ url: URL, why: String) {
+        diagnostics.log("other-site-failed", ["host": url.host ?? "", "why": why])
+        lastLoadFailed = false
+        delegate?.webController(self, otherSiteFailed: url)
+        load(lastOwnOriginURL ?? config.baseURL)
+    }
 
     private var lastAccessoryResult = ""
 
@@ -700,5 +811,32 @@ extension WebController: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         true
+    }
+}
+
+extension WebController: WKDownloadDelegate {
+    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
+                  suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let name = suggestedFilename.isEmpty ? "download" : suggestedFilename
+        let file = folder.appendingPathComponent(name)
+        downloadFiles[ObjectIdentifier(download)] = file
+        completionHandler(file)
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {
+        guard let file = downloadFiles.removeValue(forKey: ObjectIdentifier(download)) else { return }
+        diagnostics.log("download-finished", ["bytes": (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1])
+        guard let presenter = topViewController() else { return }
+        let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+        sheet.popoverPresentationController?.sourceView = webView
+        sheet.popoverPresentationController?.sourceRect = CGRect(x: webView.bounds.midX, y: webView.bounds.midY, width: 1, height: 1)
+        presenter.present(sheet, animated: true)
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        downloadFiles.removeValue(forKey: ObjectIdentifier(download))
+        diagnostics.log("download-failed", ["description": (error as NSError).localizedDescription])
     }
 }

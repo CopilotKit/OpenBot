@@ -24,6 +24,21 @@ final class DemoTourUITests: ShellTestCase {
         element.tap()
     }
 
+    /// Run before the recording, unrecorded: the first launch on a fresh simulator (WebKit's caches,
+    /// the sheet's Safari service, the mock's first answers) took over a minute to sign in.
+    func testWarmUp() throws {
+        let app = launchSignedIn(moment: "warm-up")
+        _ = webText(app, "Start a conversation").waitForExistence(timeout: 60)
+        let composer = app.webViews.textViews.firstMatch
+        if composer.waitForExistence(timeout: 10), focusComposer(app, composer) {
+            composer.typeText("hi")
+            dragPageDown(app)
+        }
+        tab(app, .conversations).tap()
+        _ = webText(app, "Competitor pricing notes").waitForExistence(timeout: 20)
+        app.terminate()
+    }
+
     func testDemoTour() throws {
         note("video-mark start \(Date().timeIntervalSince1970)")
         defer { note("video-mark end \(Date().timeIntervalSince1970)") }

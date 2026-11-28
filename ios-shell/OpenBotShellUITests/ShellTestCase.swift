@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 /// Shared launch, wait and screenshot helpers for the shell's UI tests.

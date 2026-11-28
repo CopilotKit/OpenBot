@@ -166,6 +166,12 @@ jobs:
         run: |
           for _ in $(seq 1 300); do [ -f "$RUNNER_TEMP/simulator.ready" ] && break; sleep 1; done
           [ -f "$RUNNER_TEMP/simulator.ready" ] || { cat "$RUNNER_TEMP/boot.log"; exit 1; }
+          echo "$(date +%s) warm-up" >> "$RUNNER_TEMP/timing"
+          # One unrecorded pass first: a fresh simulator's first sign-in took over a minute.
+          xcodebuild test-without-building -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath DerivedData-Debug \
+            -only-testing:OpenBotShellUITests/DemoTourUITests/testWarmUp CODE_SIGNING_ALLOWED=NO > xcodebuild-warm-up.log 2>&1 \
+            || grep -E "error:|Test Case" xcodebuild-warm-up.log || true
           echo "$(date +%s) record" >> "$RUNNER_TEMP/timing"
           started="$(python3 -c 'import time; print(time.time())')"
           echo "STARTED=$started" >> "$GITHUB_ENV"

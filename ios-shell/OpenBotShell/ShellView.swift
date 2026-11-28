@@ -26,7 +26,8 @@ struct ShellView: View {
                         .position(x: model.webFrame.midX, y: model.webFrame.midY)
                 }
                 .ignoresSafeArea()
-                .allowsHitTesting(false)
+                // Swallows taps: nothing reaches a page that is still loading under it.
+                .allowsHitTesting(true)
                 // On at once (never a frame of empty web view), off with a short fade.
                 .transition(.asymmetric(insertion: .identity, removal: .opacity))
             }
