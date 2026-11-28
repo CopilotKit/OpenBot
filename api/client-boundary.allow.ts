@@ -229,6 +229,12 @@ export const ALLOWED: Allowed[] = [
   },
   {
     file: "app/src/lib/auth/resume.ts",
+    what: "/api/auth/shell/handoff?{}",
+    rule: "sign-in-protocol",
+    why: "where a first-time native sign-in returns to confirm the handoff in the system browser",
+  },
+  {
+    file: "app/src/lib/auth/resume.ts",
     what: "/api/plugins/arcade/verify",
     rule: "sign-in-protocol",
     why: "where sign-in sends a person back to finish verifying an app account",
