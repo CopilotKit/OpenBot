@@ -61,6 +61,23 @@ class ShellTestCase: XCTestCase {
         return app
     }
 
+    /// A first-use typing lesson can occupy the keyboard's frame without showing any keys.
+    func focusComposerForTyping(_ composer: XCUIElement, in app: XCUIApplication) {
+        composer.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 8), "the software keyboard did not appear")
+        let lesson = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "speed up your typing")).firstMatch
+        let keyboardContinue = app.keyboards.buttons["Continue"].firstMatch
+        if keyboardContinue.exists {
+            keyboardContinue.tap()
+            composer.tap()
+        } else if lesson.exists, app.buttons["Continue"].exists {
+            app.buttons["Continue"].tap()
+            composer.tap()
+        }
+        XCTAssertTrue(keyboard.keys.firstMatch.waitForExistence(timeout: 5), "the software keyboard did not show its keys")
+    }
+
     /// Puts the software keyboard away if it is up (a conversation focuses its message box when it
     /// opens): taps `neutral`, then swipes the page down.
     func dismissKeyboardIfUp(_ app: XCUIApplication, tapping neutral: XCUIElement? = nil) {

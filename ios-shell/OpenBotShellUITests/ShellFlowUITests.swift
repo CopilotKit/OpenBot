@@ -426,8 +426,7 @@ final class ShellFlowUITests: ShellTestCase {
         let app = launchSignedIn()
         let composer = app.webViews.textViews.firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 30))
-        composer.tap()
-        _ = app.keyboards.firstMatch.waitForExistence(timeout: 6)
+        focusComposerForTyping(composer, in: app)
         composer.typeText("Hello there")
         guard let send = firstExisting([webElement(app, label: "Send message")], timeout: 5) else {
             XCTFail("no Send button")

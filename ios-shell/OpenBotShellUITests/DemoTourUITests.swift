@@ -60,9 +60,8 @@ final class DemoTourUITests: ShellTestCase {
         scene("sign-in")
 
         // The software keyboard: the tab bar hides, the message box sits on it.
-        composer.tap()
+        focusComposerForTyping(composer, in: app)
         let keyboard = app.keyboards.firstMatch
-        XCTAssertTrue(keyboard.waitForExistence(timeout: 8), "demo: the software keyboard did not appear")
         composer.typeText("What changed in competitor pricing?")
         let send = webElement(app, label: "Send message")
         XCTAssertTrue(send.waitForExistence(timeout: 5))
