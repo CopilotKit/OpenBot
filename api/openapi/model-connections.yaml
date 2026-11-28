@@ -2018,8 +2018,10 @@ components:
             this list (startAiSignIn for the organization,
             startPersonalAiSignIn for a person). Every provider not listed
             connects with a key or an address.
+          # Keep the released list's values when a key-only provider is added.
           items:
-            $ref: '#/components/schemas/AiConnectionProvider'
+            type: string
+            enum: [openai, anthropic, google, xai, trustedrouter, openai-compatible]
     ModelChoice:
       type: object
       description: >-
@@ -2126,29 +2128,30 @@ components:
       description: >-
         The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic:
         Anthropic. google: Google Gemini. xai: xAI. trustedrouter:
-        TrustedRouter. openai-compatible: any server that speaks OpenAI's
-        API, at an address given.
-      enum: [openai, anthropic, google, xai, trustedrouter, openai-compatible]
+        TrustedRouter. privatemode: Privatemode. openai-compatible: any server
+        that speaks OpenAI's API, at an address given.
+      enum: [openai, anthropic, google, xai, trustedrouter, privatemode, openai-compatible]
     AiConnectionProviderAnswer:
       type: string
-      x-extensible-enum: [openai, anthropic, google, xai, trustedrouter, openai-compatible]
+      x-extensible-enum: [openai, anthropic, google, xai, trustedrouter, privatemode, openai-compatible]
       description: >-
         The AI provider OpenBot's Bots run on, as the server answers it.
         openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai:
-        xAI. trustedrouter: TrustedRouter. openai-compatible: any server that
-        speaks OpenAI's API, at an address given. The list can grow: a client
-        shows a provider it doesn't know by its id. A request still names one
-        of AiConnectionProvider. A connection saved for a provider OpenBot no
-        longer offers is still listed, under the id it was saved with, so it
-        can be removed: it is never ready, its problem is provider-retired,
-        and it is never accepted again.
+        xAI. trustedrouter: TrustedRouter. privatemode: Privatemode.
+        openai-compatible: any server that speaks OpenAI's API, at an address
+        given. The list can grow: a client shows a provider it doesn't know
+        by its id. A request still names one of AiConnectionProvider. A
+        connection saved for a provider OpenBot no longer offers is still
+        listed, under the id it was saved with, so it can be removed: it is
+        never ready, its problem is provider-retired, and it is never accepted
+        again.
     AiConnectionLogin:
       type: string
       description: >-
         How OpenBot signs in to the provider. plan: the person's Claude or
         ChatGPT plan (openai, anthropic). api-key: a key from the provider
         (openai, anthropic). endpoint: an address and, where it asks for one,
-        a key (google, xai, trustedrouter, openai-compatible).
+        a key (google, xai, trustedrouter, privatemode, openai-compatible).
         oauth: the person's xAI sign-in (xai). A Google sign-in (google,
         oauth) saved before Gemini took an API key only is still listed,
         with the problem sign-in-retired, and is never accepted again.
@@ -2265,8 +2268,8 @@ components:
       additionalProperties: false
       description: >-
         The connection to switch to. openai and anthropic take plan or
-        api-key; xai takes endpoint or oauth; google, trustedrouter and
-        openai-compatible take endpoint. Any other pair is
+        api-key; xai takes endpoint or oauth; google, trustedrouter,
+        privatemode and openai-compatible take endpoint. Any other pair is
         refused: google with oauth is refused with the words of the problem
         sign-in-retired.
       required: [provider, login]
