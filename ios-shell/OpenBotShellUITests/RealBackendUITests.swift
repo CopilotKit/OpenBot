@@ -287,33 +287,37 @@ class RealBackendTestCase: ShellTestCase {
         screenshot("j1-home")
 
         // One real message, and the reply streaming in.
-        composer.tap()
-        _ = app.keyboards.firstMatch.waitForExistence(timeout: 8)
+        XCTAssertTrue(focusComposer(app, composer), "the message box raised no keyboard")
         composer.typeText(RealBackendTestCase.prompt)
         hold(1)
         screenshot("j2-message-typed")
-        let before = Set(labels(in: app.webViews.firstMatch, limit: 400))
+        // The reply to "Say hello in three words." says hello: a cheap query, where reading every
+        // label of the page took seconds a time (the video waited on it).
+        let reply = app.webViews.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] 'hello' AND NOT (label CONTAINS[c] 'say hello')")).firstMatch
+        let before = videoMode ? [] : Set(labels(in: app.webViews.firstMatch, limit: 400))
         if let send = firstExisting([webElement(app, label: "Send message")], timeout: 5) {
             send.tap()
         } else {
             composer.typeText("\n")
         }
-        var lengths: [Int] = []
         let started = Date()
-        while Date().timeIntervalSince(started) < (videoMode ? 30 : 60) {
-            hold(videoMode ? 1 : 3)
-            let now = labels(in: app.webViews.firstMatch, limit: 400)
-            let fresh = now.filter { !before.contains($0) && !$0.contains(RealBackendTestCase.prompt) && $0.hasPrefix("StaticText") }
-            lengths.append(fresh.map { $0.count }.max() ?? 0)
-            if lengths.count == 2 { screenshot("j3-reply-streaming") }
-            if lengths.count >= 3, lengths.suffix(2).allSatisfy({ $0 == lengths.last! }), (lengths.last ?? 0) > 0 { break }
+        let replied = reply.waitForExistence(timeout: videoMode ? 30 : 60)
+        note("reply: a hello on screen \(replied) after \(Int(Date().timeIntervalSince(started))) s")
+        if !videoMode {
+            var lengths: [Int] = []
+            for _ in 0..<3 {
+                let now = labels(in: app.webViews.firstMatch, limit: 400)
+                let fresh = now.filter { !before.contains($0) && !$0.contains(RealBackendTestCase.prompt) && $0.hasPrefix("StaticText") }
+                lengths.append(fresh.map { $0.count }.max() ?? 0)
+                if lengths.count == 2 { screenshot("j3-reply-streaming") }
+            }
+            note("reply: longest new text by sample \(lengths)")
         }
-        let grew = zip(lengths, lengths.dropFirst()).contains { $0 < $1 && $0 > 0 }
-        note("reply: longest new text by 3 s step \(lengths); grew while shown (streaming) \(grew); after \(Int(Date().timeIntervalSince(started))) s")
         hold(3)
         screenshot("j4-reply")
         // Dismissed by dragging the page down, as a person does.
-        app.webViews.firstMatch.swipeDown()
+        dragPageDown(app)
         dismissKeyboardIfUp(app, tapping: webText(app, RealBackendTestCase.prompt))
         XCTAssertTrue(tab(app, .bots).waitForExistence(timeout: 5), "the tab bar did not come back after the reply")
         note("after sending: \(debugState(app))")
