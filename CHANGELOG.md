@@ -70,6 +70,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   HTTPS: Google's (`fcm.googleapis.com`), Mozilla's (`*.push.services.mozilla.com`), Apple's
   (`*.push.apple.com`) and Microsoft's (`*.notify.windows.com`). A firewall that limits the
   server's outbound traffic must allow them.
+- **An AI connection saved for Unbiased AI stops running.** Unbiased AI stopped serving models,
+  and OpenBot no longer offers it. Where it is the organization's default AI, or a person's own,
+  Bots on it stop before they start and say to connect another AI; connect another before
+  upgrading. Nothing is deleted, and the connection stays listed so it can be removed (below, under
+  AI providers).
 - **No downtime, and nothing new is required.** The upgrade rolls (`openbot.ai/requires-downtime`
   stays `"false"`), no setting or secret becomes required, and the `openbot-bundle` and
   `openbot-agent` charts have no changes of their own.
@@ -323,12 +328,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `AiConnectionProviderAnswer` can name it; `signIns` keeps the values it had, since Privatemode
   has no sign-in.
 
-- **Unbiased AI is no longer an AI provider.** OpenBot Desktop's setup, Settings and Admin AI
-  providers, Connect another AI, and the conversation and Bot model pickers no longer offer it,
-  OpenBot Desktop's Sign in with Unbiased AI is gone, and the server no longer runs its sign-in.
-  The API no longer takes `unbiased` as a provider. A connection saved for it before is still
-  listed, so it can be removed, but it never runs: it reads as stopped with the new problem
-  `provider-retired`, which says to connect another AI. The model shown on an existing conversation
+- **Unbiased AI is no longer an AI provider.** Unbiased AI stopped serving models. OpenBot
+  Desktop's setup, Settings and Admin AI providers, Connect another AI, and the conversation and
+  Bot model pickers no longer offer it, OpenBot Desktop's Sign in with Unbiased AI is gone, and the
+  server no longer runs its sign-in. A connection saved for it before is still listed, in the
+  organization's list, a person's own and the model list, so it can be removed, which also revokes
+  its saved key. It is never ready and lists no models, and its problem is the new
+  `provider-retired`: "OpenBot no longer offers this AI provider. Remove it and connect another
+  AI.", or for a member, "OpenBot no longer offers your organization's AI provider. An admin has to
+  connect another one." A released app shows that sentence as it shows any problem it doesn't
+  know. It never runs: a Bot picked onto it, or an organization whose default it is, stops before
+  the run starts, with that sentence, and nothing is sent to its address. It can't be picked or
+  made the default again, and OpenBot Desktop no longer carries one in from its setup. The API no
+  longer takes `unbiased` as a provider; a released app that still names it gets the answers it
+  got before, in the same order, and then a refusal. The model shown on an existing conversation
   stays readable.
 
 **Notifications.**
