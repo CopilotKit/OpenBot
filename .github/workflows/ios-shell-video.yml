@@ -89,14 +89,25 @@ jobs:
             (cd ios-shell && xcodegen generate)
           fi
 
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData-Debug
+          key: ios-shell-video-dd-Debug-${{ hashFiles('ios-shell/**') }}
+          restore-keys: ios-shell-video-dd-Debug-
+
+      # The app builds while the web app does: on a cold web cache the two together are what
+      # keeps the job inside its 13 minutes.
+      - name: Start the Debug build in the background
+        run: |
+          echo "$(date +%s) build-and-web" >> "$RUNNER_TEMP/timing"
+          nohup bash -c 'xcodebuild build-for-testing -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell \
+            -configuration Debug -destination "platform=iOS Simulator,id=$1" -derivedDataPath DerivedData-Debug \
+            CODE_SIGNING_ALLOWED=NO > xcodebuild-build.log 2>&1; echo $? > "$2"' build "$SIM_UDID" \
+            "$RUNNER_TEMP/build.status" > /dev/null 2>&1 &
+
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
-
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: ios-shell-video-bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
 
       - name: Look for the built web app in the cache
         id: web-cache
@@ -110,7 +121,6 @@ jobs:
         env:
           WEB_CACHED: ${{ steps.web-cache.outputs.cache-hit }}
         run: |
-          echo "$(date +%s) web-and-mock" >> "$RUNNER_TEMP/timing"
           mkdir -p artifacts/video
           bun install --frozen-lockfile
           cp .env.example .env
@@ -135,21 +145,13 @@ jobs:
           path: app/dist
           key: ${{ steps.web-cache.outputs.cache-primary-key }}
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: DerivedData-Debug
-          key: ios-shell-video-dd-Debug-${{ hashFiles('ios-shell/**') }}
-          restore-keys: ios-shell-video-dd-Debug-
-
-      - name: Build the Debug app and its UI tests
-        timeout-minutes: 10
+      - name: Wait for the Debug build
+        timeout-minutes: 8
         run: |
-          echo "$(date +%s) build" >> "$RUNNER_TEMP/timing"
-          set -o pipefail
-          xcodebuild build-for-testing -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath DerivedData-Debug CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee xcodebuild-build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
-          grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build.log
+          echo "$(date +%s) build-wait" >> "$RUNNER_TEMP/timing"
+          while [ ! -f "$RUNNER_TEMP/build.status" ]; do sleep 2; done
+          grep -E "error:|BUILD (SUCCEEDED|FAILED)" xcodebuild-build.log || true
+          [ "$(cat "$RUNNER_TEMP/build.status")" = 0 ]
 
       - name: Record the demo tour
         timeout-minutes: 10
