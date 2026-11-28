@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.webkit.CookieManager
 import androidx.annotation.IdRes
 import androidx.core.net.toUri
@@ -131,7 +132,7 @@ class ShellController(
     var pageLoading = true
         private set
     private var lastWebVisible = false
-    private var loadingSince = 0L
+    private var loadingSince = SystemClock.uptimeMillis()
 
     /** The sign-in screen; while entering, the web area (and its skeleton) shows instead. */
     val showsSignInScreen: Boolean
@@ -169,12 +170,14 @@ class ShellController(
         if (visible && !lastWebVisible && !pageLoading) {
             // The web area comes into view: covered until a page renders in it.
             pageLoading = true
-            loadingSince = System.currentTimeMillis()
+            loadingSince = SystemClock.uptimeMillis()
+            contentSince = 0L
             main.removeCallbacks(hideSkeleton)
             diagnostics.log("skeleton", mapOf("shown" to true, "reason" to "web-area-shown"))
             // A page already up (no load coming) ends it at once; a load in flight ends it itself.
             if (web.pageReady) {
-                main.postDelayed({ pageShown("already-ready", 200) }, 50)
+                main.removeCallbacks(checkContent)
+                main.post(checkContent)
             } else if (web.webView.progress >= 100) {
                 // Nothing loading and no bridge: as after a finish without ready (a load starting
                 // right after this cancels it in onFullLoad).
@@ -239,6 +242,7 @@ class ShellController(
     }
 
     fun stop() {
+        contentCheckId++
         network.stop()
         signInFlow.shutdown()
         main.removeCallbacksAndMessages(null)
@@ -485,53 +489,54 @@ class ShellController(
     private val hideSkeleton = Runnable {
         if (pageLoading) {
             pageLoading = false
-            diagnostics.log("skeleton", mapOf("shown" to false, "ms" to System.currentTimeMillis() - loadingSince))
+            diagnostics.log("skeleton", mapOf("shown" to false, "ms" to SystemClock.uptimeMillis() - loadingSince))
             changed()
         }
     }
     private val checkContent = Runnable { checkPageContent() }
 
     override fun onFullLoad() {
+        contentCheckId++
         main.removeCallbacks(hideSkeleton)
         main.removeCallbacks(checkContent)
         contentSince = 0L
         if (!pageLoading) {
             pageLoading = true
-            loadingSince = System.currentTimeMillis()
+            loadingSince = SystemClock.uptimeMillis()
             diagnostics.log("skeleton", mapOf("shown" to true))
             changed()
         }
     }
 
-    /** The page has rendered: the skeleton fades out after `after` ms, never before 300 ms on screen. */
-    private fun pageShown(reason: String, after: Long) {
+    /** Keep the skeleton on screen for at least 300 ms before it fades. */
+    private fun pageShown(reason: String) {
         if (!pageLoading) return
         main.removeCallbacks(checkContent)
-        val elapsed = System.currentTimeMillis() - loadingSince
-        val delay = maxOf(after, MIN_SKELETON_MS - elapsed, 0L)
+        val elapsed = SystemClock.uptimeMillis() - loadingSince
+        val delay = maxOf(MIN_SKELETON_MS - elapsed, 0L)
         diagnostics.log("skeleton-ending", mapOf("reason" to reason, "afterMs" to delay))
         main.removeCallbacks(hideSkeleton)
         main.postDelayed(hideSkeleton, delay)
     }
 
     private var contentSince = 0L
+    private var contentCheckId = 0L
 
-    /**
-     * Finished and no `ready` came (a web app without the bridge, or a page that is not the web app,
-     * such as a bot check): the skeleton goes as soon as the page shows text, 8 s at most, so an
-     * interactive page is never kept covered.
-     */
+    /** The router may mount before the first route paints. Older pages can show just one line. */
     private fun checkPageContent() {
-        if (!pageLoading || web.pageReady) return
-        if (contentSince == 0L) contentSince = System.currentTimeMillis()
-        web.evaluateJson("JSON.stringify({n: (document.body && document.body.innerText.trim().length) || 0, t: document.title})") { answer ->
-            val length = answer?.optInt("n", 0) ?: 0
-            val waited = System.currentTimeMillis() - contentSince
-            if (length > 0 || waited >= MAX_TEXT_WAIT_MS) {
-                diagnostics.log("page-after-finish", mapOf("textLength" to length, "title" to (answer?.optString("t") ?: ""), "waitedMs" to waited))
-                pageShown(if (length > 0) "text" else "text-timeout", 0)
+        if (!pageLoading) return
+        main.removeCallbacks(checkContent)
+        if (contentSince == 0L) contentSince = SystemClock.uptimeMillis()
+        val checkId = ++contentCheckId
+        web.hasVisibleContent(if (web.pageReady) 3 else 1) { visible ->
+            if (!pageLoading || checkId != contentCheckId) return@hasVisibleContent
+            // A known OpenBot router can still be fetching its first route on a slow device.
+            // Keep the shorter escape hatch for an older page or a provider with no bridge.
+            val limit = if (web.pageReady) MAX_ROUTE_DRAW_WAIT_MS else MAX_TEXT_WAIT_MS
+            if (visible || SystemClock.uptimeMillis() - contentSince >= limit) {
+                pageShown(if (visible) "drawn" else "text-timeout")
             } else {
-                main.postDelayed(checkContent, 400)
+                main.postDelayed(checkContent, 200)
             }
         }
     }
@@ -543,6 +548,7 @@ class ShellController(
     }
 
     private fun stopSkeleton() {
+        contentCheckId++
         main.removeCallbacks(hideSkeleton)
         main.removeCallbacks(checkContent)
         if (pageLoading) {
@@ -656,7 +662,8 @@ class ShellController(
     override fun onBridgeMessage(message: JSONObject) {
         when (message.optString("type")) {
             "ready" -> {
-                pageShown("ready", 200)
+                main.removeCallbacks(hideSkeleton)
+                checkPageContent()
                 refreshChrome()
             }
             "route" -> {
@@ -755,7 +762,7 @@ class ShellController(
             // No `ready` within 1.5 s of finishing: a page without the bridge (production today),
             // or one that is not the web app at all (an interactive bot check): never keep it covered.
             main.removeCallbacks(checkContent)
-            main.postDelayed(checkContent, 300)
+            main.postDelayed(checkContent, NO_READY_MS)
         }
     }
 
@@ -779,5 +786,6 @@ class ShellController(
         const val MIN_SKELETON_MS = 300L
         const val NO_READY_MS = 1_500L
         const val MAX_TEXT_WAIT_MS = 8_000L
+        const val MAX_ROUTE_DRAW_WAIT_MS = 20_000L
     }
 }

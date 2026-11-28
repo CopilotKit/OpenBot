@@ -1,8 +1,10 @@
 package ai.openbot.shell.test
 
 import android.os.SystemClock
+import android.webkit.CookieManager
 import android.webkit.WebView
 import ai.openbot.shell.R
+import ai.openbot.shell.SessionCookies
 import androidx.test.filters.SdkSuppress
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
@@ -329,9 +331,12 @@ class ShellFlowTest : ShellTestBase() {
         check(waitFor("sign_in_button", 5_000)?.isEnabled == true, "the Sign in button is not usable after the lock lifted")
         screenshot("after-offline-lifted")
 
-        // Leave time for UiAutomator to attach on a cold signed-in launch and observe the lock.
-        if (!launchSignedIn("sign-in")) return
-        sleep(3_000)
+        // Exercise the lock with the workbench's signed-in fixture. The separate Custom Tab
+        // tests cover acquiring and persisting this cookie through the real ticket exchange.
+        CookieManager.getInstance().apply {
+            setCookie(MOCK_A, "${SessionCookies.PLAIN_NAME}=mock; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600")
+            flush()
+        }
         launch(MOCK_A, "signed-in-timed", reset = false, extras = mapOf("openbot.force_offline_seconds" to "15"))
         check(waitFor("offline_lock", 5_000) != null, "no lock while signed in and offline")
         screenshot("signed-in-offline-lock")
@@ -477,6 +482,42 @@ class ShellFlowTest : ShellTestBase() {
     }
 
     // The native loading skeleton: seen for real by delaying the first page load (debug hook).
+    @Test
+    fun testSkeletonCoversAMountedRouterWithNoVisibleRoute() {
+        // Use the independent, always-available probe origin so the sign-in provider cannot
+        // affect this rendering test. The shell still receives the normal WebView bridge message.
+        CookieManager.getInstance().apply {
+            setCookie(PROBE, "${SessionCookies.PLAIN_NAME}=probe; Path=/; HttpOnly")
+            flush()
+        }
+        launch(PROBE, "delayed-route", reset = false)
+        if (!check(waitForState("skeleton=0", 15_000), "the initial probe stayed covered")) return
+        val page = """
+            <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
+            <div style="opacity:0"><span>Hidden</span><span>route</span><span>contents</span></div>
+            <main hidden><h1>Conversations</h1><p>Quarterly forecast</p><p>Trip to Lisbon</p></main>
+            <script>
+              OpenBotShellAndroid.postMessage(JSON.stringify({type: 'ready'}));
+              document.title = 'Router mounted';
+            </script>
+        """.trimIndent()
+        instrumentation.runOnMainSync {
+            shellActivity()?.findViewById<WebView>(R.id.openbot_webview)
+                ?.loadDataWithBaseURL(PROBE, page, "text/html", "UTF-8", null)
+        }
+        val deadline = SystemClock.uptimeMillis() + 10_000
+        while (pageString("document.title") != "Router mounted" && SystemClock.uptimeMillis() < deadline) sleep(100)
+        if (!check(pageString("document.title") == "Router mounted", "the route fixture did not mount")) return
+        // The previous shell dismissed the skeleton 200 ms after the bridge's ready message.
+        sleep(800)
+        check(debugState().contains("skeleton=1"), "the mounted router exposed a blank page")
+        screenshot("before-first-visible-route")
+        pageJs("document.querySelector('main').hidden = false")
+        check(waitForState("skeleton=0", 5_000), "the first visible route stayed covered")
+        check(waitPageText("Trip to Lisbon", 5_000), "the route did not render")
+        screenshot("first-visible-route")
+    }
+
     @Test
     fun testLoadingSkeleton() {
         if (!launchSignedIn()) return

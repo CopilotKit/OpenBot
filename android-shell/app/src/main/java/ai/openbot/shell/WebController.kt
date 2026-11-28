@@ -316,6 +316,34 @@ class WebController(
         webView.evaluateJavascript(script) { result -> done(decodeJsString(result)) }
     }
 
+    /** Only count on-screen text that is large enough to read and visible through its ancestors. */
+    fun hasVisibleContent(minimum: Int, done: (Boolean) -> Unit) {
+        val script = """
+            (() => {
+              if (!document.body) return false;
+              const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+              const range = document.createRange();
+              let seen = 0, node;
+              while ((node = walker.nextNode())) {
+                if (!node.textContent.trim()) continue;
+                range.selectNodeContents(node);
+                const r = range.getBoundingClientRect();
+                if (r.width <= 4 || r.height <= 4 || r.bottom <= 0 || r.top >= innerHeight ||
+                    r.right <= 0 || r.left >= innerWidth) continue;
+                let opacity = 1;
+                for (let element = node.parentElement; element; element = element.parentElement) {
+                  const style = getComputedStyle(element);
+                  if (style.visibility === 'hidden' || style.display === 'none') { opacity = 0; break; }
+                  opacity *= Number(style.opacity);
+                }
+                if (opacity > 0.5 && ++seen >= $minimum) return true;
+              }
+              return false;
+            })()
+        """.trimIndent()
+        webView.evaluateJavascript(script) { done(it == "true") }
+    }
+
     // Renderer -------------------------------------------------------------------------------------
 
     private fun recreate() {

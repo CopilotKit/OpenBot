@@ -10,6 +10,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
 import ai.openbot.shell.R
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
@@ -285,9 +287,19 @@ abstract class ShellTestBase {
         return false
     }
 
-    /** Whether the software keyboard is up: the app's own state (debug) or the input method service. */
+    /** Inspect the focused window's IME insets when testing in-process. A service dump also
+     * includes old clients on newer releases, even after Back puts the keyboard away. */
     fun keyboardShown(): Boolean {
-        if (variant == "debug" && stateValue("keyboard") == "1") return true
+        if (variant == "debug") {
+            var visible: Boolean? = null
+            instrumentation.runOnMainSync {
+                val window = shellActivity()?.window?.decorView ?: return@runOnMainSync
+                if (window.hasWindowFocus()) {
+                    visible = ViewCompat.getRootWindowInsets(window)?.isVisible(WindowInsetsCompat.Type.ime())
+                }
+            }
+            visible?.let { return it }
+        }
         val dump = shell("dumpsys input_method")
         return dump.contains("mInputShown=true") || dump.contains("isInputViewShown=true")
     }
@@ -391,7 +403,12 @@ abstract class ShellTestBase {
                     }
                     if (point.startsWith("{")) {
                         val position = org.json.JSONObject(point)
-                        return device.click(web.left + position.getInt("x"), web.top + position.getInt("y"))
+                        val x = web.left + position.getInt("x")
+                        val y = web.top + position.getInt("y")
+                        // input tap dispatches DOWN and UP together. Under emulator load, a delay
+                        // between injected events selected the avatar text as a long press.
+                        device.executeShellCommand("input tap $x $y")
+                        return true
                     }
                 }
             }
@@ -534,7 +551,7 @@ abstract class ShellTestBase {
 
     /** Chrome's first-run and promotion screens, if any show despite the command-line flags. */
     fun dismissChromeScreens(): Boolean {
-        val labels = "Accept & continue|Accept & Continue|Use without an account|No thanks|No, thanks|Got it|Not now|Skip"
+        val labels = "Accept & continue|Accept & Continue|Use without an account|Stay signed out|No thanks|No, thanks|Got it|Not now|Skip"
         val button = device.findObject(By.text(java.util.regex.Pattern.compile(labels))) ?: return false
         if (button.applicationPackage == pkg) return false
         note("Chrome showed '${button.text}'; tapped it")

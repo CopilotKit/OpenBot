@@ -82,6 +82,7 @@ SUITE2 = [
     "ShellFlowTest#testResumeFromBackground",
     "ShellFlowTest#testOpenConversationSurvivesRendererTermination",
     "ShellFlowTest#testLoadingSkeleton",
+    "ShellFlowTest#testSkeletonCoversAMountedRouterWithNoVisibleRoute",
     "ShellFlowTest#testLockLiftsWhenServerComesBack",
 ]
 DEMO = ["DemoTourTest#testDemoTour"]
@@ -187,7 +188,9 @@ class Recorder:
 
 
 def video_seconds(path):
-    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+    if not path or not os.path.isfile(path):
+        return 0.0
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration", "-of", "csv=p=0", path],
                          capture_output=True, text=True)
     try:
         return float(out.stdout.strip())
@@ -451,8 +454,9 @@ def main():
                 dest = recorder.stop(os.path.join(private if secret else artifacts, "video"))
                 if dest:
                     trim_and_copy(dest, recorder.started, os.path.join(private if secret else artifacts, "instrument.log"))
-                length = video_seconds(dest) if dest else 0.0
-                print(f"  video {name}: {length:.1f} s", flush=True)
+                length = video_seconds(dest)
+                small_length = video_seconds(dest[:-4] + "-600.mp4") if dest else 0.0
+                print(f"  video {name}: {length:.1f} s original, {small_length:.1f} s phone copy", flush=True)
                 statuses = recording_statuses.pop(name)
                 if all(result == "skipped" for result in statuses):
                     # Nothing to show: the test skipped itself (no secret, gate off, backend down).
@@ -466,8 +470,11 @@ def main():
                     video_status = "failed"
                     message = f"incomplete journey ({', '.join(statuses)}), {length:.1f} s recorded"
                 else:
-                    video_status = "passed" if length >= 30 else "failed"
-                    message = f"{length:.1f} s recorded" + ("" if length >= 30 else " (under 30 s)")
+                    complete = min(length, small_length) >= 30 and abs(length - small_length) <= max(2, length * 0.02)
+                    video_status = "passed" if complete else "failed"
+                    message = f"{length:.1f} s original, {small_length:.1f} s phone copy"
+                    if not complete:
+                        message += " (a video track is missing, short or truncated)"
                 results.append({"id": f"video:{name}", "test": name, "class": "video", "variant": "debug",
                                 "status": video_status, "seconds": round(length), "message": message,
                                 "private": secret, "notes": [], "probe": []})
