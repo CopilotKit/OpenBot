@@ -1,15 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
     <item
         android:id="@+id/tab_conversations"
         android:icon="@drawable/tab_conversations"
-        android:title="@string/tab_conversations" />
+        android:title="@string/tab_conversations"
+        app:contentDescription="@string/tab_conversations" />
     <item
         android:id="@+id/tab_home"
         android:icon="@drawable/tab_home"
-        android:title="@string/tab_home" />
+        android:title="@string/tab_home"
+        app:contentDescription="@string/tab_home" />
     <item
         android:id="@+id/tab_bots"
         android:icon="@drawable/ic_bolt"
-        android:title="@string/tab_bots" />
+        android:title="@string/tab_bots"
+        app:contentDescription="@string/tab_bots" />
 </menu>

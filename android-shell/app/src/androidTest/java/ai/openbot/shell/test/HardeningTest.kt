@@ -49,7 +49,7 @@ class HardeningTest : ShellTestBase() {
         checkEquals("Sign in", find("sign_in_button")?.text, "the Sign in button's spoken label")
         check(device.hasObject(By.text("OpenBot")), "the first screen's heading")
         if (!launchSignedIn("labels-signed-in")) return
-        for (title in listOf("Conversations", "Home", "Bots")) {
+        for (title in listOf("Chats", "Home", "Bots")) {
             val item = find("bottom_nav")?.findObject(By.desc(title)) ?: find("bottom_nav")?.findObject(By.text(title))
             check(item != null, "the $title tab has no spoken label")
         }

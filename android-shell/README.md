@@ -58,7 +58,7 @@ What is native:
   comes back goes to `enter` with the header and `to` encoded as one value (every character outside
   `A-Z a-z 0-9 - _ . ~` percent-encoded). Unit-tested against the doc's worked example
   (`ShellUrlsTest`); the mock has no hosted sign-in route, so there is no end-to-end test of it here.
-- **The bottom bar.** A Material 3 `BottomNavigationView`: Conversations, Home, Bots (`tab_conversations`,
+- **The bottom bar.** A Material 3 `BottomNavigationView`: Chats (the web app's `/conversations`; bridge tab id `conversations`), Home, Bots (`tab_conversations`,
   `tab_home`, `tab_bots`; Home selected at start). A tap (also on the selected tab) asks the page to
   navigate with the `openbot:open` event and loads the page if nobody handled it. The page's `route`
   messages select the tab. One WebView for all tabs. The bar hides while the keyboard is up. The bar,

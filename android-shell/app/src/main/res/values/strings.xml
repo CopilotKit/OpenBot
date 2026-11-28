@@ -10,7 +10,7 @@
     <string name="sign_in_too_long">Sign-in took too long. Try again.</string>
     <string name="sign_in_no_browser">No browser to sign in with. Try again.</string>
 
-    <string name="tab_conversations">Conversations</string>
+    <string name="tab_conversations">Chats</string>
     <string name="tab_home">Home</string>
     <string name="tab_bots">Bots</string>
 

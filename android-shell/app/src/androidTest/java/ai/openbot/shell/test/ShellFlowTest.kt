@@ -32,7 +32,7 @@ class ShellFlowTest : ShellTestBase() {
         val c = bounds(conversations)!!
         val h = bounds(home)!!
         val b = bounds(bots)!!
-        check(c.left < h.left && h.left < b.left, "$moment: tabs are not Conversations, Home, Bots from left to right")
+        check(c.left < h.left && h.left < b.left, "$moment: tabs are not Chats, Home, Bots from left to right")
         val web = bounds(find("openbot_webview"))
         val bar = bounds(find("bottom_nav"))
         if (web != null && bar != null) {
@@ -139,8 +139,8 @@ class ShellFlowTest : ShellTestBase() {
         for (title in listOf("Competitor pricing notes", "Quarterly forecast", "Trip to Lisbon")) {
             check(waitPageText(title, 20_000), "Conversations does not list '$title'")
         }
-        check(waitForState("tab=conversations", 5_000), "Conversations is not selected: ${debugState()}")
-        check(waitForState("nav=event", 5_000), "the Conversations tap was not handled by openbot:open: ${debugState()}")
+        check(waitForState("tab=conversations", 5_000), "Chats is not selected: ${debugState()}")
+        check(waitForState("nav=event", 5_000), "the Chats tap was not handled by openbot:open: ${debugState()}")
         sleep(1_000)
         screenshot("2-conversations")
         find("openbot_webview")?.let { web ->
