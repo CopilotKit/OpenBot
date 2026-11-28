@@ -3,6 +3,7 @@ package ai.openbot.shell.test
 import ai.openbot.shell.R
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Until
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -17,7 +18,9 @@ class ShellFlowTest : ShellTestBase() {
 
     private fun homeRendered(timeoutMs: Long = 30_000): Boolean = waitPageText(homeText, timeoutMs)
 
-    private fun accountButton() = device.findObject(By.desc("Account")) ?: device.findObject(By.text("Account"))
+    private fun accountButton() = device.findObject(By.text("Account"))
+        ?: device.wait(Until.findObject(By.desc("Account")), 5_000)
+        ?: device.findObject(By.text("Account"))
 
     private fun checkTabBar(moment: String) {
         val conversations = tab(Tab.CONVERSATIONS)
