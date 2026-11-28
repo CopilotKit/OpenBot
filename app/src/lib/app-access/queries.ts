@@ -126,6 +126,8 @@ export type AppAccessRequest = {
   createdAt: string;
   resolvedAt: string | null;
   resolvedBy: string | null;
+  /** The actions asked for, written `<app id>/<action name>`. Empty asks for the app itself. */
+  actions: string[];
 };
 
 /** The administrator's inbox: the requests asked for, and a count per app for the Plugins list. */
@@ -146,6 +148,7 @@ export const appAccessKeys = {
     ["plugins", "app-access", "bot", agentId, "app", app] as const,
   inbox: (app?: string) =>
     ["plugins", "app-access", "inbox", { app: app ?? null }] as const,
+  mine: ["plugins", "app-access", "mine"] as const,
   giveable: ["plugins", "app-access", "giveable"] as const,
 };
 
@@ -190,6 +193,8 @@ export function accessRequestOf(
     createdAt: request.createdAt,
     resolvedAt: request.resolvedAt,
     resolvedBy: request.resolvedBy,
+    // A server from before requests named actions answers without the field.
+    actions: request.actions ?? [],
   };
 }
 
@@ -253,18 +258,62 @@ export function botAppsQueryOptions(agentId: string) {
 
 /**
  * One app, by key or by name, whether or not this Bot holds it — what a card in a conversation
- * asks, so it never draws a stale state.
+ * asks, so it never draws a stale state. With `actions`, the app as it stands for those actions: a
+ * Bot that holds the app but not all of them reads as not given (getBotApp's `actions`).
  */
-export function botAppQueryOptions(agentId: string, app: string) {
+export function botAppQueryOptions(
+  agentId: string,
+  app: string,
+  actions?: readonly string[],
+) {
+  const named = actions && actions.length > 0 ? [...actions] : undefined;
   return queryOptions({
-    queryKey: appAccessKeys.app(agentId, app),
+    queryKey: named
+      ? ([...appAccessKeys.app(agentId, app), { actions: named }] as const)
+      : appAccessKeys.app(agentId, app),
     queryFn: async ({ signal }): Promise<AppAccess> =>
       appAccessOf(
-        await getBotApp(organizationId(), agentId, app, {
-          signal,
-          fallback: `What ${app} is for this Bot could not be loaded.`,
-        }),
+        await getBotApp(
+          organizationId(),
+          agentId,
+          app,
+          named ? { actions: named } : undefined,
+          {
+            signal,
+            fallback: `What ${app} is for this Bot could not be loaded.`,
+          },
+        ),
       ),
+  });
+}
+
+/**
+ * The apps this person has asked an admin to add, still waiting: their own requests with no Bot named
+ * (`botId` null, kind `enable`), by the app each names. A member's list holds only their own, so this
+ * is read by a member, never an admin, whose list is everybody's.
+ */
+export function myAppRequestsQueryOptions(enabled: boolean) {
+  return queryOptions({
+    queryKey: appAccessKeys.mine,
+    queryFn: async ({ signal }): Promise<AppAccessRequest[]> => {
+      const requests = await everyPage(async (cursor) => {
+        const page = await listAppAccessRequests(
+          organizationId(),
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { signal, fallback: "Couldn't load your requests." },
+        );
+        return { items: page.appAccessRequests, nextCursor: page.nextCursor };
+      });
+      return requests
+        .map(accessRequestOf)
+        .filter(
+          (request) =>
+            request.status === "pending" &&
+            request.kind === "enable" &&
+            request.agentId === null,
+        );
+    },
+    enabled,
   });
 }
 

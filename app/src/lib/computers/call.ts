@@ -1,3 +1,5 @@
+import { OUTCOME_UNKNOWN } from "@openbot/shared/approval-outcomes";
+import { COMPUTER_START_WAIT_MS } from "@openbot/shared/computer-start";
 import {
   clickComputer,
   listComputerFiles,
@@ -46,12 +48,36 @@ type Options = { signal?: AbortSignal };
 /** A write's key: one per call, so a retry the network makes is the same write. */
 const once = () => ({ "Idempotency-Key": idempotencyKey() });
 
-/** Only what the API's contract names for the call, so a stray argument a model added is not sent. */
+/**
+ * Only what the API's contract names for the call, so a stray argument a model added is not sent,
+ * and the step it answers (`StepIds`) when the call carries it.
+ */
 function only<T>(body: Body | undefined, fields: readonly string[]): T {
   const kept: Body = {};
-  for (const field of fields)
+  for (const field of [...fields, "threadId", "toolCallId"])
     if (body?.[field] !== undefined) kept[field] = body[field];
   return kept as T;
+}
+
+/**
+ * The Bot's tool call a computer call answers: its conversation's thread and the call's id.
+ *
+ * SENT WITH EVERY CALL A BOT MAKES, so the server runs the step once, whoever asks for it. The server
+ * runs a Bot's computer steps itself, and a page that asks for one it has already run, or is running
+ * (an older page, a second tab, a reload part way through), is answered with that run's result, or
+ * told it is still going, and nothing is done a second time. Both or neither: one without the other
+ * names no step.
+ */
+export type StepIds = { threadId: string; toolCallId: string };
+
+/** The step a tool call's context names, when it names both its thread and its call. */
+export function stepOf(context: {
+  agent?: { threadId?: string };
+  toolCall?: { id?: string };
+}): StepIds | undefined {
+  const threadId = context.agent?.threadId;
+  const toolCallId = context.toolCall?.id;
+  return threadId && toolCallId ? { threadId, toolCallId } : undefined;
 }
 
 /**
@@ -63,15 +89,21 @@ const CALLS: Record<
   string,
   (botId: string, body: Body | undefined, options: Options) => Promise<unknown>
 > = {
-  "/read": (botId, _body, options) =>
-    readComputerPage(organizationId(), botId, options),
-  "/snapshot": (botId, _body, options) =>
-    snapshotComputer(organizationId(), botId, once(), options),
+  "/read": (botId, body, options) =>
+    readComputerPage(organizationId(), botId, only(body, []), options),
+  "/snapshot": (botId, body, options) =>
+    snapshotComputer(
+      organizationId(),
+      botId,
+      once(),
+      body?.threadId !== undefined ? only(body, []) : undefined,
+      options,
+    ),
   "/navigate": (botId, body, options) =>
     navigateComputer(
       organizationId(),
       botId,
-      only(body, ["url", "toolCallId"]),
+      only(body, ["url"]),
       once(),
       options,
     ),
@@ -143,7 +175,7 @@ const CALLS: Record<
     requestComputerControl(
       organizationId(),
       botId,
-      only(body, ["reason", "toolCallId", "source"]),
+      only(body, ["reason", "source"]),
       once(),
       options,
     ),
@@ -171,14 +203,87 @@ export async function callComputer(
    * A body, not a `RequestInit`. The client serialises it, so a caller that stringified first would
    * send a JSON string of a JSON string, which is what happened, briefly, when this moved over.
    */
-  init?: { method?: string; body?: unknown },
+  init?: { method?: string; body?: unknown; step?: StepIds },
   signal?: AbortSignal,
+  clock: StartClock = REAL_CLOCK,
 ): Promise<ToolOutcome> {
   // Announce before the call so the screen can open while the action is running.
   const run = OFF_SCREEN_PATHS.has(path) ? null : reportComputerActivity(botId);
   const call = CALLS[path];
   // A call the API has no address for was not made.
   if (!call) return { ok: false, reason: "That did not work." };
+  const sent = {
+    ...init,
+    body: {
+      ...(init?.body && typeof init.body === "object" ? init.body : {}),
+      ...init?.step,
+    },
+  };
+  /*
+   * ASKED AGAIN WHILE THE COMPUTER IS STILL STARTING, until COMPUTER_START_WAIT_MS has gone.
+   *
+   * One request is answered inside what an edge in front of the server lets it wait, which is less
+   * than a cold computer can take to come up. Its answer then says the computer is still starting
+   * and nothing was done, so asking again cannot do the thing twice. Asked again here, the Bot's call
+   * waits for the computer as long as a Bot's own turn does, and the line keeps saying the step is
+   * under way, rather than the model being told to try again and a plan reading that as a failure.
+   */
+  const startedAt = clock.now();
+  for (;;) {
+    const outcome = await callOnce(botId, call, run, sent, signal);
+    /*
+     * A STEP THE SERVER IS RUNNING ALREADY is not run here: it is asked about again, with the same
+     * step, until the server's run of it answers, and its answer is this call's. As long as it takes:
+     * the step is under way, as a command that runs for minutes is.
+     */
+    if (outcome.stepRunning === true) {
+      await clock.pause(START_ASK_AGAIN_MS, signal);
+      if (signal?.aborted)
+        return { ok: false, reason: "Stopped.", stopped: true };
+      continue;
+    }
+    if (outcome.starting !== true) return outcome;
+    const left = COMPUTER_START_WAIT_MS - (clock.now() - startedAt);
+    if (left <= 0) return outcome;
+    await clock.pause(Math.min(START_ASK_AGAIN_MS, left), signal);
+    if (signal?.aborted)
+      return { ok: false, reason: "Stopped.", stopped: true };
+  }
+}
+
+/** Time, as the start wait reads it. A test hands its own, so it need not wait minutes. */
+export type StartClock = {
+  now(): number;
+  /** Resolves after `ms`, or at once when `signal` is aborted. */
+  pause(ms: number, signal?: AbortSignal): Promise<void>;
+};
+
+const REAL_CLOCK: StartClock = {
+  now: () => Date.now(),
+  pause: (ms, signal) =>
+    new Promise((resolve) => {
+      if (signal?.aborted) return resolve();
+      const timer = setTimeout(done, ms);
+      function done() {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", done);
+        resolve();
+      }
+      signal?.addEventListener("abort", done, { once: true });
+    }),
+};
+
+/** The pause before asking again about a computer still starting. Each answer has already waited on it. */
+const START_ASK_AGAIN_MS = 2_000;
+
+/** One request for the call, and what the Bot is told about its answer. */
+async function callOnce(
+  botId: string,
+  call: (typeof CALLS)[string],
+  run: ReturnType<typeof reportComputerActivity> | null,
+  init: { method?: string; body?: unknown } | undefined,
+  signal: AbortSignal | undefined,
+): Promise<ToolOutcome> {
   try {
     const body = await call(
       botId,
@@ -209,6 +314,18 @@ export async function callComputer(
         note: "This was already done. Its result is no longer available: do it again only if you need the result.",
       };
     }
+    // The server is running this step already: asked about again, never run here (`callComputer`).
+    if (error instanceof ClientError && error.code === "COMPUTER_STEP_RUNNING")
+      return { ok: false, stepRunning: true, notPerformed: true };
+    /*
+     * The server started this step once and was cut off before it answered, so nobody knows whether
+     * it happened. Not run again: the Bot is told to check first, and the step reads "Didn't run".
+     */
+    if (
+      error instanceof ClientError &&
+      error.code === "COMPUTER_STEP_OUTCOME_UNKNOWN"
+    )
+      return { ok: false, outcomeUnknown: true, reason: OUTCOME_UNKNOWN };
     if (error instanceof ClientError) {
       /*
        * A REFUSAL IS AN INTENTION, NOT AN ACTION. 403 is a policy, a capability switch or a network

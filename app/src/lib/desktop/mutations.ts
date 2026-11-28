@@ -78,6 +78,16 @@ export function changeConnectionMutationOptions() {
 }
 
 /**
+ * Move to OpenBot Cloud. The desktop app shows setup at the move, with OpenBot still running here,
+ * since what moves is read from it: what moves, then the move itself. This page goes with it.
+ */
+export function moveToCloudMutationOptions() {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("move_to_cloud"),
+  });
+}
+
+/**
  * Check for updates now. The desktop app reads its update feed and keeps the answer, so the banner
  * reads it too. Rejects with the app's own sentence when the feed couldn't be read.
  */

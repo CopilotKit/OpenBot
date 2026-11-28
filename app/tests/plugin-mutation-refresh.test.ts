@@ -15,6 +15,7 @@ import {
   setAccountModeMutationOptions,
   setOwnerGrantsMutationOptions,
 } from "../src/lib/apps/mutations";
+import { enterpriseKeys } from "../src/lib/enterprise/queries";
 import { authorizeActionMutationOptions } from "../src/lib/plugins/grants";
 import {
   brokeredConnectionFieldsMutationOptions,
@@ -114,7 +115,11 @@ async function refetchedOnRefusal<TVariables>(
 }
 
 /** What every one of these mutations has to ask for, and the only thing any of them asks for. */
-const EVERY_PLUGIN_QUERY = [{ queryKey: pluginKeys.all }];
+/** Every plugin screen, and Connectors on Admin, Apps, which lists every app added. */
+const EVERY_PLUGIN_QUERY = [
+  { queryKey: pluginKeys.all },
+  { queryKey: enterpriseKeys.overview() },
+];
 
 /**
  * The second argument react-query hands a `mutationFn`, for the one case below that calls one by hand.
@@ -142,6 +147,8 @@ const REFUSALS: {
   message: string;
   factory: (queryClient: QueryClient) => unknown;
   variables: unknown;
+  /** What it refetches, where that is not every plugin query. */
+  refetches?: { queryKey: readonly unknown[] }[];
 }[] = [
   {
     name: "granting a plugin to a Bot",
@@ -214,6 +221,8 @@ const REFUSALS: {
       title: "Triage",
       tools: [],
     },
+    // A skill is no app, so Connectors has nothing to show for it.
+    refetches: [{ queryKey: pluginKeys.all }],
   },
   {
     name: "removing a skill",
@@ -222,6 +231,7 @@ const REFUSALS: {
     message: "That did not work.",
     factory: removeSkillMutationOptions,
     variables: "triage",
+    refetches: [{ queryKey: pluginKeys.all }],
   },
   {
     name: "registering an OAuth client",
@@ -297,7 +307,7 @@ for (const refusal of REFUSALS) {
     refusing(refusal.status, refusal.message);
     expect(
       await refetchedOnRefusal(refusal.factory, refusal.variables),
-    ).toEqual(EVERY_PLUGIN_QUERY);
+    ).toEqual(refusal.refetches ?? EVERY_PLUGIN_QUERY);
   });
 }
 

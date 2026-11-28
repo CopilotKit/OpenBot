@@ -10,7 +10,25 @@ export type HandoffSource =
   | "model"
   | "cloudflare"
   | "visible-challenge"
-  | "manual";
+  | "manual"
+  | "passkey";
+/**
+ * The page asked for a passkey while a request was open (`navigator.credentials.get` or `.create` with a public key).
+ * A passkey kept on the person's own device, in their password manager or their phone, can't be used in a Bot's
+ * computer, so they sign in another way on the page.
+ */
+export type PasskeyAsk = {
+  /** The site that asked, such as accounts.google.com. */
+  host: string;
+  askedAt: string;
+};
+/**
+ * Why a request the computer raised for a passkey is open, as the person reads it after "The Bot needs you." and as
+ * the Bot is told it in the challenge. Take control works on that page: the passkey window Chromium would open is held
+ * back, so the page's own "Try another way" takes the click.
+ */
+export const PASSKEY_REASON =
+  "This page is asking for a passkey. A passkey on your own device can't be used in the Bot's computer, so take control and choose Try another way on the page to sign in with a password or a code.";
 export type HandoffRequest = {
   id: string;
   toolCallId?: string;
@@ -32,6 +50,8 @@ export type HandoffRequest = {
    * request may reopen that page. A stop or reset clears it, and so does the help TTL running out.
    */
   keepsPage?: boolean;
+  /** Set when the page asked for a passkey while this request was open. See `PasskeyAsk`. */
+  passkey?: PasskeyAsk;
 };
 export type SecretEnding = {
   id: string;
@@ -83,7 +103,7 @@ export type ControlRequestInput = {
   by?: string;
 };
 export type BrowserChallenge = {
-  kind: "cloudflare" | "visible-challenge";
+  kind: "cloudflare" | "visible-challenge" | "passkey";
   reason: string;
   requestId: string;
 };

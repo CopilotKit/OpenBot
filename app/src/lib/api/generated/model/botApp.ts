@@ -30,7 +30,7 @@ export interface BotApp {
   account: BotAppAccount;
   /** How the person's account is connected: OpenBot's own sign-in, the directory's sign-in, a key, or nothing to connect. */
   connect: BotAppConnect;
-  /** ready: usable now. not_connected and reconnect: waiting on an account the person connects (see accountHolder). shared_not_connected: waiting on the shared account. shared_not_approved: an administrator hasn't approved who may use the shared account through this Bot. disabled: turned off (see unavailable). not_granted: the Bot wasn't given it. owner_grantable: the same, and the person may give it themselves. */
+  /** ready: usable now. not_connected and reconnect: waiting on an account the person connects (see accountHolder). shared_not_connected: waiting on the shared account. shared_not_approved: an administrator hasn't approved who may use the shared account through this Bot, which happens only where the organization's apps are locked down. disabled: turned off (see unavailable). not_granted: the Bot wasn't given it. owner_grantable: the same, and the person may give it themselves. */
   state: BotAppState;
   /** Why the app is turned off, when state is disabled: nobody turned it on, the directory isn't set up here, OpenBot can't read how it connects, or it is missing the OAuth client or the key an administrator adds. Null otherwise. */
   unavailable: BotAppUnavailable;
@@ -51,7 +51,7 @@ export interface BotApp {
    * @nullable
    */
   connectedAt: string | null;
-  /** What a request would ask an administrator for in this state (createAppAccessRequest), or null where the next step is the person's own. */
+  /** What a request would ask an administrator for in this state (createAppAccessRequest), or null where the next step is the person's own. While the organization's apps are open, adding and giving an app are the person's own steps. */
   requestKind: AppAccessRequestKind | null;
   /** The person's own waiting request of that kind, or null. */
   pendingRequest: BotAppPendingRequest | null;

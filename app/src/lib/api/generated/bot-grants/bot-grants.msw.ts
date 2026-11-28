@@ -9,6 +9,7 @@ import type {
   AppTeamGrants,
   AppTeamGrantsInput,
   BotApp,
+  BotAppActionsInput,
   BotAppGiven,
   BotAppPage,
   BotAppTakenBack,
@@ -222,6 +223,7 @@ export const getApproveBotAppResponseMock = (): AppAccessApproval => ({
     createdAt: "2026-11-14T09:00:00.000Z",
     resolvedAt: "2026-11-14T10:00:00.000Z",
     resolvedBy: "user_9a1d",
+    actions: [],
   },
   enabled: false,
   granted: ["notion/notion-fetch", "notion/notion-search"],
@@ -538,24 +540,25 @@ export const getGiveBotAppMockHandler = (
     | BotAppGiven
     | ((
         info: Parameters<
-          HttpResponseResolver<{
-            organizationId: string;
-            botId: string;
-            appId: string;
-          }>
+          HttpResponseResolver<
+            { organizationId: string; botId: string; appId: string },
+            BotAppActionsInput
+          >
         >[0],
       ) => Promise<BotAppGiven> | BotAppGiven),
   options?: RequestHandlerOptions,
 ) => {
-  return http.post<{ organizationId: string; botId: string; appId: string }>(
+  return http.post<
+    { organizationId: string; botId: string; appId: string },
+    BotAppActionsInput
+  >(
     "*/api/v2/organizations/:organizationId/bots/:botId/apps/:appId/give",
     async (
       info: Parameters<
-        HttpResponseResolver<{
-          organizationId: string;
-          botId: string;
-          appId: string;
-        }>
+        HttpResponseResolver<
+          { organizationId: string; botId: string; appId: string },
+          BotAppActionsInput
+        >
       >[0],
     ) => {
       return HttpResponse.json(
@@ -614,24 +617,25 @@ export const getApproveBotAppMockHandler = (
     | AppAccessApproval
     | ((
         info: Parameters<
-          HttpResponseResolver<{
-            organizationId: string;
-            botId: string;
-            appId: string;
-          }>
+          HttpResponseResolver<
+            { organizationId: string; botId: string; appId: string },
+            BotAppActionsInput
+          >
         >[0],
       ) => Promise<AppAccessApproval> | AppAccessApproval),
   options?: RequestHandlerOptions,
 ) => {
-  return http.post<{ organizationId: string; botId: string; appId: string }>(
+  return http.post<
+    { organizationId: string; botId: string; appId: string },
+    BotAppActionsInput
+  >(
     "*/api/v2/organizations/:organizationId/bots/:botId/apps/:appId/approve",
     async (
       info: Parameters<
-        HttpResponseResolver<{
-          organizationId: string;
-          botId: string;
-          appId: string;
-        }>
+        HttpResponseResolver<
+          { organizationId: string; botId: string; appId: string },
+          BotAppActionsInput
+        >
       >[0],
     ) => {
       return HttpResponse.json(

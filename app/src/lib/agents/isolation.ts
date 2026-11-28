@@ -41,6 +41,31 @@ export const ISOLATION_WITHDRAWN =
 export const ISOLATION_GONE =
   "This OpenBot can't give a Bot a computer of its own, so this Bot runs on your computer.";
 
+/**
+ * Why it cannot be ticked on OpenBot Cloud (`hostedSignIn`), which gives each person one computer.
+ * Shown with the OpenBot for Business link (`BusinessComputerLink`), which says where a Bot can have
+ * one of its own.
+ */
+export const ISOLATION_UNAVAILABLE_CLOUD =
+  "OpenBot Cloud gives each person one computer, not one per Bot.";
+
+/** An isolated Bot on OpenBot Cloud, which runs on its owner's one computer. Shown with the same link. */
+export const ISOLATION_GONE_CLOUD =
+  "OpenBot Cloud gives each person one computer, not one per Bot, so this Bot runs on your computer.";
+
+/**
+ * Why no Bot can have a computer of its own here. OpenBot Cloud says what it gives instead, and
+ * every other OpenBot keeps its own sentence.
+ */
+export function isolationUnavailable(cloud: boolean): string {
+  return cloud ? ISOLATION_UNAVAILABLE_CLOUD : ISOLATION_UNAVAILABLE;
+}
+
+/** Why an isolated Bot runs on its owner's computer because this OpenBot can't give it one. */
+export function isolationGone(cloud: boolean): string {
+  return cloud ? ISOLATION_GONE_CLOUD : ISOLATION_GONE;
+}
+
 /** The whole explanation for a Bot of this visibility. */
 export function isolatedExplained(isPublic: boolean): string {
   return isPublic

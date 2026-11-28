@@ -20,6 +20,7 @@ export const BotAgentHarness = {
   "pydantic-ai": "pydantic-ai",
   "microsoft-agent-framework": "microsoft-agent-framework",
   "claude-agent-sdk": "claude-agent-sdk",
+  "openai-agents-sdk": "openai-agents-sdk",
   strands: "strands",
   ag2: "ag2",
   langroid: "langroid",

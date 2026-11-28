@@ -5,12 +5,14 @@ import { HttpResponse, http } from "msw";
 import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
 import type {
+  AppsSetting,
   ComputerActionPage,
   Deployment,
   InactiveComputersStopped,
   ModelUsage,
   OrganizationSettings,
   SetupChecklist,
+  UpdateAppsSettingRequest,
   UpdateOrganizationSettingsRequest,
 } from "../model";
 
@@ -114,6 +116,14 @@ export const getStopInactiveComputersResponseMock =
     stopped: ["research-assistant"],
     skipped: null,
   });
+
+export const getGetAppsSettingResponseMock = (): AppsSetting => ({
+  lockedDown: false,
+});
+
+export const getUpdateAppsSettingResponseMock = (): AppsSetting => ({
+  lockedDown: true,
+});
 
 export const getGetModelUsageResponseMock = (): ModelUsage => ({
   days: 30,
@@ -324,6 +334,68 @@ export const getStopInactiveComputersMockHandler = (
   );
 };
 
+export const getGetAppsSettingMockHandler = (
+  overrideResponse?:
+    | AppsSetting
+    | ((
+        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+      ) => Promise<AppsSetting> | AppsSetting),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string }>(
+    "*/api/v2/organizations/:organizationId/settings/apps",
+    async (
+      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetAppsSettingResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getUpdateAppsSettingMockHandler = (
+  overrideResponse?:
+    | AppsSetting
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string },
+            UpdateAppsSettingRequest
+          >
+        >[0],
+      ) => Promise<AppsSetting> | AppsSetting),
+  options?: RequestHandlerOptions,
+) => {
+  return http.patch<{ organizationId: string }, UpdateAppsSettingRequest>(
+    "*/api/v2/organizations/:organizationId/settings/apps",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string },
+          UpdateAppsSettingRequest
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getUpdateAppsSettingResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
 export const getGetModelUsageMockHandler = (
   overrideResponse?:
     | ModelUsage
@@ -432,6 +504,8 @@ export const getOrganizationSettingsMock = () => [
   getGetOrganizationSettingsMockHandler(),
   getUpdateOrganizationSettingsMockHandler(),
   getStopInactiveComputersMockHandler(),
+  getGetAppsSettingMockHandler(),
+  getUpdateAppsSettingMockHandler(),
   getGetModelUsageMockHandler(),
   getListComputerActionsMockHandler(),
   getGetSetupChecklistMockHandler(),

@@ -29,10 +29,10 @@ const APP = join(import.meta.dir, "..");
 const ORIGIN = "http://openbot.test";
 
 /**
- * The content column's width: at the default 1000px window, less the 340px sidebar and the panel's
+ * The content column's width: at the default 1000px window, less the 360px sidebar and the panel's
  * inset (measured on Windows, D50), and at the 720px narrowest window the app allows.
  */
-const DEFAULT_WIDTH = 650;
+const DEFAULT_WIDTH = 630;
 const NARROWEST_WIDTH = 370;
 
 const RELEASE = "1.0.1";

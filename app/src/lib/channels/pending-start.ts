@@ -1,3 +1,5 @@
+import type { Failure } from "@/lib/load-failure";
+
 /**
  * A conversation that has been asked for and does not exist yet.
  *
@@ -64,7 +66,11 @@ export function startedChannelFor(id: string): string | null {
  */
 export type FailedStart = {
   text: string;
-  error: string;
+  /**
+   * Why it failed, kept whole rather than as its words: a start refused while OpenBot holds off for
+   * now is said calmly under the box, not as a failure (lib/load-failure.tsx).
+   */
+  error: Failure;
   /** The files the message carried, put back on the strip with its words. */
   files?: readonly File[];
 };

@@ -26,6 +26,7 @@ jobs:
   prepare:
     name: prepare
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # names the build, in seconds
     outputs:
       manifest_version: ${{ steps.version.outputs.manifest_version }}
     steps:
@@ -62,8 +63,6 @@ jobs:
       manifest_artifact: ${{ needs.images.outputs.manifest-artifact }}
       retention_days: 30
       platforms: '["macos","windows"]'
-    secrets:
-      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
 
   # One link per installer, so nobody has to dig through the run page for them. The CLI and Node
   # versions are already in each desktop leg's own summary.
@@ -71,6 +70,7 @@ jobs:
     name: summary
     needs: [prepare, desktop]
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # writes the summary, in seconds
     permissions:
       actions: read
     steps:

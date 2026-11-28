@@ -88,7 +88,7 @@ test("a conversation's answers and its composer share one column", () => {
   }
 });
 
-test("a group conversation's answers are as wide as a conversation's", async () => {
+test("a group conversation's answers and composer share a conversation's columns", async () => {
   queryClient.setQueryData(groupKeys.detail("g-1"), {
     bots: [],
     people: [],
@@ -104,7 +104,12 @@ test("a group conversation's answers are as wide as a conversation's", async () 
       view.container.querySelector("[data-transcript-column]"),
     ).not.toBeNull(),
   );
-  centredUpTo(columns(view.container).answers, "max-w-3xl");
+  const { answers, composer } = columns(view.container);
+  centredUpTo(answers, "max-w-3xl");
+  centredUpTo(composer, "max-w-[calc(var(--container-3xl)+2rem)]");
+  // The side inset a conversation with one Bot keeps, so a group's lines are off a phone's edges.
+  expect(answers).toContain("px-4");
+  expect(composer).toContain("px-4");
 });
 
 test("every skin keeps its answers and its composer in its own column", () => {

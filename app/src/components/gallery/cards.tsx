@@ -169,7 +169,7 @@ export function ChecklistCard({
               aria-hidden="true"
               className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[5px] border text-[10px] ${
                 item.done
-                  ? "border-transparent bg-emerald-500 text-white"
+                  ? "border-transparent bg-success text-white"
                   : "border-border"
               }`}
             >

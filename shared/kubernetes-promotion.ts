@@ -68,7 +68,10 @@ export interface Deployment {
     replicas?: number;
     template: {
       metadata?: { annotations?: Record<string, string> };
-      spec: { containers: { name: string; image: string }[] };
+      spec: {
+        containers: { name: string; image: string }[];
+        terminationGracePeriodSeconds?: number;
+      };
     };
   };
 }
@@ -143,6 +146,26 @@ export function needsMaintenance(candidate: ReleaseManifest) {
     candidate.upgrade.requiresDowntime ||
     !candidate.compatibility.database.rollbackCompatible
   );
+}
+
+/** Kubernetes' termination grace period for a pod template that sets none. */
+const DEFAULT_GRACE_SECONDS = 30;
+/** Past the grace period, for the kubelet to stop the pod and its deletion to reach the API. */
+const DELETION_MARGIN_SECONDS = 60;
+/**
+ * How long to wait for the server's pods to be gone once it is scaled to zero. A stopping server
+ * keeps serving, then drains its in-flight runs for up to its termination grace period, which an
+ * install may set far above the promotion timeout. The wait covers that grace period, so a drain is
+ * never cut short or taken for a failure; the promotion timeout stays the least it waits.
+ */
+export function serverStopSeconds(
+  deployment: Deployment,
+  timeoutSeconds: number,
+) {
+  const grace =
+    deployment.spec.template.spec.terminationGracePeriodSeconds ??
+    DEFAULT_GRACE_SECONDS;
+  return Math.max(timeoutSeconds, grace + DELETION_MARGIN_SECONDS);
 }
 
 export function serverSelector(release: string) {
@@ -428,6 +451,11 @@ export async function runPromotion(
             { cwd: target.cwd },
           );
       }
+      // The grace period the server's pods are stopped with, read as the server stands now.
+      const stopSeconds = serverStopSeconds(
+        await serverDeployment(target, run),
+        target.timeoutSeconds,
+      );
       scaledDown = true;
       await scaleServer(target, run, 0);
       await run(
@@ -440,7 +468,7 @@ export async function runPromotion(
           "pod",
           "--selector",
           serverSelector(target.release),
-          `--timeout=${timeout}`,
+          `--timeout=${stopSeconds}s`,
         ],
         { cwd: target.cwd },
       );
