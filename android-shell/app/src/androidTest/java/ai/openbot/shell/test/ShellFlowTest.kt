@@ -16,7 +16,8 @@ class ShellFlowTest : ShellTestBase() {
 
     private fun homeRendered(timeoutMs: Long = 30_000): Boolean = waitPageText(homeText, timeoutMs)
 
-    private fun accountButton() = device.findObject(By.desc("Account")) ?: device.findObject(By.text("Account"))
+    /** The web app's Account button (shell mode): its rect from the page. */
+    private fun accountButton() = webRect("Account")
 
     private fun checkTabBar(moment: String) {
         val conversations = tab(Tab.CONVERSATIONS)
@@ -30,7 +31,8 @@ class ShellFlowTest : ShellTestBase() {
         val web = bounds(find("openbot_webview"))
         val bar = bounds(find("bottom_nav"))
         if (web != null && bar != null) {
-            check(web.bottom <= bar.top + 1, "$moment: the web view runs under the bottom bar (web ${web.bottom}, bar ${bar.top})")
+            // Chromium reports the page's root node in rounded CSS pixels: up to 3 px of slack.
+            check(web.bottom <= bar.top + 3, "$moment: the web view runs under the bottom bar (web ${web.bottom}, bar ${bar.top})")
             check(web.top > 0, "$moment: the web view starts at the top edge, under the status bar (web top ${web.top})")
             note("$moment: web view $web, bottom bar $bar, display ${device.displayWidth}x${device.displayHeight}")
         }
@@ -240,9 +242,7 @@ class ShellFlowTest : ShellTestBase() {
     fun testSignOutFromAccountMenu() {
         if (!launchSignedIn("sign-in")) return
         check(homeRendered(), "Home did not render")
-        val account = device.wait(androidx.test.uiautomator.Until.findObject(By.desc("Account")), 10_000) ?: accountButton()
-        check(account != null, "no Account button on Home")
-        account?.click()
+        check(tapWeb("Account"), "no Account button on Home")
         sleep(1_000)
         screenshot("1-account-menu")
         if (!check(tapWeb("Sign out"), "the Account menu has no Sign out")) return

@@ -34,6 +34,11 @@ boot() {
     if grep -q "^$1=" "$config"; then sed -i "s|^$1=.*|$1=$2|" "$config"; else echo "$1=$2" >> "$config"; fi
   }
   set_config hw.keyboard no
+  # A smaller screen than the Pixel 7's 1080x2400: software rendering in the guest has a third
+  # fewer pixels to draw, which keeps scrolling and typing smooth enough to record.
+  set_config hw.lcd.width 720
+  set_config hw.lcd.height 1600
+  set_config hw.lcd.density 320
   set_config hw.ramSize 4096
   set_config disk.dataPartition.size 8G
   set_config hw.gpu.enabled yes

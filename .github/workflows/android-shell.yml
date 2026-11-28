@@ -165,7 +165,8 @@ jobs:
         run: |
           adb install -r -g android-shell/app/build/outputs/apk/debug/app-debug.apk
           adb install -r -g android-shell/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-          adb install -r -g android-shell/app/build/outputs/apk/releaseTest/app-releaseTest.apk
+          # The releaseTest build is installed by the runner right before its tests, after the
+          # hand-off tests (two apps claiming openbotshell:// would make Chrome ask which one).
           adb shell pm list packages | grep ai.openbot
 
       - name: Run the instrumented tests

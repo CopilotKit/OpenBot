@@ -123,9 +123,9 @@ jobs:
         timeout-minutes: 4
         env:
           ANIMATOR_SCALE: "1"
-          # The host-side software renderer for the recordings: smooth enough to type and scroll
-          # on camera. The test workflow keeps the guest renderer, which never froze.
-          GPU_MODE: swiftshader_indirect
+          # The guest renderer: the host-side one (swiftshader_indirect) froze the emulator in the
+          # middle of a recording (run 46119389519) as it did in test runs.
+          GPU_MODE: guest
         run: android-shell/ci/emulator.sh all
 
       - name: Install the apps
@@ -142,7 +142,7 @@ jobs:
         env:
           RUN_MODE: video
           VIDEO_PLAN: demo
-          PER_TEST_SECONDS: "170"
+          PER_TEST_SECONDS: "150"
         run: python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
 
       - name: Record the real-backend journey (private)

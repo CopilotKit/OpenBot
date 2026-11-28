@@ -25,15 +25,18 @@ class DemoTourTest : ShellTestBase() {
     }
 
     private fun tour() {
+        step("launch")
         // The first page load answers 1.5 s late (debug hook), so the loading skeleton reads on video.
         launch(MOCK_A, "tour", extras = mapOf("openbot.delay_first_load_ms" to "1500"))
         check(waitFor("sign_in_button", 20_000) != null, "demo: no Sign in button")
         pause(800)
+        step("sign in through the Custom Tab")
         // Native sign-in, the Custom Tab with the mock's page followed by hand, each step held.
         if (!check(signInThroughCustomTab("tour", shots = false, paceMs = 1_500), "demo: signing in did not reach the tabs")) return
         check(waitPageText("Start a conversation", 30_000), "demo: Home did not render")
         pause(1_500)
 
+        step("type on the software keyboard")
         // The software keyboard: the bottom bar hides, the message box sits on the keyboard.
         waitComposerRect(10_000)?.let { box ->
             tapComposer(box)
@@ -52,6 +55,7 @@ class DemoTourTest : ShellTestBase() {
         }
         pause(800)
 
+        step("conversations, open one, Back")
         // Conversations: open one, system Back.
         tab(Tab.CONVERSATIONS)?.click()
         check(waitPageText("Competitor pricing notes", 15_000), "demo: no conversations")
@@ -66,6 +70,7 @@ class DemoTourTest : ShellTestBase() {
         check(waitPageText("Quarterly forecast", 8_000), "demo: system Back did not return to the list")
         pause(1_200)
 
+        step("bots, open one")
         // Bots: open one.
         tab(Tab.BOTS)?.click()
         check(waitPageText("Research Bot", 15_000), "demo: no Bots")
@@ -76,6 +81,7 @@ class DemoTourTest : ShellTestBase() {
         pause(2_000)
         dismissKeyboardIfUp()
 
+        step("account menu, sign out")
         // Home, the Account menu, Sign out: the native sign-in screen.
         tab(Tab.HOME)?.click()
         pause(1_200)
@@ -85,10 +91,12 @@ class DemoTourTest : ShellTestBase() {
         check(waitFor("sign_in_button", 15_000) != null, "demo: Sign out did not return to the native sign-in")
         pause(1_500)
 
+        step("lock screen")
         // The lock screen, then the connection comes back.
         launch(MOCK_A, "tour-offline", reset = false, extras = mapOf("openbot.force_offline_seconds" to "4"))
         check(waitFor("offline_lock", 5_000) != null, "demo: no lock screen")
         check(waitGone("offline_lock", 12_000), "demo: the lock did not lift")
         pause(1_500)
+        endStep()
     }
 }

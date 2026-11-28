@@ -331,8 +331,8 @@ abstract class ShellTestBase {
             if (variant == "debug") {
                 val raw = pageString(
                     "(function(t){var best=null;var all=document.querySelectorAll('a,button,[role=button],[role=link],[role=menuitem],li,div,span,p,h1,h2,h3');" +
-                        "for(var i=0;i<all.length;i++){var e=all[i];var s=(e.innerText||e.getAttribute('aria-label')||'').trim();" +
-                        "if(s===t||s.indexOf(t)===0){var r=e.getBoundingClientRect();" +
+                        "for(var i=0;i<all.length;i++){var e=all[i];var s=(e.innerText||'').trim();var al=e.getAttribute('aria-label');" +
+                        "if(al===t||s===t||s.indexOf(t)===0){var r=e.getBoundingClientRect();" +
                         "if(r.width>0&&r.height>0&&(!best||r.width*r.height<best.a))best={a:r.width*r.height,e:e};}}" +
                         "if(!best)return 'null';best.e.scrollIntoView({block:'center'});var q=best.e.getBoundingClientRect();" +
                         "return JSON.stringify({l:q.left,t:q.top,r:q.right,b:q.bottom,d:window.devicePixelRatio});})(" +
@@ -779,6 +779,32 @@ abstract class ShellTestBase {
     /** A line the CI summary picks up (never a secret or personal data). */
     fun note(text: String) {
         Log.i("SHELL_NOTE", "$testName: $text")
+        // Streamed to the runner as the test runs (status code 2: a note, not a result), so a test
+        // that hangs still shows how far it got. Private tests' notes go to the private log only.
+        try {
+            instrumentation.sendStatus(2, Bundle().apply { putString("shell_note", "$testName: $text") })
+        } catch (error: Throwable) {
+            // Never fail a test over a note.
+        }
+    }
+
+    private var stepNumber = 0
+    private var stepStarted = 0L
+    private var stepName = ""
+
+    /** Marks a step of a long test: "step N: <name> started", and the last one's end with its time. */
+    fun step(name: String) {
+        endStep()
+        stepNumber += 1
+        stepName = name
+        stepStarted = SystemClock.uptimeMillis()
+        note("step $stepNumber: $name started")
+    }
+
+    fun endStep() {
+        if (stepName.isEmpty()) return
+        note("step $stepNumber: $stepName ended ${SystemClock.uptimeMillis() - stepStarted} ms")
+        stepName = ""
     }
 
     fun bounds(obj: UiObject2?): Rect? = try {

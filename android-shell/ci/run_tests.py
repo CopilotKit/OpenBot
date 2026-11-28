@@ -157,7 +157,7 @@ class Recorder:
         local = []
         for segment in self.segments:
             target = os.path.join(dest_dir, os.path.basename(segment))
-            if adb("pull", segment, target, timeout=300).returncode == 0 and os.path.getsize(target) > 0:
+            if adb("pull", segment, target, timeout=60).returncode == 0 and os.path.getsize(target) > 0:
                 local.append(target)
         dest = os.path.join(dest_dir, self.name)
         if len(local) == 1:
@@ -303,16 +303,41 @@ def run_one(test_id, results, logs):
         extra += ["-e", "late_stack", "1"]
         late = LateStack()
         late.thread.start()
-    adb("logcat", "-c")
-    adb("shell", "rm -rf /data/local/tmp/openbot-shots")
+    adb("logcat", "-c", timeout=20)
+    adb("shell", "rm -rf /data/local/tmp/openbot-shots; mkdir -p /data/local/tmp/openbot-shots", timeout=20)
     started = time.time()
     command = "am instrument -w -r -e class " + PACKAGE + test_id + " " + " ".join(extra) + " " + RUNNER
+    print(f"  starting {test_id}", flush=True)
+    # Streamed: the tests' notes (status code 2) are printed as they come, private tests' only as
+    # step markers, so a hang shows its last step in the job log.
+    process = subprocess.Popen(["adb", "shell", command], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    lines = []
+    last_note = [""]
+
+    def pump():
+        for line in process.stdout:
+            lines.append(line)
+            if "shell_note=" in line:
+                note = line.split("shell_note=", 1)[1].strip()
+                for value in SECRET_ARGS.values():
+                    if value:
+                        note = note.replace(value, "***")
+                last_note[0] = note
+                if not is_private(test_id) or ": step " in note:
+                    print(f"    | {note[:300]}", flush=True)
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
     try:
-        out = subprocess.run(["adb", "shell", command], capture_output=True, text=True, timeout=PER_TEST_S).stdout
-    except subprocess.TimeoutExpired as error:
-        out = (error.stdout or b"").decode() if isinstance(error.stdout, bytes) else (error.stdout or "")
-        out += f"\nINSTRUMENTATION_STATUS_CODE: -2\nINSTRUMENTATION_STATUS: stack=runner: the test ran past {PER_TEST_S} s and was stopped\nINSTRUMENTATION_STATUS_CODE: -2\n"
+        process.wait(timeout=PER_TEST_S)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        lines.append(f"\nINSTRUMENTATION_STATUS: stack=runner: the test ran past {PER_TEST_S} s and was stopped; last note: {last_note[0]}\nINSTRUMENTATION_STATUS_CODE: -2\n")
+        print(f"    the test ran past {PER_TEST_S} s; last note: {last_note[0][:300]}", flush=True)
+        adb("shell", "screencap -p /data/local/tmp/openbot-shots/" + test_id.split("#")[-1] + "--runner-timeout.png", timeout=20)
         adb("shell", "am force-stop ai.openbot.shell", timeout=20)
+    reader.join(timeout=5)
+    out = "".join(lines)
     seconds = round(time.time() - started)
     if late:
         late.stop()
@@ -321,7 +346,7 @@ def run_one(test_id, results, logs):
         if value:
             out = out.replace(value, "***")
     codes = re.findall(r"INSTRUMENTATION_STATUS_CODE: (-?\d+)", out)
-    final = [c for c in codes if c != "1"]
+    final = [c for c in codes if c not in ("1", "2")]
     status = STATUS.get(final[-1], "failed") if final else ("failed" if "Process crashed" in out or "FAILURES" in out else "unknown")
     stack = ""
     match = re.search(r"INSTRUMENTATION_STATUS: stack=(.*?)(?=INSTRUMENTATION_STATUS(_CODE)?:)", out, re.S)
@@ -335,7 +360,7 @@ def run_one(test_id, results, logs):
     # Evidence: logcat and screenshots, private tests apart.
     target = private if is_private(test_id) else artifacts
     try:
-        log = adb("logcat", "-d", "-v", "threadtime", timeout=300).stdout
+        log = adb("logcat", "-d", "-v", "threadtime", timeout=40).stdout
     except subprocess.TimeoutExpired:
         log = ""
         print("    logcat did not answer in 5 minutes", flush=True)
@@ -354,7 +379,7 @@ def run_one(test_id, results, logs):
     probe = [re.sub(r"^.*?SHELL_PROBE\s*:\s*", "", line) for line in kept if "SHELL_PROBE" in line]
     raw = os.path.join(target, "raw-shots")
     os.makedirs(raw, exist_ok=True)
-    adb("pull", "/data/local/tmp/openbot-shots/.", raw, timeout=300)
+    adb("pull", "/data/local/tmp/openbot-shots/.", raw, timeout=60)
     with open(os.path.join(target, "instrument.log"), "a") as f:
         f.write(f"===== {test_id} ({seconds} s) =====\n{out}\n")
     variant = "releaseTest" if test_id.startswith("RealBackendReleaseTest") else "debug"
@@ -381,12 +406,13 @@ def main():
                 after_release = len(plan) + 1
             plan += VIDEO_REAL_GOOGLE if GOOGLE else VIDEO_REAL
     else:
-        plan = list(SUITE1_RELEASE)
-        after_release = len(plan)
+        # The mock suite first (it matters most and needs no outside network), then the probe,
+        # then the real backend. The release-like build leaves before the hand-off tests only if it
+        # is installed, so its tests run last.
+        plan = [] if REAL_ONLY else SUITE2 + PROBE
         plan += SUITE1_DEBUG
-        if not REAL_ONLY:
-            # The demo runs in the video workflow only.
-            plan += PROBE + SUITE2
+        after_release = -1
+        plan += SUITE1_RELEASE
     results, logs = [], []
     recorders = {}
     recorded_status = "unknown"
@@ -399,7 +425,7 @@ def main():
             qemu = subprocess.run(["pgrep", "-fa", "qemu-system"], capture_output=True, text=True).stdout.strip()
             not_run(test_id, results, "the emulator stopped answering adb (" + ("its process is still running: frozen" if qemu else "its process is gone") + ")")
             continue
-        if MODE == "video" and test_id.startswith("RealBackendReleaseTest"):
+        if test_id.startswith("RealBackendReleaseTest") and "releasetest" not in adb("shell", "pm list packages ai.openbot.shell.releasetest").stdout:
             here = os.path.dirname(os.path.abspath(__file__))
             adb("install", "-r", "-g", os.path.join(here, "..", "app/build/outputs/apk/releaseTest/app-releaseTest.apk"), timeout=120)
         if index == after_release:
