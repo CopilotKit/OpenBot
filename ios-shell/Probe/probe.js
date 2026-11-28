@@ -268,9 +268,12 @@
       "user-agent",
       () => {
         const ua = navigator.userAgent;
-        return ua.indexOf("OpenBotShell-iOS") !== -1
+        const marker = ua.includes("Android")
+          ? "OpenBotShell-Android/"
+          : "OpenBotShell-iOS/";
+        return ua.includes(marker)
           ? pass(ua)
-          : fail(`no OpenBotShell-iOS marker: ${ua}`);
+          : fail(`missing ${marker} marker`);
       },
     ],
     [
