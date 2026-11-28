@@ -203,7 +203,9 @@ final class ShellController: NSObject, WebControllerDelegate {
             guard let self = self else { return }
             if (result as? Bool) == true {
                 self.endPageLoad("drawn")
-            } else if attempt < 20 {
+            } else if attempt >= 20 {
+                self.endPageLoad("no-content-after-8s")
+            } else {
                 let item = DispatchWorkItem { [weak self] in self?.checkPageDrawn(attempt: attempt + 1) }
                 self.loadingCheck = item
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
@@ -583,13 +585,9 @@ final class ShellController: NSObject, WebControllerDelegate {
         // An older web app says nothing over the bridge: read its colours when it has loaded.
         refreshChrome()
         if let url = controller.webView.url, config.isOwnOrigin(url) {
+            // Without a `ready` (a Cloudflare check, an intermediary's error page, a web app without
+            // the bridge): as soon as the page shows text, or after 8 s at most.
             checkPageDrawn()
-            // Never trap a person behind the skeleton: a page that finished but says nothing (a
-            // Cloudflare check, an intermediary's error page, a web app without the bridge) shows
-            // itself 1.5 s after it finished.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.endPageLoad("finished-without-ready")
-            }
         } else if model.signIn == .webFallback {
             // The identity provider's page: no skeleton over another site.
             endPageLoad("other-site")
@@ -602,6 +600,10 @@ final class ShellController: NSObject, WebControllerDelegate {
 
     func webControllerDidCommit(_ controller: WebController) {
         model.mainFrameCommits += 1
+        // Every new document on the web app's origin starts empty: the skeleton covers it until it draws.
+        if model.webVisible, let url = controller.webView.url, config.isOwnOrigin(url), !model.pageLoading {
+            beginPageLoad("commit")
+        }
         if failureSource == .some(.web) || failureSource == nil { clearLoadFailure() }
     }
 }

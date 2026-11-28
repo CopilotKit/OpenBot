@@ -32,8 +32,8 @@ What is native:
   when signed in, the instant the sign-in sheet returns, the web sign-in's first load, a retry, a
   restarted web content process), a native skeleton (`loading-skeleton`, "Loading") covers the web
   view with a highlight sweeping left to right (a gentle pulse with Reduce Motion). It goes when the
-  page says `ready`, when an older web app's document is complete and has content, or 1.5 s after
-  any page finishes, after at least 0.3 s. It appears without a fade, so no frame shows an empty
+  page says `ready`, or when a page without the bridge shows text (8 s at most), after at least 0.3 s;
+  every new document on the web app's origin brings it back until it draws. It appears without a fade, so no frame shows an empty
   web view. Signing out is the web app's own: the app notices it from the `signed-out` message or
   from the URL reaching `/sign`, then deletes the two session cookies.
 - **The lock screen.** No connection (`NWPathMonitor`), or the web app did not load (a failed
