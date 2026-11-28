@@ -23,7 +23,7 @@ appId: ai.openbot.rnshell
     timeout: 20000
 - waitForAnimationToEnd:
     timeout: 2500
-- tapOn: "Ask anything"
+- tapOn: "(Message|Ask anything)"
 - inputText: "Summarize what changed in competitor pricing"
 - waitForAnimationToEnd:
     timeout: 2000
@@ -45,7 +45,7 @@ appId: ai.openbot.rnshell
 - tapOn: "Competitor pricing notes"
 - waitForAnimationToEnd:
     timeout: 3000
-- tapOn: "Ask anything"
+- tapOn: "(Message|Ask anything)"
 - inputText: "What changed since?"
 - waitForAnimationToEnd:
     timeout: 1500

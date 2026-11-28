@@ -43,22 +43,24 @@ MOCK = [
     ("tabs", "flows/03-tabs.yaml", "both", None, 180),
     ("keyboard", "flows/04-keyboard.yaml", "both", None, 240),
     ("relaunch-signed-in", "flows/05-relaunch-signed-in.yaml", "both", None, 150),
-    ("sign-out", "flows/06-sign-out.yaml", "both", None, 150),
-    ("web-fallback", "flows/07-web-fallback.yaml", "both", None, 150),
+    # The flows signed in with the mock's cookie run before sign-out, which ends the mock's session
+    # (as a server does) until the next hand-off.
     ("skeleton", "flows/08-skeleton.yaml", "both", None, 150),
-    ("lock-offline", "flows/09-lock-offline.yaml", "both", None, 120),
     ("lock-recovers", "flows/10-lock-recovers.yaml", "both", None, 150),
     ("lock-5xx", "flows/11-lock-5xx.yaml", "both", None, 120),
     ("lock-silent", "flows/12-lock-silent.yaml", "both", None, 150),
-    ("stale-session", "flows/13-stale-session.yaml", "both", None, 150),
-    ("header-probe", "flows/14-header-probe.yaml", "both", None, 150),
     ("process-death-before", "flows/15-process-death-a.yaml", "both", None, 150),
     ("process-death-after", "flows/16-process-death-b.yaml", "both", "kill-web-process", 150),
+    ("sign-out", "flows/06-sign-out.yaml", "both", None, 150),
+    ("web-fallback", "flows/07-web-fallback.yaml", "both", None, 150),
+    ("lock-offline", "flows/09-lock-offline.yaml", "both", None, 120),
+    ("stale-session", "flows/13-stale-session.yaml", "both", None, 150),
+    ("header-probe", "flows/14-header-probe.yaml", "both", None, 150),
     ("dark", "flows/17-dark.yaml", "both", None, 120),
     ("foreign-callback", "flows/18-foreign-callback.yaml", "android", None, 180),
 ]
 REAL = [
-    ("real-first-screen-web-sign-in", "real/01-first-screen-web-sign-in.yaml", "both", None, 180),
+    ("real-first-screen-sign-in", "real/01-first-screen-sign-in.yaml", "both", None, 180),
     ("real-lock-unreachable", "real/02-lock-unreachable.yaml", "both", None, 120),
     ("real-signed-in-journey", "real/03-signed-in.yaml", "both", "launch-with-session", 240),
 ]

@@ -3,7 +3,7 @@
 # conversation, sending keeps it up.
 appId: ai.openbot.rnshell
 ---
-- tapOn: "Ask anything"
+- tapOn: "(Message|Ask anything)"
 - extendedWaitUntil:
     visible:
       id: "debug-state"
@@ -35,7 +35,8 @@ appId: ai.openbot.rnshell
 - extendedWaitUntil:
     visible: "Here is the first draft."
     timeout: 20000
-- tapOn: "Ask anything"
+# The conversation may have focused its box already; tap it either way.
+- tapOn: "(Message|Ask anything)"
 - extendedWaitUntil:
     visible:
       id: "debug-state"
