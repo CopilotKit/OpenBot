@@ -480,6 +480,11 @@ class WebController(
         }
 
         override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+            // A client-side route change has no onPageStarted. Restore the visible page if
+            // Android terminates this renderer after the user opens a conversation.
+            if (currentNavigationCommitted && !currentNavigationFailed && config.isOwnOrigin(url)) {
+                lastRequestedUrl = url
+            }
             delegate?.onUrlChanged(url)
             activity.onBackStateChanged()
         }

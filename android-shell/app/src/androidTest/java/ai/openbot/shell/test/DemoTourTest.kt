@@ -1,8 +1,6 @@
 package ai.openbot.shell.test
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.uiautomator.By
-import androidx.test.uiautomator.Direction
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -35,17 +33,11 @@ class DemoTourTest : ShellTestBase() {
         pause(1_500)
 
         // The software keyboard: the bottom bar hides, the message box sits on the keyboard.
-        val box = waitComposerRect(10_000) ?: run {
-            check(false, "demo: no message box")
-            return
-        }
-        tapComposer(box)
-        if (!check(waitKeyboard(true, 6_000), "demo: the software keyboard did not appear")) return
+        if (!check(waitForState("skeleton=0", 15_000), "demo: the loading skeleton stayed up")) return
+        if (!check(tapWeb("Message"), "demo: the message editor was unavailable")) return
+        if (!check(waitKeyboard(true, 12_000), "demo: the software keyboard did not appear")) return
         val prompt = "what changed in pricing"
-        // Deliver the text through Android's input system while the software keyboard is visible.
-        shell("input text " + prompt.replace(" ", "%s"))
-        val typed = pageString("document.activeElement?.innerText || document.activeElement?.value || ''")
-        if (!check(typed.trim().equals(prompt, ignoreCase = true), "demo: typing did not reach the message box")) return
+        if (!check(typeInFocusedEditor(prompt), "demo: the editor did not accept the full prompt with Gboard open")) return
         screenshot("home-keyboard-typed")
         pause(1_200)
         if (!check(tapWeb("Send message"), "demo: Send is not reachable")) return

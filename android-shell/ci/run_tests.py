@@ -78,7 +78,9 @@ SUITE2 = [
     "ShellFlowTest#testFallbackToWebSignIn",
     "ShellFlowTest#testOfflineLock",
     "ShellFlowTest#testKeyboardHidesTabBar",
+    "ShellFlowTest#testSettingsNameStaysAboveKeyboard",
     "ShellFlowTest#testResumeFromBackground",
+    "ShellFlowTest#testOpenConversationSurvivesRendererTermination",
     "ShellFlowTest#testLoadingSkeleton",
     "ShellFlowTest#testLockLiftsWhenServerComesBack",
 ]

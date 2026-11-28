@@ -9,10 +9,12 @@ import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
+import ai.openbot.shell.R
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Configurator
 import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
@@ -83,6 +85,9 @@ abstract class ShellTestBase {
 
     @Before
     fun baseSetUp() {
+        // Animated pages and Chrome's onboarding can keep sending accessibility events. Each
+        // assertion has its own deadline; avoid a ten-second idle wait for every node lookup.
+        Configurator.getInstance().waitForIdleTimeout = 500
         device.wakeUp()
         shell("wm dismiss-keyguard")
         dismissSystemDialogs()
@@ -237,7 +242,7 @@ abstract class ShellTestBase {
     }
 
     /** Must run on the instrumentation main thread. */
-    private fun shellActivity(): Activity? {
+    protected fun shellActivity(): Activity? {
         val registry = ActivityLifecycleMonitorRegistry.getInstance()
         return listOf(Stage.RESUMED, Stage.PAUSED, Stage.STARTED, Stage.STOPPED)
             .flatMap { registry.getActivitiesInStage(it) }
@@ -343,35 +348,48 @@ abstract class ShellTestBase {
      * Taps the page element whose text starts with `text` (the smallest one, so a row's title, not
      * the whole list): its place from the page (debug builds), else the accessibility tree's node.
      */
-    fun tapWeb(text: String, timeoutMs: Long = 10_000): Boolean {
+    fun tapWeb(text: String, timeoutMs: Long = 10_000, cssSelector: String = ""): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         do {
             if (variant == "debug") {
-                val raw = pageString(
-                    "(function(t){var best=null;var all=document.querySelectorAll('a,button,[role=button],[role=link],[role=menuitem],li,div,span,p,h1,h2,h3');" +
-                        "for(var i=0;i<all.length;i++){var e=all[i];var s=(e.innerText||'').trim();" +
-                        "if(e.getAttribute('aria-label')===t||s.indexOf(t)===0){var r=e.getBoundingClientRect();" +
-                        "if(r.width>0&&r.height>0&&(!best||r.width*r.height<best.a))best={a:r.width*r.height,e:e};}}" +
-                        "if(!best)return 'null';best.e.scrollIntoView({block:'center'});var q=best.e.getBoundingClientRect();" +
-                        "return JSON.stringify({l:q.left,t:q.top,r:q.right,b:q.bottom,d:window.devicePixelRatio});})(" +
-                        org.json.JSONObject.quote(text) + ")",
-                )
-                sleep(300)
-                val web = bounds(find("openbot_webview"))
-                if (raw != "null" && raw.isNotEmpty() && web != null) {
-                    try {
-                        val json = org.json.JSONObject(raw)
-                        val d = json.optDouble("d", 1.0)
-                        val x = web.left + (json.optDouble("l") + json.optDouble("r")) / 2 * d
-                        val y = web.top + (json.optDouble("t") + json.optDouble("b")) / 2 * d
-                        device.click(x.toInt(), y.toInt())
-                        return true
-                    } catch (error: Exception) {
-                        // fall through to the accessibility tree
+                val web = layoutBounds(R.id.openbot_webview)
+                if (web != null) {
+                    val point = pageString(
+                        """
+                        (function(label, requestedSelector) {
+                          const selector = requestedSelector || 'a,button,[role=button],[role=link],[role=menuitem],li,div,span,p,h1,h2,h3';
+                          let target, area = Infinity;
+                          for (const e of document.querySelectorAll(selector)) {
+                            if (!requestedSelector && e.getAttribute('aria-label') !== label && !(e.innerText || '').trim().startsWith(label)) continue;
+                            const r = e.getBoundingClientRect();
+                            if (r.width > 0 && r.height > 0 && r.width*r.height < area) {
+                              target = e;
+                              area = r.width*r.height;
+                            }
+                          }
+                          if (!target) return '';
+                          const r = target.getBoundingClientRect();
+                          const x = r.left + r.width/2, y = r.top + r.height/2;
+                          if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) {
+                            target.scrollIntoView({block: 'nearest', behavior: 'instant'});
+                            return 'moving';
+                          }
+                          if (!target.contains(document.elementFromPoint(x, y))) return 'moving';
+                          return JSON.stringify({x: x * devicePixelRatio, y: y * devicePixelRatio});
+                        })(${org.json.JSONObject.quote(text)}, ${org.json.JSONObject.quote(cssSelector)})
+                        """.trimIndent(),
+                    )
+                    if (point == "moving") {
+                        sleep(150)
+                        continue
+                    }
+                    if (point.startsWith("{")) {
+                        val position = org.json.JSONObject(point)
+                        return device.click(web.left + position.getInt("x"), web.top + position.getInt("y"))
                     }
                 }
             }
-            webObject(text)?.let {
+            if (cssSelector.isEmpty()) webObject(text)?.let {
                 it.click()
                 return true
             }
@@ -400,64 +418,27 @@ abstract class ShellTestBase {
         )
     }
 
-    /**
-     * Types `text` on the real software keyboard by tapping its keys at points computed once from
-     * the keyboard window's bounds (Gboard's QWERTY grid: a toolbar strip, four key rows, the
-     * navigation strip), 150 ms a key. Letters and spaces only through the grid; anything else, and
-     * whatever the grid did not land, goes through `input text`. Answers which path was used.
-     */
-    fun typeOnKeyboard(text: String, deadlineMs: Long = 15_000): String {
-        val started = SystemClock.uptimeMillis()
-        val ime = device.findObjects(By.pkg("com.google.android.inputmethod.latin"))
-            .mapNotNull { bounds(it) }.maxByOrNull { it.width() * it.height() }
-        val unplaced = StringBuilder()
-        var path = "keys"
-        if (ime == null || ime.height() < 200) {
-            path = "input-text (no keyboard window found)"
-            shell("input text " + text.replace(" ", "%s"))
-            return path
-        }
-        val h = ime.height().toFloat()
-        val top = ime.top + h * 0.15f
-        val rowH = h * 0.75f / 4f
-        val keyW = ime.width() / 10f
-        val rows = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
-        fun point(c: Char): Pair<Int, Int>? {
-            if (c == ' ') return Pair((ime.left + ime.width() * 0.5f).toInt(), (top + rowH * 3.5f).toInt())
-            for ((r, keys) in rows.withIndex()) {
-                val i = keys.indexOf(c.lowercaseChar())
-                if (i >= 0) {
-                    val offset = when (r) { 0 -> 0f; 1 -> 0.5f; else -> 1.5f }
-                    return Pair((ime.left + keyW * (i + offset + 0.5f)).toInt(), (top + rowH * (r + 0.5f)).toInt())
-                }
+    /** Type into the focused editor with Android key events while the software keyboard is visible. */
+    fun typeInFocusedEditor(text: String): Boolean {
+        val editor = "document.activeElement?.innerText || document.activeElement?.value || ''"
+        if (!keyboardShown() || pageString(editor).trim().isNotEmpty()) return false
+        for (index in text.indices) {
+            instrumentation.sendStringSync(text[index].toString())
+            val expected = text.take(index + 1)
+            val deadline = SystemClock.uptimeMillis() + 3_000
+            var entered: String
+            do {
+                // contenteditable uses a non-breaking space at the end of a line.
+                entered = pageString(editor).replace('\u00a0', ' ').trimEnd('\n')
+                if (entered.equals(expected, ignoreCase = true)) break
+                sleep(75)
+            } while (SystemClock.uptimeMillis() < deadline)
+            if (!entered.equals(expected, ignoreCase = true)) {
+                note("the editor did not accept character ${index + 1} of ${text.length}")
+                return false
             }
-            return null
         }
-        for (c in text) {
-            if (SystemClock.uptimeMillis() - started > deadlineMs) {
-                screenshot("typing-deadline")
-                check(false, "typing took longer than ${deadlineMs / 1000} s")
-                return "$path (stopped at the deadline)"
-            }
-            val p = point(c)
-            if (p == null) {
-                unplaced.append(c)
-                continue
-            }
-            if (unplaced.isNotEmpty()) {
-                shell("input text " + unplaced.toString().replace(" ", "%s"))
-                unplaced.clear()
-                path = "keys + input-text"
-            }
-            device.click(p.first, p.second)
-            sleep(150)
-        }
-        if (unplaced.isNotEmpty()) {
-            shell("input text " + unplaced.toString().replace(" ", "%s"))
-            path = "keys + input-text"
-        }
-        note("typed ${text.length} characters on the software keyboard in ${(SystemClock.uptimeMillis() - started) / 1000.0} s ($path)")
-        return path
+        return keyboardShown()
     }
 
     /** Taps the message box near its top (where the text line is). */
@@ -547,25 +528,22 @@ abstract class ShellTestBase {
 
     /** Chrome's first-run and promotion screens, if any show despite the command-line flags. */
     fun dismissChromeScreens(): Boolean {
-        var dismissed = false
-        for (label in listOf("Accept & continue", "Accept & Continue", "Use without an account", "No thanks", "No, thanks", "Got it", "Not now", "Skip")) {
-            val button = device.findObject(By.text(label)) ?: continue
-            if (button.applicationPackage == pkg) continue
-            note("Chrome showed '$label'; tapped it")
-            button.click()
-            dismissed = true
-            sleep(1_500)
-        }
-        return dismissed
+        val labels = "Accept & continue|Accept & Continue|Use without an account|No thanks|No, thanks|Got it|Not now|Skip"
+        val button = device.findObject(By.text(java.util.regex.Pattern.compile(labels))) ?: return false
+        if (button.applicationPackage == pkg) return false
+        note("Chrome showed '${button.text}'; tapped it")
+        button.click()
+        sleep(500)
+        return true
     }
 
     /** Waits for `text` in another app (the Custom Tab), dismissing Chrome's own screens on the way. */
     fun waitInCustomTab(text: String, timeoutMs: Long): UiObject2? {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         do {
-            dismissChromeScreens()
-            val found = device.findObject(By.text(text)) ?: device.findObject(By.desc(text))
+            val found = webObject(text)
             if (found != null && found.applicationPackage != pkg) return found
+            dismissChromeScreens()
             sleep(500)
         } while (SystemClock.uptimeMillis() < deadline)
         return null

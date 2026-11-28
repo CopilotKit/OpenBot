@@ -1,6 +1,9 @@
 package ai.openbot.shell.test
 
+import android.os.SystemClock
+import android.webkit.WebView
 import ai.openbot.shell.R
+import androidx.test.filters.SdkSuppress
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
 import org.junit.Test
@@ -255,7 +258,7 @@ class ShellFlowTest : ShellTestBase() {
         if (!launchSignedIn("sign-in")) return
         check(homeRendered(), "Home did not render")
         if (!check(tapWeb("Account"), "no Account button on Home")) return
-        sleep(1_000)
+        if (!check(waitPageText("Sign out", 10_000), "the Account menu did not open")) return
         screenshot("1-account-menu")
         if (!check(tapWeb("Sign out"), "the Account menu has no Sign out")) return
         check(waitFor("sign_in_button", 20_000) != null, "Sign out did not bring back the native sign-in; ${debugState()}")
@@ -337,7 +340,70 @@ class ShellFlowTest : ShellTestBase() {
         screenshot("signed-in-after-offline-lifted")
     }
 
+    @Test
+    @SdkSuppress(minSdkVersion = 29)
+    fun testOpenConversationSurvivesRendererTermination() {
+        if (!launchSignedIn("renderer-restart")) return
+        tab(Tab.CONVERSATIONS)?.click()
+        if (!check(waitPageText("Quarterly forecast", 20_000) && tapWeb("Quarterly forecast"),
+                "the conversation could not be opened")) return
+        val message = "Here is the first draft."
+        if (!check(waitPageText(message, 20_000), "the conversation did not render")) return
+        dismissKeyboardIfUp()
+        var original: WebView? = null
+        var terminated = false
+        instrumentation.runOnMainSync {
+            original = shellActivity()?.findViewById(R.id.openbot_webview)
+            terminated = original?.webViewRenderProcess?.terminate() == true
+        }
+        if (!check(terminated, "the WebView renderer could not be terminated")) return
+        val deadline = SystemClock.uptimeMillis() + 20_000
+        var replaced = false
+        do {
+            instrumentation.runOnMainSync {
+                val current = shellActivity()?.findViewById<WebView>(R.id.openbot_webview)
+                replaced = current != null && current !== original
+            }
+            if (replaced) break
+            sleep(200)
+        } while (SystemClock.uptimeMillis() < deadline)
+        if (!check(replaced, "the shell did not recreate its WebView")) return
+        check(waitPageText(message, 20_000), "the recreated WebView lost the open conversation")
+        screenshot("after-renderer-restart")
+        dismissKeyboardIfUp()
+        tab(Tab.BOTS)?.click()
+        check(waitPageText("Research Bot", 15_000), "the replacement WebView could not open Bots")
+    }
+
     // g.
+    @Test
+    fun testSettingsNameStaysAboveKeyboard() {
+        if (!launchSignedIn("settings-keyboard")) return
+        if (!check(homeRendered() && tapWeb("Account"), "the Account button was unavailable")) return
+        if (!check(tapWeb("Settings"), "the Account menu had no Settings item")) return
+        if (!check(tapWeb("Name"), "the profile had no Name row")) return
+        if (!check(waitPageText("Choose the name OpenBot shows for you.", 10_000), "the Name dialog did not open")) return
+        val selector = "input[autocomplete=name]"
+        if (pageString("document.activeElement.matches('$selector')") != "true") {
+            if (!check(tapWeb("Name field", cssSelector = selector), "the name field was unavailable")) return
+        }
+        if (!check(waitKeyboard(true, 8_000), "the software keyboard did not open on the name field")) return
+        instrumentation.sendStringSync("Sample")
+        if (!check(pageString("document.querySelector('$selector')?.value || ''").contains("Sample"),
+                "the name field did not receive the text")) return
+        check(pageString("""
+            (() => {
+              const r = document.activeElement.getBoundingClientRect();
+              return r.top >= visualViewport.offsetTop && r.bottom <= visualViewport.offsetTop + visualViewport.height + 1;
+            })()
+        """.trimIndent()) == "true", "the name field was outside the resized viewport")
+        check(tabGone(5_000), "the tab bar stayed up while typing the name")
+        screenshot("settings-name-keyboard")
+        device.pressBack()
+        check(waitKeyboard(false, 5_000), "Back did not put away the keyboard")
+        check(waitPageText("Choose the name OpenBot shows for you.", 5_000), "Back left the Name dialog")
+    }
+
     @Test
     fun testKeyboardHidesTabBar() {
         if (!launchSignedIn()) return
