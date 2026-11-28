@@ -21,4 +21,12 @@ export interface ModelChoiceInput {
   effort: string | null;
   /** Keep an explicitly named model as an override even when it is the deployment's default. Omit to use the default as a reset. */
   pinModel?: boolean;
+  /**
+   * The AI connection the model is on, by id, one the catalogue lists in connections. Absent or null: the default connection.
+   * @minLength 1
+   * @maxLength 200
+   * @nullable
+   * @pattern ^[A-Za-z0-9_.:-]+$
+   */
+  connection?: string | null;
 }

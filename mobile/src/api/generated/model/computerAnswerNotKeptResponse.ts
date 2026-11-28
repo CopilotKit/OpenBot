@@ -4,6 +4,6 @@
 import type { ComputerProblem } from "./computerProblem";
 
 /**
- * Either the action was already done with this Idempotency-Key, and its answer is never kept, so it is not sent again (ANSWER_NOT_KEPT: it ran once; send a new key to run it again). Or the caller has something else to do first: take a new snapshot, wait for the person driving, clear what is in the way, or send the call through its conversation. Or the Idempotency-Key was already used for a different request.
+ * Either the action was already done with this Idempotency-Key, and its answer is never kept, so it is not sent again (ANSWER_NOT_KEPT: it ran once; send a new key to run it again). Or the caller has something else to do first: take a new snapshot, wait for the person driving, clear what is in the way, or send the call through its conversation. Or the Idempotency-Key was already used for a different request. Or the call named a step, by threadId and toolCallId, that the server is running now (COMPUTER_STEP_RUNNING: ask again with the same ids for its result) or that was cut off before it answered (COMPUTER_STEP_OUTCOME_UNKNOWN: check before doing it again).
  */
 export type ComputerAnswerNotKeptResponse = ComputerProblem;

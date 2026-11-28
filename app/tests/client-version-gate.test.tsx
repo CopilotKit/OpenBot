@@ -344,7 +344,7 @@ test("an OpenBot whose deployment raised an app's minimum for a security problem
   const app = { kind: "recorder" as const, version: "1.1.0" };
   expect(compatibility(cases.deployments.security, app)).toEqual({
     fit: "app",
-    minimum: "1.2.0",
+    minimum: "9.0.0",
     security: true,
   });
   const view = openApp(app);

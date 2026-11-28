@@ -24,7 +24,7 @@ export const getListCapabilitiesResponseMock = (): CapabilityPage => ({
       id: "passwordManager",
       title: "Password manager",
       description:
-        "People may save logins and hand sign-ins to a Bot's browser.",
+        "People may save logins, and sign a Bot in with a login they saved.",
       default: true,
       organization: null,
       roles: { member: false },
@@ -37,7 +37,8 @@ export const getListCapabilitiesResponseMock = (): CapabilityPage => ({
 export const getUpdateCapabilityResponseMock = (): Capability => ({
   id: "passwordManager",
   title: "Password manager",
-  description: "People may save logins and hand sign-ins to a Bot's browser.",
+  description:
+    "People may save logins, and sign a Bot in with a login they saved.",
   default: true,
   organization: null,
   roles: { member: false },

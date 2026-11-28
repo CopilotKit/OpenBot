@@ -1,0 +1,48 @@
+{
+  "CI": {
+    "run": 15,
+    "jobs": {
+      "changes": 2,
+      "format, lint, types": 3,
+      "API spec": 3,
+      "native types": 3,
+      "app (real browser)": 8,
+      "app (real browser, WebKit)": 12,
+      "app (real browser, desktop setup window)": 12,
+      "tests (shard N of N)": 7,
+      "tests": 2,
+      "tests (changed files)": 12,
+      "startup (macos-latest)": 4,
+      "startup (windows-latest)": 4,
+      "typescript langgraph engine": 3,
+      "python harness (agent-crewai)": 5,
+      "python harness (agent-claude-sdk)": 5,
+      "python harness (agent-openai-agents)": 5,
+      "python harness (agent-langgraph-agui)": 5,
+      "python harness (agent-llamaindex)": 5,
+      "python harness (agent-agno)": 5,
+      "python harness (agent-strands)": 5,
+      "python harness (agent-pydantic-ai)": 5,
+      "python harness (agent-adk)": 5,
+      "python harness (agent-antigravity)": 5,
+      "python harness (agent-langroid)": 5,
+      "python harness (agent-ag2)": 5,
+      "python harness (agent-microsoft)": 5,
+      "compose config": 2,
+      "build": 3,
+      "component list": 1,
+      "component dockerfile (*)": 10,
+      "verify": 1
+    }
+  },
+  "Desktop": {
+    "run": 15,
+    "jobs": {
+      "changes": 2,
+      "core": 4,
+      "live (images)": 8,
+      "live (engines)": 8,
+      "app / app (*)": 15
+    }
+  }
+}

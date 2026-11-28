@@ -46,8 +46,18 @@ test("every engine new Bots run on by default verifies a model on each provider 
 });
 
 test("every exact pin in a harness's requirements is a client the check records", () => {
-  const harnesses = readdirSync(ROOT).filter((name) =>
-    name.startsWith("agent-"),
+  // A ChatGPT plan's engine runs only on that plan's sign-in, which no key the check holds is, so
+  // the lock records nothing for it: its own live end-to-end lane checks it instead.
+  const { harnesses: rows } = JSON.parse(
+    readFileSync(join(ROOT, "shared/harnesses.json"), "utf8"),
+  ) as { harnesses: { image: string | null; credential: string }[] };
+  const planOnly = new Set(
+    rows
+      .filter((row) => row.credential === "chatgpt-plan")
+      .map((row) => row.image),
+  );
+  const harnesses = readdirSync(ROOT).filter(
+    (name) => name.startsWith("agent-") && !planOnly.has(name),
   );
   for (const harness of harnesses) {
     let text = "";

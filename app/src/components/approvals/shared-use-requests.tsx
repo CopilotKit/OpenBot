@@ -22,6 +22,7 @@ import {
   sharedUseRequestsQueryOptions,
 } from "@/lib/plugins/shared-use";
 import { teamListQueryOptions } from "@/lib/teams/queries";
+import { failureSaid } from "@/lib/load-failure";
 
 const WHY: Record<SharedUseRequestReason, string> = {
   refused_call:
@@ -62,7 +63,7 @@ export function SharedUseRequests() {
     <PageSection title="Shared account requests">
       {decide.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {decide.error.message}
+          {failureSaid(decide.error)}
         </p>
       ) : null}
       <PageRows>

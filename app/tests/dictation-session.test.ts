@@ -73,7 +73,7 @@ test("retry uses the same recording and never opens a new microphone", async () 
   expect(session.getSnapshot()).toMatchObject({
     phase: "error",
     canRetry: true,
-    error: "Service unavailable",
+    error: { message: "Service unavailable" },
   });
   await session.retry();
   expect(recordings).toBe(1);
@@ -112,7 +112,9 @@ test("permission errors have an actionable recovery", async () => {
   expect(session.getSnapshot()).toMatchObject({
     phase: "error",
     canRetry: false,
-    error:
-      "Microphone access was denied. Allow it in your browser and try again.",
+    error: {
+      message:
+        "Microphone access was denied. Allow it in your browser and try again.",
+    },
   });
 });

@@ -77,6 +77,15 @@ export const NOT_RUN_AFTER_FAILURE =
   "Not run: an earlier browser action in this step failed. Look at the page again before trying it.";
 
 /**
+ * A call nothing answered before the conversation went on: the browser never took the step (its page
+ * was not listening when the run ended), or the turn moved on without it. Nothing turned it away, so
+ * a person reads it as a step that didn't run, never as one that was blocked.
+ */
+export const NOT_RUN_UNANSWERED = notRun(
+  "no result came back for this call before the conversation moved on.",
+);
+
+/**
  * An approved step that the check just before it ran turned away. `why` is one sentence, with its
  * full stop, written for whoever reads it ("The rule that allowed this was removed before it ran.").
  */
@@ -100,6 +109,7 @@ const FOR_PERSON = new Map<string, string>([
     "Not done. The Bot stopped to wait for you on another step.",
   ],
   [NOT_RUN_AFTER_FAILURE, "Not done. A step before it didn't work."],
+  [NOT_RUN_UNANSWERED, "Not done. It didn't run before the Bot went on."],
   [
     OUTCOME_UNKNOWN,
     "It started, but OpenBot can't tell whether it finished. It wasn't run again.",
@@ -115,6 +125,9 @@ const FOR_PERSON = new Map<string, string>([
 export function outcomeForPerson(text: string): string {
   const known = FOR_PERSON.get(text.trim());
   if (known) return known;
+  // A step whose run was cut off before it answered, in the words the server tells the Bot that with.
+  if (text.trim().startsWith("Outcome unknown:"))
+    return FOR_PERSON.get(OUTCOME_UNKNOWN) ?? text;
   if (!text.startsWith("Not done:") && !text.startsWith("Not run:"))
     return text;
   const end = firstSentenceEnd(text);

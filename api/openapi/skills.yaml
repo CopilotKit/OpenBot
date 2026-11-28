@@ -32,6 +32,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -72,6 +74,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -129,6 +133,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -167,6 +173,9 @@ paths:
       responses:
         '204':
           description: The skill was deleted.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -203,6 +212,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -253,6 +264,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -411,6 +424,9 @@ components:
       description: >-
         No skill has that slug, the caller isn't an admin and can't see it,
         or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -431,6 +447,9 @@ components:
       description: >-
         There is no skill by that slug, a team named is not one of this
         organization's, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -462,6 +481,9 @@ components:
       description: >-
         A field is missing, blank once trimmed or holds text that can't be
         kept, or a tool is one OpenBot hasn't seen.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -482,6 +504,9 @@ components:
       description: >-
         Only an admin may write a skill for everyone, or change or delete the
         organization's or somebody else's.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:

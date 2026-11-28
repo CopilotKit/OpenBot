@@ -3,7 +3,7 @@
  */
 
 /**
- * The framework an agent somebody runs themselves is built on, by its id in OpenBot's harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint, with one exception: "langgraph-ts" sent with no endpoint asks for a Bot that runs inside OpenBot on OpenBot's own LangGraph (TypeScript) engine, which is what the New Bot sheet sends. The deployment decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, and an administrator may switch new Bots back to the built-in agent.
+ * The framework an agent somebody runs themselves is built on, by its id in OpenBot's harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint, with one exception: "langgraph-ts" sent with no endpoint asks for a Bot that runs inside OpenBot on OpenBot's own LangGraph (TypeScript) engine, which is what the New Bot sheet sends. The deployment decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, a ChatGPT plan signed in on OpenBot Desktop the OpenAI Agents SDK engine, and an administrator may switch new Bots back to the built-in agent.
  */
 export type CreateBotRequestHarness =
   (typeof CreateBotRequestHarness)[keyof typeof CreateBotRequestHarness];
@@ -20,6 +20,7 @@ export const CreateBotRequestHarness = {
   "pydantic-ai": "pydantic-ai",
   "microsoft-agent-framework": "microsoft-agent-framework",
   "claude-agent-sdk": "claude-agent-sdk",
+  "openai-agents-sdk": "openai-agents-sdk",
   strands: "strands",
   ag2: "ag2",
   langroid: "langroid",

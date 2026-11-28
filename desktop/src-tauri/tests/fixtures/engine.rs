@@ -141,7 +141,9 @@ fn main() {
     if SCENARIO == "stop-ipc" && (joined.starts_with("ps ") || joined.contains("stop supervisor")) {
         return;
     }
-    if SCENARIO == "stop-ipc" && joined == "compose -f docker-compose.yml --profile harness --profile openbot down" {
+    if SCENARIO == "stop-ipc"
+        && joined == "compose -f docker-compose.yml --profile harness --profile openbot down"
+    {
         let mut barrier = std::net::TcpStream::connect(
             std::fs::read_to_string("stop-barrier-address")
                 .unwrap()
@@ -158,6 +160,63 @@ fn main() {
             std::process::exit(71);
         }
         return;
+    }
+    // The `server` container, as Compose lists it when OpenBot stops answering: up (a stalled engine
+    // or a busy server), or stopped for memory and not restarted.
+    if SCENARIO == "server-up" || SCENARIO == "server-oom" {
+        if joined == "compose ps -a --format json server" {
+            let (state, code, status) = if SCENARIO == "server-up" {
+                ("running", 0, "Up 2 hours (healthy)")
+            } else {
+                ("exited", 137, "Exited (137) 3 seconds ago")
+            };
+            println!(
+                "{{\"ID\":\"5e7f0c2d9a11\",\"Name\":\"openbot-desktop-server-1\",\"Service\":\"server\",\"State\":\"{state}\",\"ExitCode\":{code},\"Status\":\"{status}\"}}"
+            );
+            return;
+        }
+        if joined == "inspect --format {{.State.OOMKilled}} 5e7f0c2d9a11" {
+            println!("{}", SCENARIO == "server-oom");
+            return;
+        }
+    }
+    // A Podman machine that cannot be reached: stalled (its VM process stopped, while its record
+    // still says running) or stopped. `compose ps` fails the same way for both, as measured on a
+    // Mac with the machine's VM process stopped.
+    if SCENARIO == "machine-stalled" || SCENARIO == "machine-stopped" {
+        if joined == "compose ps -a --format json server" {
+            eprintln!("Cannot connect to Podman. Please verify your connection to the Linux system using `podman system connection list`, or try `podman machine init` and `podman machine start` to manage a new Linux VM");
+            eprintln!("Error: unable to connect to Podman socket: failed to connect: ssh: handshake failed: read tcp 127.0.0.1:51828->127.0.0.1:50205: read: connection reset by peer");
+            std::process::exit(125);
+        }
+        if joined == "machine inspect openbot" {
+            let state = if SCENARIO == "machine-stalled" {
+                "running"
+            } else {
+                "stopped"
+            };
+            println!("[{{\"Name\":\"openbot\",\"State\":\"{state}\"}}]");
+            return;
+        }
+    }
+    // An engine that took a call and never answered it, as Podman's did on Windows after its machine
+    // had been stalled: `compose ps` and `machine inspect` never return.
+    if SCENARIO == "engine-hung" {
+        if joined.starts_with("compose ps") {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
+        if joined == "machine inspect openbot" {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
+    }
+    if SCENARIO == "machine-hung" {
+        if joined == "compose ps -a --format json server" {
+            eprintln!("Error: unable to connect to Podman socket: failed to connect: ssh: handshake failed: read: connection reset by peer");
+            std::process::exit(125);
+        }
+        if joined == "machine inspect openbot" {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
     }
     if args.first().map(String::as_str) == Some("version") {
         println!("1.44");
@@ -185,10 +244,10 @@ fn main() {
             ) && value.contains(" --filter label=com.docker.compose.service=") => {}
         "compose ps --format {{.Ports}}" => {
             if SCENARIO == "harness" {
-                // The default Bot's port (4215) among them, so a Start in these tests keeps it as
-                // the stack's own rather than probing it while another test's Start probes it too.
+                // The default Bot and both plan SDK Bots are already published by this stack.
+                // Keep their ports without probing real listeners or Windows excluded ranges.
                 println!(
-                    "127.0.0.1:4206->4206/tcp, 127.0.0.1:4212->4212/tcp, 127.0.0.1:4215->4215/tcp"
+                    "127.0.0.1:4206->4206/tcp, 127.0.0.1:4212->4212/tcp, 127.0.0.1:4215->4215/tcp, 127.0.0.1:4216->4216/tcp"
                 );
             }
         }

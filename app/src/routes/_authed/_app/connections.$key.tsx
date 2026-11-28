@@ -8,7 +8,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IdentityConnectionPage } from "@/components/connections/identity-connection-page";
 import {
   PageEmpty,
@@ -16,6 +16,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { OrganizationAppSwitch } from "@/components/manage/organization-app-switch";
 import { PluginPage } from "@/components/manage/plugin-page";
 import {
   BrokeredAccountRow,
@@ -23,6 +24,7 @@ import {
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import { GrantList } from "@/components/plugins/grant-list";
+import { KeyVersionOffer } from "@/components/plugins/key-version";
 import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,10 +49,18 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useDropBrokerReturn } from "@/lib/connections/broker-return";
+import { useConnectApp } from "@/lib/connections/connect-app";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useAppsOpen } from "@/lib/enterprise/apps-open";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
+import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
+import { withAdmins, yourAdmins } from "@/lib/organizations/admin-names";
+import { useOrganizationAdmins } from "@/lib/organizations/queries";
+import { useBackAfterConnect } from "@/lib/plugins/connect-return";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
+import { signsInForDirectory } from "@/lib/plugins/directory-state";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
   directoryProvider,
@@ -135,8 +145,9 @@ export const Route = createFileRoute("/_authed/_app/connections/$key")({
     ...searchTextEntry("linked", search.linked),
     ...searchTextEntry("action", search.action),
     /*
-     * `?connect=true` is Browse apps sending somebody here to finish adding an app that takes a
-     * key: the page opens with the key form. Read once and dropped, so a reload does not reopen it.
+     * `?connect=true` starts connecting on arrival: the key form for an app that takes a key (Browse
+     * apps, a Bot's card), the sign-in for one that signs in (the reconnect list's Reconnect). Read
+     * once and dropped, so a reload, or coming back from the sign-in, does not start it again.
      */
     ...(search.connect === true || search.connect === "true"
       ? { connect: true as const }
@@ -154,7 +165,15 @@ function RouteComponent() {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   // Held for this visit, keyed on the app, and dropped from the address below.
-  const [arrival] = useState(() => ({ key, connect: connect === true }));
+  const [arrival, setArrival] = useState(() => ({
+    key,
+    connect: connect === true,
+  }));
+  /*
+   * Arriving at another app's page from this one (an app's page offering its key version opens that
+   * app's key form) keeps this component, so the arrival is read again for the new app.
+   */
+  if (arrival.key !== key) setArrival({ key, connect: connect === true });
   const startConnect = arrival.key === key && arrival.connect;
   const navigate = Route.useNavigate();
   useEffect(() => {
@@ -162,6 +181,16 @@ function RouteComponent() {
     navigate({ search: ({ connect: _c, ...rest }) => rest, replace: true });
   }, [connect, navigate]);
   useDropBrokerReturn();
+  /*
+   * Opened from the reconnect list (`/reconnect/<appId>`, which OpenBot Desktop's move screen opens
+   * too): back to the list once this app is connected, and a way back to it until then.
+   */
+  const returningTo = useReturnToReconnectList();
+  /*
+   * Opened in a new tab for this app's sign-in, by a Bot's card or a Bot's page: closed, or sent
+   * back to where Connect was pressed, once the account is connected.
+   */
+  useBackAfterConnect(key);
   if (key === "github" || key === "slack") {
     return <IdentityConnectionPage linked={linked} provider={key} />;
   }
@@ -174,10 +203,21 @@ function RouteComponent() {
    */
   if (personal && action === undefined)
     return <PluginPage pluginKey={key} startConnect={startConnect} />;
-  return <AppConnectionPage startConnect={startConnect} />;
+  return (
+    <AppConnectionPage
+      backToList={returningTo === key}
+      startConnect={startConnect}
+    />
+  );
 }
 
-function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
+function AppConnectionPage({
+  startConnect,
+  backToList,
+}: {
+  startConnect: boolean;
+  backToList: boolean;
+}) {
   const { key } = useParams({
     from: "/_authed/_app/connections/$key",
   });
@@ -221,11 +261,12 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
   const catalogue = useQuery(catalogueQueryOptions());
   const setup = useQuery(appSetupQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
-  const [notice, setNotice] = useState<string | null>(null);
+  // A refusal is kept whole, not as its words, so a hold is drawn calmly (`failureSaid`).
+  const [notice, setNotice] = useState<Failure | null>(null);
 
   const connect = useMutation({
     ...connectAccountMutationOptions(),
-    onError: (thrown: Error) => setNotice(thrown.message),
+    onError: (thrown: Error) => setNotice(thrown),
     /*
      * A full page navigation, not a fetch. The consent screen is the vendor's own and has to be shown
      * to you in your own browser; there is deliberately nothing here that could complete it for you.
@@ -246,9 +287,10 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
           ? start.authorizationUrl
           : null;
       if (authorizationUrl === null) {
-        setNotice(
-          "Couldn't start connecting, so nothing was connected. Try again, or ask an admin if it keeps happening.",
-        );
+        setNotice({
+          message:
+            "Couldn't start connecting, so nothing was connected. Try again, or ask an admin if it keeps happening.",
+        });
         return;
       }
       window.location.href = authorizationUrl;
@@ -266,6 +308,12 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
   const connection = personalConnections(
     connections.data?.connections ?? [],
   ).find((row) => row.serverId === key);
+  /*
+   * A SIGN-IN THE VENDOR WITHDREW: the row stands and the grant it points at was revoked. The page
+   * read it as connected, offered nothing but a Disconnect that isn't built, and a Reconnect from the
+   * reconnect list arrived here and started nothing. It is offered Reconnect, which is Connect's press.
+   */
+  const withdrawn = connection?.revoked === true;
   /*
    * Asked of the row rather than the catalogue, because a brokered app has no catalogue entry at
    * all: the deployment recorded how it is reached when the app was enabled, and that record is the
@@ -311,6 +359,110 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
   }).data;
   const isAdmin = isOrganizationAdmin(me?.role);
   const appNames = [key, server?.title ?? key];
+  /*
+   * ADMIN'S SWITCH, HERE TOO, for an organization's owner or admin in the team edition: the same row
+   * Admin draws for the app, so somebody who runs their own organization (OpenBot Cloud's usual case)
+   * removes an app where they added it, without opening Admin. A member is never shown it.
+   */
+  const signedIn = useQuery(currentUserQueryOptions());
+  const role = signedIn.data?.role;
+  /*
+   * WHO A MEMBER GOES TO, where this page tells them only an admin can take the step: the app isn't
+   * turned on or set up yet, connecting apps isn't set up, or the server refused a Connect in words
+   * that name an admin. Read only then, and never for an admin, who is never told to ask one.
+   */
+  const member =
+    paths.edition === "team" &&
+    signedIn.isSuccess &&
+    !isOrganizationAdmin(role);
+  /*
+   * APPS OPEN (the organization's switch): a member adds an app nobody has added, as an admin does,
+   * and is never told an admin has to turn it on. Locked down, they are.
+   */
+  const open = useAppsOpen() === true;
+  const openToMember = member && open;
+  const noticeNamesAdmin = notice !== null && /\badmin\b/i.test(notice.message);
+  const notSetUp =
+    setup.data !== undefined &&
+    !setup.data.directoryAvailable &&
+    server !== undefined &&
+    fromDirectory(server);
+  const notOn =
+    plugins.data !== undefined &&
+    server === undefined &&
+    entry?.auth === "user-oauth";
+  const admins = useOrganizationAdmins(
+    member && (noticeNamesAdmin || notSetUp || (notOn && !open)),
+  );
+  /* The server's refusal as it said it, and beside it who the admins are where it names one. */
+  const shownNotice: Failure | null =
+    notice !== null && noticeNamesAdmin && yourAdmins(admins)
+      ? { message: `${notice.message} ${yourAdmins(admins)}` }
+      : notice;
+  const removable =
+    paths.edition === "team" &&
+    isOrganizationAdmin(role) &&
+    server !== undefined;
+  /*
+   * AN ADMIN'S CONNECT ON AN APP NOBODY HAS ADDED adds it for everyone and goes straight on to their
+   * own sign-in, the press Connections' tiles make (`useConnectApp`). So does a member's, with apps
+   * open; locked down, a member is told an admin has to make it available. An app with no client to
+   * sign in against yet goes to Admin's page for it, which is where the client is typed in; a member
+   * stays here, where the server's refusal says it has to be set up first.
+   */
+  const mayAdd =
+    paths.edition === "team" && (isOrganizationAdmin(role) || openToMember);
+  const connectApp = useConnectApp((app) =>
+    openToMember
+      ? { to: "/connections/$key", params: { key: app } }
+      : paths.plugin(app),
+  );
+  /* In the card under the row above it, where the page has one. */
+  const switchRow =
+    removable && server ? (
+      <>
+        <Separator />
+        <OrganizationAppSwitch appId={server.id} title={server.title} />
+      </>
+    ) : null;
+  /* As a card of its own, where the page says what it is without one. */
+  const switchSection =
+    removable && server ? (
+      <PageSection>
+        <PageRows className="mt-0">
+          <OrganizationAppSwitch appId={server.id} title={server.title} />
+        </PageRows>
+      </PageSection>
+    ) : null;
+
+  /*
+   * THE SIGN-IN ON ARRIVAL, for an app OpenBot signs in to itself: one added by its address that
+   * signs each person in, or a built-in one. The same press as this page's Connect below, made for
+   * the person who already pressed Reconnect (`startConnect`). Once per visit, only once every read
+   * has answered, and never over an account that is connected and working: over a withdrawn one it
+   * is the reconnection. A directory app's row starts its own (`BrokeredAccountRow`).
+   */
+  const signedInHere =
+    entry?.auth === "user-oauth" ||
+    (server?.source === "address" && server.signIn === true);
+  const signInOnArrival =
+    startConnect &&
+    plugins.isSuccess &&
+    catalogue.isSuccess &&
+    setup.isSuccess &&
+    connections.isSuccess &&
+    enabled &&
+    !brokered &&
+    !sharedHere &&
+    signedInHere &&
+    (connection === undefined || withdrawn);
+  const signInStarted = useRef(false);
+  const { mutate: startSignIn } = connect;
+  useEffect(() => {
+    if (!signInOnArrival || signInStarted.current) return;
+    signInStarted.current = true;
+    startSignIn(key);
+  }, [signInOnArrival, startSignIn, key]);
 
   /* Everything the brokered row below reads and does. See `brokered-account-row.tsx`. */
   const brokeredAccount = useBrokeredAccount({
@@ -367,10 +519,15 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     return <PageShell title="Account">{null}</PageShell>;
   }
 
-  const back = {
-    label: "Connections",
-    linkProps: { to: "/connections" as const },
-  };
+  const back = backToList
+    ? {
+        label: "Your apps to reconnect",
+        linkProps: { to: "/reconnect" as const },
+      }
+    : {
+        label: "Connections",
+        linkProps: { to: "/connections" as const },
+      };
 
   /*
    * AND A CONNECTIONS READ THAT FAILED IS SAID RATHER THAN DEFAULTED, WHICH IS WHAT THIS PAGE DID
@@ -392,8 +549,10 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     return (
       <PageShell backButton={back} title={server?.title ?? key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load this connection. Try again in a moment, or ask an admin
-          if it keeps happening.
+          {loadFailure(
+            connections.error,
+            "Couldn't load this connection. Try again in a moment, or ask an admin if it keeps happening.",
+          )}
         </p>
       </PageShell>
     );
@@ -408,8 +567,10 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     return (
       <PageShell backButton={back} title={key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load this app. Try again in a moment, or ask an admin if it
-          keeps happening.
+          {loadFailure(
+            [plugins.error, catalogue.error, setup.error],
+            "Couldn't load this app. Try again in a moment, or ask an admin if it keeps happening.",
+          )}
         </p>
       </PageShell>
     );
@@ -432,7 +593,10 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     return (
       <PageShell backButton={back} title={server.title}>
         <PageEmpty icon={IconPlugOff} title="Not set up yet">
-          An admin has to turn on {server.title} before anyone can connect it.
+          {withAdmins(
+            `An admin has to turn on ${server.title} before anyone can connect it.`,
+            admins,
+          )}
         </PageEmpty>
       </PageShell>
     );
@@ -478,6 +642,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
                 </ItemDescription>
               </ItemContent>
             </Item>
+            {switchRow}
           </PageRows>
         </PageSection>
 
@@ -521,6 +686,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
           An admin connects {server.title} once as a shared account and gives it
           to Bots.
         </PageEmpty>
+        {switchSection}
       </PageShell>
     );
   }
@@ -542,9 +708,9 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
         description="Bots use this as you, and see only what you can see."
         title={server.title}
       >
-        {notice ? (
+        {shownNotice ? (
           <p className="break-words text-destructive text-sm" role="alert">
-            {notice}
+            {failureSaid(shownNotice)}
           </p>
         ) : null}
 
@@ -563,6 +729,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
           <PageRows className="mt-0">
             <BrokeredAccountRow
               account={brokeredAccount}
+              admins={admins}
               edition={paths.edition}
               reader="person"
               startConnect={startConnect}
@@ -579,7 +746,19 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
               provider={provider}
               title={server.title}
             />
+            {switchRow}
           </PageRows>
+          {/*
+           * The same app with its key, for an app the directory lists as a sign-in in place of its
+           * key, offered to somebody who may add apps: adding it here connects it, as Browse apps
+           * does from Connections.
+           */}
+          {signsInForDirectory(server) &&
+          (paths.edition === "personal" ||
+            isOrganizationAdmin(role) ||
+            openToMember) ? (
+            <KeyVersionOffer appId={key} title={server.title} />
+          ) : null}
         </PageSection>
 
         {perActionGrants ? (
@@ -621,6 +800,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
         <PageEmpty icon={IconPlug} title="No account needed">
           {`Bots use ${app.title} as it is, the same for everybody. It's at ${app.vendor}.`}
         </PageEmpty>
+        {switchSection}
       </PageShell>
     );
   }
@@ -640,6 +820,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
             ? "Bots use one shared account for this app, the same for everybody."
             : "OpenBot has no app by that name."}
         </PageEmpty>
+        {switchSection}
       </PageShell>
     );
   }
@@ -650,9 +831,14 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
       description={app.summary || undefined}
       title={app.title}
     >
-      {notice ? (
+      {shownNotice ? (
         <p className="break-words text-destructive text-sm" role="alert">
-          {notice}
+          {failureSaid(shownNotice)}
+        </p>
+      ) : null}
+      {connectApp.error ? (
+        <p className="break-words text-destructive text-sm" role="alert">
+          {failureSaid(connectApp.error)}
         </p>
       ) : null}
 
@@ -665,15 +851,37 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
                   read for both. */}
               <ItemTitle>Your account</ItemTitle>
               <ItemDescription>
-                {!enabled
-                  ? "Not available yet. An admin has to turn this on first."
-                  : connection
-                    ? "Bots you allow use this as you, and see only what you can see."
-                    : `No Bot can use this as you. Connecting takes you to ${app.vendor} to approve access.`}
+                {!enabled && mayAdd
+                  ? `No Bot can use this yet. Connecting makes it available to everyone in the organization and takes you to ${app.vendor} to approve access.`
+                  : !enabled
+                    ? withAdmins(
+                        "Not available yet. An admin has to turn this on first.",
+                        admins,
+                      )
+                    : withdrawn
+                      ? `Your ${app.title} connection needs reconnecting.`
+                      : connection
+                        ? "Bots you allow use this as you, and see only what you can see."
+                        : `No Bot can use this as you. Connecting takes you to ${app.vendor} to approve access.`}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
-              {connection ? (
+              {withdrawn ? (
+                /* Connect's press over the grant that was withdrawn: the vendor's consent page. */
+                <Button
+                  disabled={connect.isPending}
+                  onClick={() => {
+                    setNotice(null);
+                    connect.mutate(key);
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {connect.isPending ? "Connecting…" : "Reconnect"}
+                  <IconArrowUpRight />
+                </Button>
+              ) : connection ? (
                 /*
                  * A state and a menu, not a switch. Connected is a fact about a grant that lives at
                  * the vendor, and withdrawing it is a deliberate act rather than the other half of a
@@ -686,7 +894,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
                       <Button size="sm" type="button" variant="outline">
                         <span
                           aria-hidden="true"
-                          className="size-1.5 rounded-full bg-emerald-500"
+                          className="size-1.5 rounded-full bg-success"
                         />
                         Connected
                         <IconChevronDown />
@@ -710,9 +918,9 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
                          * and changed nothing would report that access had been withdrawn when it
                          * had not, which is the one outcome worse than not offering it.
                          */
-                        setNotice(
-                          `You can't disconnect here yet. To stop access now, remove OpenBot in your ${app.vendor} account's third-party access settings.`,
-                        )
+                        setNotice({
+                          message: `You can't disconnect here yet. To stop access now, remove OpenBot in your ${app.vendor} account's third-party access settings.`,
+                        })
                       }
                       className="whitespace-nowrap"
                       variant="destructive"
@@ -729,10 +937,15 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
                    * vendor's own consent page, and a control that navigates away should look like one.
                    */}
                   <Button
-                    disabled={!enabled || connect.isPending}
+                    disabled={
+                      (!enabled && !mayAdd) ||
+                      connect.isPending ||
+                      connectApp.pending === key
+                    }
                     onClick={() => {
                       setNotice(null);
-                      connect.mutate(key);
+                      if (enabled) connect.mutate(key);
+                      else void connectApp.run(key, "connect");
                     }}
                     size="sm"
                     type="button"
@@ -745,10 +958,11 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
               )}
             </ItemActions>
           </Item>
+          {switchRow}
         </PageRows>
       </PageSection>
 
-      {connection ? (
+      {connection && !withdrawn ? (
         <PageSection
           description={`Review the permissions recorded by ${app.vendor}. They may include fewer permissions than OpenBot requested.`}
           title="Access"

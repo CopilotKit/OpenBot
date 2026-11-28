@@ -98,21 +98,21 @@ COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
 # this default stays in the script rather than in .env: a `docker run --env-file .env` must not
 # inherit a URL that points at a process the image does not contain.
 #
-# The personal edition runs its Personal Assistant inside the server, so it starts no Bot process and
+# The personal edition runs its Personal Assistant inside the server, so it starts no managed Bot and
 # names no managed endpoint unless .env does. Its one computer carries only the one person's Bots, so
 # it is started as theirs, which lets them record in a Bot's browser (agent-computer's person-access.ts).
 EDITION="$(setting OPENBOT_EDITION team)"
 if [ "$EDITION" = "personal" ]; then
   MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "")"
-  LANGGRAPH_TS_AG_UI_URL="$(setting LANGGRAPH_TS_AG_UI_URL "")"
   COMPUTER_PERSON_ID=personal
 else
   MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://127.0.0.1:${LANGGRAPH_PORT}/")"
-  # The TypeScript LangGraph engine, which new Bots run on, beside the managed Bot. Unset, the
-  # server runs new Bots on its built-in engine instead.
-  LANGGRAPH_TS_AG_UI_URL="$(setting LANGGRAPH_TS_AG_UI_URL "http://127.0.0.1:${LANGGRAPH_TS_PORT}/")"
   COMPUTER_PERSON_ID=
 fi
+# The TypeScript LangGraph engine, which new Bots run on, in every edition. The server refuses a Bot
+# made for the engine when it cannot reach one, rather than run it on its built-in agent, so the
+# personal edition starts it and names it too.
+LANGGRAPH_TS_AG_UI_URL="$(setting LANGGRAPH_TS_AG_UI_URL "http://127.0.0.1:${LANGGRAPH_TS_PORT}/")"
 export MANAGED_AGENT_AG_UI_URL LANGGRAPH_TS_AG_UI_URL COMPUTER_PERSON_ID
 
 # Whether this run minted a secret that something already running may not have.
@@ -381,10 +381,11 @@ SERVICES+=(agent-computer)
 # The managed coworker is the LangGraph harness, on whichever provider BOT_PROVIDER names.
 if [ "$EDITION" = "personal" ]; then
   info "  agent-langgraph-agui: skipped for the personal edition (its Bot runs in the server)"
-  info "  agent-langgraph-ts: skipped for the personal edition (its Bot runs in the server)"
 else
-  SERVICES+=(agent-langgraph-agui agent-langgraph-ts)
+  SERVICES+=(agent-langgraph-agui)
 fi
+# The TypeScript LangGraph engine, in every edition: new Bots run on it (see LANGGRAPH_TS_AG_UI_URL).
+SERVICES+=(agent-langgraph-ts)
 
 export SUPERVISOR_TOKEN COMPUTER_TOKEN
 export COMPUTER_PORT LANGGRAPH_PORT LANGGRAPH_TS_PORT SUPERVISOR_PORT
@@ -425,8 +426,8 @@ done
 wait_for "http://localhost:$COMPUTER_PORT/health" "agent-computer"
 if [ "$EDITION" != "personal" ]; then
   wait_for "http://127.0.0.1:$LANGGRAPH_PORT/health" "agent-langgraph-agui"
-  wait_for "http://127.0.0.1:$LANGGRAPH_TS_PORT/health" "agent-langgraph-ts"
 fi
+wait_for "http://127.0.0.1:$LANGGRAPH_TS_PORT/health" "agent-langgraph-ts"
 
 # Resolved at the top, where the default that .env deliberately does not carry is applied. Reading
 # .env again here would have demanded the line be present in a file the comment above that default

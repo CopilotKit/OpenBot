@@ -447,6 +447,12 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
     "OpenBot's saved data on this computer is gone, with your Bots and conversations. Start fresh to set OpenBot up again. Your sign-in and AI connection stay.",
     "start-fresh",
   ),
+  // Only the backend went, as when a prune of stopped containers removed it. OpenBot's own data
+  // is still there, so this says what went and what stays.
+  "backend-gone": blocked(
+    "Your conversations and what your Bots remember are gone from this computer. Set up again to carry on. Your Bots, settings, sign-in and AI connection stay.",
+    "start-fresh",
+  ),
   unrecognized: couldNotStart,
 };
 

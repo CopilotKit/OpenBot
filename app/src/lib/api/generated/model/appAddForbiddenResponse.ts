@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * Only an administrator may add an app from the directory or give a server a key, or the MCP allowlist doesn't approve the address.
+ * Only an administrator may add this app here: the organization's apps are locked down, the server would be given a key everyone's Bots use, or the app needs what only an administrator can enter. Or the MCP allowlist doesn't approve the address.
  */
 export type AppAddForbiddenResponse = Problem;

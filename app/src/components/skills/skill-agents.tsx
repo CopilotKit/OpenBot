@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * Which of your Agents carry this skill.
@@ -73,7 +74,7 @@ export function SkillAgents({
       )}
       {grant.error ? (
         <p className="text-destructive text-xs" role="alert">
-          {grant.error.message}
+          {failureSaid(grant.error)}
         </p>
       ) : null}
     </div>

@@ -155,5 +155,8 @@ test("granting one on its own still carries its refetch", async () => {
   );
 
   expect(seen).toHaveLength(1);
-  expect(invalidated).toEqual([{ queryKey: ["plugins"] }]);
+  expect(invalidated).toEqual([
+    { queryKey: ["plugins"] },
+    { queryKey: ["enterprise", "overview"] },
+  ]);
 });

@@ -10,6 +10,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useDesktopOpenRequests } from "@/lib/desktop/open-requests";
+import { useServiceWorkerOpenRequests } from "@/lib/web-push/open-requests";
 import type { RouterContext } from "../router-context";
 import "@fontsource-variable/inter/wght.css";
 
@@ -124,6 +125,8 @@ function RootComponent() {
   useUnclaimedDropGuard();
   // OpenBot Desktop opens a notice's page here, as a route change. See `lib/desktop/open-requests.ts`.
   useDesktopOpenRequests();
+  // And a click on a push notification, sent by the service worker. See `lib/web-push/open-requests.ts`.
+  useServiceWorkerOpenRequests();
   return (
     <div className="min-h-dvh w-full antialiased">
       <ThemeProvider>

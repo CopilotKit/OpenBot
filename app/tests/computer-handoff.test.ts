@@ -6,9 +6,10 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import type {
-  ComputerControlState,
-  HandoffStatus,
+import {
+  type ComputerControlState,
+  type HandoffStatus,
+  PASSKEY_REASON,
 } from "@openbot/shared/computer-control";
 import { releaseControl, takeControl } from "../src/lib/computers/control";
 import {
@@ -150,6 +151,34 @@ test("navigation challenge joins existing request and preserves challenge metada
     toolCallId: "tool-1",
   });
   expect(requests.some((r) => r.path.endsWith("/control/request"))).toBe(false);
+});
+
+test("a page asking for a passkey is waited on like any check, and the Bot is told why", async () => {
+  const challenge = {
+    kind: "passkey",
+    reason: PASSKEY_REASON,
+    requestId: "request-1",
+  };
+  serve((path) =>
+    path.endsWith("/navigate")
+      ? { url: "https://accounts.google.com/v3/signin/challenge/pk", challenge }
+      : path.endsWith("/snapshot")
+        ? {
+            snapshotId: 13,
+            url: "https://accounts.google.com/v3/signin/challenge/pwd",
+          }
+        : state("completed"),
+  );
+  const result = await runNavigation(
+    "bot-1",
+    "https://accounts.google.com",
+    "tool-1",
+  );
+  // The handoff was awaited (the snapshot after it is the page as the person left it), and the reason went with it.
+  expect(result).toMatchObject({ ok: true, challenge, snapshotId: 13 });
+  expect(
+    String(result.challenge && (result.challenge as { reason: string }).reason),
+  ).toContain("Try another way");
 });
 
 test("help uses the original tool call as its idempotency key", async () => {

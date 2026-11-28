@@ -37,6 +37,13 @@ export type EnrollmentConfig = z.infer<typeof EnrollmentConfig>;
 export const AgentConfig = z
   .strictObject({
     managementUrl: z.url({ protocol: /^https?$/ }),
+    /**
+     * Whether the agent runs the product's upgrades, with Flux beside it (the `openbot-agent` release).
+     * false: the agent the product chart installs by default, connected and reporting, running restart
+     * and support-bundle commands, with no Flux and no upgrades, until a person sets upgrades up.
+     * Absent: true, as every agent before this setting ran.
+     */
+    managedUpgrades: z.boolean().optional(),
     /** null only with `enrollment`: the id then comes from the certificate the agent enrolls for. */
     installId: z.uuid().nullable(),
     /** Absent or null: the certificate is mounted from the customer's Secret, as before enrollment. */
@@ -67,6 +74,12 @@ export const AgentConfig = z
           .nullable(),
         insecure: z.boolean(),
         pullSecret: name.nullable(),
+        /**
+         * How Flux signs in to the registry: `aws`, `azure` or `gcp` with source-controller's own
+         * workload identity, for a mirror in the cloud's registry (ECR, ACR, Artifact Registry),
+         * whose short-lived tokens a pull secret can't hold. Absent: `pullSecret`, or none.
+         */
+        provider: z.enum(["aws", "azure", "gcp"]).optional(),
         verify: z
           .strictObject({
             provider: z.enum(["cosign", "notation"]),
@@ -111,6 +124,10 @@ export const AgentConfig = z
     path: ["installId"],
   });
 export type AgentConfig = z.infer<typeof AgentConfig>;
+
+/** Whether the agent runs upgrades (see `managedUpgrades`). */
+export const upgradesOn = (config: Pick<AgentConfig, "managedUpgrades">) =>
+  config.managedUpgrades !== false;
 
 export interface Credentials {
   cert: string;

@@ -33,6 +33,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -75,6 +77,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -97,8 +101,10 @@ paths:
       operationId: updateOrganizationSettings
       summary: Change the organization's settings
       description: >-
-        Change the settings sent and keep the rest. Each change is recorded on
-        the audit trail with what it was before. Requiring single sign-on needs
+        Change the settings sent and keep the rest. The settings sent are saved
+        all or none: if any one is refused, none is saved. context is
+        read-only, and sending it answers 400 with nothing saved. Each change
+        is recorded on the audit trail with what it was before. Requiring single sign-on needs
         an identity provider registered first, and signs out everybody who
         signed in another way, apart from the administrators the deployment's
         configuration names and the caller. Where this OpenBot may keep more
@@ -109,6 +115,10 @@ paths:
         organization's rule holds for everybody who signs in, and sending
         ssoRequired in any other organization answers 409. Only an
         administrator of the organization may change them.
+        Where people sign in with their OpenBot by CopilotKit account
+        (hostedSignIn in getDeployment), single sign-on can't be required:
+        sending ssoRequired true answers 409 with the code
+        HOSTED_SIGN_IN_ONLY.
       security:
         - webSession: []
         - appOAuth: [settings:write]
@@ -131,6 +141,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -178,6 +190,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -187,6 +201,106 @@ paths:
                   value:
                     stopped: [research-assistant]
                     skipped: null
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings/apps:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Organization settings]
+      operationId: getAppsSetting
+      summary: Read whether the organization's apps are open
+      description: >-
+        Return whether the organization's apps are open, the default, or
+        locked down (AppsSetting). Every member may read it, so the app can
+        say what giving an app to a Bot will do. In the personal edition apps
+        are always open, and it can't be changed.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [settings:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: Whether the organization's apps are open.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppsSetting'
+              examples:
+                open:
+                  value:
+                    lockedDown: false
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    patch:
+      tags: [Organization settings]
+      operationId: updateAppsSetting
+      summary: Open the organization's apps, or lock them down
+      description: >-
+        Open the organization's apps or lock them down (AppsSetting).
+        Locking down takes nothing back unless takeBackWhatOpenGave is sent
+        too. The change, and anything taken back, is recorded on the audit
+        trail. Only an administrator of the organization may change it.
+      security:
+        - webSession: []
+        - appOAuth: [settings:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAppsSettingRequest'
+            examples:
+              lockDown:
+                value:
+                  lockedDown: true
+                  takeBackWhatOpenGave: true
+              open:
+                value:
+                  lockedDown: false
+      responses:
+        '200':
+          description: The setting, as saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppsSetting'
+              examples:
+                lockedDown:
+                  value:
+                    lockedDown: true
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -228,6 +342,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -283,6 +399,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -338,6 +456,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -393,6 +513,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -451,6 +573,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -496,6 +620,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -542,6 +668,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -590,6 +718,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -649,6 +779,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -688,6 +820,9 @@ paths:
       responses:
         '204':
           description: The policy was removed.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -737,6 +872,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -791,6 +928,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -845,6 +984,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -890,6 +1031,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -920,7 +1063,11 @@ paths:
         Return what this OpenBot has set up and what it still needs, each row
         with its fix. An administrator, or somebody running OpenBot on their
         own, reads it as the one who sets it up; anybody else reads which
-        parts work, and that an administrator sets the rest up.
+        parts work, and that an administrator sets the rest up. On OpenBot
+        Cloud, where each person can connect their own AI, the model row is
+        the reader's: ready when the AI their runs use, their own or else the
+        organization's, can answer, and needing setup only when neither can.
+        No model key in this OpenBot's configuration is needed there.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -932,6 +1079,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -971,6 +1120,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1074,7 +1225,8 @@ components:
           type: boolean
           description: >-
             Whether a company's own identity provider is registered, so an
-            email address can be sent to it. Never which.
+            email address can be sent to it. Never which. Always false where
+            hostedSignIn is true.
         ssoRequired:
           type: boolean
           description: >-
@@ -1082,7 +1234,8 @@ components:
             sign-on, because its one organization requires it; social sign-in
             then stays only as the configured administrators' way in. Where
             this OpenBot may keep more than one organization, each one requires
-            it of its own members in its settings, and this says false.
+            it of its own members in its settings, and this says false. Always
+            false where hostedSignIn is true.
         builtInBots:
           type: boolean
           description: >-
@@ -1257,6 +1410,49 @@ components:
         modelSelection:
           type: boolean
           description: Whether people may pick the model a built-in Bot answers on, per conversation.
+    AppsSetting:
+      type: object
+      description: >-
+        Whether the organization's apps are open or locked down. It is kept
+        apart from the organization's other settings so every member can read
+        it.
+      required: [lockedDown]
+      properties:
+        lockedDown:
+          type: boolean
+          description: >-
+            Whether the organization's apps are locked down. False, the
+            default, is open: an app a person connects is on for every Bot
+            they own, one press gives a Bot every action of an app, apps are
+            open to Bot owners, the apps that need no sign-in are on for every
+            Bot, any member adds an app the organization hasn't added in the
+            press that connects it, and a connected shared account is on for
+            every Bot for anybody who can use that Bot. True is locked down:
+            an administrator adds apps and approves access requests and who
+            may use a shared account through a Bot, one press gives an app's
+            read-only actions, and an app is open to Bot owners only once an
+            administrator opens it. Either way each person's own account stays
+            theirs, and an administrator connects a shared account. Switching
+            changes what giving does from then on. It doesn't take anything
+            back unless takeBackWhatOpenGave is sent too. Restrictions an
+            administrator sets on one app or one Bot hold either way.
+    UpdateAppsSettingRequest:
+      type: object
+      additionalProperties: false
+      required: [lockedDown]
+      properties:
+        lockedDown:
+          type: boolean
+          description: True locks the organization's apps down, false opens them (AppsSetting).
+        takeBackWhatOpenGave:
+          type: boolean
+          description: >-
+            Sent with lockedDown true: also take back what OpenBot gave Bots by
+            itself while the organization was open, which is a person's
+            connected apps on their own Bots and the apps that need no sign-in
+            on every Bot. What an administrator or a Bot's owner gave by hand
+            stays. Recorded on the audit trail. Ignored with lockedDown false:
+            open apps would give it all again.
     OrganizationSettings:
       allOf:
         - $ref: '#/components/schemas/OrganizationSettingValues'
@@ -2108,8 +2304,13 @@ components:
       description: >-
         Single sign-on can't be required before an identity provider is
         registered, ssoRequired was sent in an organization other than the
-        one this OpenBot keeps, or the Idempotency-Key was used for a
+        one this OpenBot keeps, people sign in here with their OpenBot by
+        CopilotKit account so no organization requires it
+        (HOSTED_SIGN_IN_ONLY), or the Idempotency-Key was used for a
         different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2137,10 +2338,24 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     SignOutUnfinished:
       description: >-
         Single sign-on is now required, but not everybody could be signed out
         yet. Saving it again finishes.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2159,6 +2374,9 @@ components:
                 traceId: trace_example
     CapabilityNotFound:
       description: No permission switch has that id, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2179,6 +2397,9 @@ components:
       description: >-
         A change is malformed, or one the rule would ignore, such as a group
         nobody is in. problems says which.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2197,6 +2418,9 @@ components:
                 traceId: trace_example
     NetworkPolicyNotFound:
       description: No such network policy is set, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2215,6 +2439,9 @@ components:
                 traceId: trace_example
     NoTrailToReplay:
       description: This OpenBot keeps no audit trail it can read, so there is nothing to test against.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2294,7 +2521,7 @@ components:
         capabilities:
           - id: passwordManager
             title: Password manager
-            description: People may save logins and hand sign-ins to a Bot's browser.
+            description: People may save logins, and sign a Bot in with a login they saved.
             default: true
             organization: null
             roles:
@@ -2337,7 +2564,7 @@ components:
       value:
         id: passwordManager
         title: Password manager
-        description: People may save logins and hand sign-ins to a Bot's browser.
+        description: People may save logins, and sign a Bot in with a login they saved.
         default: true
         organization: null
         roles:

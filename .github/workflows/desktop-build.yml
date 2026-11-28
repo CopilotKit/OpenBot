@@ -31,9 +31,6 @@ on:
         description: A JSON array of platforms to build, from macos, windows and linux.
         type: string
         default: '["macos","windows"]'
-    secrets:
-      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET:
-        required: false
 
 permissions:
   contents: read
@@ -53,6 +50,7 @@ jobs:
   app:
     name: app (${{ matrix.platform }})
     runs-on: ${{ matrix.platform == 'macos' && 'macos-latest' || matrix.platform == 'windows' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'windows-latest' || 'openbot-windows-16core') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core') }}
+    timeout-minutes: 60 # usually 6 to 12 minutes; one step alone may take 30
     strategy:
       fail-fast: false
       matrix:
@@ -189,9 +187,6 @@ jobs:
         working-directory: desktop
         env:
           APPLE_SIGNING_IDENTITY: ${{ matrix.platform == 'macos' && '-' || '' }}
-          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID }}
-          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
-          OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT }}
           BUNDLED_CLI: ${{ steps.cli.outputs.bundled }}
           PINNED_MANIFEST: ${{ steps.pinned.outputs.path }}
         run: |

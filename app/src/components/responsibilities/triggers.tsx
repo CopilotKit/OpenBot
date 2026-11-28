@@ -60,6 +60,7 @@ import {
 } from "@/lib/responsibilities";
 import { queryClient } from "@/query-client";
 import { useGoalTriggers } from "./use-goal-reads";
+import { failureSaid } from "@/lib/load-failure";
 
 export const KIND_LABEL: Record<TriggerKind, string> = {
   webhook: "Webhook",
@@ -213,7 +214,7 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
       )}
       {triggers.error && (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {triggers.error.message}
+          {failureSaid(triggers.error)}
         </p>
       )}
       {triggers.data?.length === 0 && (
@@ -368,7 +369,7 @@ function TriggerRow({
               <CopyButton value={trigger.address} label="Copy address" />
             </div>
           ) : (
-            <p className="text-amber-600 text-xs dark:text-amber-500">
+            <p className="text-warning text-xs">
               Email isn't set up on OpenBot yet, so this address can't receive
               mail. An admin has to turn it on.
             </p>
@@ -419,11 +420,7 @@ function TriggerRow({
             }}
           >
             <span
-              className={
-                trigger.hasSecret
-                  ? "text-xs"
-                  : "text-amber-600 text-xs dark:text-amber-500"
-              }
+              className={trigger.hasSecret ? "text-xs" : "text-warning text-xs"}
             >
               {trigger.hasSecret
                 ? "Signing secret saved"
@@ -451,10 +448,9 @@ function TriggerRow({
         )}
         {(reveal.error || rotate.error || remove.error || toggle.error) && (
           <p role="alert" className="text-destructive text-xs">
-            {reveal.error?.message ??
-              rotate.error?.message ??
-              remove.error?.message ??
-              toggle.error?.message}
+            {failureSaid(
+              reveal.error ?? rotate.error ?? remove.error ?? toggle.error,
+            )}
           </p>
         )}
       </ItemFooter>
@@ -737,7 +733,7 @@ function NewTriggerDialog({
           <SharedAppNotice botId={botId} reason="trigger" />
           {create.error && (
             <p role="alert" className="text-destructive text-sm">
-              {create.error.message}
+              {failureSaid(create.error)}
             </p>
           )}
         </DialogBody>

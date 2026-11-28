@@ -182,12 +182,13 @@ test("a change goes to the server's gate even when nothing about approvals has l
  * on one dropdown, and the conversation simply stopped.
  */
 async function clickAgainstGate(
-  answer: () => Promise<Response>,
+  answer: (init?: RequestInit) => Promise<Response>,
 ): Promise<unknown> {
   const originalFetch = global.fetch;
-  global.fetch = Object.assign(async () => answer(), {
-    preconnect: originalFetch.preconnect,
-  });
+  global.fetch = Object.assign(
+    async (_url: unknown, init?: RequestInit) => answer(init),
+    { preconnect: originalFetch.preconnect },
+  );
   try {
     render(
       <QueryClientProvider client={new QueryClient()}>
@@ -275,6 +276,78 @@ test("a refused change comes back as a refusal the Bot can explain", async () =>
     refused: true,
     // A problem names no rule: the sentence is what the Bot has to explain it with.
     rule: null,
+    finishedAt: expect.any(String),
+  });
+});
+
+/*
+ * A step on a computer that is still starting is asked again until it has started, as a direct call
+ * is (`callComputer`), so the Bot gets what the step did. A cold computer answered the step "still
+ * starting" after the server's wait, and the Bot was told to try again: the step's card read
+ * "Computer starting" where the command and its output should have been.
+ */
+test("a step on a computer still starting is asked again, and the Bot gets what it did", async () => {
+  const asked: string[] = [];
+  const result = await clickAgainstGate(async () => {
+    asked.push("step");
+    return asked.length === 1
+      ? Response.json({
+          outcome: "done",
+          result: {
+            ok: false,
+            starting: true,
+            notPerformed: true,
+            reason:
+              "The computer is still starting. This call was not performed. Try it again in a moment.",
+          },
+        })
+      : Response.json({
+          outcome: "done",
+          result: { ok: true, clicked: "e7" },
+        });
+  });
+  expect(asked).toEqual(["step", "step"]);
+  expect(result).toEqual({
+    ok: true,
+    clicked: "e7",
+    finishedAt: expect.any(String),
+  });
+});
+
+/*
+ * A STEP THE SERVER HAS TAKEN IS NOT RUN TWICE. The server runs a Bot's computer steps itself, once,
+ * whoever asks. A page that asks for one the server is running is told it is `taken` and still going,
+ * asks again with the same step until the server's run answers, and that answer is the step's.
+ */
+test("a step the server is running is asked about again, never run here, and gets the server's answer", async () => {
+  const asked: unknown[] = [];
+  const understood: (string | null)[] = [];
+  const result = await clickAgainstGate(async (init) => {
+    asked.push("step");
+    understood.push(new Headers(init?.headers).get("OpenBot-Capabilities"));
+    return asked.length === 1
+      ? Response.json({
+          outcome: "taken",
+          threadId: "thread",
+          toolCallId: "click-call",
+          running: true,
+        })
+      : Response.json({
+          outcome: "taken",
+          threadId: "thread",
+          toolCallId: "click-call",
+          running: false,
+          result: { ok: true, clicked: "e7" },
+        });
+  });
+  // Only the gate was asked, twice, and nothing went to the computer from here.
+  expect(asked).toEqual(["step", "step"]);
+  // Each time saying this page understands a step the server has taken (OpenBot-Capabilities).
+  for (const value of understood)
+    expect(value?.split(" ")).toContain("computer-step-taken");
+  expect(result).toEqual({
+    ok: true,
+    clicked: "e7",
     finishedAt: expect.any(String),
   });
 });

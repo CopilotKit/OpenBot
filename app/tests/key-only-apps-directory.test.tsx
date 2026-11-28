@@ -166,14 +166,65 @@ test("a key-only app says it needs a key before Add, and a sign-in app does not"
 });
 
 /*
- * The directory is read a page at a time. Two to a page puts the captured rows on three pages, so a
- * reader that stopped at the first page would list two of the six.
+ * The directory is read a page at a time, the next when the end of the list comes into view. Two to
+ * a page puts the captured rows on three pages: in a window tall enough to show the end of each
+ * page as it lands, the screen reads on until all six are listed, and the order holds across pages,
+ * since the server answers them in the order the screen draws.
  */
 for (const pageSize of [undefined, 2]) {
   test(`apps you sign in to are listed ahead of apps that need a key (${pageSize ? `${pageSize} to a page` : "one page"})`, async () => {
     stubFetch(directory(), pageSize);
-    await expectSignInAppsFirst(renderDirectory());
+    const restore = endAlwaysInView();
+    try {
+      await expectSignInAppsFirst(renderDirectory());
+    } finally {
+      restore();
+    }
   });
+}
+
+test("two to a page, the first page is drawn on its own, counted as the whole directory", async () => {
+  stubFetch(directory(), 2);
+  const view = renderDirectory();
+  await view.findByTestId("directory-hubspot");
+  const order = Array.from(
+    view.container.querySelectorAll("[data-testid^='directory-']"),
+  ).map((row) => row.getAttribute("data-testid"));
+  expect(order).toEqual([
+    "directory-gmail",
+    "directory-hubspot",
+    "directory-more",
+  ]);
+  expect(view.getByText("6 apps. Search by name to narrow them.")).toBeTruthy();
+});
+
+/**
+ * A window where whatever is observed is in view at once, as the end of a short list is on a tall
+ * screen. Answers each `observe` as a browser does when the element is already showing.
+ */
+function endAlwaysInView(): () => void {
+  const original = globalThis.IntersectionObserver;
+  class InView {
+    constructor(private readonly callback: IntersectionObserverCallback) {}
+    observe(target: Element) {
+      queueMicrotask(() =>
+        this.callback(
+          [{ isIntersecting: true, target } as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver,
+        ),
+      );
+    }
+    unobserve() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  }
+  globalThis.IntersectionObserver =
+    InView as unknown as typeof IntersectionObserver;
+  return () => {
+    globalThis.IntersectionObserver = original;
+  };
 }
 
 async function expectSignInAppsFirst(view: ReturnType<typeof renderDirectory>) {

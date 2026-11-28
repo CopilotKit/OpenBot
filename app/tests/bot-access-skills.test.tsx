@@ -11,6 +11,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { AppsSections, SkillsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { meResponse } from "./accounts-api";
+import { APPS_SETTING_PATH, appsSettingResponse } from "./admin-settings-api";
 import {
   botAppsPath,
   botAppsResponse,
@@ -104,6 +105,8 @@ function serving(options: { held?: string[]; givesOnListing?: boolean } = {}) {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
+    // Apps locked down: an empty Bot's sentence names an admin (bot-access-apps has it open).
+    if (url === APPS_SETTING_PATH) return appsSettingResponse(true);
     if (url.startsWith(`${botGrantsPath(BOT.id)}/`) && method !== "GET") {
       grants.push(`${method} ${url} ${init?.body ?? ""}`);
       return Response.json({
@@ -256,7 +259,7 @@ test("on a Bot that is not yours there are no skill switches", async () => {
   serving({ held: [] });
   const view = draw({ ...BOT, mine: false, canManage: false });
   expect(await view.findByText("No apps yet")).toBeTruthy();
-  expect(view.getByText(/^An admin has to add them\./)).toBeTruthy();
+  expect(view.getByText(/^An admin has to give it some\./)).toBeTruthy();
   expect(view.queryByRole("switch")).toBeNull();
 });
 
