@@ -177,24 +177,25 @@ class WebController(
     private var firstLoad = true
 
     /** Loads a page of the web app (or any URL) as a full page load. */
-    fun load(url: String) {
+    fun load(url: String, shellEntry: Boolean = false) {
         lastRequestedUrl = url
         lastLoadFailed = false
         diagnostics.log("load", mapOf("url" to Diagnostics.redact(url)))
         delegate?.onFullLoad()
         val delay = if (firstLoad) config.hooks.delayFirstLoadMs else 0L
         firstLoad = false
+        val start = Runnable {
+            armWatchdog()
+            if (shellEntry) webView.loadUrl(url, mapOf("OpenBot-Shell" to "android"))
+            else webView.loadUrl(url)
+        }
         if (delay > 0) {
             // Debug hook: a slow first answer, so the tests can see the loading skeleton.
             diagnostics.log("test-hook", mapOf("hook" to "delay-first-load", "ms" to delay))
-            main.postDelayed({
-                armWatchdog()
-                webView.loadUrl(url)
-            }, delay)
-            return
+            main.postDelayed(start, delay)
+        } else {
+            start.run()
         }
-        armWatchdog()
-        webView.loadUrl(url)
     }
 
     fun loadPath(path: String) = load(config.url(path))

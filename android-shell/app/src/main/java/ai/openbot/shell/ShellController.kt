@@ -434,7 +434,7 @@ class ShellController(
         diagnostics.log("enter", mapOf("to" to to, "renewal" to renewing))
         main.removeCallbacks(enterTimeout)
         main.postDelayed(enterTimeout, SignInFlow.TIMEOUT_MS)
-        web.load(enterUrl(ticket, verifier, to))
+        web.load(enterUrl(ticket, verifier, to), shellEntry = true)
     }
 
     private fun startWebSignIn() {
