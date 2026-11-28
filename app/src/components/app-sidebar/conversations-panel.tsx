@@ -40,6 +40,7 @@ import { Button } from "../ui/button";
 import { Separator } from "../ui/separator";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
+import { usePanelPosition } from "./use-panel-position";
 import { ChannelPagination } from "./channel-pagination";
 
 /**
@@ -358,15 +359,23 @@ export function SearchResults({
  * a search over the whole history and New conversation at the top. Today's roster, moved beside the
  * strip and otherwise unchanged.
  */
-export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
+export function ConversationsPanel({
+  hidden = false,
+  standalone = false,
+}: {
+  hidden?: boolean;
+  standalone?: boolean;
+}) {
   const emphasis = useMessageListEmphasis();
   const [view] = useConversationView();
   const channels = useInfiniteQuery(channelListQueryOptions());
   const delegating =
     useQuery(delegatingConversationsQueryOptions()).data ?? NONE_DELEGATING;
-  const [search, setSearch] = useState("");
+  const { search, setSearch, scrollRoot } = usePanelPosition(
+    standalone,
+    channels.data?.length ?? 0,
+  );
   const debouncedSearch = useDebounced(search, SEARCH_DEBOUNCE_MS);
-  const scrollRoot = useRef<HTMLDivElement>(null);
   const term = normalizeChannelSearch(search);
   const debouncedTerm = normalizeChannelSearch(debouncedSearch);
   const searching = term.length > 0;
@@ -398,6 +407,7 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
       // Folded away with the panel, so a keyboard never tabs into rows nobody can see.
       className="group-data-[collapsible=icon]:hidden"
       hidden={hidden}
+      standalone={standalone}
       title="Conversations"
       actions={
         // The sidebar's hover rather than `muted`, which is nearly the sidebar's own colour.
@@ -471,6 +481,24 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
                  * and quotes it back (see SearchResults). Told "you don't have channels yet" while
                  * holding a typo, a person reads their conversations as gone.
                  */}
+                {channels.isError && !channels.data ? (
+                  <div className="px-2 py-3">
+                    <p role="alert" className="text-destructive text-sm">
+                      {loadFailure(
+                        channels.error,
+                        "Couldn't load your conversations.",
+                      )}
+                    </p>
+                    <Button
+                      disabled={channels.isFetching}
+                      onClick={() => void channels.refetch()}
+                      size="sm"
+                      variant="outline"
+                    >
+                      Try again
+                    </Button>
+                  </div>
+                ) : null}
                 {channels.data?.length === 0 ? (
                   <div className="py-4">
                     {/*
