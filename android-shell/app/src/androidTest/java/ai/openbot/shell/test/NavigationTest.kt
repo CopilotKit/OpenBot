@@ -42,6 +42,15 @@ class NavigationTest : ShellTestBase() {
         }
     }
 
+    /** Taps the element whose text starts with `text` where it is, without scrolling the page. */
+    private fun tapInPlace(text: String): Boolean {
+        val rect = textRect(text) ?: return false
+        val web = bounds(find("openbot_webview")) ?: return false
+        val d = pageString("String(window.devicePixelRatio)").toDoubleOrNull() ?: 1.0
+        device.click((web.left + rect.exactCenterX() * d).toInt(), (web.top + rect.exactCenterY() * d).toInt())
+        return true
+    }
+
     private fun conversationOpen(): Boolean = waitForState("path=/channel", 15_000) && waitForState("canGoBack=1", 5_000)
 
     // A conversation opened from Chats: back by the header's Back and by system Back, to the list at
@@ -58,7 +67,7 @@ class NavigationTest : ShellTestBase() {
         val before = textRect(reference)
         note("before opening: '$reference' at $before")
 
-        check(tapWeb("Quarterly forecast"), "no 'Quarterly forecast' row")
+        check(tapInPlace(reference), "no '$reference' row")
         if (!check(conversationOpen(), "the conversation did not open: ${debugState()}")) return
         dismissKeyboardIfUp()
         check(debugState().contains("tab=conversations"), "Chats is not selected in the conversation: ${debugState()}")
@@ -75,7 +84,7 @@ class NavigationTest : ShellTestBase() {
         if (before != null && afterControl != null) check(kotlin.math.abs(before.top - afterControl.top) <= 4, "the list did not keep its scroll after the header's Back ($before, then $afterControl)")
         screenshot("3-back-by-control")
 
-        check(tapWeb("Quarterly forecast"), "no 'Quarterly forecast' row the second time")
+        check(tapInPlace(reference), "no '$reference' row the second time")
         if (!check(conversationOpen(), "the conversation did not open the second time: ${debugState()}")) return
         dismissKeyboardIfUp()
         device.pressBack()
