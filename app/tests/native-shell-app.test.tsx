@@ -293,6 +293,12 @@ describe("the frame", () => {
     expect(
       within(document.body).getByRole("menuitem", { name: "Sign out" }),
     ).toBeTruthy();
+    // The web view doesn't take a download yet, so nothing in the menu offers one.
+    expect(
+      within(document.body).queryByRole("menuitem", {
+        name: "Get troubleshooting logs",
+      }),
+    ).toBeNull();
   });
 
   test("in the shell, the account button and its menu's rows are a thumb's size", async () => {
