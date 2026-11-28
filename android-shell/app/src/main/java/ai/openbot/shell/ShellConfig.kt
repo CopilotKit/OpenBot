@@ -65,7 +65,8 @@ class ShellConfig(
     fun isOwnOrigin(url: String?): Boolean = Origins.same(url, origin)
 
     companion object {
-        fun from(context: android.content.Context, intent: Intent?): ShellConfig {
+        /** `fresh`: a new launch (not a restart of the activity, which keeps its launch intent). */
+        fun from(context: android.content.Context, intent: Intent?, fresh: Boolean = true): ShellConfig {
             var baseOverride: String? = null
             var diagnostics = false
             var testName = ""
@@ -76,7 +77,7 @@ class ShellConfig(
                 testName = overrides.testName
             }
             val hooks = DebugHooks.read(intent)
-            if (hooks.reset) ServerChoice.clear(context)
+            if (hooks.reset && fresh) ServerChoice.clear(context)
             val cloud = resolveBase(baseOverride)
             val chosen = if (hooks.plainWebView) null else ServerChoice.saved(context)
             return ShellConfig(

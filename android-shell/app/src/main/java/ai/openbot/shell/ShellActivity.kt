@@ -88,7 +88,7 @@ class ShellActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        config = ShellConfig.from(this, intent)
+        config = ShellConfig.from(this, intent, fresh = savedInstanceState == null)
         DebugHooks.beforeCreate(this, config.hooks)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -212,7 +212,7 @@ class ShellActivity : AppCompatActivity() {
         for (quiet in listOf(serverHost, selfHostedToggle, lockHost, lockChange, findViewById<TextView>(R.id.self_hosted_cancel))) {
             quiet.setTextColor(secondary)
         }
-        for (button in listOf(signInButton, findViewById<MaterialButton>(R.id.retry_button))) {
+        for (button in listOf(signInButton, addressContinue, findViewById<MaterialButton>(R.id.retry_button))) {
             button.backgroundTintList = ColorStateList.valueOf(ink)
             button.setTextColor(paper)
         }
@@ -401,7 +401,8 @@ class ShellActivity : AppCompatActivity() {
         selfHostedToggle.text = getString(if (config.selfHosted) R.string.self_hosted_use_cloud else R.string.self_hosted_toggle)
         serverHost.isVisible = config.selfHosted && !launching && !serverPanelOpen
         serverHost.text = getString(R.string.self_hosted_signs_in_to, config.displayHost)
-        signInButton.isVisible = !launching && !(controller.pickingServer && serverPanelOpen)
+        // While the field is open its Continue is the one action; Sign in (OpenBot Cloud) steps back.
+        signInButton.isVisible = !launching && !serverPanelOpen
         addressContinue.isEnabled = !checkingServer
         addressContinue.text = getString(if (checkingServer) R.string.self_hosted_checking else R.string.self_hosted_continue)
         addressInput.isEnabled = !checkingServer

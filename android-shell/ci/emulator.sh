@@ -105,6 +105,19 @@ describe() {
     echo "SCREEN=$(adb shell wm size | tr -d '\r' | tail -n1) $(adb shell wm density | tr -d '\r' | tail -n1)"
   } | tee "$ARTIFACTS/device.env"
   adb shell pm list packages | tr -d '\r' | grep -i -E 'chrome|webview|browser|inputmethod' || true
+  # The status bar before any app of ours runs (some runs draw it with its icons cut off): the
+  # launcher's picture and what the window manager and SurfaceFlinger report.
+  adb shell input keyevent KEYCODE_HOME > /dev/null 2>&1 || true
+  sleep 3
+  adb exec-out screencap -p > "$ARTIFACTS/launcher-before-app.png" 2>/dev/null || true
+  {
+    echo "== dumpsys window windows (StatusBar)"
+    adb shell dumpsys window windows | tr -d '\r' | grep -i -A8 'StatusBar' | head -n 40
+    echo "== SurfaceFlinger layers"
+    adb shell dumpsys SurfaceFlinger --list | tr -d '\r' | head -n 60
+    echo "== cpu and memory"
+    nproc; free -m | head -n 2; uptime
+  } > "$ARTIFACTS/status-bar-before-app.txt" 2>&1 || true
 }
 
 case "${1:-all}" in
