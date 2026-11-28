@@ -6,6 +6,7 @@ import {
   FinishPersonalAiSignInBody,
   FinishPersonalAiSignInResponse,
   GetAiConnectionResponse,
+  GetModelCatalogueResponse,
   GetPersonalAiConnectionResponse,
   GetPersonalAiSignInResponse,
   ReplaceAiConnectionBody,
@@ -226,9 +227,70 @@ test("an answer may name a provider this client doesn't know, and a switch is re
       apiKey: "sk-example",
     }).success;
   expect(body("trustedrouter")).toBe(true);
-  expect(body("unbiased")).toBe(true);
+  expect(body("privatemode")).toBe(true);
   expect(body("a-provider-added-later")).toBe(false);
   expect(body("")).toBe(false);
+});
+
+test("a switch names only a provider OpenBot offers, and a retired one saved before still reads as stopped", () => {
+  // The providers a request may name, and no others: one OpenBot stopped offering is refused.
+  const providers = (
+    spec.components.schemas.AiConnectionProvider as unknown as {
+      enum: string[];
+    }
+  ).enum;
+  expect(providers).toEqual([
+    "openai",
+    "anthropic",
+    "google",
+    "xai",
+    "trustedrouter",
+    "privatemode",
+    "openai-compatible",
+  ]);
+  // A connection saved for a provider OpenBot no longer offers is still listed under its saved id,
+  // never ready, with the problem provider-retired, so a client shows it stopped and it can be removed.
+  const retired = {
+    id: "retired",
+    owner: "personal",
+    provider: "a-provider-no-longer-offered",
+    login: "endpoint",
+    source: "gateway",
+    isDefault: true,
+    ready: false,
+    problem: {
+      code: "provider-retired",
+      detail:
+        "OpenBot no longer offers this AI provider. Remove it and connect another AI.",
+    },
+    default: "",
+    models: [],
+    listed: false,
+  };
+  const catalogue = {
+    provider: "openai",
+    source: "gateway",
+    exposure: "all",
+    default: "",
+    models: [],
+    choosable: false,
+    listed: false,
+    connections: [retired],
+  };
+  expect(
+    (
+      spec.components.schemas.ModelCatalogueConnection as unknown as {
+        required: string[];
+      }
+    ).required.every((field) => field in retired),
+  ).toBe(true);
+  const problemCodes = (
+    spec.components.schemas.AiConnectionProblem as unknown as {
+      properties: { code: { "x-extensible-enum": string[] } };
+    }
+  ).properties.code["x-extensible-enum"];
+  expect(problemCodes).toContain("provider-retired");
+  expect(GetModelCatalogueResponse.safeParse(catalogue).success).toBe(true);
 });
 
 test("an endpoint address is http or https with nothing in it that signs in", () => {
