@@ -2,12 +2,19 @@ name: RN shell (video)
 
 # Records the React Native shell's demo tour (maestro/demo/tour.yaml) on the mock stack, once on an
 # iPhone simulator and once on an Android emulator, each job within 13 minutes. The app and the APK
-# come from the caches the test workflows fill (keyed on the app's sources), so it is started by hand
-# once the test workflows have built the commit; it builds only if the cache has nothing.
+# come from the caches the test workflows fill (keyed on the app's sources); it builds only if the
+# cache has nothing. It runs when the demo flow or this file changes (a workflow that exists only on
+# this branch cannot be started by hand: GitHub dispatches only workflows on the default branch).
 #
 # Artifacts: rn-shell-video-ios-<run id> and rn-shell-video-android-<run id> (demo-tour.mp4, the
 # flow's screenshots and log).
 on:
+  push:
+    branches:
+      - rn-webview-shell
+    paths:
+      - rn-shell/maestro/demo/**
+      - .github/workflows/rn-shell-video.yml
   workflow_dispatch:
 
 permissions: {}
