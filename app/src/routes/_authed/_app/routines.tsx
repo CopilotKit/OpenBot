@@ -1,30 +1,29 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { PageShell } from "@/components/layout/page-shell";
-import { NewRoutineButton } from "@/components/routines/new-routine-button";
-import { RoutinesList } from "@/components/routines/routines-list";
-import { CheckInsSection } from "@/components/settings/check-ins";
+import { RoutinesHome } from "@/components/routines/routines-home";
+import { agentListQueryOptions } from "@/lib/agents/queries";
+import { proactiveSettingsQueryOptions } from "@/lib/proactive";
+import { responsibilitiesQueryOptions } from "@/lib/responsibilities";
+import { loadFirstScreen } from "@/lib/route-data";
+import { routinesQueryOptions } from "@/lib/routines/queries";
 
 /**
- * Every Bot's routines on one page: its routines, its goals and its check-ins, as one list. The
+ * Every Bot's routines on one page: one box that makes a routine from a sentence, then the routines,
+ * goals and check-ins grouped by Bot, and the switch for every Bot's check-ins at the foot. The
  * every-Bot scope of Routines, in the main menu beside Bots; each Bot's own are on its page
- * (`bots.$agentId.routines.tsx`). New routine has its own screen at `/routines/new`.
+ * (`bots.$agentId.routines.tsx`). New routine keeps its own screen at `/routines/new`, as the box's
+ * "Use the form" link opens it.
  *
  * Not Admin: a routine is something anybody has, scoped to the signed-in person on every read and
- * write. The switch for every Bot's check-ins at once sits under the list.
+ * write.
  */
 export const Route = createFileRoute("/_authed/_app/routines")({
-  component: RoutinesPage,
+  loader: ({ context }) =>
+    loadFirstScreen(context.queryClient, [
+      routinesQueryOptions(),
+      responsibilitiesQueryOptions(),
+      proactiveSettingsQueryOptions(),
+      agentListQueryOptions(),
+      agentListQueryOptions(true),
+    ]),
+  component: RoutinesHome,
 });
-
-function RoutinesPage() {
-  return (
-    <PageShell
-      action={<NewRoutineButton />}
-      description="Your Bots work on their own: on a schedule, toward a goal, or by checking in when something changes. Ask a Bot to set one up, or use New routine."
-      title="Routines"
-    >
-      <RoutinesList />
-      <CheckInsSection />
-    </PageShell>
-  );
-}

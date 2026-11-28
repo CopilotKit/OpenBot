@@ -208,22 +208,20 @@ async function startClaude(view: ReturnType<typeof renderProviders>) {
   return dialog;
 }
 
-/** Sign in with the Claude plan: approved in the browser, which comes back to Desktop. */
+/**
+ * Sign in with the Claude plan: approved in the browser, which comes back to Desktop. The sign-in
+ * switches to it at once, with nothing else pressed.
+ */
 async function signInWithClaude(view: ReturnType<typeof renderProviders>) {
-  const dialog = await startClaude(view);
-  await within(dialog).findByText("Signed in to Anthropic.");
-  return dialog;
+  return startClaude(view);
 }
 
 test("a Claude plan: signed in, its engine started alone, the server switched, Desktop settled, and OpenBot never stopped", async () => {
   const view = renderProviders();
   const dialog = await signInWithClaude(view);
+  await within(dialog).findByText("Connected to Anthropic");
   // Nothing to paste: the sign-in finished on its own.
   expect(within(dialog).queryByLabelText("Code from your browser")).toBeNull();
-  await userEvent.click(
-    within(dialog).getByRole("button", { name: "Connect" }),
-  );
-  await within(dialog).findByText("Connected to Anthropic");
 
   const asked = aiCalls();
   expect(asked.map((call) => call.what)).toEqual([
@@ -255,12 +253,16 @@ test("a Claude plan in an older Desktop: the code Claude's page shows is pasted,
     "code#state",
   );
   await userEvent.click(within(dialog).getByRole("button", { name: "Finish" }));
-  await within(dialog).findByText("Signed in to Anthropic.");
+  // Finish signs in and switches at once.
+  await within(dialog).findByText("Connected to Anthropic");
   const asked = aiCalls();
   expect(asked.map((call) => call.what)).toEqual([
     "ai_providers",
     "begin_plan_sign_in",
     "finish_plan_sign_in",
+    "prepare_ai_connection",
+    "replaceAiConnection",
+    "settle_ai_connection",
   ]);
   expect(asked[2]?.args).toEqual({ plan: "claude", code: "code#state" });
 });
@@ -286,10 +288,9 @@ test("a refused switch says why in one sentence, and Desktop settles back to the
   refuse = true;
   const view = renderProviders();
   const dialog = await signInWithClaude(view);
-  await userEvent.click(
-    within(dialog).getByRole("button", { name: "Connect" }),
-  );
+  // The switch the sign-in makes at once is refused: why, in the dialog, still signed in.
   const alert = await within(dialog).findByRole("alert");
+  expect(within(dialog).getByText("Signed in to Anthropic.")).toBeDefined();
   expect(alert.textContent).toBe(
     "Claude hasn't started yet. Try again in a moment.",
   );
@@ -310,9 +311,6 @@ test("after a switch, the models a person may pick and each conversation's pick 
   });
   const view = renderProviders();
   const dialog = await signInWithClaude(view);
-  await userEvent.click(
-    within(dialog).getByRole("button", { name: "Connect" }),
-  );
   await within(dialog).findByText("Connected to Anthropic");
   expect(queryClient.getQueryState(modelKeys.catalogue)?.isInvalidated).toBe(
     true,

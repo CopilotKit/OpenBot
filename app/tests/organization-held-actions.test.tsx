@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import type { Page } from "playwright-core";
 import {
   asked,
@@ -15,6 +15,7 @@ import {
   TEAM,
   UNAVAILABLE,
 } from "./organization-notices-browser";
+import { test } from "./renderer-crash";
 
 /**
  * A press refused because the organization's database is out of reach says the server's sentence

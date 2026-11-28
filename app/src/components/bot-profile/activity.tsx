@@ -236,66 +236,14 @@ function useActivityGroups(agentId: string, boardAbove = false) {
   };
 }
 
-/** How many running or scheduled items the Bot's page shows before "All activity". */
-const GLANCE = 3;
-
 /**
- * Running work first, then what is lined up, then the goals that wait to be asked, as many as the
- * Bot's page shows.
- */
-function upcomingOf(activity: BotActivity | undefined) {
-  return activity
-    ? [
-        ...activity.inProgress.map((item) => ({ item, live: true })),
-        ...activity.scheduled.map((item) => ({ item, live: false })),
-        ...(activity.onDemand ?? []).map((item) => ({ item, live: false })),
-      ].slice(0, GLANCE)
-    : [];
-}
-
-/**
- * The Bot page's view of its activity: what is under way and what is lined up, so either is seen
- * without opening anything, then a row to the full lists. Running work comes first, with its dot.
- *
- * Only when there is something running or lined up. With nothing to show, a whole section for one
- * row to the full lists is a heading over nothing; that row joins "For you" instead, through
- * `BotActivityRow`.
- *
- * The full lists used to sit here and ran on for screens; finished work is the long part and the
- * least urgent, so it lives only on the Activity page.
- */
-export function BotActivityGlance({ agentId }: { agentId: string }) {
-  const { activity, groups, pending } = useActivityGroups(agentId);
-  const upcoming = upcomingOf(activity.data);
-  if (pending || upcoming.length === 0) return null;
-  return (
-    <PageSection title="Activity">
-      <PageRows>
-        {upcoming.map(({ item, live }) => (
-          <Fragment key={item.id}>
-            <ActivityRow agentId={agentId} item={item} live={live} />
-            <Separator />
-          </Fragment>
-        ))}
-        <AllActivityItem
-          activity={activity.data}
-          agentId={agentId}
-          error={activity.error}
-          groups={groups}
-        />
-      </PageRows>
-    </PageSection>
-  );
-}
-
-/**
- * The row to a Bot's activity, inside "For you", for when nothing is running or lined up and
- * `BotActivityGlance` draws no section of its own. Starts with a separator, because it follows the
- * card's other rows.
+ * The row to a Bot's activity, inside "For you". Starts with a separator, because it follows the
+ * card's other rows. The Bot's routines have their own section under For you (`BotRoutinesSummary`),
+ * so this row is the way to everything else it did and is doing.
  */
 export function BotActivityRow({ agentId }: { agentId: string }) {
   const { activity, groups, pending } = useActivityGroups(agentId);
-  if (pending || upcomingOf(activity.data).length > 0) return null;
+  if (pending) return null;
   return (
     <>
       <Separator />
@@ -316,7 +264,7 @@ function AllActivityItem({
   agentId,
   error,
   groups,
-  title = "All activity",
+  title,
   withIcon = false,
 }: {
   activity: BotActivity | undefined;
@@ -325,7 +273,7 @@ function AllActivityItem({
   error?: unknown;
   /** What the Activity page lists, which the summary counts. */
   groups: readonly ActivityGroup[];
-  title?: string;
+  title: string;
   withIcon?: boolean;
 }) {
   return (

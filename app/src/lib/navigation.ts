@@ -207,9 +207,18 @@ export function useNavigationItems(): readonly NavigationItem[] {
     capabilities?.edition ?? "team",
     capabilities?.hostedSignIn === true,
   );
-  return capabilities
-    ? items
-    : items.filter(
-        (item) => item.kind === "dialog" || !(item.memoryOnly || item.teamOnly),
-      );
+  return capabilities ? items : beforeCapabilities(items);
+}
+
+/**
+ * What the main menu lists before the edition is known: without the destinations that wait for it
+ * (Memory, Teams). The frame drawn during the sign-in checks lists the same, so its strip has the
+ * rows the real one starts with.
+ */
+export function beforeCapabilities(
+  items: readonly NavigationItem[],
+): readonly NavigationItem[] {
+  return items.filter(
+    (item) => item.kind === "dialog" || !(item.memoryOnly || item.teamOnly),
+  );
 }

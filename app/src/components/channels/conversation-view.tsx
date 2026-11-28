@@ -23,6 +23,7 @@ import {
   reduceQueue,
 } from "@/components/channels/composer";
 import { StillWorkingError } from "@/components/channels/composer/queue";
+import { ComposerColumn } from "@/components/channels/conversation-columns";
 import {
   NotifyPrompt,
   notifyPromptAnswered,
@@ -61,6 +62,7 @@ export function ConversationView({
   stoppable,
   queueWhileBusy = false,
   restoring = false,
+  readOnly = false,
   intro,
   starterSuggestions,
   onSubmit,
@@ -145,6 +147,11 @@ export function ConversationView({
   queueWhileBusy?: boolean;
   /** History has been asked for and has not arrived. Drawn as placeholder rows; see `ChatTranscript`. */
   restoring?: boolean;
+  /**
+   * The transcript's message rows are for reading only; queued messages and notices stay live. See
+   * `ChatTranscript`.
+   */
+  readOnly?: boolean;
   /**
    * The top of the conversation, drawn above the first message and scrolled away with it. Only
    * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at its first message.
@@ -563,6 +570,7 @@ export function ConversationView({
           onSendQueuedNow={disabled ? undefined : sendQueuedNow}
           queued={queued}
           restoring={restoring}
+          readOnly={readOnly}
           {...(stopped ? { stopped } : {})}
           {...(refusals ? { refusals } : {})}
           {...((stopped || refusals) && stoppedNotice ? { stoppedNotice } : {})}
@@ -570,24 +578,8 @@ export function ConversationView({
           working={working}
         />
       </div>
-      {/*
-       * THE TRANSCRIPT'S SIDE INSET IN A NARROW PANE, AND THE SAME 768px COMPOSER IN A WIDE ONE.
-       *
-       * The composer had no inset of its own, so in a pane narrower than its 768px column it ran to
-       * the pane's border, and the starter tasks above it with it, while the transcript kept 16px a
-       * side. Now the column always pads `px-4`, as the transcript's does, and is allowed 2rem more
-       * than `max-w-3xl` to pay for it: from an 800px pane up the composer is 768px wide exactly as
-       * before, and below that it stands 16px off each edge.
-       *
-       * A width, not a breakpoint, on purpose. A viewport breakpoint does not know how much of the
-       * window the sidebar takes, and a container query would need `@container` on an ancestor of
-       * the composer, which is layout containment: it would become the containing block for the @
-       * menu, which is `position: fixed` at the caret (see `DictationSurface`).
-       */}
-      <div
-        className="mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] shrink-0 px-4 pb-4"
-        data-slot="composer-column"
-      >
+      {/* The composer's column, shared with a group conversation; see `ComposerColumn`. */}
+      <ComposerColumn>
         {notice}
         {/*
          * Notifications are offered once this person has started a task: a Bot is working for them,
@@ -706,7 +698,7 @@ export function ConversationView({
            */
           stoppable={stoppable ?? pending}
         />
-      </div>
+      </ComposerColumn>
     </div>
   );
 }

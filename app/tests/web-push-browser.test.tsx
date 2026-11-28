@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserContext, Page } from "playwright-core";
@@ -7,6 +7,7 @@ import { servedHeaders } from "../serve";
 import { ME_PATH, meResponse } from "./accounts-api";
 import { notificationsResponse } from "./notifications-api";
 import { still } from "./page-still";
+import { test } from "./renderer-crash";
 import {
   WEB_PUSH_KEY,
   WEB_PUSH_SUBSCRIPTIONS_PATH,

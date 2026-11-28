@@ -520,11 +520,11 @@ mod connected_ipc {
         let _ = std::fs::remove_dir_all(path.bin());
     }
 
-    /// The organisation picked in the app is kept beside the address, told back to the page, and
-    /// kept through a sign-out, so the next sign-in at that address works where the person left
-    /// off: a token remembers nothing, so the app is what remembers. Sign-out forgets the saved
-    /// sign-in and keeps the address; back on this computer the choice is local, with the address
-    /// still remembered for another time and the organisation gone.
+    /// The organisation picked in the app's switcher is kept beside the address and told back to
+    /// the page. A new sign-in names none, at that address or another: the person picks one as
+    /// they sign in and the token keeps it. Sign-out forgets the saved sign-in and keeps the
+    /// address; back on this computer the choice is local, with the address still remembered for
+    /// another time and the organisation gone.
     #[test]
     fn the_organisation_is_kept_through_sign_out_and_cleared_back_on_this_computer() {
         let _ports = crate::test_support::hold_ports();
@@ -576,17 +576,11 @@ mod connected_ipc {
                 "signedIn": false
             })
         );
-        // Signing in again at the same address carries it into the new sign-in, which the relay
-        // then names; at another address it is gone.
-        let kept = choice::read(&shell.config);
+        // Signing in again names none, at the same address or another: the new sign-in works
+        // where the person picked as they signed in.
+        assert_eq!(choice::signed_in_at(&address).organization_id, None);
         assert_eq!(
-            choice::signed_in_at(&kept, &address)
-                .organization_id
-                .as_deref(),
-            Some("org_A1-b")
-        );
-        assert_eq!(
-            choice::signed_in_at(&kept, "https://another.example.com").organization_id,
+            choice::signed_in_at("https://another.example.com").organization_id,
             None
         );
 

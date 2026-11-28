@@ -51,7 +51,7 @@ import {
   loadFailure,
 } from "@/lib/load-failure";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
-import { useDraftModel } from "@/lib/models/run-model";
+import { useDraftModel, usePickedBotModel } from "@/lib/models/run-model";
 import {
   useAnyBotSkillCommands,
   useSkillCommands,
@@ -75,6 +75,7 @@ const GROUP_TAKES_NO_FILES =
   "A conversation with more than one Bot can't take files yet. Remove them to send.";
 
 export const Route = createFileRoute("/_authed/_app/channel/new")({
+  staticData: { arrival: "conversation" },
   /*
    * The pending recipient's id, read as text whatever the router parsed it into (`searchText`):
    * search values are JSON-parsed, so a Bot id made of digits would otherwise arrive as a number
@@ -239,13 +240,23 @@ function NewConversation({ composition }: { composition: string }) {
   );
   // Not a Bot that hands work out: it answers on its own model.
   const pickable = !group && selected.length === 1 && takesModel;
+  /*
+   * Nobody in To: is home's composer, and so is its model picker: it starts on the catalogue's
+   * default, and the pick is saved with the conversation of the Bot OpenBot picks, or says that Bot
+   * picks its own model (`usePickedBotModel`, home's own).
+   */
+  const openBotPicks = recipients.length === 0;
   const models = useQuery({
     ...modelCatalogueQueryOptions(),
-    enabled: pickable,
+    enabled: pickable || openBotPicks,
   });
   const draftModel = useDraftModel(
     pickable ? models.data : undefined,
     pickable ? selected[0]?.defaultModel : undefined,
+  );
+  const pickedBotModel = usePickedBotModel(
+    openBotPicks ? models.data : undefined,
+    profiles,
   );
   // A group's first message goes to all of its Bots, so no one Bot's commands are offered.
   const skillCommands = useSkillCommands(
@@ -267,21 +278,25 @@ function NewConversation({ composition }: { composition: string }) {
     if (!draft.text.trim() && draft.attachments.length === 0) return;
     setError(null);
     setSent(seedMessage(draft.text, newId()));
+    const { pickFor } = pickedBotModel;
     try {
-      if (draft.agentId)
+      if (draft.agentId) {
+        const { pick, notUsed } = await pickFor(draft.agentId);
         await startChosen(
           draft.agentId,
           draft.text,
-          null,
+          pick,
           undefined,
           draft.attachments,
         );
-      else
+        notUsed?.();
+      } else
         await startPicked({
           text: draft.text,
           skills: draft.commandIds,
           roster: profiles,
           files: draft.attachments,
+          pickFor,
         });
     } catch (caught) {
       // The words stay in the box, with the reason under them.
@@ -497,12 +512,21 @@ function NewConversation({ composition }: { composition: string }) {
         draftKey={draftKey}
         attachmentLimits={attachmentLimits}
         modelPicker={
-          <ModelPicker
-            catalogue={pickable ? models.data : undefined}
-            defaultModel={draftModel.defaultModel}
-            onChange={draftModel.choose}
-            value={draftModel.value}
-          />
+          openBotPicks ? (
+            <ModelPicker
+              catalogue={models.data}
+              disabled={!fallback}
+              onChange={pickedBotModel.choose}
+              value={pickedBotModel.value}
+            />
+          ) : (
+            <ModelPicker
+              catalogue={pickable ? models.data : undefined}
+              defaultModel={draftModel.defaultModel}
+              onChange={draftModel.choose}
+              value={draftModel.value}
+            />
+          )
         }
         disabled={Boolean(loadError) || waitingForUrlAgent}
         /*

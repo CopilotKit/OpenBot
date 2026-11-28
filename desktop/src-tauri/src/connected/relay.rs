@@ -1534,11 +1534,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(config);
     }
 
-    /// Signed out while working in another organisation, then signed in again at the same address:
-    /// the new sign-in's relay names that organisation from its first request, because the app is
-    /// what remembers it (a token remembers nothing). At another address it names none.
+    /// Signed out while working in one organisation, then signed in again at the same address,
+    /// picking another as they sign in: the new sign-in's relay names no organisation from its
+    /// first request, so OpenBot answers in the one they picked, which the token keeps. Naming the
+    /// one from before put them back where they were, whatever they picked. Nor at another address.
     #[test]
-    fn a_new_sign_in_at_the_same_address_names_the_organisation_kept_through_sign_out() {
+    fn a_new_sign_in_names_no_organisation_so_it_works_where_the_person_signed_in() {
         use super::super::choice;
         let openbot = FakeOpenBot::start(Shape::Current);
         let store = in_memory();
@@ -1554,17 +1555,20 @@ mod tests {
         first.sign_out(no_browser).unwrap();
 
         let again = Arc::new(openbot.sign_in(store.clone()));
-        let next = choice::signed_in_at(&choice::read(&config), &openbot.address());
-        assert_eq!(next.organization_id.as_deref(), Some("org_kai"));
+        let next = choice::signed_in_at(&openbot.address());
+        assert_eq!(next.organization_id, None);
+        // Kept as it is told back to the page: the earlier organisation is gone from the record.
+        choice::write(&config, &next).unwrap();
+        assert_eq!(choice::read(&config).organization_id, None);
         let relay = Relay::start(again.clone(), next.organization_id.as_deref(), |_| {}).unwrap();
         let window = enter(&relay);
         let sent = window.echo(window.get(ECHO));
         assert_eq!(
             sent["headers"].get(ORGANIZATION_HEADER.to_ascii_lowercase()),
-            Some(&serde_json::Value::from("org_kai"))
+            None
         );
 
-        let elsewhere = choice::signed_in_at(&choice::read(&config), "https://another.example.com");
+        let elsewhere = choice::signed_in_at("https://another.example.com");
         assert_eq!(elsewhere.organization_id, None);
         let _ = std::fs::remove_dir_all(config);
     }
