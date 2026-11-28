@@ -2,6 +2,7 @@ import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { NativeShellFrame } from "@/components/layout/native-shell-frame";
+import { PageArrival } from "@/components/layout/page-arrival";
 import { PlanBanner } from "@/components/layout/plan-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
@@ -33,7 +34,9 @@ function RouteComponent() {
   if (nativeShell()) {
     return (
       <NativeShellFrame>
-        <Outlet />
+        <PageArrival>
+          <Outlet />
+        </PageArrival>
       </NativeShellFrame>
     );
   }
@@ -41,7 +44,9 @@ function RouteComponent() {
   if (Frame) {
     return (
       <Frame>
-        <Outlet />
+        <PageArrival>
+          <Outlet />
+        </PageArrival>
       </Frame>
     );
   }
@@ -85,7 +90,9 @@ function AppFrame() {
         <MovedAppsBanner />
         <UpdateBanner />
         <SelfHostBanner />
-        <Outlet />
+        <PageArrival>
+          <Outlet />
+        </PageArrival>
       </SidebarInset>
     </SidebarShell>
   );

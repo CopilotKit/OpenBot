@@ -428,12 +428,6 @@ export const ALLOWED: Allowed[] = [
       why: "today's browser addresses, which the server registers from here and no client calls since the browsers moved onto the generated client",
     }),
   ),
-  {
-    file: "desktop/src-tauri/src/provider_oauth.rs",
-    what: /^\/api\/oauth\/(device_authorization|token)$/,
-    rule: "third-party",
-    why: "a model provider's own sign-in, at the provider's address",
-  },
   // Third parties.
   {
     file: "app/src/lib/voice/websocket.ts",

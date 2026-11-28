@@ -2,6 +2,9 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { PageShell } from "@/components/layout/page-shell";
 import { MemoryList, RememberFact } from "@/components/memory/memories";
 import { deploymentOffersMemory } from "@/lib/deployment/queries";
+import { agentListQueryOptions } from "@/lib/agents/queries";
+import { memoriesQueryOptions, memorySourcesQueryOptions } from "@/lib/memory";
+import { loadFirstScreen } from "@/lib/route-data";
 
 /**
  * Memory: what your Bots remember about you, and facts you add for all of them. The every-Bot page
@@ -16,6 +19,12 @@ export const Route = createFileRoute("/_authed/_app/memory")({
       throw redirect({ to: "/bots", replace: true });
     }
   },
+  loader: ({ context }) =>
+    loadFirstScreen(context.queryClient, [
+      memoriesQueryOptions(),
+      agentListQueryOptions(),
+      memorySourcesQueryOptions(),
+    ]),
   component: MemoryPage,
 });
 

@@ -75,9 +75,6 @@ describe.skipIf(!asked)("Routines while the organization is moved", () => {
           await page
             .getByText("Northwind check", { exact: true })
             .waitFor({ timeout: 6_000 });
-          await page
-            .getByRole("switch", { name: "Check-ins for all your Bots" })
-            .waitFor({ timeout: 3_000 });
           expect(await alerts(page)).toEqual([]);
           await shoot(page, "organization-moving", "after", engine, look);
           expect(await cutOff(page)).toEqual({ sideways: false, cut: [] });

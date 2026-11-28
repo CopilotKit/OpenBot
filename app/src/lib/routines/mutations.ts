@@ -6,12 +6,15 @@ import {
 } from "@/lib/api/generated/conversations/conversations";
 import type {
   CreateRoutineRequest,
+  RoutineReading,
+  RoutineSentence,
   UpdateRoutineRequest,
 } from "@/lib/api/generated/model";
 import {
   createRoutine as createRoutineRequest,
   deleteRoutine,
   pauseRoutine,
+  readRoutineSentence,
   resumeRoutine,
   runRoutine,
   updateRoutine,
@@ -20,7 +23,11 @@ import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
 import { ClientError } from "@/lib/client";
 import { unavailableSaid } from "@/lib/load-failure";
-import { createProactiveSetting, proactiveKeys } from "@/lib/proactive";
+import {
+  createProactiveSetting,
+  proactiveKeys,
+  removeProactiveSetting,
+} from "@/lib/proactive";
 import {
   createResponsibility,
   deleteResponsibility,
@@ -29,8 +36,10 @@ import {
   responsibilityKeys,
 } from "@/lib/responsibilities";
 import { NEW_CONVERSATION } from "./form";
+import { intervalLabel } from "./merged";
 import { type RoutinePlan, runGoalInstruction } from "./plan";
 import { routineKeys } from "./queries";
+import { scheduleWords } from "./words";
 
 /**
  * Writes against a person's own standing instructions.
@@ -61,6 +70,9 @@ export type RoutineInput = Omit<CreateRoutineRequest, "goalId" | "timezone"> & {
  */
 const once = () => ({ "Idempotency-Key": idempotencyKey() });
 
+/** What a person reads when the box could not take back what it made and the server said nothing of its own. */
+const UNDO_FALLBACK = "Couldn't remove that. Try again.";
+
 /** What a person reads when a routine could not be made and the server said nothing of its own. */
 const CREATE_FALLBACK = "Couldn't set up that routine. Try again.";
 
@@ -70,6 +82,36 @@ function createRoutine(body: CreateRoutineRequest) {
     fallback: CREATE_FALLBACK,
   });
 }
+
+/**
+ * Read a sentence as New routine's answers, for the Routines page's box. It writes nothing, so it
+ * invalidates nothing; each call is its own request with its own key.
+ */
+export function readRoutineSentenceMutationOptions() {
+  return mutationOptions({
+    mutationFn: (variables: RoutineSentence): Promise<RoutineReading> =>
+      readRoutineSentence(organizationId(), variables, once(), {
+        fallback: "Couldn't read that. Try again.",
+      }),
+  });
+}
+
+/**
+ * What a create made, for a screen that wants to show, open or take it back: the kind of thing, its
+ * id, and `when` it starts in the words a row says it, read from what the server made (a schedule
+ * with its time zone where that isn't the reader's, or how often a check-in looks). `when` is empty
+ * for a goal that nothing starts on its own. A goal also names `routineId`, the routine that runs
+ * it, when one was made.
+ */
+export type MadeRoutine = {
+  when: string;
+  /** The conversation started for it, which Undo takes back too; null when it posts in one already there. */
+  startedConversationId: string | null;
+} & (
+  | { kind: "routine"; id: string }
+  | { kind: "goal"; id: string; routineId: string | null }
+  | { kind: "check-in"; id: string }
+);
 
 /** A write was saved or may have been saved: the screen must not offer to create it again. */
 export class SavedButRefused extends Error {}
@@ -81,7 +123,7 @@ export class SavedButRefused extends Error {}
  * after `name`. `write` gets the conversation to use and a `saved` callback it calls once the write has
  * landed. If the server refuses `write` before `saved` was called, the started conversation is removed (best
  * effort) and the error is rethrown: an empty conversation nobody asked for is not what a refused
- * form should leave behind.
+ * form should leave behind. It resolves to whatever `write` resolves to.
  */
 async function withConversation<T>(
   botId: string,
@@ -140,6 +182,22 @@ async function withConversation<T>(
   }
 }
 
+/** The conversation `withConversation` started, given what was asked for and what was used. */
+function startedFor(asked: string, used: string): string | null {
+  return asked === NEW_CONVERSATION ? used : null;
+}
+
+/** The lists a create or an undo changes, so each shows what is now there. */
+function settleMade(queryClient: QueryClient) {
+  return () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: routineKeys.all }),
+      queryClient.invalidateQueries({ queryKey: responsibilityKeys.all }),
+      queryClient.invalidateQueries({ queryKey: proactiveKeys.settings }),
+      queryClient.invalidateQueries({ queryKey: channelKeys.all }),
+    ]);
+}
+
 /**
  * Carries out what the form's answers made, in one mutation.
  *
@@ -158,42 +216,58 @@ async function withConversation<T>(
  */
 export function createFromPlanMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (plan: RoutinePlan): Promise<void> => {
+    mutationFn: async (plan: RoutinePlan): Promise<MadeRoutine> => {
       if (plan.kind === "routine") {
         const { routine } = plan;
-        await withConversation(
+        return withConversation<MadeRoutine>(
           routine.botId,
           routine.conversationId,
           routine.title?.trim() || routine.instruction.trim(),
           async (conversationId, saved) => {
-            await createRoutine({ ...routine, conversationId });
+            const made = await createRoutine({ ...routine, conversationId });
             saved();
+            return {
+              kind: "routine",
+              id: made.routine.id,
+              when: scheduleWords(made.routine),
+              startedConversationId: startedFor(
+                routine.conversationId,
+                conversationId,
+              ),
+            };
           },
         );
-        return;
       }
 
       if (plan.kind === "check-in") {
         const { checkIn } = plan;
-        await withConversation(
+        return withConversation<MadeRoutine>(
           checkIn.botId,
           checkIn.conversationId,
           checkIn.subject.trim() || checkIn.focus.trim(),
           async (conversationId, saved) => {
             // A new one: the server refuses one the Bot already has, should this screen's list of
             // them be out of date, as Name does while it is typed.
-            await createProactiveSetting(
+            const made = await createProactiveSetting(
               { ...checkIn, conversationId },
               { refuseExisting: true },
             );
             saved();
+            return {
+              kind: "check-in",
+              id: made.checkIn.id,
+              when: `Checks ${intervalLabel(made.checkIn.intervalMinutes).toLowerCase()}`,
+              startedConversationId: startedFor(
+                checkIn.conversationId,
+                conversationId,
+              ),
+            };
           },
         );
-        return;
       }
 
       const { goal: input, schedule, runNow } = plan;
-      await withConversation(
+      return withConversation<MadeRoutine>(
         input.botId,
         input.conversationId,
         input.title,
@@ -203,10 +277,11 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
             conversationId,
           });
           const { id } = goal;
+          let running: { id: string; when: string } | null = null;
 
           if (schedule) {
             try {
-              await createRoutine({
+              const { routine } = await createRoutine({
                 botId: input.botId,
                 conversationId,
                 goalId: id,
@@ -218,6 +293,7 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
                   ? { title: goal.title }
                   : {}),
               });
+              running = { id: routine.id, when: scheduleWords(routine) };
             } catch (error) {
               /*
                * Only a 4xx is the server saying no. A 5xx, a timeout or a dropped connection
@@ -279,17 +355,61 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
               );
             }
           }
+          return {
+            kind: "goal",
+            id,
+            when: running?.when ?? "",
+            routineId: running?.id ?? null,
+            startedConversationId: startedFor(
+              input.conversationId,
+              conversationId,
+            ),
+          };
         },
       );
     },
     // onSettled, not onSuccess: a goal kept, paused, after a refusal still has to show on the list.
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: routineKeys.all }),
-        queryClient.invalidateQueries({ queryKey: responsibilityKeys.all }),
-        queryClient.invalidateQueries({ queryKey: proactiveKeys.settings }),
-        queryClient.invalidateQueries({ queryKey: channelKeys.all }),
-      ]),
+    onSettled: settleMade(queryClient),
+  });
+}
+
+/**
+ * Takes back what a create just made: the routine, or the goal and the routine that runs it, or the
+ * check-in, and then the conversation started for it. A goal's routine goes first, so a goal is never left with a routine firing into it. It
+ * is the box's Undo, offered on the line under the box and nowhere later.
+ */
+export function undoMadeMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (made: MadeRoutine): Promise<void> => {
+      switch (made.kind) {
+        case "routine":
+          await deleteRoutine(organizationId(), made.id, once(), {
+            fallback: UNDO_FALLBACK,
+          });
+          break;
+        case "goal":
+          if (made.routineId)
+            await deleteRoutine(organizationId(), made.routineId, once(), {
+              fallback: UNDO_FALLBACK,
+            });
+          await deleteResponsibility(made.id);
+          break;
+        case "check-in":
+          await removeProactiveSetting(made.id);
+          break;
+      }
+      // The conversation started for it goes too, last, once nothing posts in it. Best effort, as
+      // when a refused create takes one back: the routine is gone either way.
+      if (made.startedConversationId)
+        await deleteConversation(
+          organizationId(),
+          made.startedConversationId,
+          { "Idempotency-Key": idempotencyKey() },
+          undefined,
+          { fallback: "Couldn't remove the conversation." },
+        ).catch(() => undefined);
+    },
+    onSettled: settleMade(queryClient),
   });
 }
 

@@ -3,6 +3,6 @@
  */
 
 /**
- * The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.
+ * The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.
  */
 export type AiConnectionProviderAnswer = string;

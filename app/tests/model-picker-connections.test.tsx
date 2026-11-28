@@ -510,3 +510,52 @@ test("a pick on a stopped connection stays on it, even when that connection list
     view.getByRole("combobox", { name: new RegExp(`Model: ${OPUS.id}`) }),
   ).toBeTruthy();
 });
+
+test("a saved Unbiased pick stays visible as the current model but cannot be picked again", async () => {
+  const pareto = { id: "pareto", label: "Pareto" };
+  const catalogue = catalogueOf([
+    CHATGPT,
+    connection({
+      id: "unbiased",
+      provider: "unbiased",
+      login: "endpoint",
+      source: "gateway",
+      default: pareto.id,
+      models: [pareto],
+    }),
+  ]);
+  const selected = { model: pareto.id, effort: null, connection: "unbiased" };
+  expect(shownPick(selected, catalogue)).toEqual(selected);
+  const view = render(
+    <ModelPicker catalogue={catalogue} onChange={() => {}} value={selected} />,
+  );
+  const { popup } = await open(view, "Model: Pareto");
+  expect(within(popup).queryByRole("option", { name: /Pareto/ })).toBeNull();
+  expect(
+    within(popup).getByRole("option", { name: /GPT-6.2 Sol/ }),
+  ).toBeTruthy();
+});
+
+test("the sole Unbiased connection has no picker even when single-model picks are allowed", () => {
+  const pareto = { id: "pareto", label: "Pareto" };
+  const catalogue = catalogueOf([
+    connection({
+      id: "unbiased",
+      provider: "unbiased",
+      login: "endpoint",
+      source: "gateway",
+      isDefault: true,
+      default: pareto.id,
+      models: [pareto],
+    }),
+  ]);
+  const view = render(
+    <ModelPicker
+      allowSingle
+      catalogue={catalogue}
+      onChange={() => {}}
+      value={{ model: pareto.id, effort: null }}
+    />,
+  );
+  expect(view.queryByRole("combobox")).toBeNull();
+});

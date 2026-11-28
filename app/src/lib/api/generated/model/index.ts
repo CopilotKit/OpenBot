@@ -46,6 +46,7 @@ export * from "./aiConnectionLogin";
 export * from "./aiConnectionNotFoundResponse";
 export * from "./aiConnectionNotReadyResponse";
 export * from "./aiConnectionPage";
+export * from "./aiConnectionPageSignInsItem";
 export * from "./aiConnectionProblem";
 export * from "./aiConnectionProvider";
 export * from "./aiConnectionProviderAnswer";
