@@ -212,6 +212,12 @@ jobs:
           grep -E "Test Case|error:|SHELL_NOTE" xcodebuild-demo.log
           exit $status
 
+      - name: Report mock handoff progress
+        if: failure()
+        run: |
+          container="$(xcrun simctl get_app_container "$SIM_UDID" ai.openbot.shell data)" || exit 0
+          python3 ios-shell/ci/demo_handoff.py "$container/Documents/diagnostics.jsonl"
+
       - name: Cut the recording and make a phone-size copy
         if: always()
         run: |
