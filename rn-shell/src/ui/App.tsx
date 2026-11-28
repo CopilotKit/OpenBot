@@ -391,6 +391,7 @@ function Shell() {
       ) : null}
       {process.env.EXPO_PUBLIC_OPENBOT_TEST_BUILD === "1" ? (
         <Text
+          pointerEvents="none"
           testID="debug-state"
           accessibilityLabel={`debug-state ${debugState(state, BASE_URL)}`}
           style={styles.debug}
@@ -413,13 +414,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   cancelText: { fontSize: 17 },
+  // A label for the UI tests (test builds only): on screen as far as the accessibility tree is
+  // concerned (UiAutomator drops nearly transparent views), invisible to a person.
   debug: {
     position: "absolute",
-    top: 0,
     left: 0,
-    width: 4,
-    height: 4,
-    opacity: 0.02,
-    fontSize: 1,
+    top: "50%",
+    width: 3,
+    height: 3,
+    fontSize: 2,
+    color: "transparent",
   },
 });

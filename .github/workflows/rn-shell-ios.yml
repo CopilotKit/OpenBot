@@ -107,8 +107,9 @@ jobs:
           bun test __tests__
           npx expo prebuild --platform ios --no-install --clean
 
-      - name: Cache CocoaPods and ccache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore CocoaPods and ccache
+        id: pods-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             rn-shell/ios/Pods
@@ -144,6 +145,17 @@ jobs:
           du -sh "$app" | tee "$ARTIFACTS/app-size.txt"
           ccache -s | tail -n 5 || true
 
+      # Saved even when a later step fails (actions/cache saves only after a successful job).
+      - name: Save CocoaPods and ccache
+        if: always() && steps.pods-cache.outputs.cache-hit != 'true' && hashFiles('rn-shell/ios/Pods/Manifest.lock') != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            rn-shell/ios/Pods
+            ~/Library/Caches/CocoaPods
+            .ccache
+          key: ${{ steps.pods-cache.outputs.cache-primary-key }}
+
       - name: Wait for the simulator, the servers and Maestro, then install the app
         timeout-minutes: 10
         run: |
@@ -156,10 +168,10 @@ jobs:
 
       - name: Run the mock suite
         id: mock
-        timeout-minutes: 30
+        timeout-minutes: 35
         run: |
           echo "$(date +%s) mock-suite" >> "$RUNNER_TEMP/timing"
-          nohup xcrun simctl spawn "$SIM_UDID" log stream --style compact --predicate 'process == "OpenBot"' > "$ARTIFACTS/simulator-app.log" 2>&1 &
+          nohup xcrun simctl spawn "$SIM_UDID" log stream --level debug --style compact --predicate 'process == "OpenBot"' > "$ARTIFACTS/simulator-app.log" 2>&1 &
           python3 rn-shell/ci/run_flows.py --platform ios --suite mock --artifacts "$ARTIFACTS" --only "$ONLY"
 
       - name: Run the real-backend suite
@@ -183,6 +195,9 @@ jobs:
         run: |
           echo "$(date +%s) end" >> "$RUNNER_TEMP/timing"
           grep -h OPENBOT_DIAG "$ARTIFACTS/simulator-app.log" > "$ARTIFACTS/diagnostics.txt" 2>/dev/null || true
+          mkdir -p "$ARTIFACTS/crashes"
+          cp ~/Library/Logs/DiagnosticReports/OpenBot*.ips "$ARTIFACTS/crashes/" 2>/dev/null || true
+          ls "$ARTIFACTS/crashes"
           {
             [ -f "$ARTIFACTS/SUMMARY.md" ] && cat "$ARTIFACTS/SUMMARY.md"
             echo "### Seconds per step"

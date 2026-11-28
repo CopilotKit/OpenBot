@@ -173,8 +173,12 @@ def run(platform, suite, artifacts, private, only):
                 lines = [line for line in (result.stdout + result.stderr).splitlines() if line.strip()]
                 failing = [line for line in lines if "FAILED" in line or "Assertion" in line or "not found" in line.lower() or "error" in line.lower()]
                 reason = (failing or lines or ["maestro failed"])[-1][:300]
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as expired:
             status, reason = "failed", f"timed out after {timeout} s"
+            out = expired.stdout or b""
+            err = expired.stderr or b""
+            text = (out.decode() if isinstance(out, bytes) else out) + "\n" + (err.decode() if isinstance(err, bytes) else err)
+            (flow_dir / "maestro.log").write_text(text)
         if status == "failed":
             device_screenshot(platform, flow_dir / "failure.png")
             tree = hierarchy(flow_dir)

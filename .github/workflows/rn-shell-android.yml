@@ -93,8 +93,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Cache Gradle
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore Gradle
+        id: gradle-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.gradle/caches
@@ -127,6 +128,16 @@ jobs:
             | tee "$ARTIFACTS/gradle.log" | grep -E "BUILD|error:|^e: |FAILURE" || true
           test -f app/build/outputs/apk/release/app-release.apk || { tail -n 120 "$ARTIFACTS/gradle.log"; exit 1; }
           ls -la app/build/outputs/apk/release/
+
+      # Saved even when a later step fails (actions/cache saves only after a successful job).
+      - name: Save Gradle
+        if: always() && steps.gradle-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ steps.gradle-cache.outputs.cache-primary-key }}
 
       - name: Free the build's memory for the emulator
         run: |

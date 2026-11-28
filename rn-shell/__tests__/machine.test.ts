@@ -493,6 +493,23 @@ describe("signed in", () => {
     expect(showsLock(lifted)).toBe(false);
   });
 
+  test("the error page after a failure does not lift the lock", () => {
+    let state = run(
+      [{ type: "httpError", url: "https://my.open.bot/", status: 502 }],
+      signedIn(),
+    ).state;
+    state = run(
+      [
+        { type: "page", message: { kind: "doc", late: false } },
+        { type: "loadEnd", url: "https://my.open.bot/" },
+        { type: "page", message: { kind: "doc", late: true } },
+      ],
+      state,
+    ).state;
+    expect(showsLock(state)).toBe(true);
+    expect(showsSkeleton(state)).toBe(false);
+  });
+
   test("another site's failure goes back to the app instead of locking", () => {
     let state = run(
       [

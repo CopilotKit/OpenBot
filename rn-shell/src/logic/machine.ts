@@ -187,6 +187,8 @@ export type State = {
   lastTapAt: number;
   lastNavigation: "none" | "event" | "load";
   callbackArrived: boolean;
+  /** The main-frame navigation in flight failed: its error page's commit and finish are not a page of ours. */
+  navFailed: boolean;
   /** The page's background colour (#rrggbb) and whether it draws dark: the strips around the web view follow it. */
   pageColor: string | null;
   pageDark: boolean | null;
@@ -251,6 +253,7 @@ export function initialState(): State {
     lastTapAt: -1e12,
     lastNavigation: "none",
     callbackArrived: false,
+    navFailed: false,
     pageColor: null,
     pageDark: null,
   };
@@ -396,6 +399,7 @@ function load(
     source: headers ? { uri: url, headers } : { uri: url },
     webKey: same ? s.webKey + 1 : s.webKey,
     pendingNavUrl: url,
+    navFailed: false,
   });
   if (isReloadableOwnUrl(url, config.origin)) set(step, { lastOwnUrl: url });
   startCovering(step, at);
@@ -413,6 +417,7 @@ function remount(config: Config, step: Step, at: number) {
     source: { uri: url },
     webKey: step.state.webKey + 1,
     pendingNavUrl: url,
+    navFailed: false,
     lastOwnUrl: url,
   });
   startCovering(step, at);
@@ -621,7 +626,9 @@ function onLoadFailure(
     "readyText",
     "skeletonDeadline",
   );
-  set(step, { pageLoading: false, hideScheduled: false });
+  // The error page that follows (WebKit's, Chromium's, or a 5xx's own body) commits and finishes
+  // like a page: none of that lifts the lock. The next load the app starts clears this.
+  set(step, { pageLoading: false, hideScheduled: false, navFailed: true });
   if (s.phase === "signedOut" && s.signIn === "entering") {
     failSignIn(step, MESSAGES.notFinished);
     showLoadFailure(step, "signIn", "enter-failed");
@@ -768,6 +775,7 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
       const message = event.message;
       switch (message.kind) {
         case "doc": {
+          if (s.navFailed) return;
           // A new document of the app's own origin committed: covered again until it draws. A late
           // one (the script's second chance at document end) only counts as the commit.
           if (webVisible(s) && !message.late) startCovering(step, at);
@@ -802,13 +810,14 @@ function handle(config: Config, step: Step, event: Event, at: number): void {
     }
 
     case "navStart": {
-      set(step, { pendingNavUrl: event.url });
+      set(step, { pendingNavUrl: event.url, navFailed: false });
       timer(step, "watchdog", TIMING.watchdogMs);
       return;
     }
 
     case "loadEnd": {
       cancel(step, "watchdog");
+      if (s.navFailed) return;
       set(step, {
         finished: true,
         currentUrl: event.url || s.currentUrl,
