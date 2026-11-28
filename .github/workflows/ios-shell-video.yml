@@ -1,0 +1,441 @@
+name: iOS shell video
+
+# Records the iOS shell for people to watch, apart from the test run so it comes back fast:
+# - demo: DemoTourUITests/testDemoTour against mock stack A (public artifact ios-shell-video-<run id>);
+# - real: the signed-in journey on https://my.open.bot (a real account: private artifact
+#   ios-shell-video-private-<run id>). With real_google_sign_in, a Release build signs in with Google
+#   in the app's web view first (testRealGoogleSignInInWebViewAndJourney); each such run sends ONE
+#   sign-in prompt to the account owner's phone, so it only runs when started by hand.
+# Each recording is cut to its test's own start and end and also comes as a 600-px-wide copy
+# (ci/video_tool.swift, AVFoundation). The two recordings run as parallel jobs; this workflow (and
+# only this one) caches the built web app and Xcode's DerivedData, keyed on their sources.
+on:
+  push:
+    branches:
+      - ios-webview-shell
+    paths:
+      - ios-shell/**
+      - .github/workflows/ios-shell-video.yml
+  workflow_dispatch:
+    inputs:
+      which:
+        description: What to record
+        type: choice
+        options:
+          - both
+          - demo
+          - real
+          - swipe
+          - selfhosted
+        default: both
+      warm_up:
+        description: Demo - one unrecorded pass first (slower job, quicker first sign-in in the recording)
+        type: boolean
+        default: false
+      real_google_sign_in:
+        description: Real backend - sign in with Google in the web view first (sends one prompt to the account's phone)
+        type: boolean
+        default: false
+      real_sign_out:
+        description: Real backend on the session cookie - end with the web app's Sign out (ends the session the secret holds)
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: ios-shell-video-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # The app and its UI tests, built once and handed to the recording job: a cold build (every
+    # change under ios-shell/ is one) takes about 5 minutes on these runners, which with the
+    # recording did not fit the 13-minute cap. The cap applies to the recording job.
+    name: Build the app for the recording (mock)
+    if: github.repository == 'CopilotKit/OpenBot' && inputs.which != 'real'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/xcodegen-dist
+          key: ios-shell-video-xcodegen-v1
+
+      - name: Generate the Xcode project
+        run: |
+          echo "$(date +%s) project" >> "$RUNNER_TEMP/timing"
+          if [ ! -x ~/xcodegen-dist/xcodegen/bin/xcodegen ]; then
+            mkdir -p ~/xcodegen-dist
+            curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" https://github.com/yonaskolb/XcodeGen/releases/latest/download/xcodegen.zip \
+              && unzip -q -o "$RUNNER_TEMP/xcodegen.zip" -d ~/xcodegen-dist || true
+          fi
+          if [ -x ~/xcodegen-dist/xcodegen/bin/xcodegen ]; then
+            (cd ios-shell && ~/xcodegen-dist/xcodegen/bin/xcodegen generate)
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
+            (cd ios-shell && xcodegen generate)
+          fi
+
+      - name: Work out the build cache key
+        id: dd-key
+        run: echo "tree=$(git rev-parse HEAD:ios-shell)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData-Debug
+          key: ios-shell-video-dd-Debug-${{ steps.dd-key.outputs.tree }}
+          restore-keys: ios-shell-video-dd-Debug-
+
+      - name: Build the Debug app and its UI tests
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell \
+            -configuration Debug -destination "generic/platform=iOS Simulator" -derivedDataPath DerivedData-Debug \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee xcodebuild-build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build.log
+          tar -C DerivedData-Debug/Build -czf products.tgz Products
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      # The built web app goes to the recording job too: a cache restore there took 2 minutes.
+      - name: Work out the web app's cache key
+        id: web-key
+        run: |
+          sum="$( (git rev-parse HEAD:app/src HEAD:app/public HEAD:shared HEAD:tokens; \
+            git hash-object app/index.html app/package.json app/vite.config.* app/tsconfig*.json bun.lock package.json .env.example) | shasum | cut -c1-40)"
+          echo "key=ios-shell-web-v2-$sum" >> "$GITHUB_OUTPUT"
+
+      - name: Look for the built web app in the cache
+        id: web-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/dist
+          key: ${{ steps.web-key.outputs.key }}
+
+      - name: Build the web app if needed
+        if: steps.web-cache.outputs.cache-hit != 'true'
+        run: |
+          bun install --frozen-lockfile
+          cp .env.example .env
+          (cd app && bun run build)
+
+      - name: Keep the built web app for the next run
+        if: steps.web-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/dist
+          key: ${{ steps.web-cache.outputs.cache-primary-key }}
+
+      - name: Pack the web app
+        run: tar -czf web.tgz app/dist
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-shell-video-build-${{ github.run_id }}
+          path: |
+            products.tgz
+            web.tgz
+          retention-days: 1
+
+  demo:
+    name: Record the demo tour (mock)
+    needs: build
+    if: github.repository == 'CopilotKit/OpenBot' && inputs.which != 'real'
+    runs-on: macos-latest
+    timeout-minutes: 13
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Start the clock
+        run: echo "$(date +%s) start" > "$RUNNER_TEMP/timing"
+
+      - name: Boot a simulator in the background
+        run: |
+          picked="$(python3 ios-shell/ci/pick_simulator.py)"
+          udid="$(printf '%s' "$picked" | cut -f1)"
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          nohup bash -c 'xcrun simctl boot "$1" || true; xcrun simctl bootstatus "$1" -b \
+            && xcrun simctl spawn "$1" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true; \
+            xcrun simctl spawn "$1" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true; \
+            sleep 15; touch "$2"' boot "$udid" "$RUNNER_TEMP/simulator.ready" > "$RUNNER_TEMP/boot.log" 2>&1 &
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ios-shell-video-build-${{ github.run_id }}
+
+      - name: Unpack the built app
+        run: |
+          echo "$(date +%s) unpack" >> "$RUNNER_TEMP/timing"
+          mkdir -p built && tar -C built -xzf products.tgz
+          tar -xzf web.tgz
+          echo "XCTESTRUN=$(ls "$PWD"/built/Products/*.xctestrun | head -1)" >> "$GITHUB_ENV"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      - name: Install, build the web app if needed, start mock stack A
+        timeout-minutes: 10
+        run: |
+          mkdir -p artifacts/video
+          bun install --frozen-lockfile
+          cp .env.example .env
+          MOCK_REPLY=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun app/workbench/mock-server.ts > artifacts/mock-a.log 2>&1 &
+          APP_PORT=3010 SERVER_PORT=3001 nohup bun app/serve.ts > artifacts/app-a.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if [ "$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3010/api/auth/shell/config?platform=ios' || true)" = 200 ]; then
+              echo "mock stack A is up"
+              # Warm the mock (its first answers took seconds, and the web app waited on them).
+              for _ in 1 2 3; do
+                for path in deployment people/me conversations "bots?limit=50" plan; do
+                  curl -s -o /dev/null -b better-auth.session_token=mock "http://127.0.0.1:3010/api/v2/organizations/default/$path" || true
+                done
+              done
+              exit 0
+            fi
+            sleep 1
+          done
+          tail -n 40 artifacts/mock-a.log artifacts/app-a.log
+          exit 1
+
+      - name: Record the demo tour
+        timeout-minutes: 10
+        env:
+          TEST_RUNNER_OPENBOT_SHELL_VIDEO_MODE: "1"
+          WHICH: ${{ inputs.which }}
+          WARM_UP: ${{ inputs.warm_up }}
+        run: |
+          for _ in $(seq 1 300); do [ -f "$RUNNER_TEMP/simulator.ready" ] && break; sleep 1; done
+          [ -f "$RUNNER_TEMP/simulator.ready" ] || { cat "$RUNNER_TEMP/boot.log"; exit 1; }
+          # which=swipe: only the slide back (its own test), no warm-up, a short clip.
+          test_id=OpenBotShellUITests/DemoTourUITests/testDemoTour
+          if [ "$WHICH" = "swipe" ]; then test_id=OpenBotShellUITests/ShellFlowUITests/testSwipeBackSlidesToTheList; fi
+          if [ "$WHICH" = "selfhosted" ]; then
+            # The self-hosted OpenBot: mock stack C on 3014, someone else signed in.
+            test_id=OpenBotShellUITests/SelfHostedUITests/testSelfHostedSignInAndBackToCloud
+            MOCK_PERSON_NAME="Dana Okafor" MOCK_ORG_NAME="Okafor Labs" MOCK_SIGNED_OUT=1 SERVER_PORT=3003 nohup bun app/workbench/mock-server.ts > artifacts/mock-c.log 2>&1 &
+            APP_PORT=3014 SERVER_PORT=3003 nohup bun app/serve.ts > artifacts/app-c.log 2>&1 &
+            sleep 5
+          fi
+          echo "MIN_SECONDS=$([ "$WHICH" = "demo" ] || [ -z "$WHICH" ] && echo 30 || echo 3)" >> "$GITHUB_ENV"
+          echo "$(date +%s) warm-up" >> "$RUNNER_TEMP/timing"
+          # The unrecorded warm-up pass now only on request (warm_up): it took 3 minutes and pushed
+          # the job past its 13 on slow runners; an idle stretch in the recording is cut instead.
+          if [ "$WARM_UP" = "true" ]; then
+          # One unrecorded pass first: a fresh simulator's first sign-in took over a minute.
+          xcodebuild test-without-building -xctestrun "$XCTESTRUN" -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -only-testing:OpenBotShellUITests/DemoTourUITests/testWarmUp > xcodebuild-warm-up.log 2>&1 \
+            || grep -E "error:|Test Case" xcodebuild-warm-up.log || true
+          fi
+          echo "$(date +%s) record" >> "$RUNNER_TEMP/timing"
+          started="$(python3 -c 'import time; print(time.time())')"
+          echo "STARTED=$started" >> "$GITHUB_ENV"
+          xcrun simctl io "$SIM_UDID" recordVideo --codec h264 --force artifacts/video/demo-tour.mp4 > artifacts/record.log 2>&1 &
+          recorder=$!
+          sleep 2
+          set +e
+          xcodebuild test-without-building -xctestrun "$XCTESTRUN" -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -only-testing:"$test_id" > xcodebuild-demo.log 2>&1
+          status=$?
+          # SIGINT and wait, so the recorder writes a playable file.
+          kill -INT "$recorder"
+          wait "$recorder"
+          grep -E "Test Case|error:|SHELL_NOTE" xcodebuild-demo.log
+          exit $status
+
+      - name: Cut the recording and make a phone-size copy
+        if: always()
+        env:
+          WHICH: ${{ inputs.which }}
+        run: |
+          echo "$(date +%s) cut" >> "$RUNNER_TEMP/timing"
+          [ -f artifacts/video/demo-tour.mp4 ] || exit 0
+          # The swipe and self-hosted clips are kept whole: their marks are seconds apart and
+          # simctl's variable frame rate made the cut miss the swipe once.
+          if [ "$WHICH" != "swipe" ] && [ "$WHICH" != "selfhosted" ]; then
+            python3 ios-shell/ci/trim_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log "$STARTED" || true
+          fi
+          ls -la artifacts/video
+          python3 ios-shell/ci/check_video.py artifacts/video/demo-tour.mp4 xcodebuild-demo.log "${MIN_SECONDS:-30}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ios-shell-video-${{ github.run_id }}
+          path: artifacts/video/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Where the time went
+        if: always()
+        env:
+          JOB_NAME: ${{ github.job }}
+        run: |
+          echo "$(date +%s) end" >> "$RUNNER_TEMP/timing"
+          {
+            echo "### $JOB_NAME: seconds per step"
+            awk 'NR > 1 { printf "- %s: %d s\n", name, $1 - previous } { previous = $1; name = $2 }' "$RUNNER_TEMP/timing"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  real:
+    name: Record the real-backend journey (private)
+    if: github.repository == 'CopilotKit/OpenBot' && inputs.which != 'demo' && inputs.which != 'swipe' && inputs.which != 'selfhosted'
+    runs-on: macos-latest
+    timeout-minutes: 13
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Start the clock
+        run: echo "$(date +%s) start" > "$RUNNER_TEMP/timing"
+
+      - name: Boot a simulator in the background
+        run: |
+          picked="$(python3 ios-shell/ci/pick_simulator.py)"
+          udid="$(printf '%s' "$picked" | cut -f1)"
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          # Booting takes minutes on a fresh runner: it runs while the rest of the job does.
+          nohup bash -c 'xcrun simctl boot "$1" || true; xcrun simctl bootstatus "$1" -b \
+            && xcrun simctl spawn "$1" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true; \
+            xcrun simctl spawn "$1" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true; \
+            sleep 15; touch "$2"' boot "$udid" "$RUNNER_TEMP/simulator.ready" > "$RUNNER_TEMP/boot.log" 2>&1 &
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/xcodegen-dist
+          key: ios-shell-video-xcodegen-v1
+
+      - name: Generate the Xcode project
+        run: |
+          echo "$(date +%s) project" >> "$RUNNER_TEMP/timing"
+          if [ ! -x ~/xcodegen-dist/xcodegen/bin/xcodegen ]; then
+            mkdir -p ~/xcodegen-dist
+            curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" https://github.com/yonaskolb/XcodeGen/releases/latest/download/xcodegen.zip \
+              && unzip -q -o "$RUNNER_TEMP/xcodegen.zip" -d ~/xcodegen-dist || true
+          fi
+          if [ -x ~/xcodegen-dist/xcodegen/bin/xcodegen ]; then
+            (cd ios-shell && ~/xcodegen-dist/xcodegen/bin/xcodegen generate)
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
+            (cd ios-shell && xcodegen generate)
+          fi
+
+      - name: Decide the build
+        env:
+          GOOGLE_INPUT: ${{ inputs.real_google_sign_in }}
+        run: |
+          mkdir -p private-artifacts/video
+          # With the Google sign-in: a Release build, no hook. Otherwise the session-cookie hook (Debug).
+          if [ "$GOOGLE_INPUT" = "true" ]; then echo "CONFIGURATION=Release" >> "$GITHUB_ENV"; else echo "CONFIGURATION=Debug" >> "$GITHUB_ENV"; fi
+
+      # git's own id for the app's sources: hashFiles timed out on a slow runner.
+      - name: Work out the build cache key
+        id: dd-key-2
+        run: echo "tree=$(git rev-parse HEAD:ios-shell)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData-${{ env.CONFIGURATION }}
+          key: ios-shell-video-dd-${{ env.CONFIGURATION }}-${{ steps.dd-key-2.outputs.tree }}
+          restore-keys: ios-shell-video-dd-${{ env.CONFIGURATION }}-
+
+      - name: Build the app and its UI tests
+        timeout-minutes: 10
+        run: |
+          echo "$(date +%s) build" >> "$RUNNER_TEMP/timing"
+          set -o pipefail
+          # A Release build for tests reads its launch environment only with this flag (ShellConfig).
+          extra=()
+          if [ "$CONFIGURATION" = "Release" ]; then extra=(SWIFT_ACTIVE_COMPILATION_CONDITIONS=OPENBOT_TEST_ENVIRONMENT); fi
+          xcodebuild build-for-testing -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration "$CONFIGURATION" \
+            -destination "generic/platform=iOS Simulator" -derivedDataPath "DerivedData-$CONFIGURATION" CODE_SIGNING_ALLOWED=NO \
+            "${extra[@]}" \
+            2>&1 | tee xcodebuild-build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build.log
+
+      - name: Record the journey
+        timeout-minutes: 10
+        env:
+          TEST_RUNNER_OPENBOT_SHELL_VIDEO_MODE: "1"
+          TEST_RUNNER_OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
+          TEST_RUNNER_OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}
+          TEST_RUNNER_OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
+          TEST_RUNNER_OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
+          REAL_SIGN_OUT: ${{ inputs.real_sign_out }}
+        run: |
+          for _ in $(seq 1 300); do [ -f "$RUNNER_TEMP/simulator.ready" ] && break; sleep 1; done
+          [ -f "$RUNNER_TEMP/simulator.ready" ] || { cat "$RUNNER_TEMP/boot.log"; exit 1; }
+          echo "$(date +%s) record" >> "$RUNNER_TEMP/timing"
+          if [ "$REAL_SIGN_OUT" = "true" ]; then export TEST_RUNNER_OPENBOT_SHELL_REAL_SIGN_OUT=1; fi
+          if [ "$CONFIGURATION" = "Release" ]; then
+            # Fresh install, no hook: the sign-in a person does today.
+            export TEST_RUNNER_OPENBOT_SHELL_RUN_GOOGLE_WEBVIEW=true
+            xcrun simctl uninstall "$SIM_UDID" ai.openbot.shell || true
+            target=(-xctestrun "$(ls DerivedData-Release/Build/Products/*.xctestrun | head -1)"
+                    -only-testing:OpenBotShellUITests/RealBackendUITests/testRealGoogleSignInInWebViewAndJourney)
+          else
+            target=(-project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration Debug
+                    -derivedDataPath DerivedData-Debug CODE_SIGNING_ALLOWED=NO
+                    -only-testing:OpenBotShellUITests/RealBackendDebugUITests/testRealSignedInJourneyWithSessionCookie)
+          fi
+          started="$(python3 -c 'import time; print(time.time())')"
+          echo "STARTED=$started" >> "$GITHUB_ENV"
+          xcrun simctl io "$SIM_UDID" recordVideo --codec h264 --force private-artifacts/video/real-journey.mp4 > record.log 2>&1 &
+          recorder=$!
+          sleep 2
+          set +e
+          xcodebuild test-without-building "${target[@]}" -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -resultBundlePath RealJourney.xcresult > xcodebuild-real.log 2>&1
+          status=$?
+          kill -INT "$recorder"
+          wait "$recorder"
+          # Notes only: never the account's data or the secrets.
+          grep -E "Test Case|error: -\[|SHELL_NOTE" xcodebuild-real.log | grep -v "label:" || true
+          xcrun xcresulttool export attachments --path RealJourney.xcresult --output-path private-artifacts/attachments || true
+          exit $status
+
+      - name: Cut the recording and make a phone-size copy
+        if: always()
+        run: |
+          echo "$(date +%s) cut" >> "$RUNNER_TEMP/timing"
+          [ -f private-artifacts/video/real-journey.mp4 ] || exit 0
+          python3 ios-shell/ci/trim_video.py private-artifacts/video/real-journey.mp4 xcodebuild-real.log "$STARTED" || true
+          ls -la private-artifacts/video
+          python3 ios-shell/ci/check_video.py private-artifacts/video/real-journey.mp4 xcodebuild-real.log 30
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ios-shell-video-private-${{ github.run_id }}
+          path: private-artifacts/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Where the time went
+        if: always()
+        env:
+          JOB_NAME: ${{ github.job }}
+        run: |
+          echo "$(date +%s) end" >> "$RUNNER_TEMP/timing"
+          {
+            echo "### $JOB_NAME: seconds per step"
+            awk 'NR > 1 { printf "- %s: %d s\n", name, $1 - previous } { previous = $1; name = $2 }' "$RUNNER_TEMP/timing"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
