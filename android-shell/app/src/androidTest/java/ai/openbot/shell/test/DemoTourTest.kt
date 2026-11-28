@@ -58,7 +58,7 @@ class DemoTourTest : ShellTestBase() {
         pause(800)
         find("openbot_webview")?.swipe(Direction.DOWN, 0.6f)
         pause(1_000)
-        waitWebObject("Competitor pricing notes", 10_000)?.click()
+        tapWeb("Competitor pricing notes")
         check(waitPageText("What do our three closest competitors charge?", 20_000) || waitPageText("per-seat", 2_000), "demo: the conversation did not open")
         pause(2_000)
         dismissKeyboardIfUp()
@@ -69,7 +69,7 @@ class DemoTourTest : ShellTestBase() {
 
         // Bots: open one.
         tab(Tab.BOTS)?.click()
-        waitWebObject("Research Bot", 20_000)?.click()
+        tapWeb("Research Bot", 20_000)
         pause(2_500)
         dismissKeyboardIfUp()
 
@@ -78,7 +78,7 @@ class DemoTourTest : ShellTestBase() {
         pause(1_500)
         (device.findObject(By.desc("Account")) ?: waitWebObject("Account", 10_000))?.click()
         pause(1_500)
-        waitWebObject("Sign out", 10_000)?.click()
+        tapWeb("Sign out")
         check(waitFor("sign_in_button", 20_000) != null, "demo: Sign out did not return to the native sign-in")
         pause(2_000)
 

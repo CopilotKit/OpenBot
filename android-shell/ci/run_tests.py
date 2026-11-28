@@ -159,8 +159,10 @@ class Recorder:
             listing = os.path.join(dest_dir, "segments.txt")
             with open(listing, "w") as f:
                 f.writelines(f"file '{os.path.basename(p)}'\n" for p in local)
+            # Re-encoded: screenrecord's segments do not join cleanly with stream copy.
             subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing,
-                            "-c", "copy", dest], cwd=dest_dir)
+                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-an", dest],
+                           cwd=dest_dir)
             for p in local + [listing]:
                 if os.path.exists(p):
                     os.remove(p)
@@ -207,7 +209,7 @@ def trim_and_copy(path, recording_started, instrument_log):
         end = max(e for e in ends) - recording_started + 1.0
         if end > start + 5:
             trimmed = path[:-4] + ".trimmed.mp4"
-            result = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start:.2f}", "-i", path, "-t",
+            result = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-ss", f"{start:.2f}", "-t",
                                      f"{end - start:.2f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                                      "-pix_fmt", "yuv420p", "-an", trimmed])
             if result.returncode == 0 and os.path.exists(trimmed):

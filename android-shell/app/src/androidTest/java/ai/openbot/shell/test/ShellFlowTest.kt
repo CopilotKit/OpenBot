@@ -148,9 +148,7 @@ class ShellFlowTest : ShellTestBase() {
         assertNoWebNavigation("conversations")
         check(accountButton() != null, "no Account button on Conversations")
 
-        val row = waitWebObject("Quarterly forecast", 10_000)
-        check(row != null, "no 'Quarterly forecast' row to tap")
-        row?.click()
+        check(tapWeb("Quarterly forecast"), "no 'Quarterly forecast' row to tap")
         val opened = waitPageText("Here is the first draft.", 25_000) || waitPageText("Can you draft the quarterly forecast?", 2_000)
         check(opened, "the conversation did not open")
         sleep(1_000)
@@ -245,11 +243,9 @@ class ShellFlowTest : ShellTestBase() {
         val account = device.wait(androidx.test.uiautomator.Until.findObject(By.desc("Account")), 10_000) ?: accountButton()
         check(account != null, "no Account button on Home")
         account?.click()
-        val signOut = waitWebObject("Sign out", 10_000)
         sleep(1_000)
         screenshot("1-account-menu")
-        if (!check(signOut != null, "the Account menu has no Sign out")) return
-        signOut!!.click()
+        if (!check(tapWeb("Sign out"), "the Account menu has no Sign out")) return
         check(waitFor("sign_in_button", 20_000) != null, "Sign out did not bring back the native sign-in; ${debugState()}")
         check(tabGone(5_000), "the bottom bar stayed after Sign out")
         sleep(1_000)

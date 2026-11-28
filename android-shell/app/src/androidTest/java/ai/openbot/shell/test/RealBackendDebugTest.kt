@@ -314,9 +314,7 @@ class RealBackendDebugTest : ShellTestBase() {
         sleep(5_000)
         screenshot("j5-bots")
         note("bots: ${debugState()}")
-        val bot = waitWebObject("General Assistant", 8_000)
-        if (bot != null) {
-            bot.click()
+        if (tapWeb("General Assistant", 8_000)) {
             sleep(5_000)
             dismissKeyboardIfUp()
             screenshot("j6-a-bot")

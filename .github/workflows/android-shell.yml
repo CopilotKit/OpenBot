@@ -70,10 +70,16 @@ jobs:
         working-directory: android-shell
         run: |
           mkdir -p "$ARTIFACTS" "$PRIVATE_ARTIFACTS"
-          ./gradlew --no-daemon --stacktrace \
-            assembleDebug assembleDebugAndroidTest assembleRelease assembleReleaseTest \
-            testDebugUnitTest lint lintRelease 2>&1 | tee "$ARTIFACTS/gradle.log"
-          status=${PIPESTATUS[0]}
+          # Maven Central answers 429 now and then: up to three tries.
+          for attempt in 1 2 3; do
+            ./gradlew --no-daemon --stacktrace \
+              assembleDebug assembleDebugAndroidTest assembleRelease assembleReleaseTest \
+              testDebugUnitTest lint lintRelease 2>&1 | tee "$ARTIFACTS/gradle.log"
+            status=${PIPESTATUS[0]}
+            if [ "$status" = 0 ] || ! grep -q "Could not resolve\|status code 429\|Could not GET" "$ARTIFACTS/gradle.log"; then break; fi
+            echo "dependency download failed (attempt $attempt); retrying in 30 s"
+            sleep 30
+          done
           mkdir -p "$ARTIFACTS/lint"
           cp app/build/reports/lint-results-*.{html,xml,txt} "$ARTIFACTS/lint/" 2>/dev/null || true
           cp -r app/build/reports/tests "$ARTIFACTS/unit-tests" 2>/dev/null || true

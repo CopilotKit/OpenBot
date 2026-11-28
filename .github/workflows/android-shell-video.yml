@@ -72,8 +72,14 @@ jobs:
           mkdir -p "$ARTIFACTS" "$PRIVATE_ARTIFACTS"
           tasks="assembleDebug assembleDebugAndroidTest"
           if [ "$GOOGLE_SIGN_IN" = "true" ]; then tasks="$tasks assembleReleaseTest"; fi
-          # shellcheck disable=SC2086
-          ./gradlew --no-daemon $tasks
+          # Maven Central answers 429 now and then: up to three tries.
+          for attempt in 1 2 3; do
+            # shellcheck disable=SC2086
+            if ./gradlew --no-daemon $tasks; then exit 0; fi
+            echo "build failed (attempt $attempt); retrying in 30 s"
+            sleep 30
+          done
+          exit 1
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         if: env.VIDEO_PLAN != 'real'

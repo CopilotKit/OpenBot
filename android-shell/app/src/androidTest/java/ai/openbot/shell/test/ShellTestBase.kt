@@ -259,6 +259,7 @@ abstract class ShellTestBase {
     fun composer(): UiObject2? {
         val web = find("openbot_webview") ?: return null
         return web.findObject(By.clazz("android.widget.EditText"))
+            ?: web.findObject(By.desc("Message"))
             ?: web.findObject(By.text("Ask anything")) ?: web.findObject(By.desc("Ask anything"))
             ?: web.findObject(By.textStartsWith("Message ")) ?: web.findObject(By.descStartsWith("Message "))
     }
@@ -292,6 +293,47 @@ abstract class ShellTestBase {
             sleep(500)
         } while (SystemClock.uptimeMillis() < deadline)
         return null
+    }
+
+    /**
+     * Taps the page element whose text starts with `text` (the smallest one, so a row's title, not
+     * the whole list): its place from the page (debug builds), else the accessibility tree's node.
+     */
+    fun tapWeb(text: String, timeoutMs: Long = 10_000): Boolean {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        do {
+            if (variant == "debug") {
+                val raw = pageString(
+                    "(function(t){var best=null;var all=document.querySelectorAll('a,button,[role=button],[role=link],[role=menuitem],li,div,span,p,h1,h2,h3');" +
+                        "for(var i=0;i<all.length;i++){var e=all[i];var s=(e.innerText||e.getAttribute('aria-label')||'').trim();" +
+                        "if(s===t||s.indexOf(t)===0){var r=e.getBoundingClientRect();" +
+                        "if(r.width>0&&r.height>0&&r.bottom>0&&r.top<window.innerHeight&&(!best||r.width*r.height<best.a))" +
+                        "best={a:r.width*r.height,l:r.left,t:r.top,r:r.right,b:r.bottom};}}" +
+                        "if(!best)return 'null';best.d=window.devicePixelRatio;return JSON.stringify(best);})(" +
+                        org.json.JSONObject.quote(text) + ")",
+                )
+                val web = bounds(find("openbot_webview"))
+                if (raw != "null" && raw.isNotEmpty() && web != null) {
+                    try {
+                        val json = org.json.JSONObject(raw)
+                        val d = json.optDouble("d", 1.0)
+                        val x = web.left + (json.optDouble("l") + json.optDouble("r")) / 2 * d
+                        val y = web.top + (json.optDouble("t") + json.optDouble("b")) / 2 * d
+                        device.click(x.toInt(), y.toInt())
+                        return true
+                    } catch (error: Exception) {
+                        // fall through to the accessibility tree
+                    }
+                }
+            }
+            webObject(text)?.let {
+                it.click()
+                return true
+            }
+            sleep(400)
+        } while (SystemClock.uptimeMillis() < deadline)
+        note("tapWeb: no '$text' to tap")
+        return false
     }
 
     /** Taps the message box near its top (where the text line is). */
