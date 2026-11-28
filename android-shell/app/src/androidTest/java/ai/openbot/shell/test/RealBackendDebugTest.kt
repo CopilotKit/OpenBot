@@ -1,0 +1,365 @@
+package ai.openbot.shell.test
+
+import android.net.Uri
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.UiObject2
+import org.junit.Test
+import org.junit.runner.RunWith
+
+/**
+ * Suite 1, the parts that need a DEBUG hook: the session-cookie journey on the real backend, the
+ * hosted sign-in opened in a Custom Tab, and the bare WebView on my.open.bot. A real account's
+ * screenshots go only to the private artifact (android-shell/ci/collect.py).
+ */
+@RunWith(AndroidJUnit4::class)
+class RealBackendDebugTest : ShellTestBase() {
+    private val hostedSignIn = "$PRODUCTION/api/auth/hosted/sign-in?returnTo=%2F"
+
+    /** The bare WebView (plain mode) on my.open.bot: does the hosted web app load at all. */
+    @Test
+    fun testLoadsHostedWebApp() {
+        requireProduction()
+        launch(null, "hosted", plain = true)
+        check(waitFor("openbot_webview", 30_000) != null, "the web view never appeared")
+        var content = false
+        for (i in 0 until 30) {
+            if (exists("offline_lock")) break
+            if (pageText().trim().isNotEmpty()) {
+                content = true
+                break
+            }
+            sleep(2_000)
+        }
+        if (exists("offline_lock")) {
+            screenshot("hosted-lock")
+            skip("my.open.bot did not load on this runner; the shell showed its lock screen")
+        }
+        sleep(8_000)
+        screenshot("hosted")
+        note("hosted web app: title '${pageString("document.title")}', path ${pageString("location.pathname")}")
+        check(content, "the web view showed no web content within 60 s")
+    }
+
+    /** Texts of everything another app (the Custom Tab) shows, lower-cased. */
+    private fun tabText(browser: String): String =
+        device.findObjects(By.pkg(browser)).flatMap { listOfNotNull(it.text, it.contentDescription) }.joinToString("\n").lowercase()
+
+    private fun tabUrlHost(browser: String): String {
+        val bar = device.findObject(By.res(browser, "url_bar")) ?: device.findObject(By.res(browser, "title_url_container"))
+        val text = bar?.text ?: return "(no url bar)"
+        val host = Uri.parse(if (text.contains("://")) text else "https://$text").host
+        return host ?: "(unparsed)"
+    }
+
+    private fun findInTab(browser: String, text: String, timeoutMs: Long): UiObject2? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        do {
+            dismissChromeScreens()
+            val found = device.findObject(By.pkg(browser).textContains(text)) ?: device.findObject(By.pkg(browser).descContains(text))
+            if (found != null) return found
+            sleep(500)
+        } while (System.currentTimeMillis() < deadline)
+        return null
+    }
+
+    /** Sign in with the debug hook that opens the hosted sign-in in a Custom Tab. Returns the browser package. */
+    private fun openHostedSignInInTab(moment: String): String? {
+        launch(null, moment, extras = mapOf("openbot.debug_tab_url" to hostedSignIn))
+        val button = waitFor("sign_in_button", 15_000) ?: return null
+        button.click()
+        val deadline = System.currentTimeMillis() + 30_000
+        while (System.currentTimeMillis() < deadline) {
+            dismissChromeScreens()
+            val other = foregroundPackage()
+            if (other.isNotEmpty() && other != pkg) return other
+            sleep(500)
+        }
+        return null
+    }
+
+    /** The hosted sign-in in a Custom Tab, without credentials: what is reachable there. */
+    @Test
+    fun testRealSignInPathInCustomTab() {
+        requireProduction()
+        val browser = openHostedSignInInTab("tab") ?: run {
+            screenshot("no-custom-tab")
+            check(false, "no Custom Tab opened")
+            return
+        }
+        note("Custom Tab browser: $browser")
+        val google = findInTab(browser, "Google", 30_000)
+        sleep(3_000)
+        screenshot("1-custom-tab-identity-provider")
+        val text = tabText(browser)
+        for (name in listOf("github", "google", "microsoft", "email")) note("identity provider in the Custom Tab offers $name: ${text.contains(name)}")
+        note("the Custom Tab is on ${tabUrlHost(browser)}")
+        if (google == null) {
+            note("no Google button reachable in the Custom Tab")
+            return
+        }
+        google.click()
+        sleep(10_000)
+        screenshot("2-google-in-custom-tab")
+        val page = tabText(browser)
+        note("Google in the Custom Tab: email page ${page.contains("email or phone")}, refusal ${page.contains("disallowed_useragent") || page.contains("may not be secure")}; on ${tabUrlHost(browser)}")
+        device.pressBack()
+        sleep(1_500)
+        device.pressBack()
+        check(waitFor("sign_in_button", 15_000) != null, "closing the Custom Tab did not return to the native sign-in")
+        check(waitForState("signIn=idle", 5_000), "closing the Custom Tab did not end the sign-in: ${debugState()}")
+    }
+
+    /**
+     * The real sign-in with Google in a Custom Tab, with the throwaway account. Runs only when the
+     * workflow is started by hand with google_sign_in on: each attempt sends a prompt to the
+     * account's phone. One attempt; stops at any CAPTCHA or other challenge; never changes the user
+     * agent. Passes only when the tab ends on OpenBot signed in; otherwise skipped with the reason.
+     */
+    @Test
+    fun testRealGoogleSignInInCustomTab() {
+        if (args.getString("google_sign_in") != "true") {
+            skip("runs only when the workflow is started by hand with google_sign_in on: each attempt sends a sign-in prompt to the account's phone")
+        }
+        val names = listOf("openbot_google_email", "openbot_google_password", "openbot_google_totp_secret")
+        note("secret-inputs: ${if (names.all { secret(it) != null }) "present" else "absent"}")
+        val email = secret(names[0]) ?: skip("the Google email secret is not set")
+        val password = secret(names[1]) ?: skip("the Google password secret is not set")
+        val totpSecret = secret(names[2])?.let { Totp.base32Decode(it) } ?: skip("the TOTP secret is not set or not base32")
+        requireProduction()
+        note("video-mark start ${System.currentTimeMillis() / 1000.0}")
+        try {
+            googleSignIn(email, password, totpSecret)
+        } finally {
+            note("video-mark end ${System.currentTimeMillis() / 1000.0}")
+        }
+    }
+
+    private fun googleSignIn(email: String, password: String, totpSecret: ByteArray) {
+        val browser = openHostedSignInInTab("google-tab") ?: skip("no Custom Tab opened")
+        val google = findInTab(browser, "Google", 30_000) ?: skip("no Google button in the Custom Tab")
+        screenshot("1-identity-provider")
+        google.click()
+        sleep(8_000)
+        screenshot("2-google")
+
+        fun stopIfChallenged(step: String, allowSecondStep: Boolean = false) {
+            val text = tabText(browser)
+            val signs = mutableListOf("captcha", "unusual activity", "not a robot", "type the text you hear or see",
+                "this browser or app may not be secure", "couldn’t sign you in", "couldn't sign you in",
+                "try again later", "suspicious", "disallowed_useragent")
+            if (!(allowSecondStep && text.contains("2-step verification"))) {
+                signs += listOf("verify it’s you", "verify it's you", "confirm it’s you", "confirm it's you", "check your phone")
+            }
+            val sign = signs.firstOrNull { text.contains(it) }
+            if (sign != null) {
+                screenshot("challenge-at-${step.replace(' ', '-')}")
+                note("challenged by Google at $step (page says '$sign')")
+                skip("challenged by Google at $step")
+            }
+        }
+
+        fun field(timeoutMs: Long): UiObject2? {
+            val deadline = System.currentTimeMillis() + timeoutMs
+            do {
+                val match = device.findObjects(By.pkg(browser).clazz("android.widget.EditText")).firstOrNull { it.isEnabled }
+                if (match != null) return match
+                sleep(500)
+            } while (System.currentTimeMillis() < deadline)
+            return null
+        }
+
+        /** Sets the value through accessibility (nothing is typed into a log), then checks its length. */
+        fun fill(target: UiObject2, value: String, step: String, secure: Boolean = false): Boolean {
+            target.click()
+            sleep(800)
+            target.text = value
+            sleep(1_000)
+            val now = target.text ?: ""
+            // A password field reads back masked (or empty): only that it holds something is checked.
+            val ok = if (secure) now.isNotEmpty() else now.length == value.length
+            note("$step: field filled $ok")
+            return ok
+        }
+
+        fun next() {
+            val button = device.findObject(By.pkg(browser).text("Next")) ?: device.findObject(By.pkg(browser).desc("Next"))
+            if (button != null) button.click() else device.pressEnter()
+        }
+
+        stopIfChallenged("email page")
+        val emailField = field(15_000) ?: skip("no email field reachable on Google's page")
+        if (!fill(emailField, email, "email")) skip("could not enter the email")
+        next()
+        sleep(8_000)
+        screenshot("3-after-email")
+        stopIfChallenged("after email")
+
+        val passwordField = field(15_000) ?: run {
+            screenshot("no-password-field")
+            skip("no password field after the email step")
+        }
+        if (!fill(passwordField, password, "password", secure = true)) skip("could not enter the password")
+        next()
+        sleep(10_000)
+        screenshot("4-after-password")
+        stopIfChallenged("after password", allowSecondStep = true)
+
+        var text = tabText(browser)
+        val codePage = { t: String -> t.contains("google authenticator") || t.contains("authenticator app") || t.contains("enter code") }
+        if (text.contains("2-step verification") && !codePage(text)) {
+            val another = findInTab(browser, "Try another way", 8_000) ?: run {
+                screenshot("no-try-another-way")
+                skip("the 2-Step page offered no 'Try another way'")
+            }
+            another.click()
+            sleep(6_000)
+            screenshot("5-other-ways")
+            val options = tabText(browser)
+            note("other ways offered: authenticator ${options.contains("authenticator")}, backup codes ${options.contains("backup code")}, text message ${options.contains("text message") || options.contains("sms")}")
+            val option = findInTab(browser, "Authenticator", 5_000) ?: skip("the authenticator app is not among Google's other ways")
+            option.click()
+            sleep(6_000)
+            screenshot("6-authenticator-page")
+            stopIfChallenged("authenticator page", allowSecondStep = true)
+            text = tabText(browser)
+        }
+        if (codePage(text) || text.contains("2-step verification")) {
+            val codeField = field(10_000) ?: skip("2-Step Verification page without a code field reachable")
+            val code = Totp.freshCode(totpSecret)
+            if (!fill(codeField, code, "code")) skip("could not enter the code")
+            next()
+            sleep(12_000)
+            screenshot("7-after-code")
+            stopIfChallenged("after code")
+            val after = tabText(browser)
+            note("the authenticator code was accepted: ${!after.contains("wrong code") && !after.contains("2-step verification")}")
+        } else {
+            note("no authenticator page after the password")
+        }
+        sleep(8_000)
+        screenshot("8-where-the-tab-ended")
+        val ended = tabText(browser)
+        val host = tabUrlHost(browser)
+        val landed = host == "my.open.bot" && (ended.contains("start a conversation") || ended.contains("ask anything") || ended.contains("message"))
+        note("the Custom Tab ended on $host; OpenBot signed in there: $landed; OpenBot sign-in page ${ended.contains("sign in to openbot")}")
+        if (!landed) skip("Google's sign-in in the Custom Tab did not end on OpenBot signed in (ended on $host)")
+    }
+
+    // The signed-in journey on the real backend. --------------------------------------------------------
+
+    /**
+     * The signed-in journey with the session cookie the secret holds (debug hook). Notes hold counts
+     * and yes/no only: the account's data stays in the private screenshots. Does not sign out.
+     */
+    @Test
+    fun testRealSignedInJourneyWithSessionCookie() {
+        val session = secret("openbot_test_session")
+        note("secret-inputs: ${if (session == null) "absent" else "present"}")
+        if (session == null) skip("OPENBOT_SHELL_TEST_SESSION is not set")
+        requireProduction()
+        note("video-mark start ${System.currentTimeMillis() / 1000.0}")
+        launch(null, "session", extras = mapOf("openbot.test_session_cookie" to session))
+        if (waitForTab(Tab.HOME, 30_000) == null) {
+            screenshot("no-tabs")
+            check(false, "the session cookie did not reach the tabs; state ${debugState()}")
+            return
+        }
+        sleep(6_000)
+        if (exists("sign_in_button") || pageText().contains("Sign in to OpenBot Cloud")) {
+            screenshot("session-rejected")
+            check(false, "production rejected the session cookie (it may be stale or copied wrong)")
+            return
+        }
+        val box = device.wait(androidx.test.uiautomator.Until.findObject(By.clazz("android.widget.EditText").pkg(pkg)), 30_000)
+        check(box != null, "no message box on Home")
+        sleep(2_000)
+        screenshot("j1-home")
+        assertWebNavigationNote("home")
+
+        // One real message, typed with the software keyboard, and the reply streaming in.
+        box?.click()
+        val keyboard = waitKeyboard(true, 8_000)
+        note("software keyboard shown for the message: $keyboard")
+        shell("input text Say%shello%sin%sthree%swords.")
+        sleep(1_000)
+        screenshot("j2-message-typed")
+        val before = pageText().lines().map { it.trim() }.toSet()
+        val send = device.findObject(By.desc("Send message")) ?: device.findObject(By.text("Send message"))
+        if (send != null) send.click() else device.pressEnter()
+        val lengths = mutableListOf<Int>()
+        val started = System.currentTimeMillis()
+        while (System.currentTimeMillis() - started < 60_000) {
+            sleep(3_000)
+            val fresh = pageText().lines().map { it.trim() }.filter { it.isNotEmpty() && it !in before && !it.contains("Say hello in three words") }
+            lengths.add(fresh.maxOfOrNull { it.length } ?: 0)
+            if (lengths.size == 2) screenshot("j3-reply-streaming")
+            if (lengths.size >= 4 && lengths.takeLast(3).toSet().size == 1 && lengths.last() > 0) break
+        }
+        val grew = lengths.zipWithNext().any { (a, b) -> a in 1 until b }
+        note("reply: longest new line by 3 s step $lengths; grew while shown (streaming) $grew; after ${(System.currentTimeMillis() - started) / 1000} s")
+        check(lengths.any { it > 0 }, "no reply appeared within 60 s")
+        sleep(3_000)
+        screenshot("j4-reply")
+        dismissKeyboardIfUp()
+        note("after sending: ${debugState()}")
+
+        // Bots, a Bot.
+        tab(Tab.BOTS)?.click()
+        sleep(5_000)
+        screenshot("j5-bots")
+        note("bots: ${debugState()}")
+        val bot = waitWebObject("General Assistant", 8_000)
+        if (bot != null) {
+            bot.click()
+            sleep(5_000)
+            dismissKeyboardIfUp()
+            screenshot("j6-a-bot")
+        } else {
+            note("no 'General Assistant' Bot on this account's Bots page")
+        }
+
+        // Conversations: production has no /conversations yet.
+        tab(Tab.CONVERSATIONS)?.click()
+        sleep(6_000)
+        screenshot("j7-conversations-tab")
+        note("conversations tab: ${debugState()}; page says not found ${pageText().contains("Not found") || pageText().contains("404")}")
+        assertWebNavigationNote("conversations")
+
+        tab(Tab.HOME)?.click()
+        sleep(3_000)
+        // Background for 40 s, then back.
+        device.pressHome()
+        sleep(40_000)
+        bringBack()
+        sleep(3_000)
+        screenshot("j8-back-from-background")
+        tab(Tab.HOME)?.click()
+        check(device.wait(androidx.test.uiautomator.Until.findObject(By.clazz("android.widget.EditText").pkg(pkg)), 20_000) != null, "Home did not come back after the background")
+        note("after background: ${debugState()}")
+        // Let the cookie store reach the disk before the next test kills the process.
+        device.pressHome()
+        sleep(4_000)
+    }
+
+    /** Runs right after the journey, in a new process: killed and opened again, straight to the tabs. */
+    @Test
+    fun testRealSignedInJourneyWithSessionCookie_2_relaunch() {
+        if (secret("openbot_test_session") == null) skip("OPENBOT_SHELL_TEST_SESSION is not set")
+        try {
+            launch(null, "relaunch", reset = false)
+            check(waitForTab(Tab.HOME, 20_000) != null, "a cold relaunch did not go straight to the tabs; ${debugState()}")
+            check(!exists("sign_in_button"), "a cold relaunch showed the sign-in screen")
+            sleep(6_000)
+            screenshot("j9-relaunched")
+            note("relaunched: ${debugState()}")
+        } finally {
+            note("video-mark end ${System.currentTimeMillis() / 1000.0}")
+        }
+    }
+
+    private fun assertWebNavigationNote(moment: String) {
+        val toggle = pageString("String(!!document.querySelector('[data-sidebar=\"trigger\"],[aria-label=\"Toggle Sidebar\"]'))")
+        note("$moment: the web app's own sidebar toggle is drawn (production has no shell mode yet): $toggle")
+    }
+}

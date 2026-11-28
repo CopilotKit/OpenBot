@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Covers the whole app while OpenBot cannot be reached. Swallows every touch. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?android:attr/colorBackground"
+    android:clickable="true"
+    android:fillViewport="true"
+    android:focusable="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingHorizontal="32dp"
+        android:paddingVertical="40dp">
+
+        <ImageView
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginBottom="20dp"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_cloud_off"
+            app:tint="@color/ink_secondary"
+            xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+        <TextView
+            android:id="@+id/offline_lock_heading"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:accessibilityHeading="true"
+            android:gravity="center"
+            android:maxWidth="480dp"
+            android:text="@string/lock_heading"
+            android:textAppearance="?attr/textAppearanceTitleLarge"
+            android:textColor="@color/ink" />
+
+        <TextView
+            android:id="@+id/offline_lock_message"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center"
+            android:maxWidth="480dp"
+            android:text="@string/lock_message"
+            android:textAppearance="?attr/textAppearanceBodyLarge"
+            android:textColor="@color/ink_secondary" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/retry_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:minHeight="52dp"
+            android:paddingHorizontal="32dp"
+            android:text="@string/lock_retry"
+            android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/lock_need_help"
+                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="@color/ink_secondary" />
+
+            <TextView
+                android:id="@+id/support_email"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:minHeight="48dp"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="4dp"
+                android:text="@string/support_address"
+                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="@color/ink" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>
