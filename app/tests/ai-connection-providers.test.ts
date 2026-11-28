@@ -57,6 +57,7 @@ test("Settings lists the setup window's providers, in its order and words", () =
     "google",
     "xai",
     "trustedrouter",
+    "privatemode",
     "openai-compatible",
   ]);
   expect<unknown>(

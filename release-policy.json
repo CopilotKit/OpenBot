@@ -1,12 +1,13 @@
 {
   "$schema": "./shared/release-policy.schema.json",
-  "version": "v1.2.1",
+  "version": "v1.2.2",
   "compatibility": {
     "launcherApi": 1,
     "configSchema": 1,
     "extensionApi": 1,
     "database": {
       "from": [
+        "0188_audit_events_redacted_index",
         "0182_withdraw_default_source_imports",
         "0181_organization_ai_sign_in_credentials",
         "0164_schedules_held_by_move",
@@ -21,13 +22,14 @@
         "0082_routine_goal",
         "0077_channel_opening"
       ],
-      "to": "0188_audit_events_redacted_index",
+      "to": "0193_ai_connections_privatemode",
       "rollbackCompatible": false
     },
     "intelligenceCapabilities": []
   },
   "upgrade": {
     "fromVersions": [
+      "v1.2.1",
       "v1.2.0",
       "v1.2.0-rc.7",
       "v1.2.0-rc.6",

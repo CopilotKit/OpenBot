@@ -7,6 +7,8 @@ import {
 } from "@/lib/ai-connection/paths";
 import {
   GOOGLE_SIGN_IN_ENDED,
+  PROVIDER_RETIRED,
+  providerRetired,
   signInRetired,
 } from "@/lib/ai-connection/providers";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
@@ -48,6 +50,10 @@ export function chooseDefaultPath(): string {
  * connection is connected but can't run (`stopped`). The refusal's own words are never matched: the
  * server's sentence varies by connection, and an OpenBot older than several connections sends no
  * `stopped`, which draws nothing here.
+ *
+ * A connection whose provider OpenBot no longer offers (`provider-retired`) has nothing to
+ * reconnect: its way on is Remove it, to the same page, where it is disconnected and another AI
+ * connected.
  *
  * Reconnect is a whole page load into Settings → AI providers, as the other ways to fix an AI from a conversation
  * are (add-model-key-link.tsx). It is left out for a member whose runs use the organization's
@@ -91,6 +97,8 @@ export function StoppedConnectionNotice({
   if (!stopped) return null;
   // A Google sign-in OpenBot no longer offers: the way on opens Google Gemini's API key directly.
   const retired = signInRetired(stopped);
+  // A provider OpenBot no longer offers: nothing reconnects it. Its page is where it is removed.
+  const gone = providerRetired(stopped);
   const canFix =
     owner === "personal" ||
     (owner === "organization" && isOrganizationAdmin(me?.role));
@@ -116,7 +124,9 @@ export function StoppedConnectionNotice({
             {stopped.connection
               ? retired
                 ? GOOGLE_SIGN_IN_ENDED.action
-                : "Reconnect"
+                : gone
+                  ? PROVIDER_RETIRED.remove
+                  : "Reconnect"
               : "Choose a default"}
           </a>
         ) : null}

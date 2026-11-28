@@ -45,7 +45,9 @@ import {
   AI_PROVIDERS,
   GOOGLE_SIGN_IN_ENDED,
   isSignIn,
+  PROVIDER_RETIRED,
   providerById,
+  providerRetired,
   signInRetired,
 } from "@/lib/ai-connection/providers";
 import {
@@ -269,6 +271,8 @@ function ProviderDetails({
   const name = connectionName(entry);
   const described = describeConnection(entry, owner);
   const retired = signInRetired(entry);
+  // A provider OpenBot no longer offers: nothing changes it or makes it the default; it is removed.
+  const gone = providerRetired(entry);
 
   /**
    * After a removal, back to the list. A person whose runs now have no AI, where one is required, is
@@ -290,9 +294,11 @@ function ProviderDetails({
     <PageShell
       backButton={back}
       description={
-        entry.isDefault
-          ? "Bots use it when nobody picked a model. OpenBot keeps the key or sign-in and never shows it."
-          : "Bots use it when someone picks one of its models. OpenBot keeps the key or sign-in and never shows it."
+        gone
+          ? "OpenBot keeps the key or sign-in and never shows it."
+          : entry.isDefault
+            ? "Bots use it when nobody picked a model. OpenBot keeps the key or sign-in and never shows it."
+            : "Bots use it when someone picks one of its models. OpenBot keeps the key or sign-in and never shows it."
       }
       title={name}
     >
@@ -333,6 +339,41 @@ function ProviderDetails({
             </ItemActions>
           </Item>
         </PageRows>
+      ) : gone ? (
+        /*
+         * A provider OpenBot no longer offers: the server's words, and the way on, connecting another
+         * AI. The organization's default is changed in place to it, as Change does (inside OpenBot
+         * Desktop that is the only way off the default); any other is connected beside it, and
+         * Disconnect, below, removes this one.
+         */
+        <PageRows>
+          <Item role="alert" size="sm">
+            <ItemMedia variant="icon">
+              <IconAlertTriangle className="text-destructive" />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>{PROVIDER_RETIRED.title}</ItemTitle>
+              <ItemDescription className="line-clamp-none">
+                {entry.problem?.detail}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Button
+                render={(props) => (
+                  <Link
+                    {...(changesInPlace
+                      ? paths.change(entry.id, scope)
+                      : paths.connect(scope))}
+                    {...props}
+                  />
+                )}
+                size="sm"
+              >
+                {PROVIDER_RETIRED.connect}
+              </Button>
+            </ItemActions>
+          </Item>
+        </PageRows>
       ) : entry.ready ? null : (
         <p className="text-destructive text-sm" role="alert">
           {entry.problem?.detail}
@@ -355,8 +396,11 @@ function ProviderDetails({
               </Item>
             </Fragment>
           ))}
-          {/* A retired sign-in's way on is the notice's button above: it is the change. */}
-          {retired ? null : (
+          {/*
+           * A retired sign-in's way on is the notice's button above: it is the change. A retired
+           * provider has no change at all.
+           */}
+          {retired || gone ? null : (
             <>
               {described?.details.length ? <Separator /> : null}
               <Item
@@ -385,7 +429,7 @@ function ProviderDetails({
           )}
         </PageRows>
       </PageSection>
-      {entry.isDefault ? null : (
+      {entry.isDefault || gone ? null : (
         <PageSection title="Default">
           <PageRows>
             <Item size="sm">
@@ -614,7 +658,9 @@ export function ChangeProviderPage({
   // Desktop's sentence when it couldn't finish after the switch: shown here, not lost on the way.
   const [done, setDone] = useState<Connected | null>(null);
   const back = {
-    label: nameFromAddress(id),
+    // A provider this app doesn't know has no name of its own: the connection's, as its page says.
+    label:
+      providerById(id) || !entry ? nameFromAddress(id) : connectionName(entry),
     linkProps: paths.provider(id, scope),
   };
   const name = entry ? connectionName(entry) : nameFromAddress(id);
@@ -658,6 +704,26 @@ export function ChangeProviderPage({
       </PageShell>
     );
   const list = providers.list.data;
+  // A provider OpenBot no longer offers can't be connected again: another AI goes beside it.
+  if (providerRetired(entry) && !changesInPlace)
+    return (
+      <PageShell backButton={back} title={name}>
+        <PageEmpty
+          action={
+            <Button
+              render={(props) => <Link {...paths.connect(scope)} {...props} />}
+              size="sm"
+            >
+              {PROVIDER_RETIRED.connect}
+            </Button>
+          }
+          icon={IconAlertTriangle}
+          title={PROVIDER_RETIRED.title}
+        >
+          {entry.problem?.detail}
+        </PageEmpty>
+      </PageShell>
+    );
   return (
     <PageShell
       backButton={back}
