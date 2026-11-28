@@ -6,12 +6,17 @@ appId: ai.openbot.rnshell
       id: "debug-state"
       text: ".*phase=signedIn.*skeleton=0.*"
     timeout: 45000
+# The page is back on Bots (native state: the page reported its route and drew text).
 - extendedWaitUntil:
-    visible: "New Bot"
+    visible:
+      id: "debug-state"
+      text: ".*tab=bots.*path=/bots.*ready=1.*"
     timeout: 30000
 - takeScreenshot: after-kill
 - tapOn:
     id: "tab-home"
 - extendedWaitUntil:
-    visible: "Start a conversation"
+    visible:
+      id: "debug-state"
+      text: ".*tab=home.*path=/ .*"
     timeout: 20000

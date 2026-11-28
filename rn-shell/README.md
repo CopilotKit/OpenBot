@@ -27,9 +27,16 @@ Everything the two native shells do (their READMEs and PRODUCTION-PARITY files a
   (react-native-webview's `source={{uri, headers}}`, on that one request; proven by the header probe
   test). The hosted sign-in's renewal (`/api/auth/hosted/sign-in` while signed in) runs in the sheet
   too and comes back to its `returnTo` (unit-tested against the contract's worked example).
-- **Tab bar.** Conversations, Home, Bots, under the one web view. A tap dispatches `openbot:open` in the
-  page (loading the page itself if nobody handled it); the page's `route` messages select the tab.
-  It hides while the keyboard is up.
+- **Tab bar.** Chats, Home, Bots (the bridge's id for the first is still `conversations`), under the
+  one web view. A tap, also on the tab already selected, dispatches `openbot:open` with the tab's root
+  path (the page decides: switch to that tab where it was left, or pop to its root); the page's
+  `route` messages select the tab. It stays in a conversation and hides only while the keyboard is up.
+- **Back.** When the page's `route` carries `canGoBack` (the web app's per-tab stacks), Back is a
+  command to the page: Android's Back closes the keyboard, sends `openbot:back` while the tab is deeper
+  than its root, and leaves the app at a root; on iOS WebKit's back swipe is turned off and a swipe
+  from the left edge sends `openbot:back`. Without `canGoBack` (production today) Android's Back walks
+  the web view's history and iOS keeps WebKit's swipe; neither reaches /sign, /api/ or another site
+  after sign-in (a new web view per sign-in, and the navigation policy refuses such back navigations).
 - **Bridge.** At document start, in the main frame of the app's own origin only, the page gets
   `window.__OPENBOT_NATIVE_SHELL__ = {platform, version, bridge: 1}` and `window.OpenBotShellAndroid`,
   which the web app's `bridge.ts` already uses (on iOS too: it falls back to it). The user agent ends
@@ -121,6 +128,14 @@ store bundle made after a test bundle reused the test build's modules (see COMPA
   a newer push waits for a running iOS workflow rather than cancelling its 15-minute build. Each
   flow has a deadline (2 to 3 minutes) and each shard's suite 15 minutes; a flow runs once more only
   when Maestro's own driver died. Each run uploads SUMMARY.md, results and screenshots per shard.
+
+## Status (28 Nov 2026)
+
+- Android: 18 of 19 mock flows and 2 of 3 real-backend flows pass (run 46149889717); the real web
+  sign-in is skipped when Cloudflare challenges the emulator. Demo recording: run 46149889725.
+- iOS: builds; first screen, web sign-in fallback and skeleton pass; the system-sheet sign-in times out
+  after the sheet returns (not diagnosed); most flows exceed their deadline because Maestro is slow on
+  the macOS runners. See COMPARISON.md.
 
 ## Known gaps
 

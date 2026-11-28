@@ -5,23 +5,35 @@ with `rn-shell/` (React Native with Expo). All three wrap the same web app in on
 the same server contracts; the numbers and findings below come from building the third one after the
 first two, and running all three in CI.
 
-## Size of each approach (non-blank lines, counted on 28 Nov 2026)
+## Where each one stands tonight (be blunt)
 
-| | iOS shell | Android shell | Both native | RN shell |
+| | Native iOS | Native Android | RN iOS | RN Android |
 | --- | --- | --- | --- | --- |
-| App code | 3,200 lines, 19 files (Swift, project.yml) | 3,508 lines, 45 files (Kotlin, XML, Gradle) | 6,708 lines, 64 files | 4,077 lines, 29 files: 3,431 TypeScript, 646 native (a 160-line Swift module, a 210-line Kotlin module and trampoline, a 70-line config plugin, a 170-line patch to react-native-webview) |
-| Tests | 1,952 (XCUITest) | 2,274 (UiAutomator, JUnit) | 4,226 | 1,992: 3 unit test files (48 cases, every rule of the app as a pure reducer) and 24 Maestro flows |
-| CI scripts and workflows | 1,187 | 1,225 | 2,412 | 1,313 (both platforms) |
+| Test suite | Green (4 parallel simulator jobs, PR 2383) | Green (2 emulator shards, PR 2380) | **Not green.** First screen, web sign-in fallback and the skeleton passed in CI; the system-sheet sign-in reaches the consent alert, the sheet and the skeleton (recorded) but then times out ("Sign-in took too long", cause not found yet); most flows ran out of time because Maestro on the macOS runners takes 60 to 70 s to start and 20 to 45 s per step | **18 of 19 mock flows and 2 of 3 real-backend flows pass** (run 46149889717, 7 minutes wall); the one mock failure was Maestro not reading the page's text after the web process restart (the app had recovered, screenshot), since changed to check native state; the real web sign-in is skipped when Cloudflare challenges the emulator |
+| Demo recording | Yes | Yes | Partial (88 s: launch, consent, sheet, skeleton, then the sign-in timeout) | 175 s: first screen, sign-in, skeleton, Home, typing on the software keyboard with Send visible, a conversation with the keyboard (cut at screenrecord's limit) |
+| Real backend | Session-cookie journey and web fallback green | Same, with Cloudflare skips | Not reached in CI tonight | Session-cookie journey (Home, Chats, Bots) and lock-when-unreachable pass; web sign-in to the identity provider passed once and is otherwise skipped by Cloudflare |
 
-The native shells include about 540 lines of diagnostics (a page probe and JSON logging) the RN shell
-does not have; without them the app code is roughly 6,200 native lines against 4,100 RN lines, of
-which about 650 are still platform code. In both cases the web view does the real work.
+The RN shell's logic is well tested (59 unit tests of the pure reducer and helpers, run on every
+push), but its UI suite on iOS is immature, and on Android it is green only after many rounds of
+making the flows independent of each other and of Chromium's accessibility tree.
+
+## Size of each approach (counted on 28 Nov 2026, non-blank lines)
+
+| | iOS shell | Android shell | Both native | RN shell (one codebase) |
+| --- | --- | --- | --- | --- |
+| App code | 3,381 lines, 19 files (Swift, project.yml), 167 KB | 3,773 lines, 48 files (Kotlin, XML, Gradle), 180 KB | 7,154 lines, 67 files, 347 KB | 4,303 lines, 29 files, 158 KB: 3,657 TypeScript (formatted by Biome at 80 columns, which inflates the line count; 128 KB) and 646 platform lines (Swift module 132, Kotlin module 129 and trampoline 45, its manifest 32, config plugin 84, patch to react-native-webview 163) |
+| Test code | 2,037 (XCUITest) | 2,578 (UiAutomator, JUnit) | 4,615 | 2,415: 1,707 unit tests (59 cases) and 708 lines of Maestro flows (26 files) |
+| CI scripts and workflows | 1,213 | 1,229 | 2,442 | 1,482 (both platforms) |
+
+By bytes the RN app is 46% of the two native apps together. The native shells carry about 540 lines
+of diagnostics the RN shell does not; without them the comparison is roughly 6,600 native lines
+against 4,300 RN lines, about 650 of which are still Swift, Kotlin, XML or a patch.
 
 ## What React Native made easier
 
 - **One behaviour, written once and tested without a phone.** The app's whole state machine (sign-in,
   entering, renewal, sign-out, lock, skeleton, keyboard effects, process death, the navigation policy)
-  is one pure TypeScript reducer: 48 unit tests run in 20 ms on any laptop and caught real mistakes
+  is one pure TypeScript reducer: 59 unit tests run in under a second on any laptop and caught real mistakes
   before CI did (an error page lifting the lock; enter being reloaded after a restart). The native
   shells each implement the same rules twice, in two languages, tested mostly through slow UI tests.
 - **Sign-in sheet**: `expo-web-browser` gives `ASWebAuthenticationSession` (non-ephemeral, shares
@@ -71,6 +83,24 @@ Every place the RN shell drops to native code or configuration:
 | Dialogs: other origins suppressed, own titled OpenBot | Other origins' main-frame dialogs (an injected script) | The patch (frames, title) | |
 | A dead content process recovers | Yes (`onContentProcessDidTerminate`, `onRenderProcessGone`, a remount) | | |
 
+### Back: iOS's edge swipe and Android's Back button with a single-page app
+
+- **What react-native-webview gives.** iOS: `allowsBackForwardNavigationGestures` turns on WKWebView's
+  own swipe, which walks the web view's back-forward list, pushState entries included. Android: no
+  Back handling at all; the app reads `canGoBack` from `onNavigationStateChange` and calls
+  `goBack()` from React Native's `BackHandler`. Neither can see the list's entries, so neither can
+  refuse "back to /sign or another site" directly: the RN shell keeps that list clean instead (a
+  new web view after every sign-in) and refuses `backforward` navigations to /sign, /api/ or another
+  site in its navigation policy (iOS reports the navigation type; Android does not).
+- **The per-tab contract** (the page owns 3 stacks and reports `canGoBack`; Back is `openbot:back`):
+  Android is JavaScript only (`BackHandler` asks the reducer: keyboard, page back, or leave the app).
+  iOS needed no native code either, but only because a React Native `PanResponder` on a 20-point
+  strip at the left edge stands in for the system gesture: it does not follow the finger with an
+  interactive transition the way WKWebView's own swipe or a UINavigationController's does, and the
+  strip takes touches at the very edge of the page. A gesture with the system's feel would need a
+  native `UIScreenEdgePanGestureRecognizer` on the web view (a module or a patch). The native iOS
+  shell can attach that recognizer directly.
+
 Further friction found while building it:
 
 - **A store build shipped the test hooks until Metro's cache was cleared.** `EXPO_PUBLIC_` values are
@@ -90,12 +120,12 @@ Further friction found while building it:
 
 | | Native iOS | Native Android | RN iOS | RN Android |
 | --- | --- | --- | --- | --- |
-| Clean build in CI | about 2 to 3 min (Swift only) | about 3 min (Gradle) | 13 to 14 min Release (prebuild, CocoaPods, React Native's prebuilt core, Hermes); ccache and a pods cache are wired in to cut repeats | about 8 min Release, x86_64 only |
-| Whole test workflow (last runs) | about 22 min | about 10 min | see the final report: build plus 18 flows | see the final report |
-| App size | not measured (a small SwiftUI app) | 1.3 MB (R8) | 52 MB simulator Release .app (arm64, unsigned) | 25.5 MB store APK, arm64-v8a only, R8 off |
+| Clean build in CI | about 2 to 3 min | about 3 min | 12.5 to 15 min Release (prebuild, CocoaPods with React Native's prebuilt core, Hermes, Swift for the Expo modules); ccache barely helps because Xcode rebuilds after checkout | 6 to 8 min Release, x86_64 only |
+| Test workflow, wall clock | about 18 min (4 parallel jobs) | about 12 min (2 shards) | build job, then 2 simulator shards: 15 min build on a source change plus a test job that did not finish inside 35 minutes tonight | 2 shards: 7 min when the APK is cached on its sources, about 15 min when it is rebuilt |
+| App size | not measured (small) | 1.3 MB release APK (R8) | 52 MB Release simulator .app (arm64, unsigned) | 25.5 MB store APK, arm64-v8a only, R8 off |
 
-The RN app carries React Native, Hermes and the Expo modules: about 20 times the native Android APK.
-An Android App Bundle and R8 would roughly halve it; it stays an order of magnitude larger.
+React Native, Hermes and the Expo modules make the RN app about 20 times the native Android APK. An
+App Bundle and R8 would roughly halve it; it stays an order of magnitude larger.
 
 ## App Store and Play review: what differs
 
@@ -125,13 +155,19 @@ itself.
    whitelist trap), and one cannot be fully fixed without forking it (Android allows an http(s) load
    when JavaScript does not answer in 250 ms). The native shells hold these with the platform's own
    APIs.
-2. **Size and build time.** 25 MB against 1.3 MB on Android; 13-minute iOS builds against 2 to 3, which
-   is the difference between a 20-minute and a 35-minute CI round trip for every change.
-3. **The code saving is smaller than it looks.** About 4,100 lines (650 of them still Swift, Kotlin and
-   patch) against 6,200 native lines without diagnostics: React Native removes the duplicated UI (first
-   screen, lock screen, skeleton, tab bar), but the shell is mostly web view policy, and that needed
-   per-platform code anyway.
-4. **It is a separate stack from `mobile/` in practice.** Same versions, but the shell adds a local
+2. **Maturity.** The native shells are green on both platforms with recordings; the RN shell is nearly
+   green on Android only (18 of 19 mock flows), and its iOS sign-in through the sheet is not proven (it times out after the
+   sheet returns). Closing that gap is more nights of work, on the slowest CI of the three.
+3. **Size and build time.** 25 MB against 1.3 MB on Android; 12.5 to 15-minute iOS builds against 2 to
+   3, so every change to the app's code costs a much longer CI round trip.
+4. **The code saving is smaller than it looks.** About 4,300 lines (650 of them still Swift, Kotlin,
+   XML and a patch) against about 6,600 native lines without diagnostics: React Native removes the
+   duplicated UI (first screen, lock screen, skeleton, tab bar), but the shell is mostly web view
+   policy, and much of that needed per-platform code anyway. The second security pass confirmed it:
+   clearing site data and waiting for it, and reading the session cookie, are native module code;
+   per-origin permissions and Android downloads cannot be enforced through react-native-webview
+   without patching it further.
+5. **It is a separate stack from `mobile/` in practice.** Same versions, but the shell adds a local
    native module, a config plugin and a patched web view that `mobile/` does not need.
 
 Where React Native would win: if the phone app is going to grow native screens beyond the shell

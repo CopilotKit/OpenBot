@@ -12,6 +12,8 @@ appId: ai.openbot.rnshell
 - tapOn:
     id: "tab-bots"
 - extendedWaitUntil:
-    visible: "New Bot"
+    visible:
+      id: "debug-state"
+      text: ".*tab=bots.*path=/bots.*ready=1.*"
     timeout: 20000
 - takeScreenshot: before-kill
