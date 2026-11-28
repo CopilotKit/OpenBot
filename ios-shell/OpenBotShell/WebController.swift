@@ -24,7 +24,7 @@ protocol WebControllerDelegate: AnyObject {
 }
 
 /// Owns the one WKWebView, its navigation and UI delegate, the page bridge and the load watchdog.
-final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, UIGestureRecognizerDelegate {
     static let bridgeName = "openbotShell"
     /// WebKit fails some blocked loads without a word: a load that neither commits nor fails in this
     /// long shows the load-failure overlay.
@@ -89,6 +89,13 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         #endif
         self.webView = webView
         super.init()
+
+        // The page may scroll its own nested element, leaving WebKit's outer scroll view still.
+        let dismissSwipe = UISwipeGestureRecognizer(target: self, action: #selector(dismissKeyboardOnSwipe))
+        dismissSwipe.direction = .down
+        dismissSwipe.cancelsTouchesInView = false
+        dismissSwipe.delegate = self
+        webView.addGestureRecognizer(dismissSwipe)
 
         // The page learns it is in the shell before its first script runs: main frame only, and
         // only on the web app's own origin (an identity provider's page is not told).
@@ -203,6 +210,16 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
             armWatchdog(for: webView.url)
             webView.reload()
         }
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
+    }
+
+    @objc private func dismissKeyboardOnSwipe() {
+        guard let window = webView.window,
+              window.bounds.maxY - window.keyboardLayoutGuide.layoutFrame.minY > window.safeAreaInsets.bottom + 1 else { return }
+        endEditing()
     }
 
     /// Ends editing in the page: the keyboard goes before the shell moves somewhere else.

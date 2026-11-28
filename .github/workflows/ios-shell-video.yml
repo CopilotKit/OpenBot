@@ -158,7 +158,7 @@ jobs:
           sleep 2
           set +e
           xcodebuild test-without-building -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath DerivedData-Debug \
+            -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath DerivedData-Debug -parallel-testing-enabled NO \
             -only-testing:OpenBotShellUITests/DemoTourUITests/testDemoTour CODE_SIGNING_ALLOWED=NO > xcodebuild-demo.log 2>&1
           status=$?
           # SIGINT and wait, so the recorder writes a playable file.
@@ -297,7 +297,7 @@ jobs:
           recorder=$!
           sleep 2
           set +e
-          xcodebuild test-without-building "${target[@]}" -destination "platform=iOS Simulator,id=$SIM_UDID" \
+          xcodebuild test-without-building "${target[@]}" -destination "platform=iOS Simulator,id=$SIM_UDID" -parallel-testing-enabled NO \
             -resultBundlePath RealJourney.xcresult > xcodebuild-real.log 2>&1
           status=$?
           kill -INT "$recorder"

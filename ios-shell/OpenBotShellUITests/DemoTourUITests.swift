@@ -25,6 +25,7 @@ final class DemoTourUITests: ShellTestCase {
     }
 
     func testDemoTour() throws {
+        continueAfterFailure = false
         note("video-mark start \(Date().timeIntervalSince1970)")
         defer { note("video-mark end \(Date().timeIntervalSince1970)") }
         sceneStart = Date()
@@ -60,11 +61,26 @@ final class DemoTourUITests: ShellTestCase {
 
         // The software keyboard: the tab bar hides, the message box sits on it.
         composer.tap()
-        if app.keyboards.firstMatch.waitForExistence(timeout: 6) {
-            composer.typeText("What changed in competitor pricing?")
-            pause(1)
-            dismissKeyboardIfUp(app)
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 8), "demo: the software keyboard did not appear")
+        composer.typeText("What changed in competitor pricing?")
+        let send = webElement(app, label: "Send message")
+        XCTAssertTrue(send.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(send.frame.maxY, keyboard.frame.minY + 1)
+        XCTAssertTrue(send.isHittable)
+        screenshot("home-keyboard-send")
+        pause(1)
+        send.tap()
+        let reply = webText(app, "All three competitors now charge per seat.")
+        XCTAssertTrue(reply.waitForExistence(timeout: 20), "demo: the reply did not appear")
+        screenshot("conversation-reply")
+        pause(1.5)
+        if !keyboard.exists {
+            composer.tap()
+            XCTAssertTrue(keyboard.waitForExistence(timeout: 8))
         }
+        app.webViews.firstMatch.swipeDown()
+        XCTAssertTrue(keyboard.waitForNonExistence(timeout: 5), "demo: dragging down did not dismiss the keyboard")
         scene("keyboard")
 
         // Conversations, one conversation.
@@ -74,7 +90,7 @@ final class DemoTourUITests: ShellTestCase {
         pause(1)
         row.tap()
         let answer = webText(app, "All three moved to per-seat pricing this year.")
-        _ = answer.waitForExistence(timeout: 15)
+        XCTAssertTrue(answer.waitForExistence(timeout: 15))
         pause(1.5)
         dismissKeyboardIfUp(app, tapping: answer)
         scene("conversation")
