@@ -1,13 +1,15 @@
 import { ssoClient } from "@better-auth/sso/client";
 import { createAuthClient } from "better-auth/react";
+import { withClientName } from "@/lib/client";
 import type { AuthProviderId } from "./queries";
 
 export const authClient = createAuthClient({
   plugins: [ssoClient()],
   fetchOptions: {
     // The page's fetch at the time of each call, as every other request in the app uses it, rather
-    // than the one there was when this module loaded.
-    customFetchImpl: (input, init) => fetch(input, init),
+    // than the one there was when this module loaded. Naming this app, as every request does.
+    customFetchImpl: (input, init) =>
+      fetch(input, { ...init, headers: withClientName(init?.headers) }),
   },
 });
 
@@ -58,6 +60,35 @@ export async function signInWith(
         `Could not start ${providerName(provider)} sign-in.`,
     );
   }
+}
+
+/**
+ * Link the signed-in person's company account: sign in, while signed in, through one of their organization's identity
+ * providers, by its id. The server links what the provider vouches for to the account they already have (as a GitHub
+ * member authenticates their SAML identity to an organization) rather than opening another, and the browser comes back
+ * to `callbackURL` with both.
+ *
+ * By the provider's id, not by address: somebody who joined with a personal address has none at the company's domain.
+ * Injectable for the same reason as `signInWith`: the Better Auth client is a proxy.
+ */
+export async function linkCompanyAccount(
+  providerId: string,
+  start: (input: {
+    providerId: string;
+    callbackURL: string;
+  }) => Promise<SocialResult> = (input) =>
+    (
+      authClient as unknown as {
+        signIn: { sso: (i: unknown) => Promise<SocialResult> };
+      }
+    ).signIn.sso(input),
+  callbackURL: string = window.location.href,
+) {
+  const result = await start({ providerId, callbackURL });
+  if (result.error)
+    throw new Error(
+      result.error.message || "Couldn't start signing in with your company.",
+    );
 }
 
 /**

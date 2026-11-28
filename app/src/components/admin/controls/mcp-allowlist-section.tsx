@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { ControlsSection } from "./controls-section";
 
 /**
@@ -41,17 +42,32 @@ export function listedAddress(entry: string): string | null {
   return `${url.protocol}//${url.host.toLowerCase()}${url.pathname.replace(/\/+$/, "")}`;
 }
 
-/** Admin, Plugins: the allowlist of MCP servers Bots may call tools on. */
+/**
+ * OpenBot's own apps, on for every Bot. The allowlist never holds them back, so their rows read on
+ * and can't be switched.
+ */
+const ALWAYS_ON = new Set([ALWAYS_ON_APP, "openbot-settings"]);
+
+/**
+ * Admin, Apps: Connectors, the allowlist of the apps Bots may call tools on.
+ *
+ * WHAT EACH STATE SAYS. Off, every app can be used, so each app's switch reads on and can't be
+ * changed: switching one would do nothing. Turning it on approves every app already added (the
+ * server does it too, for every other way of saving the list), so nothing in use is cut off and
+ * the admin turns off the ones they don't want. While it is on, an app an admin adds is approved
+ * as it's added. An always-on app reads on in either state.
+ */
 export function McpAllowlistSection() {
   const [approving, setApproving] = useState(false);
   const [address, setAddress] = useState("");
   return (
     <ControlsSection
-      description="With the allowlist on, Bots can only call tools on the MCP servers approved here, and people can only add a server by its address once it's approved. Calls to any other server are refused."
-      title="MCP servers"
+      description="While this is on, Bots can only use the connectors approved here, and a connector can only be added by its address once it's approved. Turning it on approves every connector already added, and each one an admin adds after that."
+      title="Connectors"
     >
       {({ data, setSetting, saving }) => {
         const { mcpAllowlist } = data.settings;
+        const limiting = mcpAllowlist.enabled;
         /*
          * Addresses approved before anybody added a server there. One already added is approved by
          * the same entry, so it is drawn on its server's row instead of twice.
@@ -75,6 +91,14 @@ export function McpAllowlistSection() {
           );
         };
         const candidate = listedAddress(address);
+        const approved = (server: { id: string; url: string }) =>
+          mcpAllowlist.servers.includes(server.id) ||
+          approvedByAddress(server.url);
+        // Apps, then addresses nobody has added yet: what an admin reads as approved.
+        const approvedCount =
+          data.mcpServers.filter(
+            (server) => !ALWAYS_ON.has(server.id) && approved(server),
+          ).length + addresses.length;
         return (
           <>
             <PageRows>
@@ -83,26 +107,44 @@ export function McpAllowlistSection() {
                   <IconPlug />
                 </ItemMedia>
                 <ItemContent>
-                  <ItemTitle>Only approved servers</ItemTitle>
+                  <ItemTitle>Only approved connectors</ItemTitle>
                   <ItemDescription>
-                    {mcpAllowlist.enabled
-                      ? `${mcpAllowlist.servers.length} approved`
-                      : "Off. Bots can use any registered server they have access to."}
+                    {limiting
+                      ? `${approvedCount} approved`
+                      : "Off. Bots can use every connector."}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
                   <Switch
-                    aria-label="Only approved MCP servers"
-                    checked={mcpAllowlist.enabled}
+                    aria-label="Only approved connectors"
+                    checked={limiting}
                     disabled={saving}
                     onCheckedChange={(enabled) =>
-                      setSetting("mcpAllowlist", { ...mcpAllowlist, enabled })
+                      setSetting("mcpAllowlist", {
+                        enabled,
+                        /*
+                         * Turned on, it starts with every app already added approved, so nothing in
+                         * use is cut off. The server does the same whatever sends the list.
+                         */
+                        servers: enabled
+                          ? [
+                              ...mcpAllowlist.servers,
+                              ...data.mcpServers
+                                .filter(
+                                  (server) =>
+                                    !ALWAYS_ON.has(server.id) &&
+                                    !approved(server),
+                                )
+                                .map((server) => server.id),
+                            ]
+                          : mcpAllowlist.servers,
+                      })
                     }
                   />
                 </ItemActions>
               </Item>
               {data.mcpServers.map((server) => {
-                const byAddress = approvedByAddress(server.url);
+                const alwaysOn = ALWAYS_ON.has(server.id);
                 return (
                   <div key={server.id}>
                     <Separator />
@@ -112,16 +154,16 @@ export function McpAllowlistSection() {
                       </ItemMedia>
                       <ItemContent>
                         <ItemTitle>{server.title}</ItemTitle>
-                        <ItemDescription>{server.url}</ItemDescription>
+                        <ItemDescription>
+                          {alwaysOn ? "Always on, for every Bot." : server.url}
+                        </ItemDescription>
                       </ItemContent>
                       <ItemActions>
                         <Switch
                           aria-label={`Approve ${server.title}`}
-                          checked={
-                            mcpAllowlist.servers.includes(server.id) ||
-                            byAddress
-                          }
-                          disabled={saving}
+                          // Off, every app can be used; an always-on app, always.
+                          checked={!limiting || alwaysOn || approved(server)}
+                          disabled={saving || !limiting || alwaysOn}
                           onCheckedChange={(checked) =>
                             setSetting("mcpAllowlist", {
                               ...mcpAllowlist,
@@ -130,8 +172,14 @@ export function McpAllowlistSection() {
                                 : mcpAllowlist.servers.filter(
                                     (entry) =>
                                       entry !== server.id &&
-                                      listedAddress(entry) !==
-                                        listedAddress(server.url),
+                                      /*
+                                       * An address entry at this app's address goes too. Only an
+                                       * address: an id and a `composio://` app have none, and
+                                       * comparing two nones took every id off the list.
+                                       */
+                                      (listedAddress(server.url) === null ||
+                                        listedAddress(entry) !==
+                                          listedAddress(server.url)),
                                   ),
                             })
                           }
@@ -186,7 +234,7 @@ export function McpAllowlistSection() {
                   <IconWorld />
                 </ItemMedia>
                 <ItemContent>
-                  <ItemTitle>Approve a server by its address</ItemTitle>
+                  <ItemTitle>Approve a connector by its address</ItemTitle>
                   <ItemDescription>
                     So people can add it from Connections.
                   </ItemDescription>
@@ -205,15 +253,15 @@ export function McpAllowlistSection() {
             >
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Approve a server</DialogTitle>
+                  <DialogTitle>Approve a connector</DialogTitle>
                   <DialogDescription>
-                    People can add the MCP server at this address, and Bots can
-                    call its tools.
+                    The connector at this address can be added, and Bots can use
+                    its tools.
                   </DialogDescription>
                 </DialogHeader>
                 <DialogBody className="mt-4">
                   <Input
-                    aria-label="Server address"
+                    aria-label="Connector address"
                     autoComplete="off"
                     onChange={(event) => setAddress(event.target.value)}
                     placeholder="https://mcp.example.com/mcp"

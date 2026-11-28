@@ -1,5 +1,3 @@
-import { deleteAttachment } from "@/lib/api/generated/conversations/conversations";
-import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { Message } from "@ag-ui/core";
 import type { Attachment } from "@copilotkit/react-core/v2";
 import {
@@ -25,7 +23,17 @@ import {
   reduceQueue,
 } from "@/components/channels/composer";
 import { StillWorkingError } from "@/components/channels/composer/queue";
-import { NotifyPrompt } from "@/components/notifications/notify-prompt";
+import { ComposerColumn } from "@/components/channels/conversation-columns";
+import {
+  NotifyPrompt,
+  notifyPromptAnswered,
+} from "@/components/notifications/notify-prompt";
+import { StarPrompt } from "@/components/star-prompt/star-prompt";
+import { deleteAttachment } from "@/lib/api/generated/conversations/conversations";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
+import type { Failure } from "@/lib/load-failure";
+import { useNotificationPermission } from "@/lib/notifications/permission";
 import { newId } from "../../lib/new-id";
 
 /** How soon a drain the Bot was still too busy for goes again. Nothing is sent while it waits. */
@@ -41,15 +49,20 @@ export function ConversationView({
   commands,
   channelId,
   holdsFilesUntilSent = false,
+  attachmentLimits,
   disabled = false,
   onSendHeld,
   pending = false,
   autoFocus = false,
   stopped,
+  refusals,
+  stoppedNotice,
+  onCarryOn,
   working,
   stoppable,
   queueWhileBusy = false,
   restoring = false,
+  readOnly = false,
   intro,
   starterSuggestions,
   onSubmit,
@@ -57,6 +70,8 @@ export function ConversationView({
   voiceCall,
   modelPicker,
   routine,
+  draftKey,
+  composerOpening,
 }: {
   messages: readonly Message[];
   threadId?: string;
@@ -84,6 +99,8 @@ export function ConversationView({
    * creates the conversation. See `Composer`.
    */
   holdsFilesUntilSent?: boolean;
+  /** How large a picked file may be, forwarded to the composer (`useAttachmentLimits`). */
+  attachmentLimits?: ComposerAttachmentLimits;
   disabled?: boolean;
   /** Writing is open and sending waits on the caller; forwarded to the composer. */
   onSendHeld?: () => void;
@@ -100,7 +117,13 @@ export function ConversationView({
   /** Focus the composer the moment it can take a caret; forwarded to the composer. */
   autoFocus?: boolean;
   /** Why the last turn ended without an answer. Drawn at the end of the transcript, not here. */
-  stopped?: string;
+  stopped?: Failure;
+  /** Turns the server refused, each under its own message; see the transcript's `refusals`. */
+  refusals?: ReadonlyMap<string, string>;
+  /** Drawn under `stopped`, or else the latest refusal (the transcript's `stoppedNotice`). */
+  stoppedNotice?: ReactNode;
+  /** Carry on with a turn that was cut off part way; a button beside `stopped`. */
+  onCarryOn?: () => void;
   /** Work the conversation waits on that is not this tab's run. Drawn at the end of the transcript. */
   working?: ReactNode;
   /**
@@ -125,6 +148,11 @@ export function ConversationView({
   /** History has been asked for and has not arrived. Drawn as placeholder rows; see `ChatTranscript`. */
   restoring?: boolean;
   /**
+   * The transcript's message rows are for reading only; queued messages and notices stay live. See
+   * `ChatTranscript`.
+   */
+  readOnly?: boolean;
+  /**
    * The top of the conversation, drawn above the first message and scrolled away with it. Only
    * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at its first message.
    */
@@ -142,6 +170,13 @@ export function ConversationView({
   modelPicker?: ReactNode;
   /** The Bot and conversation for the composer's routine clock. See `Composer`. */
   routine?: { agentId: string; channelId: string };
+  /** Which conversation's unsent message the composer keeps. See `Composer`. */
+  draftKey?: string;
+  /**
+   * Changed to open the composer again, so it reads its draft once more: it reads it only as it
+   * opens, and a message put back in the draft afterwards would not show otherwise.
+   */
+  composerOpening?: number;
 }) {
   /*
    * THE QUEUE LIVES HERE BECAUSE BOTH HALVES OF IT DO.
@@ -199,6 +234,7 @@ export function ConversationView({
    * for the same fact.
    */
   const [running, setRunning] = useState(false);
+  const notificationPermission = useNotificationPermission();
   const inFlight = pending || running;
 
   /**
@@ -392,6 +428,46 @@ export function ConversationView({
   );
 
   /**
+   * SEND NOW ON A QUEUED MESSAGE: stop the turn, keep what it did, and send this one next.
+   *
+   * Idle, the message simply goes. Busy, `reduceQueue` marks it to run alone when the turn ends,
+   * and Stop ends it: the same Stop as the button, so the work the turn has done so far (its
+   * finished steps, their results, the reply up to that point) stays in the conversation and the
+   * Bot reads all of it with this message. The drain below does the sending, on the turn ending,
+   * as it does for everything else that is parked.
+   *
+   * A turn Stop cannot reach yet (its run has not started) is stopped once it can be. One it cannot
+   * reach at all (the server carrying on after an approval) is not stopped from here, and the
+   * message goes as soon as it ends, ahead of the rest.
+   */
+  const stopWhenStoppable = useRef(false);
+  const canStop = Boolean(onStop) && (stoppable ?? pending);
+  const sendQueuedNow = (id: string) => {
+    const next = apply({ busy: inFlight, id, type: "sendNow" });
+    if (next.run) {
+      const carried = next.restoreIfRunFails;
+      void startRef.current(next.run).catch((error: unknown) => {
+        // As a drain's failure is answered: back in the queue, nothing lost. See the drain below.
+        restoreFailedRun(carried, error);
+      });
+      return;
+    }
+    if (!next.queue.some((message) => message.next)) return;
+    if (canStop) onStop?.();
+    else stopWhenStoppable.current = true;
+  };
+  useEffect(() => {
+    if (!inFlight) {
+      stopWhenStoppable.current = false;
+      return;
+    }
+    if (canStop && stopWhenStoppable.current) {
+      stopWhenStoppable.current = false;
+      onStop?.();
+    }
+  }, [canStop, inFlight, onStop]);
+
+  /**
    * The turn ended. Whatever was waiting for it goes now, as one message.
    *
    * KEYED ON THE TURN BEING OVER AND NOT ON HOW IT ENDED, which is what makes Stop useful rather
@@ -491,30 +567,19 @@ export function ConversationView({
           onRemoveQueued={(id) => {
             apply({ id, type: "remove" });
           }}
+          onSendQueuedNow={disabled ? undefined : sendQueuedNow}
           queued={queued}
           restoring={restoring}
+          readOnly={readOnly}
           {...(stopped ? { stopped } : {})}
+          {...(refusals ? { refusals } : {})}
+          {...((stopped || refusals) && stoppedNotice ? { stoppedNotice } : {})}
+          {...(stopped && onCarryOn && !disabled ? { onCarryOn } : {})}
           working={working}
         />
       </div>
-      {/*
-       * THE TRANSCRIPT'S SIDE INSET IN A NARROW PANE, AND THE SAME 768px COMPOSER IN A WIDE ONE.
-       *
-       * The composer had no inset of its own, so in a pane narrower than its 768px column it ran to
-       * the pane's border, and the starter tasks above it with it, while the transcript kept 16px a
-       * side. Now the column always pads `px-4`, as the transcript's does, and is allowed 2rem more
-       * than `max-w-3xl` to pay for it: from an 800px pane up the composer is 768px wide exactly as
-       * before, and below that it stands 16px off each edge.
-       *
-       * A width, not a breakpoint, on purpose. A viewport breakpoint does not know how much of the
-       * window the sidebar takes, and a container query would need `@container` on an ancestor of
-       * the composer, which is layout containment: it would become the containing block for the @
-       * menu, which is `position: fixed` at the caret (see `DictationSurface`).
-       */}
-      <div
-        className="mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] shrink-0 px-4 pb-4"
-        data-slot="composer-column"
-      >
+      {/* The composer's column, shared with a group conversation; see `ComposerColumn`. */}
+      <ComposerColumn>
         {notice}
         {/*
          * Notifications are offered once this person has started a task: a Bot is working for them,
@@ -524,6 +589,27 @@ export function ConversationView({
         {messages.some((message) => message.role === "user") ? (
           <NotifyPrompt />
         ) : null}
+        {/*
+         * The ask to star OpenBot on GitHub, when the server says it is due (`StarPrompt`), and never
+         * beside the notifications offer: one card above the composer at a time, and the offer that
+         * is useful to this person goes first.
+         *
+         * Never right after an error: not while the last turn here ended without an answer
+         * (`stopped`, where a failed run is said). Not read off `notice`: a conversation passes one
+         * every time, mostly empty, so its presence says nothing. It also waits while OpenBot Desktop has not yet
+         * said whether notifications are on (`checking`), or the card could draw, be counted as
+         * shown, and vanish when the answer is "not asked yet". And never in a conversation that
+         * cannot take a message: the brief "Picking a Bot" screen, or one whose Bot was deleted.
+         */}
+        {disabled ||
+        stopped ||
+        // A turn refused here is said under its message, and counts as an error the same way.
+        (refusals?.size ?? 0) > 0 ||
+        notificationPermission === "checking" ||
+        (notificationPermission === "default" &&
+          !notifyPromptAnswered()) ? null : (
+          <StarPrompt />
+        )}
         {/*
          * THE DRAWER IS THE LAST THING ABOVE THE COMPOSER, AND THE STARTER TASKS STEP ASIDE FOR IT.
          *
@@ -538,7 +624,7 @@ export function ConversationView({
          */}
         {attached ? (
           <div
-            className="mx-5 -mb-4 rounded-t-2xl border border-border border-b-0 bg-muted pb-4"
+            className="mx-5 -mb-4 rounded-t-xl border border-border border-b-0 bg-muted pb-4"
             data-slot="composer-drawer"
           >
             {attached}
@@ -547,12 +633,15 @@ export function ConversationView({
           starterSuggestions
         )}
         <Composer
+          key={composerOpening}
           modelPicker={modelPicker}
           {...(routine ? { routine } : {})}
+          {...(draftKey ? { draftKey } : {})}
           agents={agents}
           autoFocus={autoFocus}
           {...(channelId ? { channelId } : {})}
           holdsFilesUntilSent={holdsFilesUntilSent}
+          {...(attachmentLimits ? { attachmentLimits } : {})}
           {...(commands ? { commands } : {})}
           className="relative w-full mt-auto"
           compact
@@ -609,7 +698,7 @@ export function ConversationView({
            */
           stoppable={stoppable ?? pending}
         />
-      </div>
+      </ComposerColumn>
     </div>
   );
 }

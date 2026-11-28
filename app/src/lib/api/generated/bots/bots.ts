@@ -646,7 +646,7 @@ export const getUpdateBotUrl = (organizationId: string, botId: string) => {
 };
 
 /**
- * Replace a Bot's name, title, role description and visibility, which are all required, and change any optional field that is present. An absent endpoint, key or isolated leaves that setting as it is, so an edit to a name never drops a key or moves a Bot between computers. Only whoever may manage the Bot may change it, and a Bot that comes with OpenBot cannot be changed. Making a Bot public reports what that means for the shared app accounts it uses.
+ * Replace a Bot's name, title, role description and visibility, which are all required, and change any optional field that is present. An absent endpoint, key, isolated or default model leaves that setting as it is, so an edit to a name never drops a key or moves a Bot between computers. Only whoever may manage the Bot may change it, and a Bot that comes with OpenBot cannot be changed. Making a Bot public reports what that means for the shared app accounts it uses.
  * @summary Change a Bot
  */
 export const updateBot = async (

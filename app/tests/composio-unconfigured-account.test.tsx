@@ -20,12 +20,20 @@ import { cleanup, render } from "@testing-library/react";
 import { serversListedFor } from "@/lib/plugins/listed";
 import { type PluginConnections, pluginKeys } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
+import { ME_PATH, meResponse } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import {
   type AppsFixture,
   appBody,
   seedAppReads,
   type TodayServer,
 } from "./apps-api";
+import { connectionPage, MY_CONNECTIONS_PATH } from "./connections-api";
+import {
+  MEMBERS_PATH,
+  membersResponse,
+  organizationMember,
+} from "./organizations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -195,4 +203,48 @@ test("with the key set, the app's page offers the account as before", async () =
   const view = renderAccount(true);
   expect(await view.findByText("Your account")).toBeTruthy();
   expect(view.queryByText(/isn't set up yet/)).toBeNull();
+});
+
+/** The team edition, the person signed in with `role`, and the organization's members. */
+function answering(role: "owner" | "admin" | "member") {
+  const asked: string[] = [];
+  global.fetch = Object.assign(
+    async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const path = url.split("?")[0];
+      asked.push(path ?? url);
+      if (path === DEPLOYMENT_PATH) return Response.json({ edition: "team" });
+      if (path === ME_PATH)
+        return meResponse({ user: { id: "usr_me", role, name: "Me" } });
+      if (path === MEMBERS_PATH)
+        return membersResponse(url, [
+          organizationMember("Sam Lee", "sam@northwind.test", "member"),
+          organizationMember("Ines Duarte", "ines@northwind.test", "admin"),
+          organizationMember("Priya Raman", "priya@northwind.test", "owner"),
+        ]);
+      if (path?.startsWith(MY_CONNECTIONS_PATH)) return connectionPage([]);
+      return new Response(null, { status: 404 });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  return asked;
+}
+
+test("a member is told who can turn it on: the owner, then the admins", async () => {
+  answering("member");
+  const view = renderAccount(false);
+  expect(
+    await view.findByText(
+      "An admin has to turn on Gmail before anyone can connect it: Priya Raman (priya@northwind.test) or Ines Duarte (ines@northwind.test).",
+    ),
+  ).toBeTruthy();
+});
+
+test("an admin reading the same page is given no list of admins to ask", async () => {
+  const asked = answering("admin");
+  const view = renderAccount(false);
+  await view.findByText(/An admin has to turn on Gmail/);
+  await settleReactWork();
+  expect(view.queryByText(/northwind\.test/)).toBeNull();
+  expect(asked).not.toContain(MEMBERS_PATH);
 });

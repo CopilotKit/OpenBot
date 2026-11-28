@@ -1,5 +1,7 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { CAPABILITIES_HEADER } from "@openbot/shared/client-capabilities";
+import { CLIENT_HEADER } from "@openbot/shared/client-version";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -11,15 +13,16 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ConnectAppCard } from "@/components/channels/connect-app-card";
+import { CAPABILITIES, CLIENT_NAME } from "@/lib/client";
 import { carryOnMessage } from "@/lib/copilot/carry-on";
 import { ConversationProvider } from "@/lib/copilot/conversation";
-import { settleReactWork } from "./settle-react-work";
 import {
   connectionPage,
   connectionsCall,
   connectionsProblem,
   startResponse,
 } from "./connections-api";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * The card a Bot's refusal turns into when the app it needed is one this person can connect.
@@ -402,7 +405,15 @@ test("in OpenBot Desktop, coming back finishes a held consent in the background,
     await comeBack(card);
 
     expect(card.verifierCalls).toEqual([
-      { credentials: "same-origin", redirect: "manual" },
+      {
+        credentials: "same-origin",
+        redirect: "manual",
+        // Naming this app, and what it understands, as every request to OpenBot does.
+        headers: {
+          [CLIENT_HEADER]: CLIENT_NAME,
+          [CAPABILITIES_HEADER]: CAPABILITIES,
+        },
+      },
     ]);
     expect(window.location.href).toBe(before);
   } finally {

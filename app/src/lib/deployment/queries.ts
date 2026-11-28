@@ -1,13 +1,27 @@
 import {
+  type ClientKind,
+  type Compatibility,
+  compatibility,
+  RELEASE,
+} from "@openbot/shared/client-version";
+import {
   type QueryClient,
   queryOptions,
   useQuery,
 } from "@tanstack/react-query";
+import { useMemo } from "react";
 import type { Deployment } from "@/lib/api/generated/model";
 import { getDeployment } from "@/lib/api/generated/organization-settings/organization-settings";
 import { listOrganizations } from "@/lib/api/generated/organizations/organizations";
 import { DEPLOYMENT_ORGANIZATION } from "@/lib/api/request";
+import {
+  type AttachmentLimits,
+  attachmentLimitsFrom,
+  DEFAULT_ATTACHMENT_LIMITS,
+} from "@/lib/channels/attachments";
 import { ClientError } from "@/lib/client";
+import { invokeDesktop } from "@/lib/desktop/queries";
+import { desktopShell } from "@/lib/desktop/shell";
 import { currentOrganizationId } from "@/lib/organizations/current";
 
 /**
@@ -64,7 +78,33 @@ export type DeploymentCapabilities = {
    * and says so in place of asking.
    */
   botComputers?: boolean;
+  /**
+   * Whether people sign in through the hosted sign-in, with their account with OpenBot by
+   * CopilotKit: a hosted OpenBot. There an invitation is an email from OpenBot by CopilotKit, accepted
+   * from that email, with no OpenBot link that accepts it.
+   */
+  hostedSignIn?: boolean;
 };
+
+/**
+ * Whether this page shows the OpenBot on this computer inside OpenBot Desktop. There a request is admitted by the
+ * install's cookie (the personal edition admits nothing without it), so nothing is asked without the page's cookies.
+ * Asked of the desktop app once: it doesn't change while the page shows.
+ */
+const onThisComputer = new WeakMap<object, Promise<boolean>>();
+function showsOpenBotOnThisComputer(): Promise<boolean> {
+  const shell = desktopShell();
+  if (shell === null) return Promise.resolve(false);
+  let asked = onThisComputer.get(shell);
+  if (!asked) {
+    asked = invokeDesktop<{ mode?: string }>("connection").then(
+      (answer) => answer?.mode !== "connected",
+      () => true,
+    );
+    onThisComputer.set(shell, asked);
+  }
+  return asked;
+}
 
 /**
  * The API's `deployment`, asked where the server answers it.
@@ -72,35 +112,163 @@ export type DeploymentCapabilities = {
  * Signed in, it is answered in an organization the person is a member of and not found in any
  * other, `default` included, as every address under an organization is. Nobody signed in reads it
  * at `default`, which the sign-in screen asks before there is anybody to ask as. So it is asked in
- * the organization the person works in once that is known, and at `default` before. A person who
- * is signed in and not a member of `default` is told "not found" there, and is asked in one of
- * their own instead: the facts are the deployment's, the same in each.
+ * the organization the person works in once that is known. Before, it is asked at `default` as
+ * nobody, without the page's cookies: answered to anybody, so a person who is signed in and not a
+ * member of `default` is never told "not found" on the way in. The facts are the deployment's, the
+ * same asked as anybody or in any organization.
+ *
+ * Inside OpenBot Desktop, on the OpenBot on this computer, it is asked with the page's cookies,
+ * which that OpenBot needs; the person is in `default` there. Told "not found" all the same, it is
+ * asked in one of their own.
+ *
+ * SIGNED OUT, THE TAB STILL KNOWS THE ORGANIZATION IT WORKED IN, and on a hosted OpenBot with many
+ * organizations that one tells nobody it exists. Asked there after Sign out, the sign-in screen was
+ * told "not found" and drew the router's error in its place. Told "not found" in the organization
+ * it knows (signed out since, or no longer in it), it is asked the way it is before signing in.
  */
 export async function readDeployment(options: {
   signal?: AbortSignal;
   fallback: string;
 }): Promise<Deployment> {
   const known = currentOrganizationId();
+  if (known !== undefined) {
+    try {
+      return await getDeployment(known, options);
+    } catch (error) {
+      if (!(error instanceof ClientError) || error.status !== 404) throw error;
+      if (await showsOpenBotOnThisComputer()) throw error;
+      return getDeployment(DEPLOYMENT_ORGANIZATION, {
+        ...options,
+        credentials: "omit",
+      });
+    }
+  }
+  if (!(await showsOpenBotOnThisComputer()))
+    return getDeployment(DEPLOYMENT_ORGANIZATION, {
+      ...options,
+      credentials: "omit",
+    });
   try {
-    return await getDeployment(known ?? DEPLOYMENT_ORGANIZATION, options);
+    return await getDeployment(DEPLOYMENT_ORGANIZATION, options);
   } catch (error) {
-    if (
-      known !== undefined ||
-      !(error instanceof ClientError) ||
-      error.status !== 404
-    )
-      throw error;
+    if (!(error instanceof ClientError) || error.status !== 404) throw error;
     const own = (await listOrganizations({ limit: 1 }, undefined, options))
       .organizations[0];
-    if (!own) throw error;
+    // In no organization (removed from the last one): what this OpenBot offers anybody, asked as nobody, so the
+    // sign-in screen and the page for somebody in no organization can still offer a way back in.
+    if (!own)
+      return getDeployment(DEPLOYMENT_ORGANIZATION, {
+        ...options,
+        credentials: "omit",
+      });
     return getDeployment(own.id, options);
   }
 }
 
+/** An app as `compatibility` reads it: its kind, its release, and the API versions it speaks. */
+export type CompatibleApp = {
+  kind: ClientKind;
+  version: string;
+  speaks?: readonly string[];
+};
+
+/** This app: the web app, the release it was built from, speaking this release's API versions. */
+export const THIS_APP: CompatibleApp = { kind: "web", version: RELEASE };
+
 export const deploymentKeys = {
   all: ["deployment"] as const,
   capabilities: () => ["deployment", "capabilities"] as const,
+  attachmentLimits: () => ["deployment", "attachment-limits"] as const,
+  compatibility: (app: CompatibleApp) =>
+    [
+      "deployment",
+      "compatibility",
+      { kind: app.kind, version: app.version, speaks: app.speaks ?? null },
+    ] as const,
 };
+
+/**
+ * Whether this app and the OpenBot it talks to can work together, as that OpenBot's `deployment`
+ * says: the API versions it serves and the oldest release of each app it serves
+ * (`compatibility` in shared/client-version.ts, which every OpenBot app decides by).
+ *
+ * `deployment` is the one read an OpenBot never refuses for the app's version, so this is how a page
+ * finds out before anything else fails. Read again every so often and when the tab is looked at
+ * again, like the attachment limits, because the OpenBot can be upgraded while the tab stays open.
+ * Not answered (an OpenBot from before the v2 API, or one that failed to answer) is not a verdict:
+ * the screens say their own failures as they always did.
+ *
+ * `app` is this app; a test names another to see the other verdicts drawn.
+ */
+export function deploymentCompatibilityQueryOptions(
+  app: CompatibleApp = THIS_APP,
+) {
+  return queryOptions({
+    queryKey: deploymentKeys.compatibility(app),
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+    queryFn: async ({ signal }): Promise<Compatibility> =>
+      compatibility(
+        await readDeployment({
+          signal,
+          fallback: "Couldn't load which apps OpenBot serves.",
+        }),
+        app,
+      ),
+  });
+}
+
+/**
+ * How large an attached file may be, as this server says, read again every so often.
+ *
+ * NOT ON {@link deploymentCapabilitiesQueryOptions}, BECAUSE THESE CAN CHANGE WHILE THE SERVER RUNS.
+ * Everything there is fixed until the process restarts, so it is read once. These are not: a server
+ * can start taking larger files once the whole deployment has been upgraded, with no restart of the
+ * one this tab talks to. Read once, a tab left open across that would refuse a file the server now
+ * takes, naming a limit that is no longer true. So they are their own query, stale after a minute,
+ * read again when the tab is looked at again, and after any upload is refused.
+ *
+ * Absent reads as today's 8MB and 1MB (`attachmentLimitsFrom`): an older server publishes nothing
+ * and takes exactly those, so assuming more would pass files it then refuses.
+ */
+export function attachmentLimitsQueryOptions() {
+  return queryOptions({
+    queryKey: deploymentKeys.attachmentLimits(),
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+    queryFn: async ({ signal }): Promise<AttachmentLimits> => {
+      const body = await readDeployment({
+        signal,
+        fallback: "Couldn't load how large a file may be.",
+      });
+      return attachmentLimitsFrom(body.attachmentLimits);
+    },
+  });
+}
+
+/** The limits a composer screens a pick against, and how it asks for them again. */
+export type ComposerAttachmentLimits = {
+  limits: AttachmentLimits;
+  /** Read the limits again, as after a refusal: the refusal may be the first sign they changed. */
+  refresh: () => void;
+};
+
+/**
+ * {@link attachmentLimitsQueryOptions} for a screen with a composer: the server's limits, and the
+ * defaults while they load or when they could not be read. The defaults are the safe side, the
+ * smallest any server takes.
+ */
+export function useAttachmentLimits(): ComposerAttachmentLimits {
+  const query = useQuery(attachmentLimitsQueryOptions());
+  const { refetch } = query;
+  return useMemo(
+    () => ({
+      limits: query.data ?? DEFAULT_ATTACHMENT_LIMITS,
+      refresh: () => void refetch(),
+    }),
+    [query.data, refetch],
+  );
+}
 
 /**
  * What this deployment can do.
@@ -134,6 +302,7 @@ export function deploymentCapabilitiesQueryOptions() {
         isolatedBots: body.isolatedBots === true,
         // The other way round from the rest: a server that doesn't say reads as having computers.
         botComputers: body.botComputers !== false,
+        hostedSignIn: body.hostedSignIn === true,
       };
     },
   });
@@ -145,9 +314,10 @@ export function deploymentCapabilitiesQueryOptions() {
  * like every other, and that is what the connection line reads.
  */
 export async function askWhetherOpenBotAnswers(): Promise<void> {
-  await getDeployment(DEPLOYMENT_ORGANIZATION, {
-    fallback: "Couldn't reach OpenBot.",
-  }).catch(() => undefined);
+  // Where the deployment is answered for this person, so the question is never refused as "not found".
+  await readDeployment({ fallback: "Couldn't reach OpenBot." }).catch(
+    () => undefined,
+  );
 }
 
 /**

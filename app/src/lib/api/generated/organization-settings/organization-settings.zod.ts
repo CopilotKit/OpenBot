@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.
+ * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, how large an attached file may be, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no build: only whether single sign-on is set up and required, and which API versions and which releases of each OpenBot app it serves. It is never refused for the app's version, so an app reads it first to learn whether it, or the OpenBot, needs an update.
  * @summary Read what this OpenBot offers
  */
 
@@ -16,6 +16,32 @@ export const GetDeploymentParams = zod.object({
       "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
+
+export const getDeploymentResponseApiItemRegExp = new RegExp(
+  "^v[1-9][0-9]{0,3}$",
+);
+
+export const getDeploymentResponseMinimumClientsWebRegExp = new RegExp(
+  "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$",
+);
+export const getDeploymentResponseMinimumClientsDesktopRegExp = new RegExp(
+  "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$",
+);
+export const getDeploymentResponseMinimumClientsMobileRegExp = new RegExp(
+  "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$",
+);
+export const getDeploymentResponseMinimumClientsRecorderRegExp = new RegExp(
+  "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$",
+);
+export const getDeploymentResponseSecurityMinimumClientsWebRegExp = new RegExp(
+  "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$",
+);
+export const getDeploymentResponseSecurityMinimumClientsDesktopRegExp =
+  new RegExp("^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$");
+export const getDeploymentResponseSecurityMinimumClientsMobileRegExp =
+  new RegExp("^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$");
+export const getDeploymentResponseSecurityMinimumClientsRecorderRegExp =
+  new RegExp("^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$");
 
 export const GetDeploymentResponse = zod
   .object({
@@ -45,15 +71,21 @@ export const GetDeploymentResponse = zod
     authProviders: zod
       .array(zod.enum(["google", "microsoft", "okta"]))
       .describe("The social sign-ins offered, by id."),
+    hostedSignIn: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether people sign in through OpenBot by CopilotKit's own sign-in, with their account there. The sign-in starts at /api/auth/hosted/sign-in. Absent or false, people sign in only the ways authProviders and ssoConfigured say.",
+      ),
     ssoConfigured: zod
       .boolean()
       .describe(
-        "Whether a company's own identity provider is registered, so an email address can be sent to it. Never which.",
+        "Whether a company's own identity provider is registered, so an email address can be sent to it. Never which. Always false where hostedSignIn is true.",
       ),
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether an administrator requires single sign-on; social sign-in then stays only as the configured administrators' way in.",
+        "Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false. Always false where hostedSignIn is true.",
       ),
     builtInBots: zod
       .boolean()
@@ -69,6 +101,99 @@ export const GetDeploymentResponse = zod
       .boolean()
       .describe(
         "Whether this OpenBot has computers for Bots at all. False, a Bot has no computer, browser or sign-in to a website, and the computers answer 503 to every call. Not isolatedBots: an OpenBot whose Bots share one computer has computers (true) and cannot give a Bot one of its own (isolatedBots false).",
+      ),
+    attachmentLimits: zod
+      .object({
+        imageBytes: zod.int().min(1).describe("The largest image."),
+        documentBytes: zod
+          .int()
+          .min(1)
+          .describe(
+            "The largest document: a PDF, or a Word, Excel or PowerPoint file (.docx, .xlsx, .pptx).",
+          ),
+        fileBytes: zod
+          .int()
+          .min(1)
+          .describe("The largest text file, or a file of any other kind."),
+      })
+      .optional()
+      .describe(
+        "How large a file attached to a message may be, by kind, in bytes. An upload over its kind's limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a document (a PDF, or a Word, Excel or PowerPoint file) and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot's model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.",
+      ),
+    api: zod
+      .array(zod.string().regex(getDeploymentResponseApiItemRegExp))
+      .min(1)
+      .optional()
+      .describe(
+        "The API versions this OpenBot serves, by major, such as v2. An app that speaks none of them can't use it: when they are all newer than the app's, the app needs an update; when they are all older, this OpenBot does. Absent from a release before it was published, which serves v2.",
+      ),
+    minimumClients: zod
+      .object({
+        web: zod
+          .string()
+          .regex(getDeploymentResponseMinimumClientsWebRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+        desktop: zod
+          .string()
+          .regex(getDeploymentResponseMinimumClientsDesktopRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+        mobile: zod
+          .string()
+          .regex(getDeploymentResponseMinimumClientsMobileRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+        recorder: zod
+          .string()
+          .regex(getDeploymentResponseMinimumClientsRecorderRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+      })
+      .optional()
+      .describe(
+        "The oldest release of each OpenBot app this OpenBot serves. An app names itself in the OpenBot-Client header, and one older than its minimum here is refused with CLIENT_UPDATE_REQUIRED, everywhere but this deployment answer. An app not listed has no minimum. An OpenBot serves every app released in the last 12 months, so it names one only where its administrator raised it. Absent from a release before it was published.",
+      ),
+    securityMinimumClients: zod
+      .object({
+        web: zod
+          .string()
+          .regex(getDeploymentResponseSecurityMinimumClientsWebRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+        desktop: zod
+          .string()
+          .regex(getDeploymentResponseSecurityMinimumClientsDesktopRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+        mobile: zod
+          .string()
+          .regex(getDeploymentResponseSecurityMinimumClientsMobileRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+        recorder: zod
+          .string()
+          .regex(getDeploymentResponseSecurityMinimumClientsRecorderRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+      })
+      .optional()
+      .describe(
+        "The part of minimumClients raised because of a security problem in older releases: for each app named, the minimum is there for security. Absent or empty when none is.",
+      ),
+    launcherApi: zod
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "The version of what OpenBot Desktop supplies when it starts this OpenBot on its own computer. It changes when Desktop must supply something new.",
+      ),
+    extensionApi: zod
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "The version of what the OpenBot Recorder and this OpenBot exchange.",
       ),
   })
   .describe("What this OpenBot offers and how people sign in to it.");
@@ -93,13 +218,13 @@ export const getOrganizationSettingsResponseOneInactiveComputerDaysMax = 3650;
 export const getOrganizationSettingsResponseOneModelAllowlistModelsItemMax = 200;
 
 export const getOrganizationSettingsResponseOneModelAllowlistModelsItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const getOrganizationSettingsResponseOneModelAllowlistModelsMax = 500;
 
 export const getOrganizationSettingsResponseOneMcpAllowlistServersItemMax = 200;
 
 export const getOrganizationSettingsResponseOneMcpAllowlistServersItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const getOrganizationSettingsResponseOneMcpAllowlistServersMax = 500;
 
 export const getOrganizationSettingsResponseOneProactiveDailyRunsMax = 1440;
@@ -147,12 +272,18 @@ export const GetOrganizationSettingsResponse = zod
         actionRecordRetentionDays: zod
           .int()
           .describe("How many days recorded computer actions are kept."),
+        computerMode: zod
+          .enum(["per-person", "shared", "none"])
+          .optional()
+          .describe(
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+          ),
       })
       .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -226,7 +357,7 @@ export const GetOrganizationSettingsResponse = zod
   .and(zod.unknown());
 
 /**
- * Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Requiring single sign-on applies to signing in to the whole OpenBot, so it is set only in the organization `default`: sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.
+ * Change the settings sent and keep the rest. The settings sent are saved all or none: if any one is refused, none is saved. context is read-only, and sending it answers 400 with nothing saved. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Where this OpenBot may keep more than one organization, requiring single sign-on is each organization's own rule: its members sign in through an identity provider, and saving it signs out only this organization's members who signed in another way. Where it keeps only one organization, that organization's rule holds for everybody who signs in, and sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), single sign-on can't be required: sending ssoRequired true answers 409 with the code HOSTED_SIGN_IN_ONLY.
  * @summary Change the organization's settings
  */
 
@@ -257,13 +388,13 @@ export const updateOrganizationSettingsBodyOneInactiveComputerDaysMax = 3650;
 export const updateOrganizationSettingsBodyOneModelAllowlistModelsItemMax = 200;
 
 export const updateOrganizationSettingsBodyOneModelAllowlistModelsItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsBodyOneModelAllowlistModelsMax = 500;
 
 export const updateOrganizationSettingsBodyOneMcpAllowlistServersItemMax = 200;
 
 export const updateOrganizationSettingsBodyOneMcpAllowlistServersItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsBodyOneMcpAllowlistServersMax = 500;
 
 export const updateOrganizationSettingsBodyOneProactiveDailyRunsMax = 1440;
@@ -311,6 +442,12 @@ export const UpdateOrganizationSettingsBody = zod
         actionRecordRetentionDays: zod
           .int()
           .describe("How many days recorded computer actions are kept."),
+        computerMode: zod
+          .enum(["per-person", "shared", "none"])
+          .optional()
+          .describe(
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+          ),
       })
       .optional()
       .describe("What an administrator needs to set the settings. Read only."),
@@ -318,7 +455,7 @@ export const UpdateOrganizationSettingsBody = zod
       .boolean()
       .optional()
       .describe(
-        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -406,13 +543,13 @@ export const updateOrganizationSettingsResponseOneInactiveComputerDaysMax = 3650
 export const updateOrganizationSettingsResponseOneModelAllowlistModelsItemMax = 200;
 
 export const updateOrganizationSettingsResponseOneModelAllowlistModelsItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsResponseOneModelAllowlistModelsMax = 500;
 
 export const updateOrganizationSettingsResponseOneMcpAllowlistServersItemMax = 200;
 
 export const updateOrganizationSettingsResponseOneMcpAllowlistServersItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsResponseOneMcpAllowlistServersMax = 500;
 
 export const updateOrganizationSettingsResponseOneProactiveDailyRunsMax = 1440;
@@ -460,12 +597,18 @@ export const UpdateOrganizationSettingsResponse = zod
         actionRecordRetentionDays: zod
           .int()
           .describe("How many days recorded computer actions are kept."),
+        computerMode: zod
+          .enum(["per-person", "shared", "none"])
+          .optional()
+          .describe(
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+          ),
       })
       .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -577,6 +720,84 @@ export const StopInactiveComputersResponse = zod.object({
     .nullable()
     .describe("Why nothing was stopped, when nothing was looked at."),
 });
+
+/**
+ * Return whether the organization's apps are open, the default, or locked down (AppsSetting). Every member may read it, so the app can say what giving an app to a Bot will do. In the personal edition apps are always open, and it can't be changed.
+ * @summary Read whether the organization's apps are open
+ */
+
+export const GetAppsSettingParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const GetAppsSettingResponse = zod
+  .object({
+    lockedDown: zod
+      .boolean()
+      .describe(
+        "Whether the organization's apps are locked down. False, the default, is open: an app a person connects is on for every Bot they own, one press gives a Bot every action of an app, apps are open to Bot owners, the apps that need no sign-in are on for every Bot, any member adds an app the organization hasn't added in the press that connects it, and a connected shared account is on for every Bot for anybody who can use that Bot. True is locked down: an administrator adds apps and approves access requests and who may use a shared account through a Bot, one press gives an app's read-only actions, and an app is open to Bot owners only once an administrator opens it. Either way each person's own account stays theirs, and an administrator connects a shared account. Switching changes what giving does from then on. It doesn't take anything back unless takeBackWhatOpenGave is sent too. Restrictions an administrator sets on one app or one Bot hold either way.",
+      ),
+  })
+  .describe(
+    "Whether the organization's apps are open or locked down. It is kept apart from the organization's other settings so every member can read it.",
+  );
+
+/**
+ * Open the organization's apps or lock them down (AppsSetting). Locking down takes nothing back unless takeBackWhatOpenGave is sent too. The change, and anything taken back, is recorded on the audit trail. Only an administrator of the organization may change it.
+ * @summary Open the organization's apps, or lock them down
+ */
+
+export const UpdateAppsSettingParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const updateAppsSettingHeaderIdempotencyKeyMax = 128;
+
+export const UpdateAppsSettingHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(updateAppsSettingHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const UpdateAppsSettingBody = zod.object({
+  lockedDown: zod
+    .boolean()
+    .describe(
+      "True locks the organization's apps down, false opens them (AppsSetting).",
+    ),
+  takeBackWhatOpenGave: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Sent with lockedDown true: also take back what OpenBot gave Bots by itself while the organization was open, which is a person's connected apps on their own Bots and the apps that need no sign-in on every Bot. What an administrator or a Bot's owner gave by hand stays. Recorded on the audit trail. Ignored with lockedDown false: open apps would give it all again.",
+    ),
+});
+
+export const UpdateAppsSettingResponse = zod
+  .object({
+    lockedDown: zod
+      .boolean()
+      .describe(
+        "Whether the organization's apps are locked down. False, the default, is open: an app a person connects is on for every Bot they own, one press gives a Bot every action of an app, apps are open to Bot owners, the apps that need no sign-in are on for every Bot, any member adds an app the organization hasn't added in the press that connects it, and a connected shared account is on for every Bot for anybody who can use that Bot. True is locked down: an administrator adds apps and approves access requests and who may use a shared account through a Bot, one press gives an app's read-only actions, and an app is open to Bot owners only once an administrator opens it. Either way each person's own account stays theirs, and an administrator connects a shared account. Switching changes what giving does from then on. It doesn't take anything back unless takeBackWhatOpenGave is sent too. Restrictions an administrator sets on one app or one Bot hold either way.",
+      ),
+  })
+  .describe(
+    "Whether the organization's apps are open or locked down. It is kept apart from the organization's other settings so every member can read it.",
+  );
 
 /**
  * Return which models the organization's Bots ran on over the last days, with how many runs, refusals and people each had, and the newest 50 runs. Only an administrator of the organization may read it.
@@ -703,7 +924,7 @@ export const ListComputerActionsResponse = zod.object({
 });
 
 /**
- * Return what this OpenBot has set up and what it still needs, each row with its fix. An administrator, or somebody running OpenBot on their own, reads it as the one who sets it up; anybody else reads which parts work, and that an administrator sets the rest up.
+ * Return what this OpenBot has set up and what it still needs, each row with its fix. An administrator, or somebody running OpenBot on their own, reads it as the one who sets it up; anybody else reads which parts work, and that an administrator sets the rest up. On OpenBot Cloud, where each person can connect their own AI, the model row is the reader's: ready when the AI their runs use, their own or else the organization's, can answer, and needing setup only when neither can. No model key in this OpenBot's configuration is needed there.
  * @summary Read the setup checklist
  */
 

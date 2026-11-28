@@ -1,6 +1,5 @@
 import type {
   LearningAutoAssignState,
-  LearningProposal,
   LearningTarget,
 } from "@openbot/shared/learning";
 import {
@@ -26,13 +25,6 @@ import {
 } from "@/components/layout/page-shell";
 import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
 import { ProposalDialog } from "@/components/learning/proposal-dialog";
-import {
-  containerIdFor,
-  containerName,
-  containerNameLimit,
-  containerTitle,
-  skillTitle,
-} from "@/lib/learning/display";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -55,6 +47,13 @@ import { Separator } from "@/components/ui/separator";
 import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
+  containerIdFor,
+  containerName,
+  containerNameLimit,
+  containerTitle,
+  skillTitle,
+} from "@/lib/learning/display";
+import {
   createLearningContainer,
   type LearningParticipation,
   reviewLearningProposalMutationOptions,
@@ -74,6 +73,7 @@ import {
   learningRunsQueryOptions,
   learningSettingsQueryOptions,
 } from "@/lib/learning/queries";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { useCurrentOrganizationName } from "@/lib/organizations/queries";
 import { queryClient as appQueryClient } from "@/query-client";
 
@@ -82,10 +82,13 @@ export const Route = createFileRoute("/_authed/admin/learning")({
 });
 /**
  * The default container, as the page calls it. Where OpenBot keeps a container for the organization
- * alone (`own`), it is the organization's. Otherwise it is the one the deployment was given.
+ * alone (`own`), or where the person works in one of several organizations (`organization`), it is
+ * the organization's: each organization learns in a backend project of its own, so its default is
+ * its own even where the server names no container for it. Only an OpenBot that keeps one
+ * organization and lists none calls it the deployment's.
  */
-function defaultWords(own: string | null) {
-  return own === null
+function defaultWords(own: string | null, organization: string | undefined) {
+  return own === null && organization === undefined
     ? { use: "Use deployment default", shown: "Deployment default" }
     : {
         use: "Use this organization's default",
@@ -94,9 +97,9 @@ function defaultWords(own: string | null) {
 }
 
 /** How one Bot takes part in Learning: the default space, none, or a space of its own. */
-function participation(own: string | null) {
+function participation(own: string | null, organization: string | undefined) {
   return [
-    { value: "inherit", label: defaultWords(own).use },
+    { value: "inherit", label: defaultWords(own, organization).use },
     { value: "exclude", label: "Leave out of Learning" },
     { value: "container", label: "Use a specific container" },
   ];
@@ -124,11 +127,15 @@ function automaticMessage(
     settings.defaultTarget?.containerId === automatic.containerId
   )
     return own === null
-      ? `OpenBot assigned this project's "${automatic.containerId}" container automatically. You can change it here.`
+      ? organization
+        ? `Bots in ${organization} learn into its "${automatic.containerId}" container, which OpenBot assigned automatically. You can change it here.`
+        : `OpenBot assigned this project's "${automatic.containerId}" container automatically. You can change it here.`
       : `${organization ? `Bots in ${organization}` : "Bots"} learn into this organization's default container. You can change it here.`;
   if (automatic.state === "absent")
     return own === null
-      ? `This project has no "${automatic.containerId}" Learning container yet. Nothing is collected.`
+      ? organization
+        ? `${organization} has no "${automatic.containerId}" Learning container yet. Nothing is collected.`
+        : `This project has no "${automatic.containerId}" Learning container yet. Nothing is collected.`
       : "This organization's default container doesn't exist yet. Nothing is collected.";
   if (automatic.state === "not_entitled")
     return "This project's plan doesn't include Learning. No container was assigned.";
@@ -242,8 +249,8 @@ function ContainerSetup({
         </div>
       )}
       {(create.error || automatic.createError) && (
-        <p role="alert" className="text-destructive">
-          {create.error?.message ?? automatic.createError}
+        <p role="alert" className="text-destructive text-sm">
+          {create.error ? failureSaid(create.error) : automatic.createError}
         </p>
       )}
       {automatic.instructions && (
@@ -280,7 +287,7 @@ export function LearningPage() {
   const organizationSpace = useQuery(learningOrganizationSpaceQueryOptions());
   const own = organizationSpace.data ?? null;
   const organization = useCurrentOrganizationName();
-  const words = defaultWords(own);
+  const words = defaultWords(own, organization);
   const settings = organizationSpace.isSuccess
     ? (draft ?? settingsQuery.data)
     : undefined;
@@ -322,9 +329,11 @@ export function LearningPage() {
       <PageSection
         title="Participation"
         description={
-          own === null
+          own === null && organization === undefined
             ? "Container changes apply to new conversations. Existing ones keep their first container. Containers must already exist in the same project. Until you save here, OpenBot uses that project's openbot container."
-            : "Container changes apply to new conversations. Existing ones keep their first container. Until you choose another, Bots learn into this organization's default container."
+            : own === null
+              ? `Container changes apply to new conversations. Existing ones keep their first container. Containers must already exist in ${organization}'s project. Until you save here, Bots in ${organization} learn into its openbot container.`
+              : "Container changes apply to new conversations. Existing ones keep their first container. Until you choose another, Bots learn into this organization's default container."
         }
       >
         {(settingsQuery.isPending || organizationSpace.isPending) && (
@@ -333,8 +342,8 @@ export function LearningPage() {
           </p>
         )}
         {settingsError && (
-          <p role="alert" className="mt-4 text-destructive">
-            {settingsError.message}
+          <p role="alert" className="mt-4 text-destructive text-sm">
+            {failureSaid(settingsError)}
           </p>
         )}
         {settings && (
@@ -385,9 +394,11 @@ export function LearningPage() {
                 Per-Bot participation
               </legend>
               {(agents.error || hiddenAgents.error) && (
-                <p role="alert" className="text-destructive">
-                  Couldn't load the Bot list. Saved settings for each Bot are
-                  below.
+                <p role="alert" className="text-destructive text-sm">
+                  {loadFailure(
+                    [agents.error, hiddenAgents.error],
+                    "Couldn't load the Bot list. Saved settings for each Bot are below.",
+                  )}
                 </p>
               )}
               {botIds.map((id) => {
@@ -405,7 +416,7 @@ export function LearningPage() {
                     >
                       <span className="font-medium">{nameFor(id)}</span>
                       <Select
-                        items={participation(own)}
+                        items={participation(own, organization)}
                         value={mode}
                         onValueChange={(value) => {
                           const mappings = { ...settings.bots };
@@ -429,7 +440,7 @@ export function LearningPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {participation(own).map((choice) => (
+                          {participation(own, organization).map((choice) => (
                             <SelectItem key={choice.value} value={choice.value}>
                               {choice.label}
                             </SelectItem>
@@ -468,8 +479,8 @@ export function LearningPage() {
               </Button>
             </div>
             {save.error && (
-              <p role="alert" className="text-destructive">
-                {save.error.message}
+              <p role="alert" className="text-destructive text-sm">
+                {failureSaid(save.error)}
               </p>
             )}
           </form>
@@ -513,8 +524,8 @@ export function LearningPage() {
           </label>
           {overview.isPending && <p role="status">Checking the backend…</p>}
           {overview.error && (
-            <p role="alert" className="text-destructive">
-              {overview.error.message}
+            <p role="alert" className="text-destructive text-sm">
+              {failureSaid(overview.error)}
             </p>
           )}
           {snapshot && organizationSpace.isSuccess && (
@@ -591,7 +602,7 @@ export function LearningPage() {
               {delivery.isPending ? (
                 <p>Checking delivery…</p>
               ) : delivery.error ? (
-                <p role="alert">{delivery.error.message}</p>
+                <p role="alert">{failureSaid(delivery.error)}</p>
               ) : (
                 delivery.data && (
                   <>
@@ -614,7 +625,7 @@ export function LearningPage() {
                       </p>
                     )}
                     {delivery.data.error && (
-                      <p role="alert">{delivery.data.error.message}</p>
+                      <p role="alert">{failureSaid(delivery.data.error)}</p>
                     )}
                   </>
                 )
@@ -657,11 +668,16 @@ export function LearningPage() {
   );
 }
 
-const STATUS: Record<LearningProposal["status"], string> = {
+const STATUS: Partial<Record<string, string>> = {
   pending_review: "To review",
   approved: "Published",
   rejected: "Rejected",
 };
+
+/** A proposal's status in a word. Nothing for one a newer server sends that this app doesn't know. */
+export function proposalStatusWord(status: string): string | null {
+  return STATUS[status] ?? null;
+}
 
 /**
  * The skills Intelligence proposed for the container shown above, to approve (which publishes it to
@@ -699,12 +715,12 @@ function ProposedSkills({ agentId }: { agentId?: string }) {
       )}
       {learnNow.error && (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {learnNow.error.message}
+          {failureSaid(learnNow.error)}
         </p>
       )}
       {proposals.isPending ? null : proposals.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {proposals.error.message}
+          {failureSaid(proposals.error)}
         </p>
       ) : !containerId ? (
         <PageEmpty icon={IconSparkles} title="No container">
@@ -738,7 +754,7 @@ function ProposedSkills({ agentId }: { agentId?: string }) {
                 </ItemContent>
                 <ItemActions>
                   <span className="text-muted-foreground text-sm">
-                    {STATUS[proposal.status]}
+                    {proposalStatusWord(proposal.status)}
                   </span>
                   <IconChevronRight className="size-4 text-muted-foreground" />
                 </ItemActions>
@@ -770,7 +786,7 @@ function ProposedSkills({ agentId }: { agentId?: string }) {
   );
 }
 
-const RUN_STATUS: Record<LearningRunSummary["status"], string> = {
+const RUN_STATUS: Partial<Record<string, string>> = {
   queued: "Queued",
   freezing: "Starting",
   batching: "Analyzing",
@@ -807,6 +823,21 @@ export function runPollInterval(
   )
     ? RUN_POLL_MS
     : false;
+}
+
+/**
+ * A run's title: where it stands, and whether somebody started it. A status a newer server sends that
+ * this app doesn't know is left out.
+ */
+export function runTitle(
+  run: Pick<LearningRunSummary, "status" | "triggerSource">,
+): string {
+  return [
+    RUN_STATUS[run.status],
+    run.triggerSource === "manual" ? "Manual" : "Automatic",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /** One line saying how many skills and insights a run produced, for the counts it has. */
@@ -846,7 +877,7 @@ function AnalysisRuns({ agentId }: { agentId?: string }) {
     >
       {runs.isPending ? null : runs.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {runs.error.message}
+          {failureSaid(runs.error)}
         </p>
       ) : !runs.data.containerId ? (
         <PageEmpty icon={IconHistory} title="No container">
@@ -866,10 +897,7 @@ function AnalysisRuns({ agentId }: { agentId?: string }) {
                   <IconHistory />
                 </ItemMedia>
                 <ItemContent>
-                  <ItemTitle>
-                    {RUN_STATUS[run.status]} ·{" "}
-                    {run.triggerSource === "manual" ? "Manual" : "Automatic"}
-                  </ItemTitle>
+                  <ItemTitle>{runTitle(run)}</ItemTitle>
                   {[runTimes(run), runCounts(run)]
                     .filter((line) => line !== null)
                     .map((line) => (
@@ -901,7 +929,7 @@ function PublishedSkills({ agentId }: { agentId?: string }) {
     >
       {skills.isPending ? null : skills.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {skills.error.message}
+          {failureSaid(skills.error)}
         </p>
       ) : !skills.data.containerId ? (
         <PageEmpty icon={IconSparkles} title="No container">

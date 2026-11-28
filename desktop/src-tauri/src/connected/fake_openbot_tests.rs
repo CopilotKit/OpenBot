@@ -2,7 +2,9 @@
 A stand-in for an OpenBot that runs elsewhere, for this module's tests: a real HTTP server on a
 loopback port that answers the addresses the app uses as the real one does.
 
-- the public deployment answer and the authorization server metadata (RFC 8414), at the real paths;
+- the public deployment answer and the authorization server metadata (RFC 8414), at the real paths,
+  the deployment as one of the real answers in `shared/fixtures/client-version/cases.json` when
+  asked (`Shape::Answers`);
 - the authorization endpoint, which accepts only the public client, `response_type=code`, an S256
   challenge and a redirect of exactly `http://127.0.0.1:<port>/callback`, and sends the browser
   back with a code or with `error=access_denied`;
@@ -60,9 +62,25 @@ pub enum Shape {
     InfoAnswers(u16),
     /// Its revocation endpoint fails with a 500 whatever it is sent.
     RevokeBroken,
+    /// Signs in as `Current` does, and answers `deployment` with one of the real answers in
+    /// `shared/fixtures/client-version/cases.json`, by name: `current`, `v1.1.0`, `raised`,
+    /// `security` or `v3-only`.
+    Answers(&'static str),
+    /// Signs in as `Current` does, and its metadata also names an `end_session_endpoint` on its
+    /// own address (OpenID Connect RP-Initiated Logout), as a hosted OpenBot publishes one: where
+    /// a browser goes to end its session there.
+    EndSession,
+    /// Signs in as `Current` does, and its metadata names an `end_session_endpoint` on another
+    /// host.
+    EndSessionElsewhere,
 }
 
 const SCOPES: [&str; 4] = ["openid", "profile", "offline_access", "openbot"];
+
+/// Where `Shape::EndSession` says a browser ends its session.
+const END_SESSION_PATH: &str = "/api/auth/end-session";
+/// Where `Shape::EndSessionElsewhere` says it does.
+pub const END_SESSION_ELSEWHERE: &str = "https://elsewhere.example/api/auth/end-session";
 
 /// One request as the server received it.
 #[derive(Clone, Debug)]
@@ -329,6 +347,11 @@ impl FakeOpenBot {
         self.state.lock().unwrap().token_delay = delay;
     }
 
+    /// The `end_session_endpoint` that `Shape::EndSession` publishes.
+    pub fn end_session_endpoint(&self) -> String {
+        format!("{}{END_SESSION_PATH}", self.address)
+    }
+
     pub fn metadata(&self) -> Metadata {
         super::address::probe(&self.address).unwrap()
     }
@@ -348,6 +371,12 @@ impl FakeOpenBot {
         browser.tab();
         session
     }
+}
+
+/// The opener for a sign-out where the browser is not to be sent anywhere: an OpenBot that
+/// publishes no `end_session_endpoint`.
+pub fn no_browser(address: &str) -> Result<(), String> {
+    panic!("the browser was sent to {address}");
 }
 
 fn bearer(request: &Request<Incoming>) -> Option<String> {
@@ -416,17 +445,23 @@ async fn answer(
         )
     };
     Ok(match (method.as_str(), path.as_str()) {
-        ("GET", "/api/v2/organizations/default/deployment") => json(
-            StatusCode::OK,
-            serde_json::json!({
-                "edition": if shape == Shape::Personal { "personal" } else { "team" },
-                "localEvaluation": shape == Shape::LocalEvaluation,
-                "generativeUi": true,
-                "authProviders": ["google"],
-                "ssoConfigured": false,
-                "ssoRequired": false,
-            }),
-        ),
+        ("GET", "/api/v2/organizations/default/deployment") => match &shape {
+            Shape::Answers(name) => json(
+                StatusCode::OK,
+                crate::client_version::fixture_deployment(name),
+            ),
+            _ => json(
+                StatusCode::OK,
+                serde_json::json!({
+                    "edition": if shape == Shape::Personal { "personal" } else { "team" },
+                    "localEvaluation": shape == Shape::LocalEvaluation,
+                    "generativeUi": true,
+                    "authProviders": ["google"],
+                    "ssoConfigured": false,
+                    "ssoRequired": false,
+                }),
+            ),
+        },
         ("GET", "/.well-known/oauth-authorization-server/api/auth") => {
             if matches!(
                 shape,
@@ -442,20 +477,26 @@ async fn answer(
             } else {
                 address.clone()
             };
-            json(
-                StatusCode::OK,
-                serde_json::json!({
-                    "issuer": format!("{address}/api/auth"),
-                    "authorization_endpoint": format!("{home}/api/auth/oauth2/authorize"),
-                    "token_endpoint": format!("{home}/api/auth/oauth2/token"),
-                    "revocation_endpoint": format!("{home}/api/auth/oauth2/revoke"),
-                    "scopes_supported": SCOPES,
-                    "response_types_supported": ["code"],
-                    "grant_types_supported": ["authorization_code", "refresh_token"],
-                    "code_challenge_methods_supported": ["S256"],
-                    "token_endpoint_auth_methods_supported": ["none"],
-                }),
-            )
+            let mut metadata = serde_json::json!({
+                "issuer": format!("{address}/api/auth"),
+                "authorization_endpoint": format!("{home}/api/auth/oauth2/authorize"),
+                "token_endpoint": format!("{home}/api/auth/oauth2/token"),
+                "revocation_endpoint": format!("{home}/api/auth/oauth2/revoke"),
+                "scopes_supported": SCOPES,
+                "response_types_supported": ["code"],
+                "grant_types_supported": ["authorization_code", "refresh_token"],
+                "code_challenge_methods_supported": ["S256"],
+                "token_endpoint_auth_methods_supported": ["none"],
+            });
+            let end_session = match &shape {
+                Shape::EndSession => Some(format!("{address}{END_SESSION_PATH}")),
+                Shape::EndSessionElsewhere => Some(END_SESSION_ELSEWHERE.to_owned()),
+                _ => None,
+            };
+            if let Some(end_session) = end_session {
+                metadata["end_session_endpoint"] = end_session.into();
+            }
+            json(StatusCode::OK, metadata)
         }
         ("GET", "/api/auth/oauth2/authorize") => {
             let asked = form(query.as_bytes());

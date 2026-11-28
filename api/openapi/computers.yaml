@@ -31,6 +31,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -88,6 +90,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -146,6 +150,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -204,6 +210,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -249,6 +257,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -295,6 +305,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -312,6 +324,136 @@ paths:
           $ref: '#/components/responses/ComputerBotNotFound'
         '409':
           $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ComputerUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/computers/{botId}/workspace-snapshots:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    get:
+      tags: [Computers]
+      operationId: getWorkspaceSnapshots
+      x-openbot-singleton: true
+      summary: Read a computer's saved copies
+      description: >-
+        Return the saved copies of the computer this Bot runs on for the
+        caller, newest first, and the latest restore of it. OpenBot saves each
+        computer's files and browser sign-ins once a day and keeps the last 7,
+        and saves it again just before every restore. computer names another
+        person's computer the Bot runs on (person:<id> or bot:<id>), which only
+        an administrator of the organization may read. available is false
+        where this OpenBot keeps no copies. canRestore says whether the caller
+        may restore it: an administrator of the organization, or the person
+        whose computer it is when they own the Bot (an isolated Bot's computer
+        is its owner's). Reading it never starts the computer.
+      security:
+        - webSession: []
+        - appOAuth: [computers:read]
+        - apiKey: []
+      parameters:
+        - name: computer
+          in: query
+          required: false
+          description: Whose computer, as person:<id> or bot:<id>. Absent, the one this Bot runs on for the caller.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 300
+            pattern: ^(person|bot):\S+$
+      responses:
+        '200':
+          description: The computer's saved copies and its latest restore.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceSnapshots'
+              examples:
+                answer:
+                  $ref: '#/components/examples/WorkspaceSnapshotsExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ComputerBotNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ComputerUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/computers/{botId}/restore:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    post:
+      tags: [Computers]
+      operationId: restoreComputer
+      summary: Restore a computer from a saved copy
+      description: >-
+        Put the computer this Bot runs on back the way it was in one of its
+        saved copies, and record it on the audit trail. Nothing is restored
+        unless someone asks: OpenBot first saves the computer as it is now
+        (kept as a copy of kind before-restore), then replaces every file and
+        browser sign-in on it with the copy's and starts it again. Every Bot on
+        that computer goes back, and routines that use it wait until it is
+        back. The answer comes at once, with the restore running; read
+        getWorkspaceSnapshots for how it ends. computer names another person's
+        computer, as in getWorkspaceSnapshots. Only an administrator of the
+        organization, or the person whose computer it is when they own the
+        Bot, may do this. One restore of a computer runs at a time.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComputerRestoreRequest'
+            examples:
+              request:
+                value:
+                  snapshotId: snap_20261121t0300z_4kq2
+      responses:
+        '202':
+          description: The restore, started.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputerRestore'
+              examples:
+                answer:
+                  $ref: '#/components/examples/ComputerRestoreExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WorkspaceSnapshotNotFound'
+        '409':
+          $ref: '#/components/responses/ComputerRestoreConflict'
         '500':
           $ref: './common.yaml#/components/responses/ServerError'
         '503':
@@ -341,6 +483,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -385,6 +529,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -414,18 +560,24 @@ paths:
       summary: Read the page a Bot's browser is on
       description: >-
         Return the text of the page the Bot's browser is showing, with its
-        address and title.
+        address and title. Asked with the Bot's threadId and toolCallId, the
+        step runs once, however many times it is asked.
       x-openbot-singleton: true
       security:
         - webSession: []
         - appOAuth: [computers:read]
         - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/ComputerStepThreadIdQuery'
+        - $ref: '#/components/parameters/ComputerStepToolCallIdQuery'
       responses:
         '200':
           description: The page's address, title and text.
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -474,6 +626,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -531,6 +685,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -588,6 +744,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -644,6 +802,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -700,6 +860,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -760,6 +922,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -817,6 +981,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -879,6 +1045,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -920,18 +1088,33 @@ paths:
         Idempotency-Key, and sending the same key again answers 409
         ANSWER_NOT_KEPT, not the answer a second time. It was done; send a
         new key to do it again.
+        The body is optional: sent with the Bot's threadId and toolCallId, the
+        step runs once, however many times it is asked.
       security:
         - webSession: []
         - appOAuth: [computers:write]
         - apiKey: []
       parameters:
         - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComputerSnapshotAsk'
+            examples:
+              request:
+                value:
+                  threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+                  toolCallId: call_8c1f
       responses:
         '200':
           description: The elements, and the snapshot they belong to.
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -991,6 +1174,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1050,6 +1235,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1114,6 +1301,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1173,6 +1362,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1232,6 +1423,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1295,6 +1488,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1358,6 +1553,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1420,6 +1617,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1479,6 +1678,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1504,6 +1705,20 @@ paths:
           $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
   parameters:
+    ComputerStepThreadIdQuery:
+      name: threadId
+      in: query
+      required: false
+      description: The conversation's thread the Bot's tool call is in. Sent with toolCallId.
+      schema:
+        $ref: '#/components/schemas/ComputerStepThreadId'
+    ComputerStepToolCallIdQuery:
+      name: toolCallId
+      in: query
+      required: false
+      description: The Bot's tool call this step answers. Sent with threadId.
+      schema:
+        $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerToolCallId:
       name: toolCallId
       in: path
@@ -1567,7 +1782,7 @@ components:
                 computer named it (COMPUTER_ACTION_UNFINISHED).
     ComputerState:
       type: string
-      enum: [absent, starting, ready, unreachable]
+      x-extensible-enum: [absent, starting, ready, unreachable]
       description: >-
         Where a computer is in its life. absent is one that is not running:
         never started, or put to sleep after a quiet spell; it starts on the
@@ -1653,7 +1868,11 @@ components:
       properties:
         kind:
           type: string
-          enum: [cloudflare, visible-challenge]
+          x-extensible-enum: [cloudflare, visible-challenge, passkey]
+          description: >-
+            What the page raised: a Cloudflare check, a visible human check, or
+            a request for a passkey, which a passkey kept on the person's own
+            device can't answer in a Bot's computer.
         reason:
           type: string
         requestId:
@@ -1751,6 +1970,14 @@ components:
         truncated:
           type: boolean
           description: True when the page had more elements than are returned.
+    ComputerSnapshotAsk:
+      type: object
+      additionalProperties: false
+      properties:
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerNavigate:
       type: object
       additionalProperties: false
@@ -1765,7 +1992,40 @@ components:
           type: string
           description: >-
             The tool call that asked, so a picture of the page is kept under
-            it.
+            it. Sent with threadId, the step also runs once, however many
+            times it is asked (ComputerStepToolCallId says how).
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+    ComputerStepThreadId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: \S
+      description: >-
+        The conversation's thread the Bot's tool call is in. Sent with
+        toolCallId, so the server runs the step once, however many times it is
+        asked.
+    ComputerStepToolCallId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: \S
+      description: >-
+        The Bot's tool call this step answers. Sent with threadId, the server
+        runs the step once, however many times and from wherever it is asked.
+        The first ask runs it. When the server already ran this step, it
+        answers as it answered the first run, with the same result or the same
+        problem, and does nothing a second time; what the first run answered is
+        kept for this only until the conversation's turn is over, and after
+        that the answer is ANSWER_NOT_KEPT. While the first run is still going,
+        the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId
+        and toolCallId for its result. When the first run was cut off before it
+        answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it
+        was done before doing it again. COMPUTER_STEP_RUNNING and
+        COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose
+        OpenBot-Capabilities header names computer-step-taken; any other
+        request is answered as before they existed. Without both ids a call
+        runs once per Idempotency-Key, as it always has.
     ComputerClick:
       type: object
       additionalProperties: false
@@ -1778,6 +2038,10 @@ components:
         snapshotId:
           type: integer
           description: The snapshot the ref came from.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerType:
       type: object
       additionalProperties: false
@@ -1796,6 +2060,10 @@ components:
         submit:
           type: boolean
           description: Send the field's form afterwards.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerKey:
       type: object
       additionalProperties: false
@@ -1811,6 +2079,10 @@ components:
           description: The element to press it on. With it, snapshotId.
         snapshotId:
           type: integer
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerScroll:
       type: object
       additionalProperties: false
@@ -1820,6 +2092,10 @@ components:
           description: >-
             Pixels to scroll down, or up when negative. Without it the
             computer scrolls its own default distance.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerActionResult:
       type: object
       required: [action, url, elapsedMs]
@@ -1869,6 +2145,10 @@ components:
           type: integer
           minimum: 1000
           maximum: 600000
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerCommandResult:
       type: object
       required: [command, exitCode, stdout, stderr, truncated, timedOut, elapsedMs]
@@ -1899,6 +2179,10 @@ components:
         path:
           type: string
           description: A folder of the workspace. Without it, the workspace itself.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerFileEntry:
       type: object
       required: [path, kind]
@@ -1931,6 +2215,10 @@ components:
           type: string
           minLength: 1
           pattern: \S
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerFileText:
       type: object
       required: [path, text, truncated, bytes]
@@ -1962,6 +2250,10 @@ components:
         append:
           type: boolean
           description: Add to the end of the file instead of replacing it.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerFileWritten:
       type: object
       required: [path, bytes, appended]
@@ -1985,13 +2277,29 @@ components:
           type: string
         source:
           type: string
-          enum: [model, cloudflare, visible-challenge, manual]
+          x-extensible-enum: [model, cloudflare, visible-challenge, manual, passkey]
           description: >-
-            Who raised it: the Bot (model), a check the page raised, or the
-            person themselves (manual).
+            Who raised it: the Bot (model), a check the page raised (cloudflare,
+            visible-challenge, or passkey when the page asked for a passkey), or
+            the person themselves (manual).
+        passkey:
+          type: object
+          required: [host, askedAt]
+          description: >-
+            Set when the page asked for a passkey while this request was open. A
+            passkey kept on the person's own device can't be used in a Bot's
+            computer, so they sign in another way on the page, such as its "Try
+            another way".
+          properties:
+            host:
+              type: string
+              description: The site that asked, such as accounts.google.com.
+            askedAt:
+              type: string
+              description: When it asked.
         status:
           type: string
-          enum: [waiting, taken, completed, cancelled, expired, interrupted]
+          x-extensible-enum: [waiting, taken, completed, cancelled, expired, interrupted]
         createdAt:
           type: string
         updatedAt:
@@ -2068,6 +2376,12 @@ components:
           description: What the person is needed for.
         toolCallId:
           type: string
+          description: >-
+            The Bot's tool call that asked. Sent with threadId, the step also
+            runs once, however many times it is asked (ComputerStepToolCallId
+            says how).
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
         source:
           type: string
           enum: [model, manual]
@@ -2097,6 +2411,10 @@ components:
         label:
           type: string
           description: What to ask the person for, such as your bank password.
+        threadId:
+          $ref: '#/components/schemas/ComputerStepThreadId'
+        toolCallId:
+          $ref: '#/components/schemas/ComputerStepToolCallId'
     ComputerSecretValue:
       type: object
       additionalProperties: false
@@ -2266,12 +2584,113 @@ components:
         to:
           type: string
           description: The image it runs now.
+    WorkspaceSnapshotKind:
+      type: string
+      x-extensible-enum: [daily, before-restore]
+      description: daily is the copy OpenBot saves once a day. before-restore is the one it saved just before a restore.
+    WorkspaceSnapshot:
+      type: object
+      description: One saved copy of a computer's files and browser sign-ins.
+      required: [id, takenAt, kind]
+      properties:
+        id:
+          type: string
+          description: Names the copy in restoreComputer.
+        takenAt:
+          type: string
+          format: date-time
+          description: When it was saved.
+        kind:
+          $ref: '#/components/schemas/WorkspaceSnapshotKind'
+    ComputerRestoreState:
+      type: string
+      x-extensible-enum: [running, done, failed]
+      description: running is under way, and the computer is not yet back. done is back on the copy. failed says why in error.
+    ComputerRestore:
+      type: object
+      description: One restore of a computer from a saved copy.
+      required: [id, snapshotId, snapshotTakenAt, beforeSnapshotId, state, startedAt, finishedAt, error]
+      properties:
+        id:
+          type: string
+        snapshotId:
+          type: string
+          description: The copy it restores.
+        snapshotTakenAt:
+          type: string
+          format: date-time
+          description: When that copy was saved.
+        beforeSnapshotId:
+          type:
+            - string
+            - 'null'
+          description: The copy of the computer as it was just before, once it is saved. Null until then.
+        state:
+          $ref: '#/components/schemas/ComputerRestoreState'
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it was done or failed. Null while it runs.
+        error:
+          type:
+            - string
+            - 'null'
+          description: Why it failed, written for the person who asked. Null unless it failed.
+    WorkspaceSnapshots:
+      type: object
+      required: [computer, available, canRestore, snapshots, restore]
+      properties:
+        computer:
+          type: string
+          description: Whose computer, as person:<id> or bot:<id>.
+        available:
+          type: boolean
+          description: False where this OpenBot keeps no saved copies of computers. snapshots is then empty.
+        canRestore:
+          type: boolean
+          description: Whether the caller may restore this computer.
+        snapshots:
+          type: array
+          description: Newest first.
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/WorkspaceSnapshot'
+        restore:
+          description: The latest restore of this computer, or null when it was never restored.
+          oneOf:
+            - $ref: '#/components/schemas/ComputerRestore'
+            - type: 'null'
+    ComputerRestoreRequest:
+      type: object
+      additionalProperties: false
+      required: [snapshotId]
+      properties:
+        snapshotId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: The saved copy to restore, from getWorkspaceSnapshots.
+        computer:
+          type: string
+          minLength: 1
+          maxLength: 300
+          pattern: ^(person|bot):\S+$
+          description: Whose computer, as person:<id> or bot:<id>. Absent, the one this Bot runs on for the caller.
   responses:
     ComputerActionRefused:
       description: >-
         The boundary, a network rule or the workspace refused the action, and
         nothing was done. rule names the boundary rule when one did. Or the
         caller holds no role in this organization.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2316,6 +2735,9 @@ components:
       description: >-
         An administrator has not turned the password manager on for the
         caller, or the caller holds no role in this organization.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2348,6 +2770,9 @@ components:
       description: >-
         The computer named is not one of the organization's Bots' computers,
         or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2380,6 +2805,9 @@ components:
         The Bot does not exist or is not the caller's to use, a file or a
         control request the call names does not exist, or the organization
         does not.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2436,12 +2864,23 @@ components:
         once; send a new key to run it again). Or the caller has something else
         to do first: take a new snapshot, wait for the person driving, clear
         what is in the way, or send the call through its conversation. Or the
-        Idempotency-Key was already used for a different request.
+        Idempotency-Key was already used for a different request. Or the call
+        named a step, by threadId and toolCallId, that the server is running
+        now (COMPUTER_STEP_RUNNING: ask again with the same ids for its
+        result) or that was cut off before it answered
+        (COMPUTER_STEP_OUTCOME_UNKNOWN: check before doing it again).
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/ComputerProblem'
           examples:
+            stepRunning:
+              $ref: '#/components/examples/ComputerStepRunningProblemExample'
+            stepOutcomeUnknown:
+              $ref: '#/components/examples/ComputerStepOutcomeUnknownProblemExample'
             answerNotKept:
               value:
                 type: https://open.bot/errors/answer-not-kept
@@ -2470,12 +2909,23 @@ components:
         Nothing is broken, and the caller has something else to do first: take
         a new snapshot, wait for the person driving, clear what is in the way,
         or send the call through its conversation. Or the Idempotency-Key was
-        already used for a different request.
+        already used for a different request. Or the call named a step, by
+        threadId and toolCallId, that the server is running now
+        (COMPUTER_STEP_RUNNING: ask again with the same ids for its result) or
+        that was cut off before it answered (COMPUTER_STEP_OUTCOME_UNKNOWN:
+        check before doing it again).
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/ComputerProblem'
           examples:
+            stepRunning:
+              $ref: '#/components/examples/ComputerStepRunningProblemExample'
+            stepOutcomeUnknown:
+              $ref: '#/components/examples/ComputerStepOutcomeUnknownProblemExample'
             stale:
               value:
                 type: https://open.bot/errors/computer-snapshot-stale
@@ -2549,6 +2999,9 @@ components:
       description: >-
         The control request has already ended or is somebody else's, or the
         Idempotency-Key was already used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2580,6 +3033,9 @@ components:
       description: >-
         The computer could not be reached, or is still starting: the call was
         not performed, and is worth sending again in a moment.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2607,7 +3063,118 @@ components:
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
+            restoring:
+              value:
+                type: https://open.bot/errors/computer-restoring
+                title: The computer is being restored.
+                status: 503
+                detail: This computer is being restored from a saved copy. It's back in a few minutes.
+                code: COMPUTER_RESTORING
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    WorkspaceSnapshotNotFound:
+      description: The Bot does not exist or is not the caller's to use, the saved copy is not one of this computer's, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ComputerProblem'
+          examples:
+            snapshot:
+              value:
+                type: https://open.bot/errors/not-found
+                title: Not found.
+                status: 404
+                detail: Couldn't find that saved copy of this computer.
+                code: NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            bot:
+              value:
+                type: https://open.bot/errors/bot-not-found
+                title: Bot not found.
+                status: 404
+                detail: There is no such Bot.
+                code: BOT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ComputerRestoreConflict:
+      description: A restore of this computer is already running, or the Idempotency-Key was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ComputerProblem'
+          examples:
+            running:
+              value:
+                type: https://open.bot/errors/computer-restore-running
+                title: A restore is already running.
+                status: 409
+                detail: This computer is already being restored. Wait for it to finish, then try again.
+                code: COMPUTER_RESTORE_RUNNING
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
   examples:
+    WorkspaceSnapshotsExample:
+      summary: A computer with two daily copies and one from before a restore.
+      value:
+        computer: 'person:user_2b8kq4'
+        available: true
+        canRestore: true
+        snapshots:
+          - id: snap_20261121t1504z_9xq1
+            takenAt: '2026-11-21T15:04:12Z'
+            kind: before-restore
+          - id: snap_20261121t0300z_4kq2
+            takenAt: '2026-11-21T03:00:41Z'
+            kind: daily
+          - id: snap_20261120t0300z_7mn3
+            takenAt: '2026-11-20T03:00:38Z'
+            kind: daily
+        restore:
+          id: rst_5f2a9c
+          snapshotId: snap_20261120t0300z_7mn3
+          snapshotTakenAt: '2026-11-20T03:00:38Z'
+          beforeSnapshotId: snap_20261121t1504z_9xq1
+          state: done
+          startedAt: '2026-11-21T15:04:10Z'
+          finishedAt: '2026-11-21T15:07:55Z'
+          error: null
+    ComputerRestoreExample:
+      summary: A restore that has just started.
+      value:
+        id: rst_5f2a9c
+        snapshotId: snap_20261120t0300z_7mn3
+        snapshotTakenAt: '2026-11-20T03:00:38Z'
+        beforeSnapshotId: null
+        state: running
+        startedAt: '2026-11-21T15:04:10Z'
+        finishedAt: null
+        error: null
     ComputerStatusExample:
       summary: A computer that is up.
       value:
@@ -2750,3 +3317,27 @@ components:
       value:
         action: human_click
         url: https://example.com/sign-in
+    ComputerStepRunningProblemExample:
+      summary: The server is running this step now.
+      value:
+        type: https://open.bot/errors/computer-step-running
+        title: This step is already being run.
+        status: 409
+        detail: This step is already being run, and has not finished yet. Ask again in a moment for its result.
+        code: COMPUTER_STEP_RUNNING
+        category: conflict
+        retryable: true
+        requestId: req_example
+        traceId: trace_example
+    ComputerStepOutcomeUnknownProblemExample:
+      summary: The step was cut off before it answered.
+      value:
+        type: https://open.bot/errors/computer-step-outcome-unknown
+        title: This step's outcome is unknown.
+        status: 409
+        detail: This step was started once and stopped before it finished, so it may or may not have been done. Check before doing it again.
+        code: COMPUTER_STEP_OUTCOME_UNKNOWN
+        category: conflict
+        retryable: false
+        requestId: req_example
+        traceId: trace_example

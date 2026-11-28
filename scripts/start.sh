@@ -74,6 +74,7 @@ APP_PORT="$(setting APP_PORT 3010)"
 SERVER_PORT="$(setting SERVER_PORT 3001)"
 COMPUTER_PORT="$(setting COMPUTER_PORT 4100)"
 LANGGRAPH_PORT="$(setting LANGGRAPH_PORT 4201)"
+LANGGRAPH_TS_PORT="$(setting LANGGRAPH_TS_PORT 4215)"
 SUPERVISOR_PORT="$(setting SUPERVISOR_PORT 4500)"
 # Through `setting`, like every other key here, so `.env` counts as the comment above says and as
 # docs/configuration.md tells people to rely on. Read from the environment alone, `false` in `.env`
@@ -97,7 +98,7 @@ COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
 # this default stays in the script rather than in .env: a `docker run --env-file .env` must not
 # inherit a URL that points at a process the image does not contain.
 #
-# The personal edition runs its Personal Assistant inside the server, so it starts no Bot process and
+# The personal edition runs its Personal Assistant inside the server, so it starts no managed Bot and
 # names no managed endpoint unless .env does. Its one computer carries only the one person's Bots, so
 # it is started as theirs, which lets them record in a Bot's browser (agent-computer's person-access.ts).
 EDITION="$(setting OPENBOT_EDITION team)"
@@ -108,7 +109,11 @@ else
   MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://127.0.0.1:${LANGGRAPH_PORT}/")"
   COMPUTER_PERSON_ID=
 fi
-export MANAGED_AGENT_AG_UI_URL COMPUTER_PERSON_ID
+# The TypeScript LangGraph engine, which new Bots run on, in every edition. The server refuses a Bot
+# made for the engine when it cannot reach one, rather than run it on its built-in agent, so the
+# personal edition starts it and names it too.
+LANGGRAPH_TS_AG_UI_URL="$(setting LANGGRAPH_TS_AG_UI_URL "http://127.0.0.1:${LANGGRAPH_TS_PORT}/")"
+export MANAGED_AGENT_AG_UI_URL LANGGRAPH_TS_AG_UI_URL COMPUTER_PERSON_ID
 
 # Whether this run minted a secret that something already running may not have.
 #
@@ -379,9 +384,11 @@ if [ "$EDITION" = "personal" ]; then
 else
   SERVICES+=(agent-langgraph-agui)
 fi
+# The TypeScript LangGraph engine, in every edition: new Bots run on it (see LANGGRAPH_TS_AG_UI_URL).
+SERVICES+=(agent-langgraph-ts)
 
 export SUPERVISOR_TOKEN COMPUTER_TOKEN
-export COMPUTER_PORT LANGGRAPH_PORT SUPERVISOR_PORT
+export COMPUTER_PORT LANGGRAPH_PORT LANGGRAPH_TS_PORT SUPERVISOR_PORT
 # Quiet progress, because stdout is /dev/null while stderr is still the terminal. Seeing that
 # terminal, newer Compose (v5 and later) picks its interactive build display and tries to draw it on
 # stdout, and stops with "failed to get console: provided file is not a console". An environment
@@ -420,6 +427,7 @@ wait_for "http://localhost:$COMPUTER_PORT/health" "agent-computer"
 if [ "$EDITION" != "personal" ]; then
   wait_for "http://127.0.0.1:$LANGGRAPH_PORT/health" "agent-langgraph-agui"
 fi
+wait_for "http://127.0.0.1:$LANGGRAPH_TS_PORT/health" "agent-langgraph-ts"
 
 # Resolved at the top, where the default that .env deliberately does not carry is applied. Reading
 # .env again here would have demanded the line be present in a file the comment above that default

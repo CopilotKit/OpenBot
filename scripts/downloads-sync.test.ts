@@ -873,7 +873,12 @@ type Job = {
   if?: string;
   permissions?: Record<string, string>;
   env?: Record<string, string>;
-  steps?: { uses?: string; with?: Record<string, string>; run?: string }[];
+  steps?: {
+    if?: string;
+    uses?: string;
+    with?: Record<string, string>;
+    run?: string;
+  }[];
 };
 type Workflow = {
   on: Record<string, unknown>;
@@ -910,8 +915,14 @@ test("the sync workflow runs on main only, one at a time, with the role and noth
   );
   const runs = job.steps?.map((step) => step.run).filter(Boolean);
   // The images first: a failed copy stops the job before latest/ names the release.
-  expect(runs?.at(-2)).toBe("bun scripts/downloads-images.ts");
-  expect(runs?.at(-1)).toBe("scripts/downloads-sync.sh");
+  expect(runs?.at(-3)).toBe("bun scripts/downloads-images.ts");
+  expect(runs?.at(-2)).toBe("scripts/downloads-sync.sh");
+  // Then the older releases' installers, on every run for the Latest release (scheduled, or
+  // dispatched with no tag), and never on a run for one tag.
+  const older = job.steps?.at(-1);
+  expect(older?.run).toBe("scripts/release-older-installers.sh bucket");
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow's own expression, unexpanded.
+  expect(older?.if).toBe("${{ !inputs.tag }}");
 
   // Both attach jobs may be the one that makes the release Latest, so both may start the sync.
   for (const path of [

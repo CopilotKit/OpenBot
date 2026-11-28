@@ -28,6 +28,8 @@ paths:
           headers: &a1
             Cache-Control:
               $ref: ./common.yaml#/components/headers/PrivateNoStore
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -56,9 +58,9 @@ paths:
         instruction on the schedule and posts in the conversation, which must be
         one the caller and the Bot share. With goalId it is the routine that
         runs that goal on a schedule. A person may have 20 routines switched on,
-        and a routine runs at most once an hour. There is no operation to change
-        a routine: that is done by asking its Bot. A repeated request with the
-        same Idempotency-Key and body returns the first result."
+        and a routine runs at most once an hour. updateRoutine changes one. A
+        repeated request with the same Idempotency-Key and body returns the
+        first result."
       security:
         - webSession: []
         - appOAuth:
@@ -106,10 +108,160 @@ paths:
           $ref: ./common.yaml#/components/responses/ServerError
         default:
           $ref: ./common.yaml#/components/responses/UnexpectedError
+  /api/v2/organizations/{organizationId}/routines/read:
+    parameters:
+      - $ref: ./common.yaml#/components/parameters/OrganizationId
+    post:
+      tags:
+        - Routines
+      operationId: readRoutineSentence
+      summary: Read a sentence as a routine's answers
+      description: "Read a sentence in English as New routine's answers: what the Bot
+        does, when it starts, the schedule and what ends it. It writes nothing.
+        createRoutine, createGoal or createCheckIn makes what it read. A
+        repeated request with the same Idempotency-Key and body returns the
+        first reading without asking the model again."
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:read
+        - apiKey: []
+      parameters:
+        - $ref: ./common.yaml#/components/parameters/IdempotencyKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoutineSentence"
+            examples:
+              request:
+                value:
+                  botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+                  sentence: Summarize my unread mail every weekday at 9.
+                  timezone: America/New_York
+      responses:
+        "200":
+          description: What the sentence says, or what is still missing from it.
+          headers: *a1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutineReading"
+              examples:
+                ready:
+                  value:
+                    outcome: ready
+                    draft:
+                      does: act
+                      instruction: Summarize my unread mail.
+                      title: Morning mail summary
+                      starts: schedule
+                      cron: 0 9 * * 1-5
+                      timezone: America/New_York
+                      doneWhen: ""
+                      conversationId: null
+                      intervalMinutes: null
+                needsMore:
+                  value:
+                    outcome: needsMore
+                    draft:
+                      does: act
+                      instruction: Summarize my unread mail.
+                      title: Mail summary
+                      starts: unsaid
+                      cron: null
+                      timezone: America/New_York
+                      doneWhen: ""
+                      conversationId: null
+                      intervalMinutes: null
+                    missing: time
+                refused:
+                  value:
+                    outcome: refused
+                    detail: A routine can run at most every 15 minutes.
+                    fix: null
+                notRoutine:
+                  value:
+                    outcome: notRoutine
+        "400":
+          $ref: ./common.yaml#/components/responses/InvalidRequest
+        "401":
+          $ref: ./common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: ./common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: ./common.yaml#/components/responses/OrganizationNotFound
+        "409":
+          $ref: ./common.yaml#/components/responses/IdempotencyConflict
+        "500":
+          $ref: ./common.yaml#/components/responses/ServerError
+        "502":
+          $ref: ./common.yaml#/components/responses/ModelFailed
+        "503":
+          $ref: ./common.yaml#/components/responses/ModelNotConfigured
+        default:
+          $ref: ./common.yaml#/components/responses/UnexpectedError
   /api/v2/organizations/{organizationId}/routines/{routineId}:
     parameters:
       - $ref: ./common.yaml#/components/parameters/OrganizationId
       - $ref: "#/components/parameters/RoutineId"
+    patch:
+      tags:
+        - Routines
+      operationId: updateRoutine
+      summary: Change a routine
+      description: "Change one of the caller's routines: its name, what the Bot does,
+        its schedule or its time zone. Only the fields sent change. It keeps
+        its id, its conversation and its runs. A new schedule or time zone
+        follows the same rules as a new routine's, and its next run is worked
+        out from now. One that does not exist, or is somebody else's, is not
+        found. A repeated request with the same Idempotency-Key and body
+        returns the first result."
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:write
+        - apiKey: []
+      parameters:
+        - $ref: ./common.yaml#/components/parameters/IdempotencyKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRoutineRequest"
+            examples:
+              request:
+                value:
+                  instruction: Summarize my unread mail, today's calendar and the
+                    weather.
+                  cron: 30 8 * * 1-5
+      responses:
+        "200":
+          description: The routine, as saved.
+          headers: *a1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutineResponse"
+              examples:
+                answer:
+                  $ref: "#/components/examples/RoutineResponseExample"
+        "400":
+          $ref: "#/components/responses/InvalidRoutine"
+        "401":
+          $ref: ./common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: ./common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: "#/components/responses/RoutineNotFound"
+        "409":
+          $ref: ./common.yaml#/components/responses/IdempotencyConflict
+        "500":
+          $ref: ./common.yaml#/components/responses/ServerError
+        default:
+          $ref: ./common.yaml#/components/responses/UnexpectedError
     delete:
       tags:
         - Routines
@@ -128,6 +280,9 @@ paths:
       responses:
         "204":
           description: The routine was deleted.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         "400":
           $ref: ./common.yaml#/components/responses/InvalidRequest
         "401":
@@ -268,6 +423,8 @@ paths:
           $ref: "#/components/responses/InvalidRoutine"
         "401":
           $ref: ./common.yaml#/components/responses/Unauthenticated
+        "402":
+          $ref: ./common.yaml#/components/responses/PlanRequired
         "403":
           $ref: ./common.yaml#/components/responses/Forbidden
         "404":
@@ -500,6 +657,9 @@ paths:
       responses:
         "204":
           description: The check-in was removed.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         "400":
           $ref: ./common.yaml#/components/responses/InvalidRequest
         "401":
@@ -549,6 +709,8 @@ paths:
           $ref: "#/components/responses/InvalidCheckIn"
         "401":
           $ref: ./common.yaml#/components/responses/Unauthenticated
+        "402":
+          $ref: ./common.yaml#/components/responses/PlanRequired
         "403":
           $ref: ./common.yaml#/components/responses/Forbidden
         "404":
@@ -639,6 +801,62 @@ paths:
           $ref: ./common.yaml#/components/responses/InvalidRequest
         "401":
           $ref: ./common.yaml#/components/responses/Unauthenticated
+        "402":
+          $ref: ./common.yaml#/components/responses/PlanRequired
+        "403":
+          $ref: ./common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: "#/components/responses/CheckInItemNotFound"
+        "409":
+          $ref: ./common.yaml#/components/responses/IdempotencyConflict
+        "500":
+          $ref: ./common.yaml#/components/responses/ServerError
+        default:
+          $ref: ./common.yaml#/components/responses/UnexpectedError
+  /api/v2/organizations/{organizationId}/check-in-items/{checkInItemId}/work-on:
+    parameters:
+      - $ref: ./common.yaml#/components/parameters/OrganizationId
+      - $ref: "#/components/parameters/CheckInItemId"
+    post:
+      tags:
+        - Check-ins
+      operationId: workOnCheckInItem
+      summary: Work on an item
+      description: "Start an item the way this server takes work on. Where the server
+        runs tasks in conversations of their own, it becomes a task, as
+        startCheckInItem makes one, and `task` names it. Where it does not, no
+        task and no conversation is made: the item is started, and
+        `conversation` names the caller's own conversation with the item's Bot
+        (made if they have none yet) and the message to send there as the
+        caller's own, so the Bot works on it in that conversation like any other
+        request. One that is no longer open, or is somebody else's, is refused."
+      security:
+        - webSession: []
+        - appOAuth:
+            - check-ins:write
+        - apiKey: []
+      parameters:
+        - $ref: ./common.yaml#/components/parameters/IdempotencyKey
+      responses:
+        "200":
+          description: The item, started, with the task it became or the conversation to
+            work on it in.
+          headers: *a1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckInItemWork"
+              examples:
+                inConversation:
+                  $ref: "#/components/examples/CheckInItemWorkInConversationExample"
+                asTask:
+                  $ref: "#/components/examples/CheckInItemWorkAsTaskExample"
+        "400":
+          $ref: ./common.yaml#/components/responses/InvalidRequest
+        "401":
+          $ref: ./common.yaml#/components/responses/Unauthenticated
+        "402":
+          $ref: ./common.yaml#/components/responses/PlanRequired
         "403":
           $ref: ./common.yaml#/components/responses/Forbidden
         "404":
@@ -916,6 +1134,9 @@ paths:
       responses:
         "204":
           description: The goal was deleted.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         "400":
           $ref: ./common.yaml#/components/responses/InvalidRequest
         "401":
@@ -1092,6 +1313,8 @@ paths:
           $ref: "#/components/responses/InvalidGoal"
         "401":
           $ref: ./common.yaml#/components/responses/Unauthenticated
+        "402":
+          $ref: ./common.yaml#/components/responses/PlanRequired
         "403":
           $ref: ./common.yaml#/components/responses/Forbidden
         "404":
@@ -1322,6 +1545,9 @@ paths:
       responses:
         "204":
           description: The trigger was removed.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         "400":
           $ref: ./common.yaml#/components/responses/InvalidRequest
         "401":
@@ -1635,6 +1861,9 @@ paths:
       responses:
         "204":
           description: The source was disconnected.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         "400":
           $ref: ./common.yaml#/components/responses/InvalidRequest
         "401":
@@ -1777,6 +2006,7 @@ components:
         - id
         - botId
         - schedule
+        - cron
         - timezone
         - instruction
         - title
@@ -1796,6 +2026,11 @@ components:
         schedule:
           type: string
           description: When it runs, as text to show.
+        cron:
+          type: string
+          description: "The schedule as it is kept, five cron fields: minute, hour, day
+            of month, month, day of week. What a form that changes the schedule
+            starts from."
         timezone:
           type: string
           description: The IANA time zone the schedule is read in.
@@ -1868,12 +2103,11 @@ components:
           type:
             - string
             - "null"
-          enum:
+          x-extensible-enum:
             - succeeded
             - failed
             - skipped
             - waiting
-            - null
           description: How it ended, or null while it is still open. Only failed is a
             failure.
         at:
@@ -1947,6 +2181,207 @@ components:
           type: string
           description: The goal this routine runs, when it runs one.
           maxLength: 200
+    RoutineSentence:
+      type: object
+      additionalProperties: false
+      required:
+        - botId
+        - sentence
+        - timezone
+      properties:
+        botId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: The Bot the routine is for.
+        sentence:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: \S
+          description: The routine in the person's own words. At most 2,000 characters.
+        timezone:
+          type: string
+          maxLength: 100
+          description: The IANA time zone the person is in, used to read a time of day.
+    RoutineDraft:
+      type: object
+      description: What a sentence says, as the answers New routine asks for.
+      required:
+        - does
+        - instruction
+        - title
+        - starts
+        - cron
+        - timezone
+        - doneWhen
+        - conversationId
+        - intervalMinutes
+      properties:
+        does:
+          type: string
+          enum:
+            - act
+            - tell
+          description: act carries out the instruction. tell only reports back.
+        instruction:
+          type: string
+          description: What the Bot does on each run.
+        title:
+          type: string
+          description: What to call it.
+        starts:
+          type: string
+          enum:
+            - schedule
+            - event
+            - now
+            - unsaid
+          description: What starts it. schedule is a time, event is something
+            that happens, now is straight away, and unsaid is a start the
+            sentence doesn't give.
+        cron:
+          type:
+            - string
+            - "null"
+          description: The schedule, as five cron fields. Set only when starts is
+            schedule, and null otherwise.
+        timezone:
+          type: string
+          description: The IANA time zone the schedule is read in.
+        doneWhen:
+          type: string
+          description: "The outcome that ends it, in the sentence's words. Empty when the
+            sentence gives none: on a schedule that makes a routine, and an
+            outcome makes a goal that ends when it is met."
+        conversationId:
+          type:
+            - string
+            - "null"
+          description: The conversation it posts in. Null means a new conversation.
+        intervalMinutes:
+          type:
+            - integer
+            - "null"
+          enum:
+            - 60
+            - 240
+            - 720
+            - 1440
+            - null
+          description: How often a check-in looks, in minutes. Set only when does is
+            tell, and null otherwise.
+    RoutineReadingReady:
+      type: object
+      description: The sentence says everything a routine needs.
+      required:
+        - outcome
+        - draft
+      properties:
+        outcome:
+          type: string
+          const: ready
+        draft:
+          $ref: "#/components/schemas/RoutineDraft"
+    RoutineReadingNeedsMore:
+      type: object
+      description: The sentence is a routine but leaves something out.
+      required:
+        - outcome
+        - draft
+        - missing
+      properties:
+        outcome:
+          type: string
+          const: needsMore
+        draft:
+          $ref: "#/components/schemas/RoutineDraft"
+        missing:
+          type: string
+          x-extensible-enum:
+            - time
+            - event
+            - once
+          description: What to ask next. time is when it runs, event is what
+            starts it, and once is whether it runs once or keeps going.
+    RoutineReadingRefused:
+      type: object
+      description: The sentence asks for something a routine can't do.
+      required:
+        - outcome
+        - detail
+        - fix
+      properties:
+        outcome:
+          type: string
+          const: refused
+        detail:
+          type: string
+          description: Why it can't, in a sentence for the person.
+        fix:
+          type:
+            - string
+            - "null"
+          x-extensible-enum:
+            - connectApp
+          description: What the person can do about it. connectApp is to connect an
+            app first. Null when there is nothing to do but ask differently.
+    RoutineReadingNotRoutine:
+      type: object
+      description: The sentence is not a request for a routine.
+      required:
+        - outcome
+      properties:
+        outcome:
+          type: string
+          const: notRoutine
+    RoutineReading:
+      description: A sentence read as a routine's answers, or why it can't be.
+      oneOf:
+        - $ref: "#/components/schemas/RoutineReadingReady"
+        - $ref: "#/components/schemas/RoutineReadingNeedsMore"
+        - $ref: "#/components/schemas/RoutineReadingRefused"
+        - $ref: "#/components/schemas/RoutineReadingNotRoutine"
+      discriminator:
+        propertyName: outcome
+        mapping:
+          ready: "#/components/schemas/RoutineReadingReady"
+          needsMore: "#/components/schemas/RoutineReadingNeedsMore"
+          refused: "#/components/schemas/RoutineReadingRefused"
+          notRoutine: "#/components/schemas/RoutineReadingNotRoutine"
+    UpdateRoutineRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: What to change. Only the fields sent change, and at least one must
+        be sent.
+      properties:
+        title:
+          type: string
+          description: A new name, at most 100 characters. Empty takes the name away, and
+            the routine is called by what it does.
+          maxLength: 100
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: \S
+          description: What the Bot does on each run from now on. At most 2,000
+            characters.
+        cron:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: "A new schedule, as five cron fields: minute, hour, day of month,
+            month, day of week. The same rules as a new routine's."
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: \S
+          description: A new IANA time zone to read the schedule in.
     RoutineResponse:
       type: object
       required:
@@ -1991,7 +2426,7 @@ components:
           description: The run's id.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - running
             - succeeded
             - failed
@@ -2162,7 +2597,7 @@ components:
           description: When it last ran, or null.
         lastStatus:
           type: string
-          enum:
+          x-extensible-enum:
             - idle
             - running
             - succeeded
@@ -2337,7 +2772,7 @@ components:
           description: Where it can be opened, or null.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - open
             - dismissed
             - started
@@ -2406,6 +2841,51 @@ components:
             conversationId:
               type: string
               description: The task's own conversation.
+    CheckInItemWork:
+      type: object
+      description: An item, started, and where the work on it goes on. Exactly one of
+        `task` and `conversation` is set.
+      required:
+        - checkInItem
+        - task
+        - conversation
+      properties:
+        checkInItem:
+          $ref: "#/components/schemas/CheckInItem"
+        task:
+          type:
+            - object
+            - "null"
+          description: The task the item became, where this server runs tasks in
+            conversations of their own. Null otherwise.
+          required:
+            - id
+            - conversationId
+          properties:
+            id:
+              type: string
+              description: The task's id.
+            conversationId:
+              type: string
+              description: The task's own conversation.
+        conversation:
+          type:
+            - object
+            - "null"
+          description: Where this server runs no tasks, the caller's own conversation with
+            the item's Bot and what to send there. Null when the item became a
+            task.
+          required:
+            - id
+            - message
+          properties:
+            id:
+              type: string
+              description: The caller's conversation with the item's Bot, that Bot alone.
+            message:
+              type: string
+              description: "The message to send in that conversation as the caller's own: the
+                item's title, its detail and where it was read."
     CheckInUsage:
       type: object
       description: How check-ins are going, per Bot. Counts only.
@@ -2617,7 +3097,7 @@ components:
           description: When it is done. May be empty.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - active
             - paused
             - completed
@@ -2790,7 +3270,7 @@ components:
           description: The run's id.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - running
             - waiting
@@ -3262,6 +3742,9 @@ components:
         fields or runs more often than hourly, the Bot is not in that
         conversation, the routine is paused or already running, or the caller
         has 20 routines switched on.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -3281,6 +3764,9 @@ components:
     RoutineNotFound:
       description: The routine does not exist or is somebody else's, or the
         organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -3301,6 +3787,9 @@ components:
       description: A field is missing or out of bounds, the Bot or the conversation is
         not one the caller can use, or a check-in is running already or ran in
         the last ten minutes.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -3320,6 +3809,9 @@ components:
     CheckInConflict:
       description: The Bot already checks in on this and refuseExisting was asked for,
         or the Idempotency-Key was already used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -3340,6 +3832,9 @@ components:
     CheckInNotFound:
       description: The check-in does not exist or is somebody else's, or the
         organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -3359,6 +3854,9 @@ components:
     CheckInItemNotFound:
       description: The item does not exist, is somebody else's or is no longer open,
         or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -3380,6 +3878,9 @@ components:
         not one the caller can use, the goal both repeats and ends when met, the
         goal is paused or completed, or a trigger's configuration or secret is
         not one its kind takes.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -3399,6 +3900,9 @@ components:
     GoalNotFound:
       description: The goal does not exist or is somebody else's, or the organization
         does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -3418,6 +3922,9 @@ components:
     GoalTriggerNotFound:
       description: The trigger does not exist, is not this goal's or is somebody
         else's, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -3437,6 +3944,9 @@ components:
     GithubEventSourceNotFound:
       description: The source does not exist or is somebody else's, or the
         organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -3456,6 +3966,9 @@ components:
     FollowUpNotFound:
       description: The follow-up already ran, was cancelled or is somebody else's, the
         Bot is not one the caller can see, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -3534,6 +4047,53 @@ components:
         task:
           id: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
           conversationId: 8d7c6b5a-4f3e-4d2c-9b1a-0f9e8d7c6b5a
+    CheckInItemWorkInConversationExample:
+      summary: An item, started in the caller's own conversation with its Bot.
+      value:
+        checkInItem:
+          id: 9e8d7c6b-5a4f-4e3d-2c1b-0a9f8e7d6c5b
+          botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          checkInId: c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90
+          title: Reply to the vendor about the renewal
+          detail: The vendor answered yesterday and asked for a decision by Friday.
+          sourceApp: Gmail
+          sourceRef: null
+          sourceLink: https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5
+          status: started
+          pingId: null
+          deliveredAt: null
+          resolvedAt: 2026-11-14T10:12:00.000Z
+          createdAt: 2026-11-14T09:00:36.000Z
+        task: null
+        conversation:
+          id: 5f0c2a52-3f1e-4a55-9d0a-7f6d2b1c8e90
+          message: |-
+            Reply to the vendor about the renewal
+
+            The vendor answered yesterday and asked for a decision by Friday.
+
+            Source: https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5
+    CheckInItemWorkAsTaskExample:
+      summary: An item, started as a task.
+      value:
+        checkInItem:
+          id: 9e8d7c6b-5a4f-4e3d-2c1b-0a9f8e7d6c5b
+          botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          checkInId: c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90
+          title: Reply to the vendor about the renewal
+          detail: The vendor answered yesterday and asked for a decision by Friday.
+          sourceApp: Gmail
+          sourceRef: null
+          sourceLink: https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5
+          status: started
+          pingId: null
+          deliveredAt: null
+          resolvedAt: 2026-11-14T10:12:00.000Z
+          createdAt: 2026-11-14T09:00:36.000Z
+        task:
+          id: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+          conversationId: 8d7c6b5a-4f3e-4d2c-9b1a-0f9e8d7c6b5a
+        conversation: null
     CheckInUsageExample:
       summary: A week of check-ins.
       value:
@@ -3649,6 +4209,7 @@ components:
           id: 4a0d6f6e-1c1b-4f3e-8a52-0d9b7c6e5f41
           botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
           schedule: Weekdays at 09:00
+          cron: 0 9 * * 1-5
           timezone: America/New_York
           instruction: Summarize my unread mail and today's calendar.
           title: Morning brief

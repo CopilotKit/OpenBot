@@ -7,7 +7,7 @@ export interface RespondToQuestionRequest {
    * The person's answer. Trimmed.
    * @minLength 1
    * @maxLength 6000
-   * @pattern ^[^\x00]*\S[^\x00]*$
+   * @pattern ^[^\x00]*[^\s\x00][^\x00]*$
    */
   response: string;
   /** Sent from the open conversation, which then runs the answer as its own next turn when that is where it belongs. */

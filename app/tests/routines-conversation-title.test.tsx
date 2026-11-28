@@ -45,6 +45,7 @@ const PAGE: RoutinesPage = {
       id: "routine-eks",
       botId: "general-assistant",
       schedule: "Every 15 minutes",
+      cron: "*/15 * * * *",
       timezone: "UTC",
       instruction:
         "Reply with the current UTC time and the words 'routine check from EKS'.",
@@ -65,6 +66,7 @@ const PAGE: RoutinesPage = {
       id: "routine-new",
       botId: "general-assistant",
       schedule: "Every day at 09:00",
+      cron: "0 9 * * *",
       timezone: "UTC",
       instruction: "Post the morning summary.",
       title: null,

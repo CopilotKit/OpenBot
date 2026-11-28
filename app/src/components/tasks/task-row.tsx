@@ -1,6 +1,7 @@
 import {
   IconAlertTriangle,
   IconCircleCheck,
+  IconCircleDashed,
   IconFileCheck,
   IconHandStop,
   IconPlayerStop,
@@ -20,6 +21,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { relativeTime } from "@/lib/relative-time";
 import type { ListedTask } from "@/lib/tasks/groups";
 import { taskLine } from "@/lib/tasks/line";
@@ -35,15 +37,17 @@ import {
   stoppedByYou,
   TASK_DONE_LABEL,
   TASK_FAILED_LABEL,
-  TASK_STATUS_LABEL,
   TASK_STOPPED,
   TASK_STOPPED_LABEL,
   type TaskStatus,
+  taskStatusLabel,
 } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
-const ICONS: Record<TaskStatus, typeof IconProgress> = {
+/** Each status's icon. A status a newer server sends that this app doesn't know has a plain circle. */
+const ICONS: Partial<Record<TaskStatus, typeof IconProgress>> = {
   ready_for_review: IconFileCheck,
   needs_input: IconHandStop,
   failed: IconAlertTriangle,
@@ -52,13 +56,13 @@ const ICONS: Record<TaskStatus, typeof IconProgress> = {
 };
 
 /**
- * The dot on a task's icon, as Activity draws one on work under way: green and pulsing while it
- * runs, amber while it waits on the person, red when it couldn't finish. A resolved task has none.
+ * The dot on a task's icon, as Activity draws one on work under way: success and pulsing while it
+ * runs, warning while it waits on the person, destructive when it couldn't finish. A resolved task has none.
  */
 const DOT: Partial<Record<TaskStatus, string>> = {
-  working: "animate-pulse bg-emerald-500",
-  needs_input: "bg-amber-500",
-  ready_for_review: "bg-amber-500",
+  working: "animate-pulse bg-success",
+  needs_input: "bg-warning",
+  ready_for_review: "bg-warning",
   failed: "bg-destructive",
 };
 
@@ -83,7 +87,7 @@ function look(listed: ListedTask): {
     ? { state: "stopped", Icon: IconPlayerStop, dot: "bg-muted-foreground" }
     : {
         state: listed.status,
-        Icon: ICONS[listed.status],
+        Icon: ICONS[listed.status] ?? IconCircleDashed,
         dot: DOT[listed.status],
       };
 }
@@ -92,14 +96,14 @@ function look(listed: ListedTask): {
  * The task's status in a word or two. One the person stopped reads Stopped, as its card does, and
  * one listed as finished (`settled`) reads Done, as its card does and as the heading over it says.
  */
-function statusLabel(listed: ListedTask, settled = false): string {
+function statusLabel(listed: ListedTask, settled = false): string | null {
   if (stopped(listed)) return TASK_STOPPED_LABEL;
   if (
     settled &&
     (listed.status === "ready_for_review" || listed.status === "resolved")
   )
     return TASK_DONE_LABEL;
-  return TASK_STATUS_LABEL[listed.status];
+  return taskStatusLabel(listed.status);
 }
 
 /**
@@ -125,7 +129,7 @@ function nextLine(listed: ListedTask): string | null {
 function boardStatus(
   listed: ListedTask,
   settled = false,
-): { label: string; line: string | null } {
+): { label: string | null; line: string | null } {
   if (listed.status === "failed" && !stopped(listed))
     return {
       label: TASK_FAILED_LABEL,
@@ -238,7 +242,11 @@ export function TaskRow({
           {canTryAgain({ ...task, status }) ? (
             <Button
               disabled={busy}
-              onClick={() => again.mutate(task.id)}
+              onClick={() => {
+                // Bots can't run until a card is added: the dialog says why, in place of a run.
+                if (stopIfNeedsCard()) return;
+                again.mutate(task.id);
+              }}
               size="sm"
             >
               {again.isPending ? "Starting…" : "Try again"}
@@ -289,7 +297,7 @@ export function TaskRow({
         </ItemFooter>
         {error ? (
           <p className="mt-1 text-destructive text-sm" role="alert">
-            {error.message}
+            {failureSaid(error)}
           </p>
         ) : null}
       </ItemContent>
@@ -404,12 +412,12 @@ export function TaskBoardRow({
         detail={said.line}
         icon={<Icon />}
         meta={[
-          <span key="status">{boardStatus(listed).label}</span>,
+          said.label ? <span key="status">{said.label}</span> : null,
           <span key="when">{relativeTime(task.updatedAt)}</span>,
           ...held.meta,
           error ? (
             <span className="text-destructive" key="error" role="alert">
-              {error.message}
+              {failureSaid(error)}
             </span>
           ) : null,
         ]}
@@ -429,7 +437,11 @@ export function TaskBoardRow({
         canTryAgain({ ...task, status }) ? (
           <Button
             disabled={busy}
-            onClick={() => again.mutate(task.id)}
+            onClick={() => {
+              // Bots can't run until a card is added: the dialog says why, in place of a run.
+              if (stopIfNeedsCard()) return;
+              again.mutate(task.id);
+            }}
             size="sm"
           >
             {again.isPending ? "Starting…" : "Try again"}
@@ -446,11 +458,11 @@ export function TaskBoardRow({
       readDetail={status === "needs_input" || state === "stopped"}
       icon={<Icon />}
       meta={[
-        <span key="status">{said.label}</span>,
+        said.label ? <span key="status">{said.label}</span> : null,
         <span key="when">{relativeTime(task.updatedAt)}</span>,
         error ? (
           <span className="text-destructive" key="error" role="alert">
-            {error.message}
+            {failureSaid(error)}
           </span>
         ) : null,
       ]}

@@ -93,6 +93,8 @@ pub struct Session {
     host: String,
     token_endpoint: String,
     revocation_endpoint: Option<String>,
+    /// Where the browser goes at sign-out (`Metadata::end_session_endpoint`).
+    end_session_endpoint: Option<String>,
     store: Store,
     live: Mutex<Live>,
     /// Held for the whole of a refresh, so two requests that both find the token stale make one.
@@ -239,6 +241,7 @@ fn finish(
         host: host.clone(),
         token_endpoint: metadata.token_endpoint.clone(),
         revocation_endpoint: metadata.revocation_endpoint.clone(),
+        end_session_endpoint: metadata.end_session_endpoint.clone(),
         store,
         live: Mutex::new(Live {
             access: granted.access,
@@ -279,6 +282,7 @@ pub fn resume(address: &str, metadata: &Metadata, store: Store) -> Result<Sessio
         host,
         token_endpoint: metadata.token_endpoint.clone(),
         revocation_endpoint: metadata.revocation_endpoint.clone(),
+        end_session_endpoint: metadata.end_session_endpoint.clone(),
         store,
         live: Mutex::new(Live {
             access: String::new(),
@@ -436,13 +440,16 @@ impl Session {
     }
 
     /// Sign out: both tokens revoked at the OpenBot (RFC 7009), as far as it answers, then the
-    /// sign-in forgotten on this computer whatever it answered.
-    pub fn sign_out(&self) -> Result<(), Problem> {
+    /// sign-in forgotten on this computer whatever it answered, then the browser's own session
+    /// there ended through `open` (`end_browser_session`).
+    pub fn sign_out(&self, open: impl FnOnce(&str) -> Result<(), String>) -> Result<(), Problem> {
         let _one_at_a_time = self.refreshing.lock().unwrap();
         self.revoke();
         self.live.lock().unwrap().ended = true;
         log::info!("[connect] signed out of {}", self.host);
-        self.store.forget(&self.address)
+        let forgotten = self.store.forget(&self.address);
+        end_browser_session(self.end_session_endpoint.as_deref(), &self.host, open);
+        forgotten
     }
 
     /**
@@ -482,11 +489,13 @@ impl Session {
 }
 
 /// Revoke a saved sign-in with no session around it: the stored refresh token, when the OpenBot
-/// can be asked, and then forgotten either way.
+/// can be asked, and then forgotten either way. Then the browser's own session there is ended
+/// through `open`, as `Session::sign_out` does.
 pub fn sign_out_saved(
     address: &str,
     metadata: Option<&Metadata>,
     store: &Store,
+    open: impl FnOnce(&str) -> Result<(), String>,
 ) -> Result<(), Problem> {
     if let (Some(endpoint), Ok(Some(refresh))) = (
         metadata.and_then(|metadata| metadata.revocation_endpoint.as_deref()),
@@ -500,7 +509,39 @@ pub fn sign_out_saved(
             ),
         }
     }
-    store.forget(address)
+    let forgotten = store.forget(address);
+    end_browser_session(
+        metadata.and_then(|metadata| metadata.end_session_endpoint.as_deref()),
+        &host_of(address),
+        open,
+    );
+    forgotten
+}
+
+/**
+The browser's own session at the OpenBot, ended once the app's tokens are revoked: `open` sends the
+person's browser to the `end_session_endpoint` the OpenBot publishes (OpenID Connect RP-Initiated
+Logout), the same opener the sign-in used.
+
+The sign-in went through that browser, and revoking the app's tokens leaves it signed in there. The
+next sign-in on this computer would then come back as this person without asking who is signing
+in. An OpenBot that publishes no such address is left as it was. A browser that does not open is
+logged, and the sign-out has still happened.
+*/
+fn end_browser_session(
+    endpoint: Option<&str>,
+    host: &str,
+    open: impl FnOnce(&str) -> Result<(), String>,
+) {
+    let Some(endpoint) = endpoint else {
+        return;
+    };
+    match open(endpoint) {
+        Ok(()) => log::info!("[connect] sent the browser to end its session at {host}"),
+        Err(error) => {
+            log::warn!("[connect] could not open the browser to end its session at {host}: {error}")
+        }
+    }
 }
 
 /// One revocation (RFC 7009): form-encoded, `client_id` in the body as a public client sends it.
@@ -679,7 +720,7 @@ pub fn end_page_for(ending: Ending) -> String {
 
 /**
 The styles of the tab's page, inline: it is served by this app from 127.0.0.1 and loads nothing.
-OpenBot's own tokens (`app/src/styles.css`, as the setup window copies them in `desktop/src/styles.css`):
+OpenBot's own tokens (written here from `tokens/src/scheme.ts` by `bun run tokens:generate`):
 the frame's lavender ground with a card on it, its type, its 10px radius, and the orb, OpenBot's
 mark, as the setup window draws it. Light and dark follow the system, as the setup window does.
 Inter when the computer has it, the system's own face otherwise: a font is a file, and this page
@@ -687,24 +728,28 @@ fetches none.
 */
 const END_PAGE_STYLE: &str = r#"
 :root {
-  --background: oklch(0.983 0.003 286.4);
-  --foreground: oklch(0.108 0.015 220.9);
+  /* tokens/src/scheme.ts, light: background foreground card muted-foreground border sidebar (bun run tokens:generate) */
+  --background: oklch(0.983 0.003 247.9);
+  --foreground: oklch(0.108 0.042 264.7);
   --card: oklch(1 0 0);
-  --muted-foreground: oklch(0.506 0.013 285.9);
-  --border: oklch(0.894 0.014 286.1);
-  --sidebar: oklch(0.948 0.011 286.2);
+  --muted-foreground: oklch(0.506 0.045 257.4);
+  --border: oklch(0.108 0.042 264.7 / 20%);
+  --sidebar: oklch(0.948 0.01 251.8);
+  /* end of tokens/src/scheme.ts */
   --radius: 0.625rem;
   --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: oklch(0.182 0.023 296.6);
-    --foreground: oklch(0.956 0.005 286.3);
-    --card: oklch(0.212 0.028 297.1);
-    --muted-foreground: oklch(0.69 0.017 285.9);
-    --border: oklch(0.28 0.035 298.6);
-    --sidebar: oklch(0.156 0.017 295.8);
+    /* tokens/src/scheme.ts, dark: background foreground card muted-foreground border sidebar (bun run tokens:generate) */
+    --background: oklch(0.182 0.017 252);
+    --foreground: oklch(0.956 0.004 252);
+    --card: oklch(0.212 0.017 252);
+    --muted-foreground: oklch(0.69 0.016 252);
+    --border: oklch(0.956 0.004 252 / 16%);
+    --sidebar: oklch(0.156 0.017 252);
+    /* end of tokens/src/scheme.ts */
     --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4);
     color-scheme: dark;
   }
@@ -820,7 +865,7 @@ fn page(stream: &mut TcpStream, status: &str, ending: Ending) {
 #[cfg(test)]
 mod tests {
     use super::super::credentials::in_memory;
-    use super::super::fake_openbot::{Browser, FakeOpenBot, Shape};
+    use super::super::fake_openbot::{no_browser, Browser, FakeOpenBot, Shape};
     use super::super::kind_of;
     use super::*;
     use std::sync::Arc;
@@ -1093,7 +1138,7 @@ mod tests {
         let store = in_memory();
         let session = openbot.sign_in(store.clone());
         assert!(store.get(&openbot.address()).unwrap().is_some());
-        session.sign_out().unwrap();
+        session.sign_out(no_browser).unwrap();
         assert_eq!(openbot.revoke_requests().len(), 2);
         assert_eq!(store.get(&openbot.address()).unwrap(), None);
         assert!(session.access().is_err());
@@ -1261,7 +1306,7 @@ mod tests {
         let refresh = store.get(&openbot.address()).unwrap().unwrap();
         assert_eq!(openbot.live_tokens(), 2);
 
-        session.sign_out().unwrap();
+        session.sign_out(no_browser).unwrap();
 
         let revoked = openbot.revoke_requests();
         assert_eq!(revoked.len(), 2);
@@ -1277,6 +1322,162 @@ mod tests {
         assert!(!openbot.honours(&access));
         assert_eq!(store.get(&openbot.address()).unwrap(), None);
         assert!(session.access().is_err());
+    }
+
+    /// Where the browser was sent at a sign-out, with how many tokens still worked at the OpenBot
+    /// and whether the sign-in was still saved here at that moment.
+    type Sent = Mutex<Vec<(String, usize, bool)>>;
+
+    fn browser_at<'a>(
+        openbot: &'a FakeOpenBot,
+        store: &'a Store,
+        sent: &'a Sent,
+    ) -> impl FnOnce(&str) -> Result<(), String> + 'a {
+        move |address| {
+            let saved = store.get(&openbot.address()).unwrap().is_some();
+            sent.lock()
+                .unwrap()
+                .push((address.to_owned(), openbot.live_tokens(), saved));
+            Ok(())
+        }
+    }
+
+    /// The sign-in went through the person's browser, which stays signed in to the OpenBot after
+    /// the app's tokens are revoked: the next sign-in on this computer would come back as this
+    /// person without asking. A hosted OpenBot publishes `end_session_endpoint`, and sign-out sends
+    /// the browser there once, after both tokens are revoked and the sign-in is forgotten here.
+    #[test]
+    fn sign_out_sends_the_browser_to_the_end_session_endpoint_once_after_revoking() {
+        let openbot = FakeOpenBot::start(Shape::EndSession);
+        let store = in_memory();
+        let session = openbot.sign_in(store.clone());
+        let sent = Sent::default();
+
+        session
+            .sign_out(browser_at(&openbot, &store, &sent))
+            .unwrap();
+
+        assert_eq!(
+            sent.into_inner().unwrap(),
+            [(openbot.end_session_endpoint(), 0, false)]
+        );
+        assert_eq!(openbot.revoke_ended(), [true, true]);
+        assert!(session.access().is_err());
+    }
+
+    /// The same for a saved sign-in with no session around it, as sign-out does before the window
+    /// shows OpenBot, and with the OpenBot asked again for its metadata, as that sign-out asks.
+    #[test]
+    fn signing_out_a_saved_sign_in_sends_the_browser_there_too() {
+        let openbot = FakeOpenBot::start(Shape::EndSession);
+        let store = in_memory();
+        let address = openbot.address();
+        let _saved = openbot.sign_in(store.clone());
+        let sent = Sent::default();
+
+        sign_out_saved(
+            &address,
+            Some(&openbot.metadata()),
+            &store,
+            browser_at(&openbot, &store, &sent),
+        )
+        .unwrap();
+
+        assert_eq!(
+            sent.into_inner().unwrap(),
+            [(openbot.end_session_endpoint(), 0, false)]
+        );
+        assert_eq!(openbot.revoke_ended(), [true]);
+    }
+
+    /// A browser that does not open is only logged: the sign-out still revokes and forgets.
+    #[test]
+    fn a_browser_that_does_not_open_does_not_fail_the_sign_out() {
+        let openbot = FakeOpenBot::start(Shape::EndSession);
+        let store = in_memory();
+        let session = openbot.sign_in(store.clone());
+        let tried = std::cell::Cell::new(0);
+        session
+            .sign_out(|_| {
+                tried.set(tried.get() + 1);
+                Err("no browser".into())
+            })
+            .unwrap();
+        assert_eq!(tried.get(), 1);
+        assert_eq!(openbot.live_tokens(), 0);
+        assert_eq!(store.get(&openbot.address()).unwrap(), None);
+
+        let _saved = openbot.sign_in(store.clone());
+        sign_out_saved(
+            &openbot.address(),
+            Some(&openbot.metadata()),
+            &store,
+            |_| Err("no browser".into()),
+        )
+        .unwrap();
+        assert_eq!(store.get(&openbot.address()).unwrap(), None);
+    }
+
+    /// An OpenBot that publishes no `end_session_endpoint`, as one on a team's own servers, and
+    /// one that names it on another host: sign-out sends the browser nowhere, and connecting and
+    /// signing in work as they always have.
+    #[test]
+    fn sign_out_sends_the_browser_nowhere_without_an_end_session_endpoint_of_its_own() {
+        for shape in [Shape::Current, Shape::EndSessionElsewhere] {
+            let openbot = FakeOpenBot::start(shape.clone());
+            let (_, metadata) = check(&openbot);
+            assert_eq!(metadata.end_session_endpoint, None, "{shape:?}");
+            let store = in_memory();
+            openbot.sign_in(store.clone()).sign_out(no_browser).unwrap();
+            assert_eq!(openbot.revoke_ended(), [true, true], "{shape:?}");
+
+            let _saved = openbot.sign_in(store.clone());
+            sign_out_saved(&openbot.address(), Some(&metadata), &store, no_browser).unwrap();
+            assert_eq!(store.get(&openbot.address()).unwrap(), None, "{shape:?}");
+        }
+    }
+
+    /// Every request the shell itself makes to the OpenBot names this app, `OpenBot-Client:
+    /// desktop/<version>`: the two questions before sign-in, the code exchange, the first call
+    /// after it, a refresh, and sign-out's revocations. Only the person's browser, which opens the
+    /// authorization address, is not the app.
+    #[test]
+    fn every_request_the_shell_makes_names_this_app() {
+        let openbot = FakeOpenBot::start(Shape::Current);
+        let session = openbot.sign_in(in_memory());
+        let access = session.access().unwrap();
+        openbot.expire_access_tokens();
+        session.after_refused(&access).unwrap();
+        session.sign_out(no_browser).unwrap();
+
+        let named = format!("desktop/{}", crate::client_version::app_version());
+        let shells: Vec<_> = openbot
+            .seen()
+            .into_iter()
+            .filter(|seen| seen.path != "/api/auth/oauth2/authorize")
+            .collect();
+        let asked: Vec<String> = shells
+            .iter()
+            .map(|seen| format!("{} {}", seen.method, seen.path))
+            .collect();
+        for path in [
+            "GET /api/v2/organizations/default/deployment",
+            "GET /.well-known/oauth-authorization-server/api/auth",
+            "POST /api/auth/oauth2/token",
+            "GET /api/copilotkit/info",
+            "POST /api/auth/oauth2/revoke",
+        ] {
+            assert!(asked.iter().any(|seen| seen == path), "{path}: {asked:?}");
+        }
+        for seen in &shells {
+            assert_eq!(
+                seen.header("openbot-client"),
+                Some(named.as_str()),
+                "{} {}",
+                seen.method,
+                seen.path
+            );
+        }
     }
 
     /// Nothing shaped like a token reaches a file under the app's configuration folder or a line
@@ -1324,7 +1525,7 @@ mod tests {
         openbot.expire_access_tokens();
         tokens.push(session.after_refused(&tokens[0]).unwrap());
         tokens.push(store.get(&address).unwrap().unwrap());
-        session.sign_out().unwrap();
+        session.sign_out(no_browser).unwrap();
         // And a sign-in that ends by being refused.
         let session = openbot.sign_in(store.clone());
         tokens.push(session.access().unwrap());
@@ -1335,7 +1536,7 @@ mod tests {
         let saved = openbot.sign_in(store.clone());
         tokens.push(saved.access().unwrap());
         tokens.push(store.get(&address).unwrap().unwrap());
-        sign_out_saved(&address, Some(&openbot.metadata()), &store).unwrap();
+        sign_out_saved(&address, Some(&openbot.metadata()), &store, no_browser).unwrap();
 
         let lines = captured.0.lock().unwrap().join("\n");
         assert!(lines.contains("[connect] signed in to"), "{lines}");

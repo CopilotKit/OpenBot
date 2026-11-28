@@ -3,12 +3,14 @@
 import hmac
 import os
 import sys
+from contextlib import aclosing
 from pathlib import Path
 
 # The spec file every language in the box reads: one level above this Bot in the repository, and
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import bot_settings
+from run_model_key import RunModelKey
 
 from ag_ui_strands import StrandsAgent, add_strands_fastapi_endpoint
 from fastapi import FastAPI, Request
@@ -37,6 +39,8 @@ def _model_id() -> str:
 
 
 app = FastAPI()
+# Each run's model calls carry its own gateway token, in its organization. See run_model_key.py.
+app.add_middleware(RunModelKey)
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
@@ -57,11 +61,31 @@ async def health():
     return {"ok": True, "harness": "strands"}
 
 
+class WithoutForwardedProps(StrandsAgent):
+    """None of a run's forwarded props goes on to the integration.
+
+    The one this Bot uses, its model route, was read on the way in (`RunModelKey`); the rest are the
+    server's, which nothing here reads, and whatever the browser sent. The integration takes
+    `injectA2UITool` as an order: it adds a tool that calls the model again and, given a tool's
+    name, takes that granted tool away from the run.
+    """
+
+    async def run(self, input_data, *, invocation_state=None):
+        async with aclosing(
+            super().run(
+                input_data.model_copy(update={"forwarded_props": {}}),
+                invocation_state=invocation_state,
+            )
+        ) as events:
+            async for event in events:
+                yield event
+
+
 # The role arrives as system messages on every run and becomes that run's system prompt; see
 # `system_prompt.py` for why the integration cannot be left to do it.
 add_strands_fastapi_endpoint(
     app,
-    StrandsAgent(
+    WithoutForwardedProps(
         name="openbot",
         agent=Agent(model=LiteLLMModel(model_id=_model_id())),
         hooks=[RunSystemPrompt()],

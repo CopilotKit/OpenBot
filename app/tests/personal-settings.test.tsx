@@ -20,6 +20,7 @@ import { ComputersPage } from "@/components/manage/computers-page";
 import { PluginToolPage } from "@/components/manage/plugin-tool-page";
 import { settingsSidebarItems } from "@/components/settings/settings-sidebar";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
+import { authKeys } from "@/lib/auth/queries";
 import {
   type HostAccessStatus,
   hostAccessKeys,
@@ -29,6 +30,7 @@ import {
   type DeploymentCapabilities,
   deploymentKeys,
 } from "@/lib/deployment/queries";
+import { type ComputerMode, enterpriseKeys } from "@/lib/enterprise/queries";
 import { Route as PersonalSettingsRoute } from "@/routes/_authed/settings/_personal";
 import { Route as LearningRoute } from "@/routes/_authed/settings/learning";
 import { seedAppReads } from "./apps-api";
@@ -218,11 +220,27 @@ describe("the Computer page", () => {
     edition: "team" | "personal",
     host: HostAccessStatus = hostAccess,
     computers: ComputerFleet = fleet,
+    computerMode?: ComputerMode,
+    /** A hosted OpenBot: people sign in through the hosted sign-in. */
+    hosted = false,
   ) {
     const client = clientFor(edition);
+    if (hosted)
+      client.setQueryData(deploymentKeys.capabilities(), {
+        ...capabilities(edition),
+        hostedSignIn: true,
+      });
     client.setDefaultOptions({
       queries: { retry: false, staleTime: Infinity },
     });
+    if (computerMode) {
+      // An admin reading, and what the server's settings say about the computers.
+      client.setQueryData(authKeys.currentUser(), {
+        id: "dev-local-user",
+        role: "admin",
+      } as never);
+      client.setQueryData(enterpriseKeys.computerMode(), computerMode);
+    }
     client.setQueryData(computerKeys.fleet(), computers);
     // No Bot is hidden: a name not on the list is then a Bot that is gone.
     client.setQueryData(agentKeys.list(true), []);
@@ -433,6 +451,28 @@ describe("the Computer page", () => {
     expect(folders.textContent).not.toContain("The desktop app is offline");
   });
 
+  // The hosted end-to-end run: Admin, Computers said "Needs OpenBot Desktop", but only the OpenBot that OpenBot Desktop
+  // runs on the person's own computer can be given a folder. Connected to a hosted one, Desktop never can.
+  test("on a hosted OpenBot there is no folders section at all, since no desktop app can share folders with it", async () => {
+    const view = await renderPage(
+      "team",
+      { ...hostAccess, desktop: false },
+      fleet,
+      undefined,
+      true,
+    );
+    expect(
+      view.queryByRole("heading", { name: "Folders on this computer" }),
+    ).toBeNull();
+    expect(view.queryByText("Needs OpenBot Desktop")).toBeNull();
+  });
+
+  test("self-hosted outside OpenBot Desktop still says the folders need it", async () => {
+    const view = await renderPage("team", { ...hostAccess, desktop: false });
+    const folders = foldersSection(view);
+    expect(within(folders).getByText("Needs OpenBot Desktop")).toBeTruthy();
+  });
+
   /** A folder request still open, as the API's `people/me/host-access` lists it. */
   function waiting(
     kind: NonNullable<HostAccessStatus["pending"][number]["kind"]>,
@@ -547,9 +587,11 @@ describe("the Computer page", () => {
   });
 
   test("in the team edition still tells an admin how to give each person a computer", async () => {
-    const view = await renderPage("team");
+    const view = await renderPage("team", hostAccess, fleet, "shared");
     const text = view.container.textContent ?? "";
     expect(view.getByRole("heading", { name: "Computers" })).toBeTruthy();
+    expect(text).toContain("Everyone's Bots share one computer.");
+    expect(text).toContain("computers.mode: sandbox");
     expect(text).toContain("COMPUTER_SUPERVISOR_URL");
     expect(text).toContain("Computers in this organization");
     expect(text).toContain("dev@openbot.local · Personal Assistant");

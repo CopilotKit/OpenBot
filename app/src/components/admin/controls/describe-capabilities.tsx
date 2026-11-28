@@ -1,6 +1,7 @@
 import {
   IconBuilding,
   IconChecklist,
+  IconCircleDashed,
   IconDeviceDesktop,
   IconFolder,
   IconKey,
@@ -42,6 +43,7 @@ import type {
   CapabilityChange,
   CapabilityChangeProblem,
 } from "@/lib/capability-changes/translate";
+import { failureSaid } from "@/lib/load-failure";
 import { MISSING_TEAM, teamName } from "@/lib/teams/names";
 import type { TeamSummary } from "@/lib/teams/queries";
 import { cn } from "@/lib/utils";
@@ -58,10 +60,12 @@ function scopeWords(change: CapabilityChange, teams: Teams): string {
     const name = teamName(teams, change.scopeId);
     return name === MISSING_TEAM ? name : `Team: ${name}`;
   }
-  return `Group: ${change.scopeId}`;
+  if (change.scopeKind === "group") return `Group: ${change.scopeId}`;
+  // A kind of scope a newer server names that this app doesn't know: its id alone.
+  return change.scopeId;
 }
 
-const SCOPE_ICONS = {
+const SCOPE_ICONS: Partial<Record<string, typeof IconBuilding>> = {
   organization: IconBuilding,
   role: IconUserShield,
   team: IconUsersGroup,
@@ -81,7 +85,7 @@ function settingWords(change: CapabilityChange): {
       change.scopeKind === "team" || change.scopeKind === "group"
         ? "Grant"
         : "On",
-    className: "text-emerald-600 dark:text-emerald-400",
+    className: "text-success",
   };
 }
 
@@ -112,7 +116,7 @@ export function ChangeRows({
       <PageRows>
         {changes.map((change, index) => {
           const row = index + 1;
-          const Icon = SCOPE_ICONS[change.scopeKind];
+          const Icon = SCOPE_ICONS[change.scopeKind] ?? IconCircleDashed;
           const setting = settingWords(change);
           const title = titles[change.capability] ?? change.capability;
           const wrong = problems.filter((problem) => problem.change === row);
@@ -129,7 +133,7 @@ export function ChangeRows({
                   <ItemDescription>{scopeWords(change, teams)}</ItemDescription>
                   {wrong.map((problem) => (
                     <p className="text-destructive text-sm" key={problem.field}>
-                      {problem.message}
+                      {failureSaid(problem)}
                     </p>
                   ))}
                 </ItemContent>
@@ -160,7 +164,7 @@ export function ChangeRows({
 }
 
 /** Why a person has a permission or not, after "Now" or "After this,". */
-function answerWords(answer: CapabilityAnswer, teams: Teams): string {
+export function answerWords(answer: CapabilityAnswer, teams: Teams): string {
   const state = answer.allowed ? "on" : "off";
   switch (answer.decidedBy) {
     case "default":
@@ -175,6 +179,9 @@ function answerWords(answer: CapabilityAnswer, teams: Teams): string {
     }
     case "group":
       return `on through ${answer.scopeId}`;
+    default:
+      // Decided in a way a newer server names that this app doesn't know: on or off alone.
+      return state;
   }
 }
 
@@ -189,7 +196,7 @@ function verdictOf(person: PreviewPerson): { text: string; className: string } {
   if (person.capabilities.some(gains))
     return {
       text: "Gains access",
-      className: "text-emerald-600 dark:text-emerald-400",
+      className: "text-success",
     };
   return { text: "Keeps access", className: "text-muted-foreground" };
 }
@@ -268,7 +275,7 @@ export function PermissionsPreview({
       <Field>
         <FieldLabel>Who it changes</FieldLabel>
         <p className="text-destructive text-sm" role="alert">
-          {preview.error.message}
+          {failureSaid(preview.error)}
         </p>
       </Field>
     );
@@ -319,9 +326,7 @@ export function PermissionsPreview({
           </FieldDescription>
         </div>
         {data.warning ? (
-          <p className="text-amber-600 text-sm dark:text-amber-500">
-            {data.warning}
-          </p>
+          <p className="text-warning text-sm">{data.warning}</p>
         ) : null}
         {data.people.length > 0 ? (
           <PageRows>

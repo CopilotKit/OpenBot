@@ -7,6 +7,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { BusinessComputerLink } from "@/components/edition/team-features-dialog";
 import { PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,15 +37,19 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { isolationUnavailable } from "@/lib/agents/isolation";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { setCapabilityMutationOptions } from "@/lib/enterprise/mutations";
 import type {
   CapabilitySetting,
   EnterpriseOverview,
 } from "@/lib/enterprise/queries";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { MISSING_TEAM } from "@/lib/teams/names";
 import { teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
 import { ControlsSection } from "./controls-section";
+import { PurgeSavedLogins } from "./purge-saved-logins";
 
 /**
  * Admin, Permissions: what people may do, for the whole organization, with the row that opens the
@@ -52,6 +57,15 @@ import { ControlsSection } from "./controls-section";
  */
 export function CapabilitiesSection() {
   const [overridesOpen, setOverridesOpen] = useState(false);
+  /*
+   * Whether this OpenBot gives a Bot a computer of its own at all. Where it doesn't (one shared computer, or an
+   * operator who turned isolated Bots off for every organization), "Isolated Bots" can't do anything: the row says
+   * why and its switch is off limits, so an admin isn't shown a setting that has no effect.
+   */
+  const { data: deployment } = useQuery(deploymentCapabilitiesQueryOptions());
+  const noIsolation = deployment?.isolatedBots === false;
+  // OpenBot Cloud gives each person one computer: the row says so, with where a Bot can have its own.
+  const cloud = deployment?.hostedSignIn === true;
   return (
     <ControlsSection>
       {({ data, setCapability, saving }) => {
@@ -68,6 +82,8 @@ export function CapabilitiesSection() {
             <PageRows>
               {data.capabilities.map((capability) => {
                 const effective = capability.organization ?? capability.default;
+                const unavailable =
+                  noIsolation && capability.capability === "isolatedComputers";
                 return (
                   <div key={capability.capability}>
                     <Item size="sm">
@@ -77,16 +93,21 @@ export function CapabilitiesSection() {
                       <ItemContent>
                         <ItemTitle>{capability.title}</ItemTitle>
                         <ItemDescription>
-                          {effective
-                            ? capability.description
-                            : "Off for everybody, unless a role or team turns it on."}
+                          {unavailable
+                            ? isolationUnavailable(cloud)
+                            : effective
+                              ? capability.description
+                              : "Off for everybody, unless a role or team turns it on."}
                         </ItemDescription>
+                        {unavailable && cloud ? (
+                          <BusinessComputerLink className="text-xs" />
+                        ) : null}
                       </ItemContent>
                       <ItemActions>
                         <Switch
                           aria-label={capability.title}
-                          checked={effective}
-                          disabled={saving}
+                          checked={effective && !unavailable}
+                          disabled={saving || unavailable}
                           onCheckedChange={(checked) =>
                             setCapability(capability.capability, checked)
                           }
@@ -94,6 +115,13 @@ export function CapabilitiesSection() {
                       </ItemActions>
                     </Item>
                     <Separator />
+                    {/* Beside the switch it is about: deleting the saved logins nobody may use. */}
+                    {capability.capability === "passwordManager" ? (
+                      <>
+                        <PurgeSavedLogins />
+                        <Separator />
+                      </>
+                    ) : null}
                   </div>
                 );
               })}
@@ -266,7 +294,10 @@ function OverridesDialog({
           </Select>
           {teams.error ? (
             <p className="text-destructive text-sm" role="alert">
-              Couldn't load teams. Try again in a moment.
+              {loadFailure(
+                teams.error,
+                "Couldn't load teams. Try again in a moment.",
+              )}
             </p>
           ) : null}
           <p className="text-muted-foreground text-xs">
@@ -330,7 +361,7 @@ function OverridesDialog({
             : null}
           {setCapability.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {setCapability.error.message}
+              {failureSaid(setCapability.error)}
             </p>
           ) : null}
         </DialogBody>

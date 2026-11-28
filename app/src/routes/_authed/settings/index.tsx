@@ -5,10 +5,12 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { AiModelSection } from "@/components/settings/ai-connection";
+import { CompanySignInSection } from "@/components/settings/company-sign-in";
+import { DeleteAccountSection } from "@/components/settings/delete-account";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
 import { NameRow } from "@/components/settings/profile";
 import { StandingInstructionsRow } from "@/components/settings/standing-instructions";
+import { StarOnGitHubSection } from "@/components/settings/star-on-github";
 import { ThemeRow } from "@/components/settings/theme-row";
 import { UsageDataSection } from "@/components/settings/usage-data";
 import {
@@ -19,10 +21,35 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { companySignInQueryOptions } from "@/lib/auth/company-sign-in";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { formatHotkey, HOTKEYS } from "@/lib/hotkeys/hotkeys";
+import { loadFirstScreenAfter } from "@/lib/route-data";
+import { instructionsQueryOptions } from "@/lib/settings/queries";
 import { SkinPicker } from "@/skins/skin-picker";
 
 export const Route = createFileRoute("/_authed/settings/")({
+  /*
+   * Asks only for what the page would ask for: the company sign-in is skipped where the deployment
+   * signs people in itself, because `ensureQueryData` ignores the `enabled` the section sets and
+   * would send a read the page leaves out on purpose. Nothing under Settings guarantees the
+   * capabilities, so they are read here within the same short wait as the rest, and a failed or late read counts
+   * as unknown, as in the section.
+   */
+  loader: async ({ context }) => {
+    // A router built without the app's context, as some tests build, has nothing to warm.
+    if (!context.queryClient) return;
+    const { queryClient } = context;
+    await loadFirstScreenAfter(queryClient, {
+      deciding: [deploymentCapabilitiesQueryOptions()],
+      always: [instructionsQueryOptions()],
+      choose: () =>
+        queryClient.getQueryData(deploymentCapabilitiesQueryOptions().queryKey)
+          ?.hostedSignIn !== true
+          ? [companySignInQueryOptions()]
+          : [],
+    });
+  },
   component: RouteComponent,
 });
 
@@ -33,7 +60,8 @@ function RouteComponent() {
    * to copy them.
    *
    * Connected accounts used to be a section below. It is its own screen now: a connector can need
-   * more from a person than one switch, and a section cannot grow a page's worth of that.
+   * more from a person than one switch, and a section cannot grow a page's worth of that. So is the
+   * AI Bots run on (AI providers): several providers, each with a page of its own.
    */
   return (
     <PageShell
@@ -51,8 +79,8 @@ function RouteComponent() {
           <StandingInstructionsRow />
         </PageRows>
       </PageSection>
-      {/* Only in OpenBot Desktop, which holds the AI connection and changes it in its own window. */}
-      <AiModelSection />
+      {/* Only where the organization has identity providers: the person's company account, and the way to link it. */}
+      <CompanySignInSection />
       {/* Only in OpenBot Desktop, which sends usage data and keeps this choice. */}
       <UsageDataSection />
       <PageSection title="Appearance">
@@ -95,6 +123,10 @@ function RouteComponent() {
           ))}
         </PageRows>
       </PageSection>
+      {/* OpenBot itself rather than this person's OpenBot. Gone when the deployment says so. */}
+      <StarOnGitHubSection />
+      {/* Last, as GitHub and every settings page put it: deleting the account. */}
+      <DeleteAccountSection />
     </PageShell>
   );
 }

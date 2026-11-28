@@ -5,12 +5,4 @@
 /**
  * Where a task stands: waiting on the person, being worked on, marked done, failed, or finished and ready to read.
  */
-export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus];
-
-export const TaskStatus = {
-  needs_input: "needs_input",
-  working: "working",
-  resolved: "resolved",
-  failed: "failed",
-  ready_for_review: "ready_for_review",
-} as const;
+export type TaskStatus = string;

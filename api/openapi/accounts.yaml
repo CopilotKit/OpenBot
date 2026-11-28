@@ -38,6 +38,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -81,6 +83,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -110,6 +114,8 @@ paths:
         not their own away from administrator, and not the role of somebody
         the deployment's configuration names as an administrator. Asking for
         the role a person already has changes nothing and records nothing.
+        role is deprecated: change a member's role with
+        updateOrganizationMember instead.
       security:
         - webSession: []
         - appOAuth: [people:write]
@@ -135,6 +141,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -165,12 +173,12 @@ paths:
       operationId: revokePersonAccess
       summary: Remove a person's access
       description: >-
-        Remove a person from the organization. Where everybody has an
-        organization of their own (an OpenBot whose list of organizations
-        answers canCreate true), this ends their membership of this
-        organization alone: they lose its Bots and conversations from their
-        next request, and their account, sessions, API keys, their own
-        organization and any other they belong to are unchanged. Restoring
+        Remove a person from the organization. Where OpenBot keeps more than
+        one organization (its list of organizations answers canCreate true),
+        this ends their membership of this organization alone: they lose its
+        Bots and conversations from their next request, and their account,
+        sessions, API keys and any other organization they belong to are
+        unchanged. Restoring
         them puts the membership back with its role and teams. Where OpenBot
         keeps one organization, it stops the person using OpenBot: their
         address can't sign in again, and the sessions, API keys and app
@@ -193,6 +201,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -223,8 +233,8 @@ paths:
       operationId: restorePersonAccess
       summary: Give a person their access back
       description: >-
-        Give a removed person their access back. Where everybody has an
-        organization of their own, this puts back their membership of this
+        Give a removed person their access back. Where OpenBot keeps more than
+        one organization, this puts back their membership of this
         organization with the role and teams it had; their sessions and API
         keys, which were never ended, work here again from their next request.
         Where OpenBot keeps one organization, it lets them sign in again, and
@@ -243,6 +253,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -300,6 +312,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -348,6 +362,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -368,6 +384,127 @@ paths:
           $ref: './common.yaml#/components/responses/OrganizationNotFound'
         '409':
           $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/terms:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [People]
+      operationId: getServiceTerms
+      summary: Read the terms a person has to agree to
+      description: >-
+        Return the terms of service this OpenBot asks people to agree to
+        before they use it, the version the person last agreed to and when,
+        and whether they have to agree now. OpenBot Cloud has terms: a
+        Terms of Service and an Acceptable Use Policy, published at the
+        addresses given, under one version. When the version changes,
+        acceptanceNeeded is true again until the person agrees to the new
+        one, and the apps ask them before anything else. An agreement is the
+        person's own, not an organization's: it holds in every organization
+        they are in. A self-hosted OpenBot and OpenBot Desktop on its own have
+        no terms: current is null and acceptanceNeeded is false. Only the
+        person themselves may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [people:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The current terms, the person's last agreement, and whether they have to agree now.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceTerms'
+              examples:
+                toAgree:
+                  $ref: '#/components/examples/ServiceTermsToAgreeExample'
+                agreed:
+                  $ref: '#/components/examples/ServiceTermsAgreedExample'
+                changed:
+                  $ref: '#/components/examples/ServiceTermsChangedExample'
+                none:
+                  $ref: '#/components/examples/ServiceTermsNoneExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/PersonNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/terms/accept:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [People]
+      operationId: acceptServiceTerms
+      summary: Agree to the current terms
+      description: >-
+        Record that the person agreed to the terms of service, by the version
+        they were shown, and when. The version sent must be the current one
+        (getServiceTerms' current.version): an older one is refused with the
+        code SERVICE_TERMS_CHANGED, so nobody is recorded as agreeing to terms
+        they never saw. Agreeing again to the version already agreed to keeps
+        the first time. Every agreement is kept, each version with its own
+        time, and recorded on the audit trail. Where this OpenBot has no terms
+        it answers 409 with the code SERVICE_TERMS_NONE. Only the person
+        themselves may agree.
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptServiceTermsRequest'
+            examples:
+              current:
+                value:
+                  version: '2026-11-21'
+      responses:
+        '200':
+          description: The terms, with the person's agreement recorded.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceTerms'
+              examples:
+                agreed:
+                  $ref: '#/components/examples/ServiceTermsAgreedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/PersonNotFound'
+        '409':
+          $ref: '#/components/responses/ServiceTermsConflict'
         '500':
           $ref: './common.yaml#/components/responses/ServerError'
         default:
@@ -395,6 +532,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -444,6 +583,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -488,6 +629,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -537,6 +680,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -583,6 +728,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -609,8 +756,9 @@ paths:
       operationId: createApiKey
       summary: Make an API key
       description: >-
-        Make an API key that acts as the person, in every organization they
-        are a member of, on the API. The key itself is in this answer and never again:
+        Make an API key that acts as the person on the API, in this
+        organization only: the one it was made in. In any other organization
+        it is refused as if the organization did not exist. The key itself is in this answer and never again:
         OpenBot keeps only a hash of it. Only the person themselves may make
         one, signed in to OpenBot: a key can never make another key, and
         neither can an app's sign-in. A key ends when it expires, when it is
@@ -640,6 +788,8 @@ paths:
               description: The new key's address.
               schema:
                 type: string
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -683,6 +833,9 @@ paths:
       responses:
         '204':
           description: The key was deleted.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -724,6 +877,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -766,6 +921,9 @@ paths:
       responses:
         '204':
           description: The session ended.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -809,6 +967,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -869,6 +1029,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -917,6 +1079,9 @@ paths:
       responses:
         '204':
           description: The account was unlinked.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -959,6 +1124,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -992,8 +1159,13 @@ paths:
         by email domain: a company's own SAML or OIDC provider, which signs in
         everybody at its domain. Every administrator sees every provider,
         whoever registered it. Never a client secret or a signing
-        certificate. Only an administrator may list them. A missing cursor
-        starts at the first page and nextCursor null ends the list.
+        certificate. Where this OpenBot may keep more than one organization,
+        the list in any organization but `default` also holds the providers
+        registered for the whole OpenBot, marked deployment: they count for
+        this organization's Require SSO only while it has no provider of its
+        own, and can't be removed here. Only an
+        administrator may list them. A missing cursor starts at the first
+        page and nextCursor null ends the list.
       security:
         - webSession: []
         - appOAuth: [identity-providers:read]
@@ -1007,6 +1179,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1037,6 +1211,9 @@ paths:
         and a client. Only an administrator may register one, signed in to
         OpenBot rather than with a key or an app's sign-in. The audit trail
         records who registered it.
+        Where people sign in with their OpenBot by CopilotKit account
+        (hostedSignIn in getDeployment), no organization registers a provider
+        of its own: this answers 409 with the code HOSTED_SIGN_IN_ONLY.
       security:
         - webSession: []
       parameters:
@@ -1066,6 +1243,8 @@ paths:
               description: The new provider's address.
               schema:
                 type: string
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1100,7 +1279,12 @@ paths:
       description: >-
         Remove an identity provider, whoever registered it, so nobody signs in
         through it again. Only an administrator may remove one. A provider
-        already removed is not found.
+        registered for the whole OpenBot (deployment) is removed only where it
+        was registered: in any other organization it is refused with 403. A
+        provider already removed is not found.
+        Where people sign in with their OpenBot by CopilotKit account
+        (hostedSignIn in getDeployment), this answers 409 with the code
+        HOSTED_SIGN_IN_ONLY and removes nothing.
       security:
         - webSession: []
         - appOAuth: [identity-providers:write]
@@ -1110,16 +1294,333 @@ paths:
       responses:
         '204':
           description: The provider was removed.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
         '403':
-          $ref: './common.yaml#/components/responses/AdminOnly'
+          $ref: '#/components/responses/IdentityProviderNotRemovable'
         '404':
           $ref: '#/components/responses/IdentityProviderNotFound'
         '409':
-          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/IdentityProviderRemovalConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/company-sign-in:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [People]
+      operationId: getCompanySignIn
+      summary: Read whether a person must use their company sign-in here
+      description: >-
+        Return whether this organization requires its members to sign in
+        through their company's identity provider, whether the person has,
+        and the providers they can use for it. Any member may read their own,
+        as me or by their own id. It answers even while the organization
+        holds them out for not having signed in that way, when every other
+        request they make in it is refused with SSO_REQUIRED. To use a
+        provider, they sign in through it by its id (POST
+        /api/auth/sign-in/sso with providerId) in a browser where they are
+        signed in, or from an app through createCompanySignInTicket.
+        Where people sign in with their OpenBot by CopilotKit account
+        (hostedSignIn in getDeployment), no organization requires it:
+        required is false and no providers are listed.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [people:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: Whether the person must use their company sign-in here.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanySignIn'
+              examples:
+                required:
+                  $ref: '#/components/examples/CompanySignInExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/company-sign-in/tickets:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [People]
+      operationId: createCompanySignInTicket
+      summary: Get a ticket to link a company account from an app
+      description: >-
+        Return an address for a browser to link the person's company account
+        at one of the organization's identity providers, for an app that has
+        no browser session to carry, such as the phone. The app opens it in
+        the system browser, and the person signs in through the provider
+        there. Sent with returnTo app, the browser goes back to the phone app
+        once the account is linked. The address carries a ticket, never the app's own sign-in. The
+        ticket is the person's, for this organization and this provider,
+        lasts two minutes, and opens once. Signing in through the provider
+        then links the company account as a signed-in browser's sign-in does:
+        the provider must give the person's own email address. Only the
+        person themselves may ask, as me or by their own id, signed in to
+        OpenBot or its app, never with an API key. It answers while the
+        organization holds them out for not having signed in that way.
+        providerId is one of the providers getCompanySignIn lists. Because
+        the answer is a credential shown once, it is not kept: a retry with
+        the same Idempotency-Key is refused as a conflict, so ask again with
+        a new key.
+        Where people sign in with their OpenBot by CopilotKit account
+        (hostedSignIn in getDeployment), there is no company account to link:
+        this answers 409 with the code HOSTED_SIGN_IN_ONLY.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCompanySignInTicketRequest'
+            examples:
+              okta:
+                value:
+                  providerId: acme-okta
+              fromThePhone:
+                value:
+                  providerId: acme-okta
+                  returnTo: app
+      responses:
+        '201':
+          description: The address to open in the system browser, shown this once.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanySignInTicket'
+              examples:
+                ticket:
+                  $ref: '#/components/examples/CompanySignInTicketExample'
+        '400':
+          $ref: '#/components/responses/InvalidCompanySignInTicket'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CompanySignInTicketForbidden'
+        '404':
+          $ref: '#/components/responses/CompanySignInProviderNotFound'
+        '409':
+          $ref: '#/components/responses/CompanySignInTicketConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/SignInUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/people/me/account-deletion:
+    get:
+      tags: [People]
+      operationId: getAccountDeletion
+      summary: Read where deleting the caller's account stands
+      description: >-
+        Return whether the caller's account is scheduled to be deleted, and
+        when, and what stops it being deleted now. An account belongs to the
+        person, not to an organization, so this sits outside every
+        organization's address. blockers lists each organization the person
+        has to deal with first, as GitHub does: one where they are the only
+        owner (only_owner), which they hand to another owner or delete, and
+        one where they are an owner beside others (owner_must_leave), which
+        they leave, and one with no owner where they are the only admin
+        (only_admin, as a self-hosted OpenBot's one organization is run),
+        where they make another member an admin. Other memberships end with
+        the account and block nothing; so does the person's own organization
+        when they are its only member. Once a deletion is scheduled, every other
+        operation answers 403 with the code ACCOUNT_PENDING_DELETION until it
+        is cancelled or the account is gone; this one,
+        cancelAccountDeletion and requestAccountDeletion still answer, so the
+        apps can say when the account goes and offer to cancel it or to
+        delete it now, and so do listOrganizations and getPerson for the
+        person themselves, so an app opened afresh knows who they are. Only the person themselves may read
+        it, signed in to OpenBot or its app, never with an API key.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [people:read]
+      responses:
+        '200':
+          description: Where deleting the account stands.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountDeletion'
+              examples:
+                blocked:
+                  $ref: '#/components/examples/AccountDeletionBlockedExample'
+                clear:
+                  $ref: '#/components/examples/AccountDeletionClearExample'
+                scheduled:
+                  $ref: '#/components/examples/AccountDeletionScheduledExample'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDeletionSignInOnly'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [People]
+      operationId: requestAccountDeletion
+      summary: Delete the caller's account
+      description: >-
+        Schedule the caller's account to be deleted, 14 days from now, or at
+        once with immediate true. From this moment the person is signed out everywhere,
+        their API keys, app sign-ins and connections end, their Bots,
+        routines and computers stop, and nothing runs for them. Their
+        memberships read as deactivated. Signing in again before the
+        deletion is allowed only to see when it happens, to cancel it
+        (cancelAccountDeletion), or to delete it now: asked again with
+        immediate true, the deletion already scheduled is made due at once;
+        asked again without it, the deletion is answered as it stands. When
+        the wait ends, the account is deleted
+        on its own, with everything the person owns. What they wrote in
+        organizations shared with others stays, shown as from a deleted
+        user, and security log entries are kept for 180 days without their
+        name or email. The person confirms by sending the email address they
+        sign in with and the words delete my account; either one wrong is
+        refused with 422. The session must have signed in within the last 10
+        minutes: an older one is refused with 403 and the code REAUTHENTICATE,
+        and the apps send the person through sign-in again. An organization
+        that blocks it (getAccountDeletion's blockers) refuses it with 409
+        and the code ACCOUNT_DELETION_BLOCKED, listing them. Only the person
+        themselves may do this, signed in to OpenBot or its
+        app, never with an API key.
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestAccountDeletionRequest'
+            examples:
+              inFourteenDays:
+                value:
+                  confirmEmail: dana@acme.com
+                  confirmPhrase: delete my account
+              now:
+                value:
+                  confirmEmail: dana@acme.com
+                  confirmPhrase: delete my account
+                  immediate: true
+      responses:
+        '202':
+          description: The deletion is scheduled. With immediate true it has already started.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduledAccountDeletion'
+              examples:
+                scheduled:
+                  $ref: '#/components/examples/ScheduledAccountDeletionExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDeletionForbidden'
+        '409':
+          $ref: '#/components/responses/AccountDeletionConflict'
+        '422':
+          $ref: '#/components/responses/AccountDeletionNotConfirmed'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/people/me/account-deletion/cancel:
+    post:
+      tags: [People]
+      operationId: cancelAccountDeletion
+      summary: Cancel deleting the caller's account
+      description: >-
+        Cancel a scheduled deletion of the caller's account, any time before
+        it starts. The account is the person's again: they use OpenBot as
+        before, their memberships are active again, and they sign in afresh
+        on their other devices, make new API keys and reconnect what was
+        ended when they asked. Cancelling when nothing is scheduled changes
+        nothing. A deletion already under way can't be cancelled: that
+        answers 409 with the code ACCOUNT_DELETION_UNDER_WAY. Only the person
+        themselves may cancel, signed in to OpenBot or its app, never with an
+        API key.
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Nothing is scheduled any more.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelledAccountDeletion'
+              examples:
+                cancelled:
+                  value:
+                    status: none
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDeletionSignInOnly'
+        '409':
+          $ref: '#/components/responses/AccountDeletionUnderWay'
         '500':
           $ref: './common.yaml#/components/responses/ServerError'
         default:
@@ -1187,6 +1688,67 @@ components:
           type: [string, 'null']
           format: date-time
           description: When they finished it. Null until they do, which the apps read as onboarding still to do.
+    ServiceTermsVersionId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: ^[A-Za-z0-9._-]+$
+      description: A version of the terms, such as 2026-11-21. Compared as written, never ordered.
+      example: '2026-11-21'
+    ServiceTermsVersion:
+      type: object
+      description: One version of the terms people agree to before they use OpenBot, and where each part is published.
+      required: [version, termsOfServiceUrl, acceptableUseUrl]
+      properties:
+        version:
+          $ref: '#/components/schemas/ServiceTermsVersionId'
+        termsOfServiceUrl:
+          type: string
+          format: uri
+          description: Where the Terms of Service are published.
+        acceptableUseUrl:
+          type: string
+          format: uri
+          description: Where the Acceptable Use Policy is published.
+    ServiceTermsAcceptance:
+      type: object
+      description: A version of the terms the person agreed to, and when.
+      required: [version, acceptedAt]
+      properties:
+        version:
+          $ref: '#/components/schemas/ServiceTermsVersionId'
+        acceptedAt:
+          type: string
+          format: date-time
+          description: When they agreed to it.
+    ServiceTerms:
+      type: object
+      description: >-
+        The terms this OpenBot asks people to agree to, and where the person
+        stands. acceptanceNeeded is the server's verdict; a client renders it
+        and never recomputes it.
+      required: [current, accepted, acceptanceNeeded]
+      properties:
+        current:
+          description: The terms in force. Null where this OpenBot has no terms to agree to (a self-hosted OpenBot, OpenBot Desktop on its own).
+          oneOf:
+            - $ref: '#/components/schemas/ServiceTermsVersion'
+            - type: 'null'
+        accepted:
+          description: The version the person last agreed to, which may be older than current. Null if they never agreed to any.
+          oneOf:
+            - $ref: '#/components/schemas/ServiceTermsAcceptance'
+            - type: 'null'
+        acceptanceNeeded:
+          type: boolean
+          description: Whether the person has to agree to the current terms before they use OpenBot. True while there are terms and accepted isn't the current version. The apps ask them first and let them in once they agree.
+    AcceptServiceTermsRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version:
+          $ref: '#/components/schemas/ServiceTermsVersionId'
     Person:
       type: object
       description: >-
@@ -1221,7 +1783,7 @@ components:
           type: [string, 'null']
           description: The picture their identity provider gave, when it gave one.
         role:
-          $ref: './common.yaml#/components/schemas/PersonRole'
+          $ref: './common.yaml#/components/schemas/PersonRoleAnswer'
         needsName:
           type: boolean
           description: >-
@@ -1306,6 +1868,13 @@ components:
             Only the person themselves may change it.
         role:
           $ref: '#/components/schemas/AssignableRole'
+          deprecated: true
+          x-deprecation-date: 2026-11-19
+          x-sunset: 2028-05-19
+          description: >-
+            Deprecated. Change a member's role with updateOrganizationMember
+            (PATCH /api/v2/organizations/{organizationId}/members/{personId})
+            instead.
     AdvanceOnboardingRequest:
       type: object
       additionalProperties: false
@@ -1352,6 +1921,7 @@ components:
       required:
         - messageListEmphasis
         - selfHostBannerDismissed
+        - dismissedNotices
         - narration
         - skin
         - proactive
@@ -1361,6 +1931,28 @@ components:
         selfHostBannerDismissed:
           type: boolean
           description: Whether they closed the banner offering help self-hosting OpenBot.
+        dismissedNotices:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          description: >-
+            The notices they answered, either way, by id. A notice in this list
+            is never shown to them again, on any device. Empty until they
+            answer one.
+          items:
+            $ref: './common.yaml#/components/schemas/NoticeId'
+        noticesDue:
+          type: array
+          readOnly: true
+          maxItems: 64
+          uniqueItems: true
+          description: >-
+            The notices OpenBot would show them now, by id, worked out by the
+            server from the edition and how they have used OpenBot. A notice
+            they dismissed is never here. Absent from a server that works out
+            none.
+          items:
+            $ref: './common.yaml#/components/schemas/NoticeId'
         narration:
           description: >-
             Whether they narrate their recordings in OpenBot's browser, which
@@ -1392,6 +1984,15 @@ components:
           $ref: '#/components/schemas/MessageListEmphasis'
         selfHostBannerDismissed:
           type: boolean
+        dismissedNotices:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          description: >-
+            Notices they answered, by id. Added to the ones already dismissed:
+            a notice is never taken back off the list.
+          items:
+            $ref: './common.yaml#/components/schemas/NoticeId'
         narration:
           $ref: '#/components/schemas/OnOff'
         skin:
@@ -1424,6 +2025,12 @@ components:
           type: [string, 'null']
           format: date-time
           description: When it last signed a request. Null if never.
+        organizationId:
+          type: [string, 'null']
+          description: >-
+            The organization this key acts in: the one it was made in. Null
+            for a key made before keys were bound to an organization, which
+            acts in `default`. Absent from an older server.
     ApiKeyPage:
       type: object
       required: [apiKeys, nextCursor]
@@ -1538,7 +2145,7 @@ components:
           description: Who they are there, such as their GitHub login, when the service said.
         status:
           type: string
-          enum: [active, needs_reconnect]
+          x-extensible-enum: [active, needs_reconnect]
           description: needs_reconnect when the service stopped accepting what the link holds, and linking again mends it.
         createdAt:
           type: string
@@ -1657,6 +2264,202 @@ components:
           description: >-
             The id of the person who registered it, while they still have an
             account here. Null once they are gone; the provider stays.
+        deployment:
+          type: boolean
+          description: >-
+            True for a provider registered for the whole OpenBot, listed in
+            another organization: it counts for that organization's Require
+            SSO only while the organization has no provider of its own, and
+            can't be removed from it. False or absent for the organization's
+            own.
+    CreateCompanySignInTicketRequest:
+      type: object
+      additionalProperties: false
+      required: [providerId]
+      properties:
+        providerId:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: The identity provider to sign in through, one getCompanySignIn lists.
+        returnTo:
+          type: string
+          enum: [app]
+          description: >-
+            app when the phone app asks: once the company account is linked,
+            the browser is sent back to the app at
+            openbotmobile://company-sign-in/linked, which ends its sign-in
+            session. Without it the browser stays on a page saying the
+            account is linked. Nothing else is a place to go back to.
+    AccountDeletionStatus:
+      type: string
+      x-extensible-enum: [none, scheduled]
+      description: >-
+        Whether the account is to be deleted. none: nothing is scheduled.
+        scheduled: it is deleted at deleteAfter, unless the person cancels
+        first. A later OpenBot may add a state; read one you don't know as
+        scheduled.
+    AccountDeletionBlocker:
+      type: object
+      description: >-
+        An organization the person has to deal with before their account can
+        be deleted, and why.
+      required: [organizationId, organizationName, reason]
+      properties:
+        organizationId:
+          type: string
+          description: The organization's id.
+        organizationName:
+          type: string
+          description: The organization's name, as its members see it.
+        reason:
+          type: string
+          x-extensible-enum: [only_owner, owner_must_leave, only_admin]
+          description: >-
+            only_owner: the person is its only owner, so they make another
+            member an owner or delete the organization. owner_must_leave:
+            it has other owners, so the person leaves it. only_admin: it has
+            no owner and the person is its only admin, so they make another
+            member an admin. A later OpenBot may
+            add a reason; read one you don't know as having to leave it.
+    AccountDeletion:
+      type: object
+      description: >-
+        Where deleting the caller's account stands. blockers is the server's
+        verdict; a client renders it and never recomputes it.
+      required: [status, blockers]
+      properties:
+        status:
+          $ref: '#/components/schemas/AccountDeletionStatus'
+        requestedAt:
+          type: string
+          format: date-time
+          description: When the person asked. Only while a deletion is scheduled.
+        deleteAfter:
+          type: string
+          format: date-time
+          description: When the account is deleted. Only while a deletion is scheduled.
+        blockers:
+          type: array
+          description: >-
+            The organizations that stop the account being deleted now. Empty
+            when nothing does.
+          items:
+            $ref: '#/components/schemas/AccountDeletionBlocker'
+    RequestAccountDeletionRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmEmail, confirmPhrase]
+      properties:
+        confirmEmail:
+          type: string
+          minLength: 1
+          maxLength: 320
+          pattern: ^[^\x00]*$
+          description: >-
+            The email address the person signs in with, typed by them. Matched
+            without regard to case or the spaces around it.
+        confirmPhrase:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[^\x00]*$
+          description: >-
+            The words delete my account, typed by the person. Matched without
+            regard to case or the spaces around it.
+        immediate:
+          type: boolean
+          default: false
+          description: >-
+            true deletes the account now instead of after the wait, and it
+            can't be cancelled.
+    ScheduledAccountDeletion:
+      type: object
+      description: A deletion, scheduled.
+      required: [status, requestedAt, deleteAfter]
+      properties:
+        status:
+          $ref: '#/components/schemas/AccountDeletionStatus'
+        requestedAt:
+          type: string
+          format: date-time
+          description: When the person asked.
+        deleteAfter:
+          type: string
+          format: date-time
+          description: >-
+            When the account is deleted. Now, for immediate true, when the
+            deletion has already started.
+    CancelledAccountDeletion:
+      type: object
+      description: Nothing is scheduled any more.
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/AccountDeletionStatus'
+    AccountDeletionProblem:
+      description: >-
+        A refused account deletion: the shared problem details, with the
+        organizations that block it (ACCOUNT_DELETION_BLOCKED).
+      allOf:
+        - $ref: './common.yaml#/components/schemas/Problem'
+        - type: object
+          properties:
+            blockers:
+              type: array
+              description: The organizations to deal with first, as getAccountDeletion lists them.
+              items:
+                $ref: '#/components/schemas/AccountDeletionBlocker'
+    CompanySignInTicket:
+      type: object
+      required: [url, expiresAt]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: >-
+            The address to open in the system browser. It carries the ticket,
+            a credential shown this once.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the ticket stops opening.
+    CompanySignIn:
+      type: object
+      description: >-
+        Whether a person must sign in through their company's identity
+        provider to work in this organization, and how they can.
+      required: [required, met, providers]
+      properties:
+        required:
+          type: boolean
+          description: >-
+            Whether this organization requires its members to sign in through
+            an identity provider.
+        met:
+          type: boolean
+          description: >-
+            Whether the person has: they signed in through one of providers,
+            or with the same identity at the same issuer another way, or they
+            are the admin who runs this OpenBot. While required is true and
+            met is false, the organization holds them out.
+        providers:
+          type: array
+          description: >-
+            The identity providers that count for this organization: its own,
+            or, where it has none and this OpenBot may keep more than one
+            organization, those registered for the whole OpenBot. Empty when
+            there are none.
+          items:
+            type: object
+            required: [id, domain]
+            properties:
+              id:
+                type: string
+                description: The provider's id, which signing in through it takes.
+              domain:
+                type: string
+                description: The email domain it signs in.
     IdentityProviderPage:
       type: object
       required: [identityProviders, nextCursor]
@@ -1683,7 +2486,7 @@ components:
       type: string
       minLength: 1
       maxLength: 2048
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     IdentityProviderAddress:
       type: string
       format: uri
@@ -1710,7 +2513,7 @@ components:
           type: string
           minLength: 1
           maxLength: 200000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The provider's SAML metadata XML, as its identity team supplied it.
     OidcIdentityProviderRequest:
       type: object
@@ -1734,13 +2537,13 @@ components:
       type: string
       minLength: 1
       maxLength: 200
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: An id for the provider, unique in the organization, such as acme-okta.
     IdentityProviderDomains:
       type: string
       minLength: 1
       maxLength: 2048
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: >-
         The email domain whose people it signs in, such as acme.com. Several
         are separated by commas.
@@ -1755,10 +2558,238 @@ components:
           saml: '#/components/schemas/SamlIdentityProviderRequest'
           oidc: '#/components/schemas/OidcIdentityProviderRequest'
   responses:
+    AccountDeletionSignInOnly:
+      description: >-
+        The request was signed with an API key rather than by the person
+        signed in to OpenBot or its app.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            key:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: An API key can't delete an account. Sign in to OpenBot to do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AccountDeletionForbidden:
+      description: >-
+        The session signed in more than 10 minutes ago, so the person signs in
+        again first (REAUTHENTICATE). Or the account is already scheduled to
+        be deleted (ACCOUNT_PENDING_DELETION). Or the request was signed with
+        an API key.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            reauthenticate:
+              value:
+                type: https://open.bot/errors/reauthenticate
+                title: Sign in again.
+                status: 403
+                detail: To delete your account, sign in again first.
+                code: REAUTHENTICATE
+                category: auth
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            pendingDeletion:
+              value:
+                type: https://open.bot/errors/account-pending-deletion
+                title: Your account is being deleted.
+                status: 403
+                detail: Your account is scheduled to be deleted. Cancel the deletion to use OpenBot again.
+                code: ACCOUNT_PENDING_DELETION
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            key:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: An API key can't delete an account. Sign in to OpenBot to do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AccountDeletionConflict:
+      description: >-
+        An organization stops the account being deleted
+        (ACCOUNT_DELETION_BLOCKED): blockers lists each. Or the
+        Idempotency-Key was already used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/AccountDeletionProblem'
+          examples:
+            blocked:
+              value:
+                type: https://open.bot/errors/account-deletion-blocked
+                title: Deal with your organizations first.
+                status: 409
+                detail: You're the only owner of Acme. Make someone else an owner, or delete the organization, then try again.
+                code: ACCOUNT_DELETION_BLOCKED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                blockers:
+                  - organizationId: org_acme
+                    organizationName: Acme
+                    reason: only_owner
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AccountDeletionNotConfirmed:
+      description: >-
+        The email address isn't the one the person signs in with, or the
+        words aren't delete my account.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            email:
+              value:
+                type: https://open.bot/errors/account-deletion-not-confirmed
+                title: The confirmation doesn't match.
+                status: 422
+                detail: That isn't the email address you sign in with.
+                code: ACCOUNT_DELETION_NOT_CONFIRMED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            phrase:
+              value:
+                type: https://open.bot/errors/account-deletion-not-confirmed
+                title: The confirmation doesn't match.
+                status: 422
+                detail: Type delete my account to confirm.
+                code: ACCOUNT_DELETION_NOT_CONFIRMED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AccountDeletionUnderWay:
+      description: >-
+        The account is already being deleted, so it's too late to cancel
+        (ACCOUNT_DELETION_UNDER_WAY). Or the Idempotency-Key was already used
+        for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            underWay:
+              value:
+                type: https://open.bot/errors/account-deletion-under-way
+                title: Your account is already being deleted.
+                status: 409
+                detail: Your account is already being deleted, so it can't be cancelled.
+                code: ACCOUNT_DELETION_UNDER_WAY
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ServiceTermsConflict:
+      description: >-
+        The version sent isn't the current one, so the person has to read the
+        new terms first (SERVICE_TERMS_CHANGED). Or this OpenBot has no terms to
+        agree to (SERVICE_TERMS_NONE). Or the Idempotency-Key was already used
+        for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            changed:
+              value:
+                type: https://open.bot/errors/service-terms-changed
+                title: The terms have changed.
+                status: 409
+                detail: The terms have changed since you opened them. Read the new version and agree again.
+                code: SERVICE_TERMS_CHANGED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            none:
+              value:
+                type: https://open.bot/errors/service-terms-none
+                title: There are no terms to agree to.
+                status: 409
+                detail: This OpenBot has no terms to agree to.
+                code: SERVICE_TERMS_NONE
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     InvalidPerson:
       description: >-
         The change is empty, names something a person doesn't have, or the
         name is blank or longer than 100 characters once trimmed.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1780,6 +2811,9 @@ components:
         The caller asked about somebody else's API keys or sessions, or signed
         the request with an API key or an app's sign-in rather than signing
         in to OpenBot.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1811,6 +2845,9 @@ components:
       description: >-
         The caller is not an administrator, or signed the request with an API
         key or an app's sign-in rather than signing in to OpenBot.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1833,6 +2870,9 @@ components:
         administrator removing their own role or access, or a change to
         somebody the deployment's configuration names as an administrator.
         Or the Idempotency-Key was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1862,6 +2902,9 @@ components:
                 traceId: trace_example
     ApiKeyNotFound:
       description: The person has no such API key, it was deleted, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1880,6 +2923,9 @@ components:
                 traceId: trace_example
     SessionNotFound:
       description: The person has no such session, it ended, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1900,6 +2946,9 @@ components:
       description: >-
         The person has no such linked account: it was unlinked already, or
         never was. Or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1920,6 +2969,9 @@ components:
       description: >-
         This deployment can't link an account at that service, or the
         organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1940,6 +2992,9 @@ components:
       description: >-
         This deployment keeps no linked accounts at all. The apps read this
         as nothing to show, unlike any other 503.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1956,8 +3011,46 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    IdentityProviderNotRemovable:
+      description: >-
+        The caller is not an administrator of the organization, or holds no
+        role in it. Or the provider was registered for the whole OpenBot, so
+        it can't be removed from this organization.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            deployment:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: This identity provider is set up for all of OpenBot, so it can't be removed here. Ask the admin who runs OpenBot.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     IdentityProviderNotFound:
       description: No identity provider has that id, it was removed, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1974,10 +3067,50 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    IdentityProviderRemovalConflict:
+      description: >-
+        The Idempotency-Key was used for a different request, or people sign
+        in here with their OpenBot by CopilotKit account, so no organization
+        changes a provider of its own (HOSTED_SIGN_IN_ONLY).
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     IdentityProviderConflict:
       description: >-
-        A provider with that id is registered already, or the Idempotency-Key
-        was used for a different request.
+        A provider with that id is registered already, the Idempotency-Key
+        was used for a different request, or people sign in here with
+        their OpenBot by CopilotKit account, so no organization registers
+        a provider of its own (HOSTED_SIGN_IN_ONLY).
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1994,11 +3127,25 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     SignInUnavailable:
       description: >-
         This deployment signs nobody in, as OpenBot Desktop runs for one
         person, so it has no API keys, no sessions and no single sign-on to set
         up.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -2015,7 +3162,197 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    InvalidCompanySignInTicket:
+      description: No providerId was sent, or the body or the Idempotency-Key is malformed.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            noProvider:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Name the identity provider to sign in through, as providerId.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CompanySignInTicketForbidden:
+      description: >-
+        The ticket is for somebody else, or the request is signed in with an
+        API key, which never links a company account.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            someoneElse:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can link their company account.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            apiKey:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Link your company account from OpenBot or its app, not with an API key.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CompanySignInProviderNotFound:
+      description: >-
+        The organization does not exist or the caller is not in it, or no
+        identity provider by that id counts for it.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            organization:
+              value:
+                type: https://open.bot/errors/organization-not-found
+                title: Organization not found.
+                status: 404
+                detail: Couldn't find that organization.
+                code: ORGANIZATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            provider:
+              value:
+                type: https://open.bot/errors/identity-provider-not-found
+                title: Identity provider not found.
+                status: 404
+                detail: This organization has no such identity provider for signing in.
+                code: IDENTITY_PROVIDER_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CompanySignInTicketConflict:
+      description: >-
+        The Idempotency-Key was used already. A ticket is a credential shown
+        once, so its answer is never given again: ask with a new key. Or
+        people sign in here with their OpenBot by CopilotKit account, so
+        there is no company account to link (HOSTED_SIGN_IN_ONLY).
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used already. Ask again with a new one.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
   examples:
+    AccountDeletionBlockedExample:
+      summary: Two organizations to deal with first
+      value:
+        status: none
+        blockers:
+          - organizationId: org_acme
+            organizationName: Acme
+            reason: only_owner
+          - organizationId: org_globex
+            organizationName: Globex
+            reason: owner_must_leave
+    AccountDeletionClearExample:
+      summary: Nothing stops it
+      value:
+        status: none
+        blockers: []
+    AccountDeletionScheduledExample:
+      summary: Scheduled
+      value:
+        status: scheduled
+        requestedAt: '2026-11-25T10:00:00.000Z'
+        deleteAfter: '2026-12-09T10:00:00.000Z'
+        blockers: []
+    ScheduledAccountDeletionExample:
+      value:
+        status: scheduled
+        requestedAt: '2026-11-25T10:00:00.000Z'
+        deleteAfter: '2026-12-09T10:00:00.000Z'
+    ServiceTermsToAgreeExample:
+      summary: OpenBot Cloud, for somebody who hasn't agreed yet.
+      value:
+        current:
+          version: '2026-11-21'
+          termsOfServiceUrl: https://open.bot/legal/terms
+          acceptableUseUrl: https://open.bot/legal/acceptable-use
+        accepted: null
+        acceptanceNeeded: true
+    ServiceTermsAgreedExample:
+      summary: OpenBot Cloud, for somebody who agreed to the current version.
+      value:
+        current:
+          version: '2026-11-21'
+          termsOfServiceUrl: https://open.bot/legal/terms
+          acceptableUseUrl: https://open.bot/legal/acceptable-use
+        accepted:
+          version: '2026-11-21'
+          acceptedAt: '2026-11-21T18:04:00.000Z'
+        acceptanceNeeded: false
+    ServiceTermsChangedExample:
+      summary: OpenBot Cloud, after the terms changed. The person agreed to an older version.
+      value:
+        current:
+          version: '2027-03-01'
+          termsOfServiceUrl: https://open.bot/legal/terms
+          acceptableUseUrl: https://open.bot/legal/acceptable-use
+        accepted:
+          version: '2026-11-21'
+          acceptedAt: '2026-11-21T18:04:00.000Z'
+        acceptanceNeeded: true
+    ServiceTermsNoneExample:
+      summary: A self-hosted OpenBot, or OpenBot Desktop on its own. There are no terms.
+      value:
+        current: null
+        accepted: null
+        acceptanceNeeded: false
     PersonPageLast:
       summary: An administrator's list, on one page.
       value:
@@ -2108,6 +3445,8 @@ components:
       value:
         messageListEmphasis: thread
         selfHostBannerDismissed: false
+        dismissedNotices: []
+        noticesDue: []
         narration: null
         skin: openbot
         proactive: 'on'
@@ -2121,6 +3460,7 @@ components:
             createdAt: '2026-11-14T09:00:00.000Z'
             expiresAt: '2027-02-12T09:00:00.000Z'
             lastUsedAt: '2026-11-14T09:05:12.000Z'
+            organizationId: Jq3xT9mLw2Vb8RnC5sYd0fKe
         nextCursor: null
     CreatedApiKeyExample:
       summary: A key, made.
@@ -2132,6 +3472,7 @@ components:
           createdAt: '2026-11-14T09:00:00.000Z'
           expiresAt: '2027-02-12T09:00:00.000Z'
           lastUsedAt: null
+          organizationId: Jq3xT9mLw2Vb8RnC5sYd0fKe
         key: obk_XyR2f8Lq0mVt5WcN1pZa7KdJ3hUe9sBg
     SessionPageLast:
       summary: Signed in on a laptop and a phone.
@@ -2191,7 +3532,7 @@ components:
         provider: github
         authorizationUrl: https://github.com/login/oauth/authorize?client_id=Iv23liExample&redirect_uri=https%3A%2F%2Fopenbot.acme.com%2Fapi%2Fidentity%2Fgithub%2Fcallback&state=sealed
     IdentityProviderPageLast:
-      summary: One provider, on one page.
+      summary: The organization's own provider, and one registered for the whole OpenBot.
       value:
         identityProviders:
           - id: acme-okta
@@ -2199,7 +3540,29 @@ components:
             domain: acme.com
             protocol: saml
             registeredBy: 8kq2m4x7p1rvz3a9c5d0
+            deployment: false
+          - id: example-entra
+            issuer: https://login.microsoftonline.com/0d1c2b3a-4f5e-6d7c-8b9a-0f1e2d3c4b5a/v2.0
+            domain: example.com
+            protocol: oidc
+            registeredBy: null
+            deployment: true
         nextCursor: null
+    CompanySignInTicketExample:
+      summary: An address the phone opens in the system browser.
+      value:
+        url: https://openbot.acme.com/api/auth/company-sign-in/link?ticket=cst_EXAMPLEEXAMPLEEXAMPLEEXAMPLE
+        expiresAt: '2026-11-20T06:02:00.000Z'
+    CompanySignInExample:
+      summary: An organization that requires its company sign-in, which the caller hasn't used yet.
+      value:
+        required: true
+        met: false
+        providers:
+          - id: acme-okta
+            domain: acme.com
+          - id: example-entra
+            domain: example.com
     IdentityProviderExample:
       summary: A SAML provider, registered.
       value:

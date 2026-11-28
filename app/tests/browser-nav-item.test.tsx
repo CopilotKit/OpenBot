@@ -138,6 +138,7 @@ function renderSidebar() {
   queryClient.setQueryData(userPreferencesQueryOptions("maya").queryKey, {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
+    dismissedNotices: [],
     narration: null,
     skin: "openbot",
     proactive: "on",
@@ -173,13 +174,13 @@ function renderSidebar() {
   return { view, queryClient };
 }
 
-/** The sidebar's footer, where the main menu's entries are. */
+/** The sidebar's strip, where the main menu's entries are. */
 async function footerOf(view: ReturnType<typeof render>) {
   return waitFor(() => {
     const element = view.container.querySelector<HTMLElement>(
-      '[data-sidebar="footer"]',
+      '[data-slot="strip"] nav',
     );
-    if (!element) throw new Error("No sidebar footer");
+    if (!element) throw new Error("No sidebar strip");
     return element;
   });
 }

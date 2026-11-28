@@ -1,6 +1,6 @@
 [package]
 name = "openbot-desktop"
-version = "1.1.0"
+version = "1.2.1"
 description = "OpenBot Desktop"
 edition = "2021"
 rust-version = "1.90"
@@ -42,6 +42,9 @@ sha2 = "0.10"
 tar = "0.4"
 # Comparing the app's release with its deployment's. See `follow.rs`.
 semver = "1"
+# Verifying the signed security floor, strictly (RFC 8032, no malleable signatures). Default
+# features off: the app only verifies, never signs. See `security_floor.rs`.
+ed25519-dalek = { version = "3.0.0", default-features = false }
 # OpenBot's images downloaded before any engine answers: the registry's manifests, read as the OCI
 # Distribution spec says, for this computer's platform. The ORAS project's client. See
 # `early_images.rs`. Its blobs come through `early_downloads::fetch`, which resumes and checks them.
@@ -56,7 +59,6 @@ zip = { version = "2.4.2", default-features = false, features = ["deflate-flate2
 tauri-plugin-single-instance = { version = "2.0.0-rc.5", features = ["deep-link"] }
 # The `openbot://` links a click on a notification opens on Windows, registered by the installer.
 tauri-plugin-deep-link = "2"
-portable-pty = "0.9.0"
 tauri-plugin-opener = "2.5.5"
 tauri-plugin-dialog = "2"
 # Puts each window back where the person left it: its size, its place and whether it was maximized.
@@ -94,6 +96,11 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# Verifying the ChatGPT sign-in's ID token (RS256) against OpenAI's published keys. The version
+# rustls already builds. See `chatgpt_sign_in.rs`.
+ring = "0.17"
+# This computer's Sign in with ChatGPT host id, a UUIDv4. The version Tauri already builds.
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

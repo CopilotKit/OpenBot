@@ -286,7 +286,7 @@ export const GetComputerParams = zod.object({
 export const GetComputerResponse = zod.object({
   botId: zod.string().describe("The Bot whose computer this is."),
   state: zod
-    .enum(["absent", "starting", "ready", "unreachable"])
+    .string()
     .describe(
       "Where a computer is in its life. absent is one that is not running: never started, or put to sleep after a quiet spell; it starts on the Bot's next action. starting is on its way up. unreachable is the only one that is something wrong.",
     ),
@@ -332,7 +332,7 @@ export const WakeComputerHeader = zod.object({
 export const WakeComputerResponse = zod.object({
   botId: zod.string().describe("The Bot whose computer this is."),
   state: zod
-    .enum(["absent", "starting", "ready", "unreachable"])
+    .string()
     .describe(
       "Where a computer is in its life. absent is one that is not running: never started, or put to sleep after a quiet spell; it starts on the Bot's next action. starting is on its way up. unreachable is the only one that is something wrong.",
     ),
@@ -341,6 +341,209 @@ export const WakeComputerResponse = zod.object({
     .optional()
     .describe("Why it is unreachable, written for an administrator."),
 });
+
+/**
+ * Return the saved copies of the computer this Bot runs on for the caller, newest first, and the latest restore of it. OpenBot saves each computer's files and browser sign-ins once a day and keeps the last 7, and saves it again just before every restore. computer names another person's computer the Bot runs on (person:<id> or bot:<id>), which only an administrator of the organization may read. available is false where this OpenBot keeps no copies. canRestore says whether the caller may restore it: an administrator of the organization, or the person whose computer it is when they own the Bot (an isolated Bot's computer is its owner's). Reading it never starts the computer.
+ * @summary Read a computer's saved copies
+ */
+
+export const getWorkspaceSnapshotsPathBotIdRegExp = new RegExp("\\S");
+
+export const GetWorkspaceSnapshotsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  botId: zod
+    .string()
+    .min(1)
+    .regex(getWorkspaceSnapshotsPathBotIdRegExp)
+    .describe("The Bot's id."),
+});
+
+export const getWorkspaceSnapshotsQueryComputerMax = 300;
+
+export const getWorkspaceSnapshotsQueryComputerRegExp = new RegExp(
+  "^(person|bot):\\S+$",
+);
+
+export const GetWorkspaceSnapshotsQueryParams = zod.object({
+  computer: zod
+    .string()
+    .min(1)
+    .max(getWorkspaceSnapshotsQueryComputerMax)
+    .regex(getWorkspaceSnapshotsQueryComputerRegExp)
+    .optional()
+    .describe(
+      "Whose computer, as person:<id> or bot:<id>. Absent, the one this Bot runs on for the caller.",
+    ),
+});
+
+export const getWorkspaceSnapshotsResponseSnapshotsMax = 100;
+
+export const GetWorkspaceSnapshotsResponse = zod.object({
+  computer: zod
+    .string()
+    .describe("Whose computer, as person:<id> or bot:<id>."),
+  available: zod
+    .boolean()
+    .describe(
+      "False where this OpenBot keeps no saved copies of computers. snapshots is then empty.",
+    ),
+  canRestore: zod
+    .boolean()
+    .describe("Whether the caller may restore this computer."),
+  snapshots: zod
+    .array(
+      zod
+        .object({
+          id: zod.string().describe("Names the copy in restoreComputer."),
+          takenAt: zod.iso
+            .datetime({ offset: true })
+            .describe("When it was saved."),
+          kind: zod
+            .string()
+            .describe(
+              "daily is the copy OpenBot saves once a day. before-restore is the one it saved just before a restore.",
+            ),
+        })
+        .describe("One saved copy of a computer's files and browser sign-ins."),
+    )
+    .max(getWorkspaceSnapshotsResponseSnapshotsMax)
+    .describe("Newest first."),
+  restore: zod
+    .union([
+      zod
+        .object({
+          id: zod.string(),
+          snapshotId: zod.string().describe("The copy it restores."),
+          snapshotTakenAt: zod.iso
+            .datetime({ offset: true })
+            .describe("When that copy was saved."),
+          beforeSnapshotId: zod
+            .string()
+            .nullable()
+            .describe(
+              "The copy of the computer as it was just before, once it is saved. Null until then.",
+            ),
+          state: zod
+            .string()
+            .describe(
+              "running is under way, and the computer is not yet back. done is back on the copy. failed says why in error.",
+            ),
+          startedAt: zod.iso.datetime({ offset: true }),
+          finishedAt: zod.iso
+            .datetime({ offset: true })
+            .nullable()
+            .describe("When it was done or failed. Null while it runs."),
+          error: zod
+            .string()
+            .nullable()
+            .describe(
+              "Why it failed, written for the person who asked. Null unless it failed.",
+            ),
+        })
+        .describe("One restore of a computer from a saved copy."),
+      zod.null(),
+    ])
+    .describe(
+      "The latest restore of this computer, or null when it was never restored.",
+    ),
+});
+
+/**
+ * Put the computer this Bot runs on back the way it was in one of its saved copies, and record it on the audit trail. Nothing is restored unless someone asks: OpenBot first saves the computer as it is now (kept as a copy of kind before-restore), then replaces every file and browser sign-in on it with the copy's and starts it again. Every Bot on that computer goes back, and routines that use it wait until it is back. The answer comes at once, with the restore running; read getWorkspaceSnapshots for how it ends. computer names another person's computer, as in getWorkspaceSnapshots. Only an administrator of the organization, or the person whose computer it is when they own the Bot, may do this. One restore of a computer runs at a time.
+ * @summary Restore a computer from a saved copy
+ */
+
+export const restoreComputerPathBotIdRegExp = new RegExp("\\S");
+
+export const RestoreComputerParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  botId: zod
+    .string()
+    .min(1)
+    .regex(restoreComputerPathBotIdRegExp)
+    .describe("The Bot's id."),
+});
+
+export const restoreComputerHeaderIdempotencyKeyMax = 128;
+
+export const RestoreComputerHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(restoreComputerHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const restoreComputerBodySnapshotIdMax = 200;
+
+export const restoreComputerBodySnapshotIdRegExp = new RegExp("\\S");
+export const restoreComputerBodyComputerMax = 300;
+
+export const restoreComputerBodyComputerRegExp = new RegExp(
+  "^(person|bot):\\S+$",
+);
+
+export const RestoreComputerBody = zod.object({
+  snapshotId: zod
+    .string()
+    .min(1)
+    .max(restoreComputerBodySnapshotIdMax)
+    .regex(restoreComputerBodySnapshotIdRegExp)
+    .describe("The saved copy to restore, from getWorkspaceSnapshots."),
+  computer: zod
+    .string()
+    .min(1)
+    .max(restoreComputerBodyComputerMax)
+    .regex(restoreComputerBodyComputerRegExp)
+    .optional()
+    .describe(
+      "Whose computer, as person:<id> or bot:<id>. Absent, the one this Bot runs on for the caller.",
+    ),
+});
+
+export const RestoreComputerResponse = zod
+  .object({
+    id: zod.string(),
+    snapshotId: zod.string().describe("The copy it restores."),
+    snapshotTakenAt: zod.iso
+      .datetime({ offset: true })
+      .describe("When that copy was saved."),
+    beforeSnapshotId: zod
+      .string()
+      .nullable()
+      .describe(
+        "The copy of the computer as it was just before, once it is saved. Null until then.",
+      ),
+    state: zod
+      .string()
+      .describe(
+        "running is under way, and the computer is not yet back. done is back on the copy. failed says why in error.",
+      ),
+    startedAt: zod.iso.datetime({ offset: true }),
+    finishedAt: zod.iso
+      .datetime({ offset: true })
+      .nullable()
+      .describe("When it was done or failed. Null while it runs."),
+    error: zod
+      .string()
+      .nullable()
+      .describe(
+        "Why it failed, written for the person who asked. Null unless it failed.",
+      ),
+  })
+  .describe("One restore of a computer from a saved copy.");
 
 /**
  * Return a picture of the Bot's screen as it is now, as a base64 PNG in JSON. A computer that is asleep or starting is not woken: the answer is ready false with its state.
@@ -382,7 +585,7 @@ export const GetComputerScreenshotResponse = zod.union([
     .object({
       ready: zod.literal(false),
       state: zod
-        .enum(["absent", "starting", "ready", "unreachable"])
+        .string()
         .describe(
           "Where a computer is in its life. absent is one that is not running: never started, or put to sleep after a quiet spell; it starts on the Bot's next action. starting is on its way up. unreachable is the only one that is something wrong.",
         ),
@@ -440,7 +643,7 @@ export const GetComputerPageFrameResponse = zod.object({
 });
 
 /**
- * Return the text of the page the Bot's browser is showing, with its address and title.
+ * Return the text of the page the Bot's browser is showing, with its address and title. Asked with the Bot's threadId and toolCallId, the step runs once, however many times it is asked.
  * @summary Read the page a Bot's browser is on
  */
 
@@ -460,6 +663,32 @@ export const ReadComputerPageParams = zod.object({
     .describe("The Bot's id."),
 });
 
+export const readComputerPageQueryThreadIdMax = 200;
+
+export const readComputerPageQueryThreadIdRegExp = new RegExp("\\S");
+export const readComputerPageQueryToolCallIdMax = 200;
+
+export const readComputerPageQueryToolCallIdRegExp = new RegExp("\\S");
+
+export const ReadComputerPageQueryParams = zod.object({
+  threadId: zod
+    .string()
+    .min(1)
+    .max(readComputerPageQueryThreadIdMax)
+    .regex(readComputerPageQueryThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(readComputerPageQueryToolCallIdMax)
+    .regex(readComputerPageQueryToolCallIdRegExp)
+    .optional()
+    .describe("The Bot's tool call this step answers. Sent with threadId."),
+});
+
 export const ReadComputerPageResponse = zod.object({
   untrusted: zod
     .string()
@@ -469,7 +698,11 @@ export const ReadComputerPageResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })
@@ -533,18 +766,22 @@ export const GetComputerControlResponse = zod
         toolCallId: zod.string().optional(),
         reason: zod.string(),
         source: zod
-          .enum(["model", "cloudflare", "visible-challenge", "manual"])
+          .string()
           .describe(
-            "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
+            "Who raised it: the Bot (model), a check the page raised (cloudflare, visible-challenge, or passkey when the page asked for a passkey), or the person themselves (manual).",
           ),
-        status: zod.enum([
-          "waiting",
-          "taken",
-          "completed",
-          "cancelled",
-          "expired",
-          "interrupted",
-        ]),
+        passkey: zod
+          .object({
+            host: zod
+              .string()
+              .describe("The site that asked, such as accounts.google.com."),
+            askedAt: zod.string().describe("When it asked."),
+          })
+          .optional()
+          .describe(
+            "Set when the page asked for a passkey while this request was open. A passkey kept on the person's own device can't be used in a Bot's computer, so they sign in another way on the page, such as its \"Try another way\".",
+          ),
+        status: zod.string(),
         createdAt: zod.string(),
         updatedAt: zod.string(),
         expiresAt: zod.string().optional(),
@@ -613,9 +850,27 @@ export const RequestComputerControlHeader = zod.object({
     ),
 });
 
+export const requestComputerControlBodyThreadIdMax = 200;
+
+export const requestComputerControlBodyThreadIdRegExp = new RegExp("\\S");
+
 export const RequestComputerControlBody = zod.object({
   reason: zod.string().optional().describe("What the person is needed for."),
-  toolCallId: zod.string().optional(),
+  toolCallId: zod
+    .string()
+    .optional()
+    .describe(
+      "The Bot's tool call that asked. Sent with threadId, the step also runs once, however many times it is asked (ComputerStepToolCallId says how).",
+    ),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(requestComputerControlBodyThreadIdMax)
+    .regex(requestComputerControlBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
   source: zod
     .enum(["model", "manual"])
     .optional()
@@ -636,18 +891,22 @@ export const RequestComputerControlResponse = zod
         toolCallId: zod.string().optional(),
         reason: zod.string(),
         source: zod
-          .enum(["model", "cloudflare", "visible-challenge", "manual"])
+          .string()
           .describe(
-            "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
+            "Who raised it: the Bot (model), a check the page raised (cloudflare, visible-challenge, or passkey when the page asked for a passkey), or the person themselves (manual).",
           ),
-        status: zod.enum([
-          "waiting",
-          "taken",
-          "completed",
-          "cancelled",
-          "expired",
-          "interrupted",
-        ]),
+        passkey: zod
+          .object({
+            host: zod
+              .string()
+              .describe("The site that asked, such as accounts.google.com."),
+            askedAt: zod.string().describe("When it asked."),
+          })
+          .optional()
+          .describe(
+            "Set when the page asked for a passkey while this request was open. A passkey kept on the person's own device can't be used in a Bot's computer, so they sign in another way on the page, such as its \"Try another way\".",
+          ),
+        status: zod.string(),
         createdAt: zod.string(),
         updatedAt: zod.string(),
         expiresAt: zod.string().optional(),
@@ -742,18 +1001,22 @@ export const TakeComputerControlResponse = zod
         toolCallId: zod.string().optional(),
         reason: zod.string(),
         source: zod
-          .enum(["model", "cloudflare", "visible-challenge", "manual"])
+          .string()
           .describe(
-            "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
+            "Who raised it: the Bot (model), a check the page raised (cloudflare, visible-challenge, or passkey when the page asked for a passkey), or the person themselves (manual).",
           ),
-        status: zod.enum([
-          "waiting",
-          "taken",
-          "completed",
-          "cancelled",
-          "expired",
-          "interrupted",
-        ]),
+        passkey: zod
+          .object({
+            host: zod
+              .string()
+              .describe("The site that asked, such as accounts.google.com."),
+            askedAt: zod.string().describe("When it asked."),
+          })
+          .optional()
+          .describe(
+            "Set when the page asked for a passkey while this request was open. A passkey kept on the person's own device can't be used in a Bot's computer, so they sign in another way on the page, such as its \"Try another way\".",
+          ),
+        status: zod.string(),
         createdAt: zod.string(),
         updatedAt: zod.string(),
         expiresAt: zod.string().optional(),
@@ -848,18 +1111,22 @@ export const ReleaseComputerControlResponse = zod
         toolCallId: zod.string().optional(),
         reason: zod.string(),
         source: zod
-          .enum(["model", "cloudflare", "visible-challenge", "manual"])
+          .string()
           .describe(
-            "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
+            "Who raised it: the Bot (model), a check the page raised (cloudflare, visible-challenge, or passkey when the page asked for a passkey), or the person themselves (manual).",
           ),
-        status: zod.enum([
-          "waiting",
-          "taken",
-          "completed",
-          "cancelled",
-          "expired",
-          "interrupted",
-        ]),
+        passkey: zod
+          .object({
+            host: zod
+              .string()
+              .describe("The site that asked, such as accounts.google.com."),
+            askedAt: zod.string().describe("When it asked."),
+          })
+          .optional()
+          .describe(
+            "Set when the page asked for a passkey while this request was open. A passkey kept on the person's own device can't be used in a Bot's computer, so they sign in another way on the page, such as its \"Try another way\".",
+          ),
+        status: zod.string(),
         createdAt: zod.string(),
         updatedAt: zod.string(),
         expiresAt: zod.string().optional(),
@@ -954,18 +1221,22 @@ export const CancelComputerControlResponse = zod
         toolCallId: zod.string().optional(),
         reason: zod.string(),
         source: zod
-          .enum(["model", "cloudflare", "visible-challenge", "manual"])
+          .string()
           .describe(
-            "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
+            "Who raised it: the Bot (model), a check the page raised (cloudflare, visible-challenge, or passkey when the page asked for a passkey), or the person themselves (manual).",
           ),
-        status: zod.enum([
-          "waiting",
-          "taken",
-          "completed",
-          "cancelled",
-          "expired",
-          "interrupted",
-        ]),
+        passkey: zod
+          .object({
+            host: zod
+              .string()
+              .describe("The site that asked, such as accounts.google.com."),
+            askedAt: zod.string().describe("When it asked."),
+          })
+          .optional()
+          .describe(
+            "Set when the page asked for a passkey while this request was open. A passkey kept on the person's own device can't be used in a Bot's computer, so they sign in another way on the page, such as its \"Try another way\".",
+          ),
+        status: zod.string(),
         createdAt: zod.string(),
         updatedAt: zod.string(),
         expiresAt: zod.string().optional(),
@@ -1034,6 +1305,13 @@ export const RequestComputerSecretHeader = zod.object({
     ),
 });
 
+export const requestComputerSecretBodyThreadIdMax = 200;
+
+export const requestComputerSecretBodyThreadIdRegExp = new RegExp("\\S");
+export const requestComputerSecretBodyToolCallIdMax = 200;
+
+export const requestComputerSecretBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const RequestComputerSecretBody = zod.object({
   ref: zod
     .string()
@@ -1046,6 +1324,24 @@ export const RequestComputerSecretBody = zod.object({
     .string()
     .optional()
     .describe("What to ask the person for, such as your bank password."),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(requestComputerSecretBodyThreadIdMax)
+    .regex(requestComputerSecretBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(requestComputerSecretBodyToolCallIdMax)
+    .regex(requestComputerSecretBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const RequestComputerSecretResponse = zod
@@ -1062,18 +1358,22 @@ export const RequestComputerSecretResponse = zod
         toolCallId: zod.string().optional(),
         reason: zod.string(),
         source: zod
-          .enum(["model", "cloudflare", "visible-challenge", "manual"])
+          .string()
           .describe(
-            "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
+            "Who raised it: the Bot (model), a check the page raised (cloudflare, visible-challenge, or passkey when the page asked for a passkey), or the person themselves (manual).",
           ),
-        status: zod.enum([
-          "waiting",
-          "taken",
-          "completed",
-          "cancelled",
-          "expired",
-          "interrupted",
-        ]),
+        passkey: zod
+          .object({
+            host: zod
+              .string()
+              .describe("The site that asked, such as accounts.google.com."),
+            askedAt: zod.string().describe("When it asked."),
+          })
+          .optional()
+          .describe(
+            "Set when the page asked for a passkey while this request was open. A passkey kept on the person's own device can't be used in a Bot's computer, so they sign in another way on the page, such as its \"Try another way\".",
+          ),
+        status: zod.string(),
         createdAt: zod.string(),
         updatedAt: zod.string(),
         expiresAt: zod.string().optional(),
@@ -1210,7 +1510,7 @@ export const SendComputerHumanInputResponse = zod.object({
 });
 
 /**
- * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
+ * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again. The body is optional: sent with the Bot's threadId and toolCallId, the step runs once, however many times it is asked.
  * @summary List what a Bot can act on in the page
  */
 
@@ -1242,6 +1542,34 @@ export const SnapshotComputerHeader = zod.object({
     ),
 });
 
+export const snapshotComputerBodyThreadIdMax = 200;
+
+export const snapshotComputerBodyThreadIdRegExp = new RegExp("\\S");
+export const snapshotComputerBodyToolCallIdMax = 200;
+
+export const snapshotComputerBodyToolCallIdRegExp = new RegExp("\\S");
+
+export const SnapshotComputerBody = zod.object({
+  threadId: zod
+    .string()
+    .min(1)
+    .max(snapshotComputerBodyThreadIdMax)
+    .regex(snapshotComputerBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(snapshotComputerBodyToolCallIdMax)
+    .regex(snapshotComputerBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
+});
+
 export const SnapshotComputerResponse = zod.object({
   untrusted: zod
     .string()
@@ -1251,7 +1579,11 @@ export const SnapshotComputerResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })
@@ -1316,6 +1648,9 @@ export const NavigateComputerHeader = zod.object({
 });
 
 export const navigateComputerBodyUrlRegExp = new RegExp("\\S");
+export const navigateComputerBodyThreadIdMax = 200;
+
+export const navigateComputerBodyThreadIdRegExp = new RegExp("\\S");
 
 export const NavigateComputerBody = zod.object({
   url: zod
@@ -1327,7 +1662,16 @@ export const NavigateComputerBody = zod.object({
     .string()
     .optional()
     .describe(
-      "The tool call that asked, so a picture of the page is kept under it.",
+      "The tool call that asked, so a picture of the page is kept under it. Sent with threadId, the step also runs once, however many times it is asked (ComputerStepToolCallId says how).",
+    ),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(navigateComputerBodyThreadIdMax)
+    .regex(navigateComputerBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
     ),
 });
 
@@ -1340,7 +1684,11 @@ export const NavigateComputerResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })
@@ -1390,12 +1738,37 @@ export const ClickComputerHeader = zod.object({
     ),
 });
 
+export const clickComputerBodyThreadIdMax = 200;
+
+export const clickComputerBodyThreadIdRegExp = new RegExp("\\S");
+export const clickComputerBodyToolCallIdMax = 200;
+
+export const clickComputerBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const ClickComputerBody = zod.object({
   ref: zod
     .string()
     .min(1)
     .describe("The element, by a ref from the latest snapshot."),
   snapshotId: zod.int().describe("The snapshot the ref came from."),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(clickComputerBodyThreadIdMax)
+    .regex(clickComputerBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(clickComputerBodyToolCallIdMax)
+    .regex(clickComputerBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const ClickComputerResponse = zod.object({
@@ -1424,7 +1797,11 @@ export const ClickComputerResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })
@@ -1467,6 +1844,13 @@ export const TypeComputerHeader = zod.object({
     ),
 });
 
+export const typeComputerBodyThreadIdMax = 200;
+
+export const typeComputerBodyThreadIdRegExp = new RegExp("\\S");
+export const typeComputerBodyToolCallIdMax = 200;
+
+export const typeComputerBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const TypeComputerBody = zod.object({
   ref: zod
     .string()
@@ -1478,6 +1862,24 @@ export const TypeComputerBody = zod.object({
     .boolean()
     .optional()
     .describe("Send the field's form afterwards."),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(typeComputerBodyThreadIdMax)
+    .regex(typeComputerBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(typeComputerBodyToolCallIdMax)
+    .regex(typeComputerBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const TypeComputerResponse = zod.object({
@@ -1506,7 +1908,11 @@ export const TypeComputerResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })
@@ -1549,6 +1955,13 @@ export const PressComputerKeyHeader = zod.object({
     ),
 });
 
+export const pressComputerKeyBodyThreadIdMax = 200;
+
+export const pressComputerKeyBodyThreadIdRegExp = new RegExp("\\S");
+export const pressComputerKeyBodyToolCallIdMax = 200;
+
+export const pressComputerKeyBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const PressComputerKeyBody = zod.object({
   key: zod.string().min(1).describe("A key name, such as Enter or Tab."),
   ref: zod
@@ -1557,6 +1970,24 @@ export const PressComputerKeyBody = zod.object({
     .optional()
     .describe("The element to press it on. With it, snapshotId."),
   snapshotId: zod.int().optional(),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(pressComputerKeyBodyThreadIdMax)
+    .regex(pressComputerKeyBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(pressComputerKeyBodyToolCallIdMax)
+    .regex(pressComputerKeyBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const PressComputerKeyResponse = zod.object({
@@ -1585,7 +2016,11 @@ export const PressComputerKeyResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })
@@ -1628,12 +2063,37 @@ export const ScrollComputerHeader = zod.object({
     ),
 });
 
+export const scrollComputerBodyThreadIdMax = 200;
+
+export const scrollComputerBodyThreadIdRegExp = new RegExp("\\S");
+export const scrollComputerBodyToolCallIdMax = 200;
+
+export const scrollComputerBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const ScrollComputerBody = zod.object({
   deltaY: zod
     .number()
     .optional()
     .describe(
       "Pixels to scroll down, or up when negative. Without it the computer scrolls its own default distance.",
+    ),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(scrollComputerBodyThreadIdMax)
+    .regex(scrollComputerBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(scrollComputerBodyToolCallIdMax)
+    .regex(scrollComputerBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
     ),
 });
 
@@ -1663,7 +2123,11 @@ export const ScrollComputerResponse = zod.object({
     ),
   challenge: zod
     .object({
-      kind: zod.enum(["cloudflare", "visible-challenge"]),
+      kind: zod
+        .string()
+        .describe(
+          "What the page raised: a Cloudflare check, a visible human check, or a request for a passkey, which a passkey kept on the person's own device can't answer in a Bot's computer.",
+        ),
       reason: zod.string(),
       requestId: zod.string(),
     })
@@ -1710,6 +2174,13 @@ export const runComputerCommandBodyCommandRegExp = new RegExp("\\S");
 export const runComputerCommandBodyTimeoutMsMin = 1000;
 export const runComputerCommandBodyTimeoutMsMax = 600000;
 
+export const runComputerCommandBodyThreadIdMax = 200;
+
+export const runComputerCommandBodyThreadIdRegExp = new RegExp("\\S");
+export const runComputerCommandBodyToolCallIdMax = 200;
+
+export const runComputerCommandBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const RunComputerCommandBody = zod.object({
   command: zod.string().min(1).regex(runComputerCommandBodyCommandRegExp),
   timeoutMs: zod
@@ -1717,6 +2188,24 @@ export const RunComputerCommandBody = zod.object({
     .min(runComputerCommandBodyTimeoutMsMin)
     .max(runComputerCommandBodyTimeoutMsMax)
     .optional(),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(runComputerCommandBodyThreadIdMax)
+    .regex(runComputerCommandBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(runComputerCommandBodyToolCallIdMax)
+    .regex(runComputerCommandBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const RunComputerCommandResponse = zod.object({
@@ -1768,11 +2257,36 @@ export const ListComputerFilesHeader = zod.object({
     ),
 });
 
+export const listComputerFilesBodyThreadIdMax = 200;
+
+export const listComputerFilesBodyThreadIdRegExp = new RegExp("\\S");
+export const listComputerFilesBodyToolCallIdMax = 200;
+
+export const listComputerFilesBodyToolCallIdRegExp = new RegExp("\\S");
+
 export const ListComputerFilesBody = zod.object({
   path: zod
     .string()
     .optional()
     .describe("A folder of the workspace. Without it, the workspace itself."),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(listComputerFilesBodyThreadIdMax)
+    .regex(listComputerFilesBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(listComputerFilesBodyToolCallIdMax)
+    .regex(listComputerFilesBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const ListComputerFilesResponse = zod.object({
@@ -1821,9 +2335,33 @@ export const ReadComputerFileHeader = zod.object({
 });
 
 export const readComputerFileBodyPathRegExp = new RegExp("\\S");
+export const readComputerFileBodyThreadIdMax = 200;
+
+export const readComputerFileBodyThreadIdRegExp = new RegExp("\\S");
+export const readComputerFileBodyToolCallIdMax = 200;
+
+export const readComputerFileBodyToolCallIdRegExp = new RegExp("\\S");
 
 export const ReadComputerFileBody = zod.object({
   path: zod.string().min(1).regex(readComputerFileBodyPathRegExp),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(readComputerFileBodyThreadIdMax)
+    .regex(readComputerFileBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(readComputerFileBodyToolCallIdMax)
+    .regex(readComputerFileBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const ReadComputerFileResponse = zod.object({
@@ -1873,6 +2411,12 @@ export const WriteComputerFileHeader = zod.object({
 });
 
 export const writeComputerFileBodyPathRegExp = new RegExp("\\S");
+export const writeComputerFileBodyThreadIdMax = 200;
+
+export const writeComputerFileBodyThreadIdRegExp = new RegExp("\\S");
+export const writeComputerFileBodyToolCallIdMax = 200;
+
+export const writeComputerFileBodyToolCallIdRegExp = new RegExp("\\S");
 
 export const WriteComputerFileBody = zod.object({
   path: zod.string().min(1).regex(writeComputerFileBodyPathRegExp),
@@ -1881,6 +2425,24 @@ export const WriteComputerFileBody = zod.object({
     .boolean()
     .optional()
     .describe("Add to the end of the file instead of replacing it."),
+  threadId: zod
+    .string()
+    .min(1)
+    .max(writeComputerFileBodyThreadIdMax)
+    .regex(writeComputerFileBodyThreadIdRegExp)
+    .optional()
+    .describe(
+      "The conversation's thread the Bot's tool call is in. Sent with toolCallId, so the server runs the step once, however many times it is asked.",
+    ),
+  toolCallId: zod
+    .string()
+    .min(1)
+    .max(writeComputerFileBodyToolCallIdMax)
+    .regex(writeComputerFileBodyToolCallIdRegExp)
+    .optional()
+    .describe(
+      "The Bot's tool call this step answers. Sent with threadId, the server runs the step once, however many times and from wherever it is asked. The first ask runs it. When the server already ran this step, it answers as it answered the first run, with the same result or the same problem, and does nothing a second time; what the first run answered is kept for this only until the conversation's turn is over, and after that the answer is ANSWER_NOT_KEPT. While the first run is still going, the answer is COMPUTER_STEP_RUNNING: ask again with the same threadId and toolCallId for its result. When the first run was cut off before it answered, the answer is COMPUTER_STEP_OUTCOME_UNKNOWN: check whether it was done before doing it again. COMPUTER_STEP_RUNNING and COMPUTER_STEP_OUTCOME_UNKNOWN are sent only to a request whose OpenBot-Capabilities header names computer-step-taken; any other request is answered as before they existed. Without both ids a call runs once per Idempotency-Key, as it always has.",
+    ),
 });
 
 export const WriteComputerFileResponse = zod.object({

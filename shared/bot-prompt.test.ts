@@ -15,7 +15,6 @@ import {
   runModeGuidance,
   workingGuidance,
 } from "./bot-prompt";
-import { RESEARCH_APP_NAMES } from "./research";
 
 const WITH_SEARCH = computerGuidance({ search: true });
 const WITHOUT_SEARCH = computerGuidance({ search: false });
@@ -88,12 +87,22 @@ describe("computerGuidance", () => {
     expect(guidance).not.toContain("cannot search");
   });
 
-  test("without a search tool, the browser is never a search engine", () => {
+  /*
+   * FOUND IN DOGFOODING. A Bot with no search app said "I could technically load Google or Bing in
+   * that browser, but I'm set up not to" and that "an admin can add a search app". OpenBot is open
+   * by default: without a search tool, the Bot searches with its own browser.
+   */
+  test("without a search tool, it searches with its own browser and never refuses", () => {
     const guidance = flat(WITHOUT_SEARCH);
-    expect(guidance).toContain("opening a page is not a web search");
-    expect(guidance).toContain("never drive your browser to a search engine");
+    expect(guidance).toContain("search with your own browser");
     for (const engine of ["google", "bing", "duckduckgo"])
       expect(guidance).toContain(engine);
+    expect(guidance).toContain("never refuse to search");
+    expect(guidance).toContain("try another search engine");
+    expect(guidance).not.toContain(
+      "never drive your browser to a search engine",
+    );
+    expect(guidance).not.toContain("cannot search");
     expect(guidance).not.toContain("use your search tool");
     // Conditional, not a claim: a search tool from Composio or a server added by URL is not
     // recognised by role, and a Bot holding one must not be told it holds none.
@@ -101,19 +110,16 @@ describe("computerGuidance", () => {
     expect(guidance).not.toContain("you do not hold a search tool");
   });
 
-  test("without a search tool, it answers marked as unchecked and offers a search app", () => {
-    const guidance = flat(WITHOUT_SEARCH);
-    expect(guidance).toContain("answer from what you already know");
-    expect(guidance).toContain("you have not checked it against a source");
-    expect(guidance).toContain("call it once in the conversation");
-    expect(guidance).toContain("show_app_access");
-    for (const name of RESEARCH_APP_NAMES)
-      expect(guidance).toContain(name.toLowerCase());
-    expect(guidance).toContain(
-      "otherwise say an administrator can add a search app",
+  test("without a search tool, it never tells anybody an administrator has to add search", () => {
+    for (const personal of [false, true]) {
+      const guidance = flat(computerGuidance({ search: false, personal }));
+      expect(guidance).not.toContain("an administrator can add a search app");
+      expect(guidance).not.toContain("ask an administrator to add it");
+      expect(guidance).not.toContain("answer from what you already know");
+    }
+    expect(flat(WITHOUT_SEARCH)).toContain(
+      "never tell the person that an administrator has to add a search app",
     );
-    // Asked "can you search the web?", a Bot with only a browser once said yes.
-    expect(guidance).toContain("cannot search");
   });
 
   test("says what it is doing with its first computer action, in the same reply", () => {
@@ -270,6 +276,75 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     // Said before the work, not only among the failed calls, where an empty result is no failure.
     expect(said.indexOf("never make up an id")).toBeLessThan(
       said.indexOf("when a call fails"),
+    );
+  });
+
+  test("what is private in an app the Bot holds nothing for starts with that app's card, and so does a not-found that could be private", () => {
+    // Found on the Desktop: a Bot made to follow a company's repositories held no GitHub tools,
+    // searched the web, met a private repository as GitHub's 404 and told the person it was
+    // probably private or did not exist. The card that connects GitHub was one call away.
+    for (const brought of [false, true]) {
+      const [howTo] = workingGuidance({ brought, untrusted: "" });
+      const said = flat(howTo ?? "");
+      expect(said).toContain(
+        "when a request needs that private content from an app you hold no tools for, call show_app_access with that app's name before you look on the web",
+      );
+      expect(said).toContain("the web shows only the public part");
+      // A 404 from a site that hides what is private is not an answer, and neither is a guess. Only
+      // on the web: a not-found from the app's own tools is the app answering for their account.
+      expect(said).toContain(
+        "when something of theirs you looked for on the web comes back not found, or with no access, and could be private to them",
+      );
+      expect(said).toContain("their team's repository that answers 404");
+      expect(said).toContain(
+        "that has not shown it is missing, so never say it does not exist",
+      );
+      expect(said).toContain(
+        "never leave the person only a guess that it is private",
+      );
+      // Being told it is private is the same cue, never news that asks nothing.
+      expect(said).toContain(
+        "call it too when the person tells you something is private",
+      );
+      expect(said).toContain("call it once for each app");
+      // A Bot that does not hold the card still names the app to connect.
+      expect(said).toContain(
+        "or you do not hold that tool, call no card: say which app would need connecting",
+      );
+      // Beside the rule that nothing found is not nothing there, before the work: a 404 page is
+      // an answer that came back, not a failed call.
+      const card = said.indexOf("show_app_access");
+      expect(card).toBeGreaterThan(said.indexOf("a search that finds nothing"));
+      expect(card).toBeLessThan(said.indexOf("when a call fails"));
+    }
+  });
+
+  test("only what is private to the person or their team gets the card: anything public still goes to the web", () => {
+    // A rule for "what is kept in an app" also covers a public repository's release, a public
+    // document and a dead public link, which would stall on a card the person never needed.
+    const said = flat(HOW_TO_WORK_GUIDANCE);
+    expect(said).toContain(
+      "private to them or their team: their own repositories, mail, files, documents and workspace data",
+    );
+    expect(said).toContain(
+      "anything public still goes to the web first, with no card: an open-source project, a public page or document, a link anyone can open",
+    );
+    expect(said).toContain(
+      "a public link that comes back not found is just not found: say so",
+    );
+    // Never the old, unscoped wording.
+    expect(said).not.toContain("when a request needs what is in an app");
+  });
+
+  test("a run nobody is watching shows no card, and says which app needs connecting instead", () => {
+    // A routine holds the card tool too, and a card there reaches nobody. Worded with the routine's
+    // own first sentence, so the two read as one cue.
+    const said = flat(HOW_TO_WORK_GUIDANCE);
+    expect(said).toContain(
+      "when nobody is watching this run, or you do not hold that tool, call no card: say which app would need connecting",
+    );
+    expect(flat(runModeGuidance("routine"))).toStartWith(
+      "nobody is watching this run",
     );
   });
 

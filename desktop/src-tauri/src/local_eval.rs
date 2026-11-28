@@ -139,6 +139,9 @@ pub enum Failure {
     /// The back end's images stopped downloading: no new bytes for `local_images::Limits::stall`.
     /// What arrived is kept, and the next attempt continues from there. See `local_images`.
     DownloadStalled,
+    /// This version of OpenBot is below the security floor (`security_floor`): nothing of it starts
+    /// on this computer until it is updated.
+    BelowSecurityFloor,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -211,6 +214,11 @@ pub enum Reason {
     /// in it, as when OpenBot's Podman machine was removed and made again (`stack_lost`). Waiting or
     /// Retry can't bring it back; setting it up again starts over.
     StackLost,
+    /// OpenBot's own finding, like `StackLost`, when OpenBot's own database is still there: only
+    /// the backend's cluster went, as when `docker container prune` removed its node while it was
+    /// stopped (a dogfooding Mac on Docker Desktop, Desktop 1.1.2). OpenBot's Bots and settings
+    /// stay; the conversations and memory the backend kept went with the node.
+    BackendGone,
 }
 
 impl Reason {
@@ -326,6 +334,15 @@ pub struct Shortfall {
     /// drive C:" (`EngineCheck::free_on_drive`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub free_on_drive: bool,
+    /// That drive is this Mac's own disk (`windows::mac_drive`): "This Mac has 7.5 GB of free space".
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub mac: bool,
+    /// What is short is room for an update (`update_room`), not for a first setup: `needed_gb` is
+    /// what the update needs free where `disk_gb` was measured.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub updating: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub needed_gb: Option<String>,
 }
 
 /// A number the CLI printed, to one decimal and rounded down as it rounds, without a trailing `.0`.
@@ -336,7 +353,8 @@ fn shown(value: f64) -> String {
 }
 
 impl Shortfall {
-    fn named(&self) -> bool {
+    /// Something is short, or recovering from being short.
+    pub fn named(&self) -> bool {
         self.cpu || self.memory || self.disk || self.recovering
     }
 }
@@ -1074,6 +1092,9 @@ pub enum Terms {
         /// That figure is what is free on `drive` (`Shortfall::free_on_drive`).
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         free_on_drive: bool,
+        /// The drive is this Mac's own disk (`Shortfall::mac`).
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        mac: bool,
         /// What was measured, for the desktop's usage data only. Never sent to the window.
         #[serde(skip)]
         measured: EngineMeasure,
@@ -1627,44 +1648,58 @@ const ENGINE_OUTPUT_CAP: usize = 1024 * 1024;
 static ENGINE_CHECK_LIMIT_FOR_TESTS: std::sync::Mutex<Option<Duration>> =
     std::sync::Mutex::new(None);
 
-/// `args` on the engine, within `limit`: whether it succeeded, and its stdout. Nothing when it did
-/// not finish in time or could not run.
-fn engine_answer(
+/// `args` on the engine, within `limit` and, when there is one, by `deadline`: whether it
+/// succeeded, and its stdout. Nothing when it did not finish in time, could not run, or the
+/// deadline had passed.
+fn engine_answer_by(
     address: &crate::engine::Address,
     args: &[&str],
     limit: Duration,
+    deadline: Option<Instant>,
 ) -> Option<(bool, String)> {
     #[cfg(test)]
     let limit = ENGINE_CHECK_LIMIT_FOR_TESTS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .unwrap_or(limit);
+    let limit = match deadline {
+        Some(deadline) => limit.min(deadline.saturating_duration_since(Instant::now())),
+        None => limit,
+    };
+    if limit.is_zero() {
+        return None;
+    }
     let mut command = address.command();
     command.args(args);
     let (succeeded, stdout) = crate::local_images::run_within(command, limit, ENGINE_OUTPUT_CAP)?;
     Some((succeeded, String::from_utf8_lossy(&stdout).into_owned()))
 }
 
-/// `args` on the engine, within `limit`: its stdout when it succeeded, or nothing.
-fn engine_output(
+/// `args` on the engine, within `limit` and, when there is one, by `deadline`: its stdout when it
+/// succeeded, or nothing.
+fn engine_output_by(
     address: &crate::engine::Address,
     args: &[&str],
     limit: Duration,
+    deadline: Option<Instant>,
 ) -> Option<String> {
-    engine_answer(address, args, limit).and_then(|(succeeded, stdout)| succeeded.then_some(stdout))
+    engine_answer_by(address, args, limit, deadline)
+        .and_then(|(succeeded, stdout)| succeeded.then_some(stdout))
 }
 
-/// The engine's CPUs and memory from its `info`.
-fn engine_size(address: &crate::engine::Address) -> Option<(u64, u64)> {
+/// The engine's CPUs and memory from its `info`, its command stopped at `deadline` when there is
+/// one.
+fn engine_size(address: &crate::engine::Address, deadline: Option<Instant>) -> Option<(u64, u64)> {
     let format = if address.engine == crate::engine::Engine::Podman {
         "{{.Host.CPUs}} {{.Host.MemTotal}}"
     } else {
         "{{.NCPU}} {{.MemTotal}}"
     };
-    parse_engine_size(&engine_output(
+    parse_engine_size(&engine_output_by(
         address,
         &["info", "--format", format],
         ENGINE_QUERY_LIMIT,
+        deadline,
     )?)
 }
 
@@ -1675,10 +1710,16 @@ gives no answer, and disk is then not judged. Also what `update_ready` measures 
 an update's images ahead of time.
 */
 pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
-    let images = engine_output(
+    engine_disk_by(address, None)
+}
+
+/// `engine_disk`, every command stopped at `deadline` when there is one.
+fn engine_disk_by(address: &crate::engine::Address, deadline: Option<Instant>) -> Option<Disk> {
+    let images = engine_output_by(
         address,
         &["image", "ls", "--quiet", "--no-trunc"],
         ENGINE_QUERY_LIMIT,
+        deadline,
     )?;
     let mut tried = Vec::new();
     for image in images.lines().map(str::trim).filter(|id| !id.is_empty()) {
@@ -1690,7 +1731,7 @@ pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
         }
         tried.push(image);
         // No answer in time is an engine that hangs: another image would only hang too.
-        let (succeeded, measured) = engine_answer(
+        let (succeeded, measured) = engine_answer_by(
             address,
             &[
                 "run",
@@ -1704,6 +1745,7 @@ pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
                 "df -Pk /",
             ],
             ENGINE_RUN_LIMIT,
+            deadline,
         )?;
         if let Some(disk) = succeeded.then(|| parse_disk(&measured)).flatten() {
             return Some(disk);
@@ -1713,8 +1755,8 @@ pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
 }
 
 /**
-What Windows says of the drive that holds the engine's disk, for the tests, in place of
-`windows::podman_machine_drive` and `windows::docker_data_drive`. For the whole process, so a check
+What Windows or a Mac says of the drive that holds the engine's disk, for the tests, in place of
+`windows::podman_machine_drive`, `windows::docker_data_drive` and `windows::mac_drive`. For the whole process, so a check
 on another thread reads it too, and a test never reads the drives of the computer it runs on: the
 Windows runner measured its own C: in a check made on another thread. Tests that set it run in a
 process of their own (`StartLab`).
@@ -1724,13 +1766,18 @@ static MACHINE_DRIVE: std::sync::Mutex<Option<crate::windows::MachineDrive>> =
     std::sync::Mutex::new(None);
 
 /**
-The drive that holds the engine's disk on Windows, and what is free on it: the Podman machine
-`address` names (`podman_machine_drive`), or Docker Desktop's disks (`docker_data_drive`). Both are
-sparse virtual disks of about a terabyte, so a container's own free space says nothing of the drive.
-Measured whether or not the engine answers: the drive is there either way.
+The drive that holds the engine's disk, and what is free on it: on Windows the Podman machine
+`address` names (`podman_machine_drive`), or Docker Desktop's disks (`docker_data_drive`); on a Mac
+its own disk (`mac_drive`). All are sparse virtual disks of 64 GB to a terabyte, so a container's own
+free space says nothing of the drive. Measured whether or not the engine answers: the drive is there
+either way.
 */
 #[cfg(not(test))]
 fn machine_drive(address: &crate::engine::Address) -> Option<crate::windows::MachineDrive> {
+    // A Mac's own disk, under Docker Desktop's and Podman's machine disk alike.
+    if cfg!(target_os = "macos") {
+        return crate::windows::mac_drive();
+    }
     if address.engine == crate::engine::Engine::Docker {
         return crate::windows::docker_data_drive();
     }
@@ -1772,10 +1819,15 @@ fn gib(bytes: u64) -> String {
 
 impl EngineCheck {
     fn of(address: &crate::engine::Address) -> Self {
+        Self::by(address, None)
+    }
+
+    /// `of`, every engine command stopped at `deadline` when there is one.
+    fn by(address: &crate::engine::Address, deadline: Option<Instant>) -> Self {
         Self {
             podman: address.engine == crate::engine::Engine::Podman,
-            size: engine_size(address),
-            disk: engine_disk(address),
+            size: engine_size(address, deadline),
+            disk: engine_disk_by(address, deadline),
             drive: machine_drive(address),
             pressure: None,
         }
@@ -1857,9 +1909,18 @@ impl EngineCheck {
         }
         short.drive = self.drive.as_ref().and_then(|drive| drive.drive.clone());
         // k3s's own line is inside the machine, whatever the drive has.
-        short.free_on_drive =
-            short.disk && !short.nearly_full && short.drive.is_some() && self.free_on_drive();
+        short.free_on_drive = short.disk && !short.nearly_full && self.drive_named();
+        short.mac = short.free_on_drive && self.drive.as_ref().is_some_and(|drive| drive.mac);
         short
+    }
+
+    /// The free disk that counts is a drive the window can name: `C:`, or this Mac's disk.
+    fn drive_named(&self) -> bool {
+        self.free_on_drive()
+            && self
+                .drive
+                .as_ref()
+                .is_some_and(|drive| drive.drive.is_some() || drive.mac)
     }
 
     /// `4 CPUs and 5.8 GiB of memory, 30.5 GiB free of 983.2 GiB in a container, 120.0 GiB free on
@@ -1878,10 +1939,11 @@ impl EngineCheck {
             None => "free disk not measured".to_owned(),
         });
         if let Some(drive) = &self.drive {
-            let on = drive
-                .drive
-                .as_deref()
-                .unwrap_or("the drive that holds its disk");
+            let on = match (drive.drive.as_deref(), drive.mac) {
+                (Some(letter), _) => letter,
+                (None, true) => "this Mac's disk",
+                (None, false) => "the drive that holds its disk",
+            };
             said.push(format!("{} GiB free on {on}", gib(drive.free)));
         }
         match self.pressure {
@@ -1924,14 +1986,12 @@ pub fn engine_in_use() -> Option<crate::engine::Address> {
 }
 
 /// The engine measured as `[local check]` logs it (`EngineCheck::said`): CPUs and memory, free disk
-/// inside a container and on the drive under a Podman machine, and what is short.
-pub fn measured_engine(address: &crate::engine::Address) -> String {
-    EngineCheck::of(address).said()
-}
-
-/// `args` on the engine within the check's limit for a query: its stdout when it succeeded.
-pub fn engine_query(address: &crate::engine::Address, args: &[&str]) -> Option<String> {
-    engine_output(address, args, ENGINE_QUERY_LIMIT)
+/// inside a container and on the drive under a Podman machine, and what is short. Every engine
+/// command is stopped at `deadline`, and nothing comes back when the deadline came first, since
+/// what was measured by then is not the engine's whole answer. For troubleshooting logs.
+pub fn measured_engine_by(address: &crate::engine::Address, deadline: Instant) -> Option<String> {
+    let check = EngineCheck::by(address, Some(deadline));
+    (Instant::now() < deadline).then(|| check.said())
 }
 
 /// Log a check: `[local check] before local start: ...`. A shortfall is a warning.
@@ -1974,12 +2034,10 @@ pub fn engine_size_terms() -> Option<Terms> {
         disk: short.disk,
         wsl: check.wsl(),
         disk_gb: free.filter(|_| short.disk).map(gib),
-        free_on_drive: short.disk
-            && check.free_on_drive()
-            && check
-                .drive
-                .as_ref()
-                .is_some_and(|drive| drive.drive.is_some()),
+        free_on_drive: short.disk && check.drive_named(),
+        mac: short.disk
+            && check.drive_named()
+            && check.drive.as_ref().is_some_and(|drive| drive.mac),
         measured: EngineMeasure {
             cpus,
             memory_bytes: memory,
@@ -2031,6 +2089,8 @@ sparse disk of Docker Desktop or a Podman machine on Windows shows about a terab
 drive under it has. Windows G had 938.3 GiB in a container and 15 GB on C:, and the setup took C:
 down to 11.8 GB. That setup is not started: the report says the drive is short, with its numbers,
 and the downloads behind it hold until there is room (`early_downloads::hold_for_room`).
+
+And an update the computer has no room for (`update_room`): not started, said the same way.
 */
 fn checked_call(
     command: &str,
@@ -2048,6 +2108,16 @@ fn checked_call(
                 "[local check] {command} not started: the drive that holds the engine's disk has less than OpenBot needs"
             );
             crate::early_downloads::hold_for_room();
+            return Ok(short_of_drive(short));
+        }
+    }
+    // An update the computer has no room for is not started: nothing is downloaded, paused or
+    // changed, and the report says what is short with its numbers (`update_room`).
+    if command == "local update" {
+        let database = *INSTALLATION_DATABASE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(short) = update_room_of(&before, database) {
             return Ok(short_of_drive(short));
         }
     }
@@ -2104,6 +2174,115 @@ pub fn drive_short() -> Option<Shortfall> {
         crate::early_downloads::room_again();
     }
     short
+}
+
+/**
+ROOM FOR AN UPDATE, checked before an update does anything: before the back end's `local update`
+(`checked_call`) and before OpenBot's own update stops, backs up or downloads (`upgrade::run`).
+
+The first setup's 40 GiB is what the back end needs free before it is installed. An installation
+already uses part of that, so an update is held to what the update itself writes, beside what is
+there, until it removes what it replaced:
+
+- New images: an update downloads at most `MOST_AN_UPDATE_DOWNLOADS` (every image of OpenBot's and
+  the back end's changed), and an image takes `update_ready::ON_DISK` times its download on disk.
+- The database, twice: the backup `upgrade` writes before anything changes (`upgrade::DUMP`, a
+  `pg_dump` of it), and the copy a failed update restores into before it swaps it in
+  (`stack::restore_runtime_database`). Measured when OpenBot can (`installation_database`), and
+  counted as `UNMEASURED_DATABASE` when not.
+
+Then the same lines `update_ready` holds its downloads to: inside the engine, what is left keeps
+`update_ready::KEEP_FREE_PERCENT` of its disk free, below which k3s removes the back end's images;
+and on the computer's drive under the engine's disk, the update takes at most half of what is free.
+That drive runs out first on a Mac: its Docker disk is a sparse file that shows room whatever the
+Mac has, and an update on a Mac with 7.5 GB free of 926 GB filled it mid-update and broke Docker's
+disk ("Detected aborted journal").
+
+CPUs and memory are the first setup's (`MIN_ENGINE_CPUS`, `MIN_ENGINE_MEMORY_BYTES`).
+*/
+pub const MOST_AN_UPDATE_DOWNLOADS: u64 = 1_700_000_000;
+pub const UNMEASURED_DATABASE: u64 = GIB;
+
+/// Bytes an update writes, with a database of `database` bytes (`update_room`).
+pub fn update_needs(database: Option<u64>) -> u64 {
+    MOST_AN_UPDATE_DOWNLOADS * crate::update_ready::ON_DISK
+        + 2 * database.unwrap_or(UNMEASURED_DATABASE)
+}
+
+/// The size of OpenBot's own database, as the window last measured it, for the back end's update.
+static INSTALLATION_DATABASE: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
+
+/// The size of this installation's database, for the room an update needs (`update_needs`).
+pub fn installation_database(bytes: Option<u64>) {
+    *INSTALLATION_DATABASE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = bytes;
+}
+
+/// Bytes as whole GiB, rounded up: what an update needs is never said as less than it is.
+fn whole_gib(bytes: u64) -> String {
+    bytes.div_ceil(GIB).to_string()
+}
+
+/// What `check` is short of for an update writing `needs` bytes (see `update_needs`). Anything not
+/// measured is not judged. The drive under the engine's disk is said first: it is what the person
+/// frees, and what runs out first.
+fn update_shortfall(check: &EngineCheck, needs: u64) -> Shortfall {
+    let (cpus, memory) = check.size.unwrap_or((u64::MAX, u64::MAX));
+    let mut short = engine_shortfall(cpus, memory, None);
+    short.podman = check.podman;
+    short.wsl = check.wsl();
+    short.updating = true;
+    let on_drive = needs.saturating_mul(2);
+    let in_engine = check.disk.map(|disk| {
+        (
+            disk,
+            needs.saturating_add(disk.size / 100 * crate::update_ready::KEEP_FREE_PERCENT),
+        )
+    });
+    if let Some(drive) = check.drive.as_ref().filter(|drive| drive.free < on_drive) {
+        short.disk = true;
+        short.disk_gb = Some(gib(drive.free));
+        short.needed_gb = Some(whole_gib(on_drive));
+        short.drive = drive.drive.clone();
+        short.mac = drive.mac;
+        short.free_on_drive = drive.drive.is_some() || drive.mac;
+    } else if let Some((disk, needed)) = in_engine.filter(|(disk, needed)| disk.free < *needed) {
+        short.disk = true;
+        short.disk_gb = Some(gib(disk.free));
+        short.needed_gb = Some(whole_gib(needed));
+    }
+    short
+}
+
+/**
+The update's preflight on `address`: what it is short of for an update, with a database of
+`database` bytes (`update_needs`), or nothing when it has room. Logged either way, as
+`[local check] before an update: ...`.
+*/
+pub fn update_room(address: &crate::engine::Address, database: Option<u64>) -> Option<Shortfall> {
+    update_room_of(&EngineCheck::of(address), database)
+}
+
+fn update_room_of(check: &EngineCheck, database: Option<u64>) -> Option<Shortfall> {
+    let needs = update_needs(database);
+    let short = update_shortfall(check, needs);
+    let said = format!(
+        "[local check] before an update: {}; the update writes about {} GiB, with {}",
+        check.said(),
+        whole_gib(needs),
+        database.map_or("the database not measured".to_owned(), |bytes| format!(
+            "a database of {} GiB",
+            gib(bytes)
+        ))
+    );
+    if short.named() {
+        log::warn!("{said}; not started, short of {short:?}");
+        Some(short)
+    } else {
+        log::info!("{said}; room");
+        None
+    }
 }
 
 /// A setup OpenBot did not start, for a drive short of disk (`checked_call`): blocked on resources,
@@ -4831,6 +5010,12 @@ pub fn setup_installed(
         // Its turn: the CLI's log from here on is this setup's (`Trail`).
         let _trail = Trail::begin(id, TrailKind::Setup);
         let cli = installed()?;
+        // A node that is gone leaves k3d's other containers in the way of the one setup makes.
+        if let Some(state) = crate::local_eval_state::read(installation, None)
+            .filter(crate::local_eval_state::State::tied_to_openbot)
+        {
+            clear_leftovers_of_gone(&state.stack_id());
+        }
         let set_up = || {
             setup_with(
                 &cli,
@@ -4843,15 +5028,10 @@ pub fn setup_installed(
             )
         };
         let report = set_up()?;
-        let report = match lost_stack(&cli, &report, installation, &attempt.0)? {
-            None => report,
-            Some(Lost::Said(problem)) => return Ok(Err(problem)),
-            // A delete that did not finish leaves the setup failed, as it was.
-            Some(Lost::Forgettable(stack)) => match forget(&cli, &stack, &attempt.0) {
-                Ok(()) => set_up()?,
-                Err(Failure::Cancelled) => return Err(Failure::Cancelled),
-                Err(_) => report,
-            },
+        let report = match recover_lost_stack(&cli, &report, installation, &attempt.0)? {
+            Recovered::Nothing => report,
+            Recovered::Said(problem) => return Ok(Err(problem)),
+            Recovered::Forgotten => set_up()?,
         };
         Ok(Ok((report, cli.sha256().to_owned())))
     })
@@ -4864,6 +5044,37 @@ pub fn setup_installed(
 pub enum SetupStopped {
     Failure(Failure),
     Said(crate::problem::Problem),
+}
+
+/// What `recover_lost_stack` did after a failed `local setup`.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Recovered {
+    /// Nothing to recover, or a delete that did not finish: the setup stays as it was.
+    Nothing,
+    /// This folder's stack could not be resumed and is forgotten: set up again.
+    Forgotten,
+    /// Kept as it is, with what the person can do about it.
+    Said(crate::problem::Problem),
+}
+
+/// After a failed `local setup`: forget this folder's stack when it can never be resumed
+/// (`lost_stack`), so setup can run again. A delete that did not finish leaves the setup failed,
+/// as it was.
+pub fn recover_lost_stack(
+    cli: &PinnedCli,
+    report: &Report,
+    installation: &std::path::Path,
+    cancel: &Cancel,
+) -> Result<Recovered, Failure> {
+    match lost_stack(cli, report, installation, cancel)? {
+        None => Ok(Recovered::Nothing),
+        Some(Lost::Said(problem)) => Ok(Recovered::Said(problem)),
+        Some(Lost::Forgettable(stack)) => match forget(cli, &stack, cancel) {
+            Ok(()) => Ok(Recovered::Forgotten),
+            Err(Failure::Cancelled) => Err(Failure::Cancelled),
+            Err(_) => Ok(Recovered::Nothing),
+        },
+    }
 }
 
 /// What setup does about a stack that lost the files it resumes from.
@@ -4926,6 +5137,14 @@ The stack is the one the CLI records for this folder (`appPaths`, by real path).
 files missing and no other app using it, nothing can ever resume it, so it is forgotten and set up
 again. With them damaged, or with another app on it, it is kept and the person is told what to do.
 None for every other failure, and for a stack whose files are there.
+
+On Podman the same stack is refused sooner, as `unsupported_engine`: the engine that made a stack is
+recorded in its private folder (`engine.json`), and with the folder gone the CLI takes the stack for
+a Docker one, which the Podman OpenBot names (`COPILOTKIT_LOCAL_ENGINE`) may not manage. Found on a
+Mac after the stack's folder was deleted and OpenBot set up again: "Setup stopped / OpenBot can't
+run on this computer as it's set up." until the record was removed by hand. So that refusal is a
+lost stack too, but only for this folder's stack whose private files, its engine file among them,
+are all gone. Any other `unsupported_engine` is the engine's own, and is said as the CLI said it.
 */
 fn lost_stack(
     cli: &PinnedCli,
@@ -4933,7 +5152,11 @@ fn lost_stack(
     installation: &std::path::Path,
     cancel: &Cancel,
 ) -> Result<Option<Lost>, Failure> {
-    if report.outcome != Outcome::Failed || report.reason != Some(Reason::LocalCommandFailed) {
+    let refused_engine =
+        report.outcome == Outcome::Blocked && report.reason == Some(Reason::UnsupportedEngine);
+    let failed =
+        report.outcome == Outcome::Failed && report.reason == Some(Reason::LocalCommandFailed);
+    if !failed && !refused_engine {
         return Ok(None);
     }
     let (code, bytes) = match execute(
@@ -4986,6 +5209,13 @@ fn lost_stack(
         };
         let shared = paths.iter().any(|path| !is_here(path));
         let files = private_files(&private);
+        if refused_engine
+            && (files != PrivateFiles::Missing
+                || shared
+                || private.join(STACK_ENGINE_FILE).exists())
+        {
+            return Ok(None);
+        }
         log::warn!(
             "[local setup] {}'s private files are {files:?}{}",
             stack.as_str(),
@@ -4995,8 +5225,9 @@ fn lost_stack(
                 ""
             }
         );
-        let gone = (files == PrivateFiles::Present && !shared)
-            .then(|| cluster_gone(&stack))
+        let had_cluster = had_a_cluster(saved.get("step").and_then(Value::as_str));
+        let gone = (files == PrivateFiles::Present && !shared && had_cluster)
+            .then(|| cluster_removed(&stack))
             .flatten();
         if gone == Some(true) {
             log::warn!(
@@ -5040,31 +5271,75 @@ pub fn failed_without_stack(report: &Report) -> bool {
     report.reason == Some(Reason::LocalCommandFailed) && report.stack.is_none()
 }
 
-/// Whether `stack`'s cluster is gone from the engine OpenBot runs on (`use_engine`): k3d names every
-/// container of a cluster `k3d-<cluster>-…`, and the CLI names the cluster after the stack. None
-/// when that can't be said (`cluster_gone_at`): then nothing is said to be gone.
+/**
+Whether `stack`'s cluster is gone from the engine the CLI runs on (`use_engine`): k3d names every
+container of a cluster `k3d-<cluster>-…`, and the CLI names the cluster after the stack. None when
+that can't be said (`cluster_gone_at`): then nothing is said to be gone.
+
+Asked with the very environment the CLI gets (`engine_command`), so it is the engine whose answer
+the CLI's own ownership check read as a 404: on Docker Desktop, a node container that
+`docker container prune` removed while it was stopped (a dogfooding Mac, Desktop 1.1.2), and on
+OpenBot's Podman machine, one that went with the machine (box I).
+*/
 pub fn cluster_gone(stack: &StackId) -> Option<bool> {
     cluster_gone_at(cli_engine().as_ref(), stack, |address| {
-        let listed = address
-            .command()
-            .args(["ps", "--all", "--format", "{{.Names}}"])
-            .output()
-            .ok()?;
-        listed
-            .status
-            .success()
-            .then(|| String::from_utf8_lossy(&listed.stdout).into_owned())
+        names_listed(address, &["ps", "--all", "--format", "{{.Names}}"])
     })
+}
+
+/**
+Whether the installed CLI still records `stack` (`local list`). None when the CLI can't say.
+
+A Mac on Docker Desktop, Desktop 1.1.2: after `copilotkit local delete` removed a stack whose node a
+prune had taken, OpenBot's folder still recorded it, and every launch's `local status` answered "No
+recorded local stack was found" (`local_command_failed`, no stack) and stopped there. A stack the CLI
+no longer records can never be asked about again, so it is gone whatever the engine still holds.
+*/
+pub fn stack_recorded(stack: &StackId) -> Option<bool> {
+    let cli = installed().ok()?;
+    let (code, bytes) = execute(
+        &cli,
+        &LIST_ARGUMENTS,
+        None,
+        Limits::for_action(Action::Status),
+        &Cancel::default(),
+    )
+    .ok()?;
+    let (outcome, wire) = parse_envelope("local list", code, &bytes).ok()?;
+    (outcome == Outcome::Completed).then(|| stack_listed_in(&Value::Object(wire), stack))?
+}
+
+/// Whether `local list`'s answer names `stack`. None when the answer holds no list of stacks, which
+/// is no answer about any one of them.
+pub fn stack_listed_in(wire: &Value, stack: &StackId) -> Option<bool> {
+    let stacks = wire.get("stacks")?.as_array()?;
+    Some(
+        stacks
+            .iter()
+            .any(|saved| saved.get("id").and_then(Value::as_str) == Some(stack.as_str())),
+    )
+}
+
+/// What `arguments` lists on the CLI's engine, one name per line. None when the engine did not
+/// answer in time, or answered with an error.
+fn names_listed(address: &crate::engine::Address, arguments: &[&str]) -> Option<String> {
+    let mut command = engine_command(Some(&CliEngine::of(address)));
+    command.args(arguments);
+    let (succeeded, listed) = crate::local_images::run_within(
+        command,
+        std::time::Duration::from_secs(30),
+        4 * 1024 * 1024,
+    )?;
+    succeeded.then(|| String::from_utf8_lossy(&listed).into_owned())
 }
 
 /**
 `cluster_gone`, with the engine and its container listing passed in.
 
-Only in OpenBot's own Podman machine (`acquire::MACHINE`). Nothing but OpenBot runs a cluster there,
-and a cluster that isn't there went with the machine, as on box I. Anywhere else, Docker or a
-machine of the person's, the stack may live in an engine OpenBot isn't asking: a test's process on a
-Mac found the computer's own Docker, saw no cluster in it, and setup would have deleted a stack whose
-files were all there. So there it can't be said, and nothing is.
+Only when the app has named the engine the CLI runs on. Then the CLI and this check ask the same
+engine, and a cluster it doesn't list is one the CLI can never stop, start or resume again: its
+ownership check answers 404 every time. Without an engine named, the CLI picks one itself, and
+nothing is said.
 */
 pub fn cluster_gone_at(
     address: Option<&crate::engine::Address>,
@@ -5072,20 +5347,121 @@ pub fn cluster_gone_at(
     list: impl FnOnce(&crate::engine::Address) -> Option<String>,
 ) -> Option<bool> {
     let address = address?;
-    let ours = address.engine == crate::engine::Engine::Podman
-        && address.connection.as_deref().is_some_and(|connection| {
-            crate::acquire::machine_of(connection) == crate::acquire::MACHINE
-        });
-    if !ours {
-        return None;
-    }
     Some(cluster_gone_in(&list(address)?, stack))
 }
 
-/// `cluster_gone`, from the container names the engine listed, one per line.
+/// `cluster_gone`, from the container names the engine listed, one per line: gone when there is
+/// no `k3d-<stack>-server-0`, the one node the CLI makes and asks about (its ownership check). k3d's
+/// tools container, `k3d-<stack>-tools`, can outlive it: on the cloud Mac it was still running
+/// after Quit stopped the node, so a prune of stopped containers leaves it there and takes the node.
 pub fn cluster_gone_in(names: &str, stack: &StackId) -> bool {
+    let node = format!("k3d-{}-server-0", stack.as_str());
+    !names.lines().any(|name| name.trim() == node)
+}
+
+/**
+k3d's own containers for `stack` that outlived its node, removed so setup can make the cluster again.
+
+The cloud Mac on Docker Desktop: after Quit stopped the node and a prune of stopped containers
+removed it, k3d's tools container, `k3d-<stack>-tools`, was still running. k3d finds a cluster by
+any container labelled with its name, so `k3d cluster create` refused with "a cluster with that name
+already exists", while `k3d cluster list`, which the CLI asks, listed none. Setup failed at
+`cluster-create` in 31 ms, and Retry the same way. Only when the node is gone from the engine the CLI
+runs on (`cluster_gone`), and only containers k3d labelled for this stack: nothing of the cluster is
+left running in them, and nothing else is touched.
+*/
+fn clear_leftovers_of_gone(stack: &StackId) {
+    if cluster_gone(stack) != Some(true) {
+        return;
+    }
+    let Some(address) = cli_engine() else {
+        return;
+    };
+    let label = format!("label=k3d.cluster={}", stack.as_str());
+    let Some(listed) = names_listed(
+        &address,
+        &["ps", "--all", "--filter", &label, "--format", "{{.Names}}"],
+    ) else {
+        return;
+    };
+    for name in leftovers_in(&listed, stack) {
+        let mut command = engine_command(Some(&CliEngine::of(&address)));
+        command.args(["rm", "--force", "--volumes", &name]);
+        match crate::local_images::run_within(
+            command,
+            std::time::Duration::from_secs(60),
+            64 * 1024,
+        ) {
+            Some((true, _)) => log::warn!(
+                "[local setup] removed {name}, which k3d left after {}'s node was gone",
+                stack.as_str()
+            ),
+            _ => log::warn!("[local setup] could not remove {name}"),
+        }
+    }
+}
+
+/// The containers to clear for `stack` from a listing of those k3d labelled for it, one name per
+/// line: its own, named `k3d-<stack>-…`, and never its node.
+pub fn leftovers_in(names: &str, stack: &StackId) -> Vec<String> {
     let prefix = format!("k3d-{}-", stack.as_str());
-    !names.lines().any(|name| name.trim().starts_with(&prefix))
+    let node = format!("k3d-{}-server-0", stack.as_str());
+    names
+        .lines()
+        .map(str::trim)
+        .filter(|name| name.starts_with(&prefix) && *name != node)
+        .map(str::to_owned)
+        .collect()
+}
+
+/**
+Whether `stack`'s cluster was removed from the engine the CLI runs on, so setup may forget the stack
+(`lost_stack`). Stricter than `cluster_gone`, which only offers to set the backend up again: this
+deletes the stack's record and private folder.
+
+Gone, and either in OpenBot's own Podman machine (`acquire::MACHINE`), where nothing but OpenBot runs
+a cluster and one that isn't there went with the machine (box I), or with what k3d leaves in an
+engine after the cluster's containers are removed: the cluster's network `k3d-<stack>` or its image
+volume `k3d-<stack>-images`. Neither goes with `docker container prune`. An engine with no trace of
+the stack at all may simply not be the one the stack lives in (another Docker context), and there a
+stack whose files are all there is never deleted.
+*/
+fn cluster_removed(stack: &StackId) -> Option<bool> {
+    let address = cli_engine()?;
+    let containers = names_listed(&address, &["ps", "--all", "--format", "{{.Names}}"])?;
+    if !cluster_gone_in(&containers, stack) {
+        return Some(false);
+    }
+    if own_machine(&address) {
+        return Some(true);
+    }
+    let networks = names_listed(&address, &["network", "ls", "--format", "{{.Name}}"])?;
+    let volumes = names_listed(&address, &["volume", "ls", "--format", "{{.Name}}"])?;
+    Some(cluster_traces_in(&networks, &volumes, stack))
+}
+
+/// OpenBot's own Podman machine, where nothing but OpenBot runs a cluster.
+fn own_machine(address: &crate::engine::Address) -> bool {
+    address.engine == crate::engine::Engine::Podman
+        && address.connection.as_deref().is_some_and(|connection| {
+            crate::acquire::machine_of(connection) == crate::acquire::MACHINE
+        })
+}
+
+/// Whether the engine still holds what k3d made for `stack`'s cluster beside its containers: its
+/// network, `k3d-<stack>`, or its image volume, `k3d-<stack>-images`. Names one per line.
+pub fn cluster_traces_in(networks: &str, volumes: &str, stack: &StackId) -> bool {
+    let network = format!("k3d-{}", stack.as_str());
+    let volume = format!("k3d-{}-images", stack.as_str());
+    networks.lines().any(|name| name.trim() == network)
+        || volumes.lines().any(|name| name.trim() == volume)
+}
+
+/// Whether a stack the CLI records at `step` ever had a cluster. `local setup` creates it after the
+/// `downloaded` step, so a stack recorded before that, or one whose step isn't said, never had one to
+/// lose: its cluster isn't there because it was never made.
+fn had_a_cluster(step: Option<&str>) -> bool {
+    step.is_some_and(|step| !matches!(step, "recorded" | "downloaded"))
 }
 
 /// Whether setup forgets `stack` and sets the backend up again: this folder's alone, and either its
@@ -5135,8 +5511,80 @@ pub fn delete_installed(stack: &StackId) -> Result<(), Failure> {
     Ok(())
 }
 
+/// The file in a stack's private folder that names the engine that made it (Intelligence
+/// `apps/cli/src/services/local-stack-engine.ts`).
+const STACK_ENGINE_FILE: &str = "engine.json";
+
+/// The CLI's name for the engine OpenBot runs on, as a stack's engine file holds it. None when the
+/// app has not said which engine that is.
+fn stack_engine_name() -> Option<&'static str> {
+    use crate::engine::Engine;
+    Some(match cli_engine()?.engine {
+        Engine::Podman => "podman",
+        Engine::Docker if cfg!(target_os = "linux") => "docker-engine",
+        Engine::Docker => "docker-desktop",
+    })
+}
+
+/**
+Before forgetting a stack whose private folder is gone, its engine file is put back, naming the engine
+OpenBot runs on, the engine the CLI is told to use. Without it the CLI takes the stack for a Docker
+one, and on Podman refuses `local delete` as it refused `local setup` (`lost_stack`). The CLI's own
+answer for a missing engine file is to restore it naming the engine, and this is that. A file that
+is there is left as it is.
+*/
+fn name_engine_of_lost(stack: &StackId) {
+    let Some(engine) = stack_engine_name() else {
+        return;
+    };
+    let Some(private) = crate::local_update::stack_dir(stack.as_str()) else {
+        return;
+    };
+    let file = private.join(STACK_ENGINE_FILE);
+    if file.exists() {
+        return;
+    }
+    let body = serde_json::json!({ "version": 1, "engine": engine }).to_string();
+    match write_private(&private, &file, &body) {
+        Ok(()) => log::info!(
+            "[local setup] {}'s private folder is gone; named {engine} as its engine so the CLI \
+             can forget it",
+            stack.as_str()
+        ),
+        Err(error) => log::warn!(
+            "[local setup] could not name {}'s engine before forgetting it: {error}",
+            stack.as_str()
+        ),
+    }
+}
+
+/// `body` as a new `file` in `folder`, private as the CLI keeps them: the folder 0700, the file 0600.
+fn write_private(
+    folder: &std::path::Path,
+    file: &std::path::Path,
+    body: &str,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        builder.mode(0o700);
+        options.mode(0o600);
+    }
+    builder.create(folder)?;
+    options.open(file)?.write_all(body.as_bytes())
+}
+
 /// Forget `stack` (`forget_arguments`). Anything but a completed delete leaves setup failed.
 fn forget(cli: &PinnedCli, stack: &StackId, cancel: &Cancel) -> Result<(), Failure> {
+    name_engine_of_lost(stack);
+    if let Some(private) = crate::local_update::stack_dir(stack.as_str()) {
+        keep_backups(&private, stack);
+    }
     let (code, bytes) = execute(
         cli,
         &forget_arguments(stack),
@@ -5153,10 +5601,57 @@ fn forget(cli: &PinnedCli, stack: &StackId, cancel: &Cancel) -> Result<(), Failu
         return Err(Failure::InvalidStatus);
     }
     log::info!(
-        "[local setup] forgot {}, whose private files were gone; setting the backend up again",
+        "[local setup] forgot {}, which can never be resumed; setting the backend up again",
         stack.as_str()
     );
     Ok(())
+}
+
+/**
+The database backups the CLI took before each update of `stack` (the `.sql` files in `backups` in its private
+folder, `private`), moved out before `local delete` removes that folder with them. They go beside
+it, to `local-evaluation-recovery/<stack>/database-backups`, where the CLI keeps what it gives back
+on a delete. With the cluster gone they are the only copy of the backend's data there is. Nothing is
+moved when there are none, and a move that fails is logged and the stack is forgotten all the same.
+*/
+fn keep_backups(private: &std::path::Path, stack: &StackId) {
+    let backups = private.join("backups");
+    let any = std::fs::read_dir(&backups).is_ok_and(|mut entries| entries.next().is_some());
+    if !any {
+        return;
+    }
+    let Some(kept) = private
+        .parent()
+        .and_then(std::path::Path::parent)
+        .map(|config| {
+            config
+                .join("local-evaluation-recovery")
+                .join(stack.as_str())
+                .join(format!(
+                    "database-backups-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |since| since.as_secs())
+                ))
+        })
+    else {
+        return;
+    };
+    let moved = kept
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::rename(&backups, &kept));
+    match moved {
+        Ok(()) => log::info!(
+            "[local setup] kept {}'s database backups in {}",
+            stack.as_str(),
+            kept.display()
+        ),
+        Err(error) => log::warn!(
+            "[local setup] could not keep {}'s database backups: {error}",
+            stack.as_str()
+        ),
+    }
 }
 
 /// `configure_learning_model` against the installed CLI, in its turn like every other call.
@@ -6412,39 +6907,149 @@ mod tests {
         // Another stack's cluster, or a container that only mentions the id, is not this one's.
         assert!(cluster_gone_in("k3d-local-0000-server-0\nmy-web\n", &stack));
         assert!(cluster_gone_in("local-1915a7aafba78d6207a561b0\n", &stack));
+        // k3d's tools container, still running after the node was stopped and pruned, is not it.
+        assert!(cluster_gone_in(
+            "k3d-local-1915a7aafba78d6207a561b0-tools\n",
+            &stack
+        ));
     }
 
-    /// Only OpenBot's own machine is ever asked, and only there can a cluster be found gone.
+    /// The cloud Mac: k3d's tools container outlived the pruned node and made `k3d cluster create`
+    /// refuse ("a cluster with that name already exists"). It is cleared before setup; the node
+    /// and anything not named for this stack never are.
     #[test]
-    fn a_cluster_is_found_gone_only_in_openbots_own_machine() {
+    fn only_this_stacks_k3d_leftovers_are_cleared() {
+        let stack = StackId::parse("local-7f93dd21b8553c18d27b9564").unwrap();
+        assert_eq!(
+            leftovers_in(
+                "k3d-local-7f93dd21b8553c18d27b9564-tools\n\
+                 k3d-local-7f93dd21b8553c18d27b9564-server-0\n\
+                 k3d-local-0000-tools\n\
+                 my-web\n",
+                &stack
+            ),
+            ["k3d-local-7f93dd21b8553c18d27b9564-tools"]
+        );
+        assert!(leftovers_in("", &stack).is_empty());
+    }
+
+    /// A Mac on Docker Desktop, Desktop 1.1.2: `docker container prune` removed the backend's
+    /// stopped node, `local-044466e209069a0812bc9764`, and the CLI's ownership check answered 404 at
+    /// every status, stop and Retry. Only OpenBot's own Podman machine was ever asked, so the
+    /// window said "Setup stopped partway through with an error. Retry." for good. The engine the
+    /// CLI runs on is asked now, whichever it is, and a node it doesn't list is gone.
+    #[test]
+    fn a_cluster_pruned_from_any_engine_the_cli_runs_on_is_found_gone() {
         use crate::engine::{Address, Engine};
-        let stack = StackId::parse("local-1915a7aafba78d6207a561b0").unwrap();
-        let ours = Address::new(Engine::Podman, Some("openbot-root".into()));
-        assert_eq!(
-            cluster_gone_at(Some(&ours), &stack, |_| Some(String::new())),
-            Some(true)
-        );
-        assert_eq!(
-            cluster_gone_at(Some(&ours), &stack, |_| Some(
-                "k3d-local-1915a7aafba78d6207a561b0-server-0\n".into()
-            )),
-            Some(false)
-        );
-        // The engine couldn't list its containers: nothing is said.
-        assert_eq!(cluster_gone_at(Some(&ours), &stack, |_| None), None);
-        // Docker, the person's machine, or no engine known: never even listed.
-        for elsewhere in [
-            Some(Address::new(Engine::Docker, None)),
-            Some(Address::new(Engine::Podman, Some("mine-root".into()))),
-            Some(Address::new(Engine::Podman, None)),
-            None,
+        let stack = StackId::parse("local-044466e209069a0812bc9764").unwrap();
+        let node = "k3d-local-044466e209069a0812bc9764-server-0\n";
+        for engine in [
+            Address::new(Engine::Docker, None),
+            Address::new(Engine::Podman, Some("openbot-root".into())),
+            Address::new(Engine::Podman, Some("mine-root".into())),
+            Address::new(Engine::Podman, None),
         ] {
             assert_eq!(
-                cluster_gone_at(elsewhere.as_ref(), &stack, |_| panic!("listed")),
-                None,
-                "{elsewhere:?}"
+                cluster_gone_at(Some(&engine), &stack, |_| Some(
+                    "openbot-desktop-postgres-1\nopenbot-desktop-server-1\n".into()
+                )),
+                Some(true),
+                "{engine:?}"
             );
+            assert_eq!(
+                cluster_gone_at(Some(&engine), &stack, |_| Some(node.into())),
+                Some(false),
+                "{engine:?}"
+            );
+            // The engine couldn't list its containers: nothing is said.
+            assert_eq!(cluster_gone_at(Some(&engine), &stack, |_| None), None);
         }
+        // No engine named: the CLI picks its own, so it is never even listed.
+        assert_eq!(cluster_gone_at(None, &stack, |_| panic!("listed")), None);
+    }
+
+    /// What k3d leaves after a prune of stopped containers: the cluster's network and its image
+    /// volume. Either says the cluster was removed from this engine; another stack's do not.
+    #[test]
+    fn a_pruned_clusters_network_or_image_volume_is_its_trace() {
+        let stack = StackId::parse("local-044466e209069a0812bc9764").unwrap();
+        assert!(cluster_traces_in(
+            "bridge\nk3d-local-044466e209069a0812bc9764\n",
+            "",
+            &stack
+        ));
+        assert!(cluster_traces_in(
+            "bridge\n",
+            "k3d-local-044466e209069a0812bc9764-images\n",
+            &stack
+        ));
+        assert!(!cluster_traces_in(
+            "bridge\nk3d-local-0000\n",
+            "k3d-local-0000-images\nk3d-local-044466e209069a0812bc9764-images-old\n",
+            &stack
+        ));
+        assert!(!cluster_traces_in("", "", &stack));
+    }
+
+    /// `local setup` makes the cluster after its `downloaded` step: a stack before that never had
+    /// one, so it is never forgotten for not having one.
+    #[test]
+    fn only_a_stack_past_its_download_ever_had_a_cluster() {
+        for step in ["cluster", "migrated", "bootstrapped", "ready"] {
+            assert!(had_a_cluster(Some(step)), "{step}");
+        }
+        for step in [Some("recorded"), Some("downloaded"), None] {
+            assert!(!had_a_cluster(step), "{step:?}");
+        }
+    }
+
+    /// Before `local delete` removes a forgotten stack's private folder, the database backups the
+    /// CLI took before its updates are moved beside it, and nothing else is.
+    #[test]
+    fn a_forgotten_stacks_database_backups_are_kept() {
+        let config = std::env::temp_dir().join(format!(
+            "openbot-kept-backups-{}-{}",
+            std::process::id(),
+            rand::random::<u32>()
+        ));
+        let stack = StackId::parse("local-044466e209069a0812bc9764").unwrap();
+        let private = config.join("local-evaluation").join(stack.as_str());
+        std::fs::create_dir_all(private.join("backups")).unwrap();
+        std::fs::write(
+            private
+                .join("backups")
+                .join("2026-11-10T00-00-00-000Z-before-update-from-0.16.0.sql"),
+            "-- PostgreSQL database cluster dump complete\n",
+        )
+        .unwrap();
+        std::fs::write(private.join("secrets.json"), "{}").unwrap();
+
+        keep_backups(&private, &stack);
+
+        assert!(!private.join("backups").exists());
+        assert!(private.join("secrets.json").exists());
+        let recovery = config
+            .join("local-evaluation-recovery")
+            .join(stack.as_str());
+        let kept: Vec<_> = std::fs::read_dir(&recovery)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert!(kept[0]
+            .join("2026-11-10T00-00-00-000Z-before-update-from-0.16.0.sql")
+            .is_file());
+
+        // A stack with no backups moves nothing.
+        let other = StackId::parse("local-0000").unwrap();
+        let empty = config.join("local-evaluation").join(other.as_str());
+        std::fs::create_dir_all(&empty).unwrap();
+        keep_backups(&empty, &other);
+        assert!(!config
+            .join("local-evaluation-recovery")
+            .join(other.as_str())
+            .exists());
+        let _ = std::fs::remove_dir_all(config);
     }
 
     /// Setup forgets a stack and sets it up again only when it is this folder's alone and its
@@ -8120,6 +8725,9 @@ step update-agent-wait
 '{helm}' upgrade --install cpki '{chart}' -f '{stopped}' --no-hooks || fail dependencies-install
 step dependencies-install
 sleep "$(cat "$S/wait-seconds" 2>/dev/null || echo 0)"
+# Held here, when a test asks, until it lets the update go on: two minutes at most.
+held=0
+while [ -e "$S/hold" ] && [ ! -e "$S/go-on" ] && [ "$held" -lt 2400 ]; do held=$((held + 1)); sleep 0.05; done
 # The databases' rollout: nothing schedules on a cordoned node. The real wait is ten minutes.
 tries=0
 while [ "$(cat "$S/unschedulable" 2>/dev/null)" = true ]; do
@@ -8424,40 +9032,57 @@ printf '%s' '{completed}'
             return;
         }
         let world = UpdateWorld::new("update-quit");
-        let wait_for = |what: &str, done: &dyn Fn() -> bool| {
-            let until = Instant::now() + Duration::from_secs(30);
+        // Waits for `done` while the update runs, however long a busy computer takes; an update
+        // that ends first, as its own limits end it, never got there.
+        let wait_for = |what: &str, ended: &dyn Fn() -> bool, done: &dyn Fn() -> bool| {
             while !done() {
-                assert!(Instant::now() < until, "never saw {what}");
+                assert!(!ended() || done(), "the update ended before {what}");
                 std::thread::sleep(Duration::from_millis(20));
             }
         };
 
-        // Before Helm: stopped.
-        world.set("quiesce-seconds", "30");
+        // Before Helm: stopped, in the pause before `update-quiesce`, which it never ends.
+        world.set("quiesce-seconds", "120");
         let early = Attempt::register("update-before-helm");
-        let started = Instant::now();
         let stopped = std::thread::scope(|scope| {
             let call = scope.spawn(|| world.update("update-before-helm", &early.0));
-            wait_for("secrets-apply", &|| world.cli_log_has("secrets-apply"));
+            wait_for("secrets-apply", &|| call.is_finished(), &|| {
+                world.cli_log_has("secrets-apply")
+            });
             assert!(!update_finishing());
             cancel("update-before-helm");
             call.join().unwrap()
         });
         assert_eq!(stopped, Err(Failure::Cancelled));
-        assert!(started.elapsed() < Duration::from_secs(20));
+        // Stopped in the pause, not after it: the step that follows it never ran.
+        let calls = world.calls();
+        assert!(
+            !calls
+                .iter()
+                .any(|call| call.contains("kubectl scale deployment/cpki-app-api")),
+            "the update ran past its pause before it was stopped: {calls:?}"
+        );
         assert!(!world.finished());
         drop(early);
 
-        // Past its first Helm step: Quit waits for it.
+        // Past its first Helm step: Quit waits for it. The update is held there until Quit says
+        // it is waiting, so it is still running when Quit comes however slow the computer.
         world.set("quiesce-seconds", "0");
-        world.set("wait-seconds", "3");
+        world.set("hold", "");
         let attempt = Attempt::register("update-during-quit");
         let (finished, said, waited) = std::thread::scope(|scope| {
             let call = scope.spawn(|| world.update("update-during-quit", &attempt.0));
-            wait_for("the update past update-agent-wait", &|| update_finishing());
+            wait_for(
+                "the update past update-agent-wait",
+                &|| call.is_finished(),
+                &update_finishing,
+            );
             assert!(!world.finished(), "still running when Quit comes");
             let mut said = 0;
-            let waited = close_for_quit_reporting(|| said += 1);
+            let waited = close_for_quit_reporting(|| {
+                said += 1;
+                world.set("go-on", "");
+            });
             (call.join().unwrap(), said, waited)
         });
         assert!(waited, "Quit waited for the update");
@@ -8939,6 +9564,7 @@ printf '%s' '{completed}'
             Failure::InvalidAcceptance,
             Failure::RootlessPodman,
             Failure::DownloadStalled,
+            Failure::BelowSecurityFloor,
         ];
         // Adding a variant without listing it above stops compiling here.
         for failure in all {
@@ -8960,7 +9586,8 @@ printf '%s' '{completed}'
                 | Failure::UnexpectedExit
                 | Failure::InvalidAcceptance
                 | Failure::RootlessPodman
-                | Failure::DownloadStalled => {}
+                | Failure::DownloadStalled
+                | Failure::BelowSecurityFloor => {}
             }
             let name = serde_json::to_string(&failure).unwrap();
             assert!(window.contains(&name), "localEvalCli.ts is missing {name}");
@@ -10855,6 +11482,7 @@ overlay 164506208 20481024 135620148 14% /
                 drive: None,
                 disk_gb: Some("1".into()),
                 free_on_drive: false,
+                mac: false,
                 measured: EngineMeasure {
                     cpus: 8,
                     memory_bytes: 8 * GIB,
@@ -10874,6 +11502,7 @@ overlay 164506208 20481024 135620148 14% /
                 drive: Some("C:".into()),
                 disk_gb: None,
                 free_on_drive: false,
+                mac: false,
                 measured: EngineMeasure::default(),
             })
             .unwrap(),
@@ -11448,6 +12077,7 @@ fn main() {
                 drive: None,
                 disk_gb: None,
                 free_on_drive: false,
+                mac: false,
                 measured: EngineMeasure {
                     cpus: 2,
                     memory_bytes: 22011707392,
@@ -11469,6 +12099,7 @@ fn main() {
                 drive: Some("C:".into()),
                 disk_gb: None,
                 free_on_drive: false,
+                mac: false,
                 measured: EngineMeasure {
                     cpus: 2,
                     memory_bytes: 22011707392,
@@ -11530,7 +12161,9 @@ fn main() {
             failure: Some("The backend could not start.".into()),
             log_folder: Some(&logs),
             home: Some(&home),
-            engine: engine_in_use(),
+            engine: crate::troubleshooting::given(engine_in_use()),
+            server_log: crate::troubleshooting::given(None),
+            limit: crate::troubleshooting::LIMIT,
         });
 
         // `~/.copilotkit/cli.log`, with Windows' separators on Windows.
@@ -11562,6 +12195,7 @@ fn main() {
         Some(crate::windows::MachineDrive {
             drive: Some("C:".into()),
             free: tenths * GIB / 10 + GIB / 100,
+            mac: false,
         })
     }
 
@@ -11845,8 +12479,146 @@ fn main() {
             Some(crate::windows::MachineDrive {
                 drive: Some("C:".into()),
                 free,
+                mac: false,
             }),
         );
+    }
+
+    /// What `statvfs` answers for the home folder of a 926 GB Mac with 7.5 GB free, as `df -h ~`
+    /// said it on the Mac whose update filled its disk: 4 KiB fragments, the free ones counted.
+    #[cfg(unix)]
+    fn full_mac_statvfs() -> libc::statvfs {
+        // SAFETY: statvfs is plain data; every field the free space is read from is set below.
+        let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
+        stats.f_frsize = 4096;
+        stats.f_bsize = 4096;
+        stats.f_blocks = (926 * GIB / 4096) as _;
+        stats.f_bfree = (75 * GIB / 10 / 4096) as _;
+        stats.f_bavail = (75 * GIB / 10 / 4096) as _;
+        stats
+    }
+
+    /// An update, on the Mac above: Docker Desktop 4.67.0 with 10 CPUs and 20.5 GiB, and its sparse
+    /// disk showing 900 GiB free in a container, whatever the Mac has.
+    #[cfg(unix)]
+    fn update_on_a_full_mac(lab: &StartLab, free: u64) {
+        lab.engine(
+            crate::engine::Engine::Docker,
+            DOCKER_INFO,
+            &df(WSL_DISK, 900 * KIB_PER_GIB),
+            None,
+            Some(crate::windows::MachineDrive {
+                drive: None,
+                free,
+                mac: true,
+            }),
+        );
+        // OpenBot's own database, as the window measured it: 52 MiB.
+        installation_database(Some(52 * 1024 * 1024));
+    }
+
+    /**
+    The Mac that updated to 1.1.0 with 7.5 GB free of 926 GB. Docker's disk showed room, so nothing
+    stopped the update, which filled the Mac mid-way and broke Docker's disk. The back end's update
+    is checked first now, against the Mac's own disk: it is not started, the CLI never runs, and the
+    report says what the Mac has and what the update needs.
+    */
+    #[cfg(unix)]
+    #[test]
+    fn an_update_on_a_mac_short_of_disk_is_not_started_and_says_the_macs_figures() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::an_update_on_a_mac_short_of_disk_is_not_started_and_says_the_macs_figures",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("update-full-mac");
+        let free = crate::early_downloads::statvfs_free(&full_mac_statvfs());
+        update_on_a_full_mac(&lab, free);
+        std::fs::write(lab.fixture.root.join("scenario"), "0\n{}").unwrap();
+        let stack = StackId::parse("local-abc123").unwrap();
+        let report = run_installed("full-mac", Action::Update, &stack).unwrap();
+        assert_eq!(lab.fixture.argv(), None, "the backend's update ran");
+        let wire = serde_json::to_value(&report).unwrap();
+        assert_eq!(wire["outcome"], json!("blocked"));
+        assert_eq!(wire["reason"], json!("resources-short"));
+        // 4 x 1.7 GB of images and the 52 MiB database twice, 6.9 GB, at most half of what is free.
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": false, "cpu": false, "memory": false, "disk": true,
+                "diskGb": "7.5", "freeOnDrive": true, "mac": true,
+                "updating": true, "neededGb": "13"
+            })
+        );
+        let logged = checks_logged();
+        assert!(
+            logged.iter().any(
+                |entry| entry.starts_with("WARN [local check] before an update:")
+                    && entry.contains("7.5 GiB free on this Mac's disk")
+                    && entry.contains("not started")
+            ),
+            "{logged:?}"
+        );
+    }
+
+    /// The same update with room on the Mac and in Docker: the preflight lets it through.
+    #[test]
+    fn an_update_with_room_on_the_drive_and_in_the_engine_is_let_through() {
+        let check = EngineCheck {
+            podman: false,
+            size: Some((10, 22011707392)),
+            disk: Some(Disk {
+                size: 1006 * GIB,
+                free: 900 * GIB,
+            }),
+            drive: Some(crate::windows::MachineDrive {
+                drive: None,
+                free: 60 * GIB,
+                mac: true,
+            }),
+            pressure: None,
+        };
+        assert_eq!(update_room_of(&check, Some(52 * 1024 * 1024)), None);
+        // C: on Windows at 12 GB free, under the 13 GB an update needs free there: refused, said
+        // as C:'s.
+        let windows_g = EngineCheck {
+            drive: Some(crate::windows::MachineDrive {
+                drive: Some("C:".into()),
+                free: 12 * GIB,
+                mac: false,
+            }),
+            ..check.clone()
+        };
+        let short = update_room_of(&windows_g, Some(0)).unwrap();
+        assert_eq!(
+            (short.drive.as_deref(), short.free_on_drive, short.mac),
+            (Some("C:"), true, false)
+        );
+        assert_eq!(short.needed_gb.as_deref(), Some("13"));
+        // Docker Desktop's own disk limit, the Mac with room: what is short is inside Docker, and
+        // the update needs its images and the database, and the 15% k3s keeps free, there.
+        let small_docker = EngineCheck {
+            disk: Some(Disk {
+                size: 64 * GIB,
+                free: 12 * GIB,
+            }),
+            ..check.clone()
+        };
+        let short = update_room_of(&small_docker, Some(0)).unwrap();
+        assert_eq!(
+            (
+                short.disk_gb.as_deref(),
+                short.needed_gb.as_deref(),
+                short.free_on_drive
+            ),
+            (Some("12"), Some("16"), false)
+        );
+        // An engine with too little memory for OpenBot is short for an update too.
+        let small = EngineCheck {
+            size: Some((4, 2 * GIB)),
+            ..check
+        };
+        assert!(update_room_of(&small, Some(0)).unwrap().memory);
     }
 
     /**
@@ -12068,3 +12840,7 @@ fn main() {
         assert_eq!(checks_logged(), Vec::<String>::new());
     }
 }
+
+#[cfg(test)]
+#[path = "stack_lost_live_tests.rs"]
+mod stack_lost_live;

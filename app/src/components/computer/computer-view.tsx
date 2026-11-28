@@ -1,14 +1,30 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
+import { COMPUTER_START_WAIT_MS } from "@openbot/shared/computer-start";
 import { IconLock, IconWorld, IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useRef, useState } from "react";
-import { useFittedWidth } from "@/components/browser/fitted-window";
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import {
+  useFittedWidth,
+  useFullWidthHeight,
+} from "@/components/browser/fitted-window";
 import {
   botBrowserKeys,
   botBrowserStateQueryOptions,
 } from "@/lib/bot-browser/queries";
-import { botsReason, supplySecret } from "@/lib/computers/control";
+import type { ClientError } from "@/lib/client";
+import {
+  botsReason,
+  passkeyNotice,
+  supplySecret,
+  waitingReason,
+} from "@/lib/computers/control";
 import {
   type ComputerState,
   computerStatusQueryOptions,
@@ -16,13 +32,15 @@ import {
 import {
   readPageFrame,
   readScreenshot,
-  startComputer,
   type Screenshot,
+  startComputer,
 } from "@/lib/computers/screen";
 import { useComputerControl } from "@/lib/computers/use-control";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 import { ChannelAvatar } from "../channels/avatar";
 import { BotBrowserBar, BotRecordPanel } from "./bot-browser";
+import { ComputerBlocked } from "./computer-blocked";
 import { ComputerControlButton } from "./computer-controls";
 import { LiveScreen, type LiveScreenHandle } from "./live-screen";
 import { useElementVisible, usePageVisible } from "./preview-visibility";
@@ -128,9 +146,10 @@ function capitalise(text: string): string {
  * GENEROUS ON PURPOSE. A first start pulls an image, schedules a pod and launches a browser, and a
  * minute is ordinary. The panel used to call the first frameless poll a problem, so every cold start
  * opened on "Can't show the screen right now… ask an admin", in front of a person whose computer was
- * doing exactly what it should. Past the server's own wait for a cold start, with room to spare.
+ * doing exactly what it should. Past the wait a Bot's call gives a cold start (COMPUTER_START_WAIT_MS),
+ * with room to spare: until that wait is over, the Bot's step is still waiting, and so is the panel.
  */
-const STARTUP_GRACE_MS = 150_000;
+const STARTUP_GRACE_MS = COMPUTER_START_WAIT_MS + 30_000;
 
 /** How often a computer that has not drawn a frame yet is asked where it is. */
 const STATUS_POLL_MS = 2_000;
@@ -154,6 +173,8 @@ const SECRET_CONFIRM_MS = 6_000;
  */
 function NothingToSee({
   problem,
+  blocked,
+  inButton = false,
   blankBrowser,
   settled,
   page,
@@ -161,6 +182,13 @@ function NothingToSee({
   owner = "the Bot's",
 }: {
   problem: string | null;
+  /**
+   * Starting the computer was refused for good (the organization is at its computer limit, say). It stays off, and
+   * the screen says why in the server's sentence, rather than that it starts when the Bot next uses it.
+   */
+  blocked?: ClientError | null;
+  /** Drawn inside the tile's own button, so nothing in it can be a control or a block. */
+  inButton?: boolean;
   blankBrowser: boolean;
   /**
    * Why there is no picture yet, when the reason is ordinary.
@@ -178,6 +206,16 @@ function NothingToSee({
   /** The page that turn opened, named when there is no picture of it. */
   page?: { url?: string; title?: string } | undefined;
 }) {
+  if (!settled && !problem && blocked)
+    // Inside the tile's own button nothing is drawn: the tile draws it beside the button, over the screen, so its
+    // link is a link of its own (`BlockedTile`).
+    return inButton ? null : (
+      <ComputerBlocked
+        className="absolute inset-0"
+        refusal={blocked}
+        title={`Can't start ${owner} computer`}
+      />
+    );
   return (
     <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-4 text-center text-muted-foreground text-sm">
       {settled ? (
@@ -262,6 +300,9 @@ function BrowserWindow({
   const space = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLDivElement>(null);
   const width = useFittedWidth(space, frame, aspectRatio, { shown: live });
+  const tallest = useFullWidthHeight(space, frame, aspectRatio, {
+    shown: live,
+  });
   if (!live) return children;
   return (
     // Never less than a screen a person can work in: in a short window the card grows past it and the view scrolls.
@@ -271,9 +312,20 @@ function BrowserWindow({
     // window too, where they are under it. `flex-1` alone starts from 0%, which in a card as tall as its content is
     // the page's own height at the window's full width: the page took the window and Record was below the fold,
     // where a person scrolling over the Bot's page (which scrolls that page) never found it.
+    //
+    // NO TALLER THAN THE WINDOW AT FULL WIDTH, under a narrow window's wheel (`--page-room`, `useFullWidthHeight`).
+    // On a phone the window takes the full width and is still shorter than what the card has left, and the rest of
+    // the space, the floor's included, was a blank band between the Bot's page and Hand back. Held to the window's
+    // tallest, the wheel sits right under it and what is left is at the card's foot. Beside the wheel, in a wide
+    // window, the space is the column's height as before.
     <div
       ref={space}
-      className="flex min-h-80 min-w-0 flex-1 basis-0 items-start justify-center"
+      className="flex min-w-0 flex-1 basis-0 items-start justify-center max-lg:max-h-(--page-room) max-lg:min-h-[min(var(--page-room,100svh),calc(var(--spacing)*80))] lg:min-h-80"
+      style={
+        tallest === undefined
+          ? undefined
+          : ({ "--page-room": `${tallest}px` } as CSSProperties)
+      }
     >
       {/* Clipped rather than hidden: a hidden overflow would let this shrink below the screen's own floor. */}
       <div
@@ -420,7 +472,8 @@ export function ComputerView({
   } = useComputerControl(computerId, !settled);
   /** Held only until it is sent. Never lifted into a URL, a log, or anything that outlives this form. */
   const [secret, setSecret] = useState("");
-  const [secretProblem, setSecretProblem] = useState<string | null>(null);
+  // The refusal kept whole, not as its words, so a hold is drawn calmly (`failureSaid`).
+  const [secretProblem, setSecretProblem] = useState<Failure | null>(null);
   const [sendingSecret, setSendingSecret] = useState(false);
   const pageVisible = usePageVisible();
   const [previewRef, previewIntersecting] = useElementVisible<HTMLElement>();
@@ -582,9 +635,11 @@ export function ComputerView({
     refetchInterval: STATUS_POLL_MS,
     retry: false,
   });
-  /** The fresher of the two answers: the poll that just ran, else the status read. */
-  const computerState: ComputerState | undefined =
-    polledState ?? status.data?.state;
+  /**
+   * The fresher of the two answers: the poll that just ran, else the status read. A state a newer
+   * server sends that this app doesn't know is none of the ones below: the screen waits for a frame.
+   */
+  const computerState: string | undefined = polledState ?? status.data?.state;
   /*
    * OPENING THE SCREEN STARTS A COMPUTER THAT IS OFF. Once, for the state the screen was opened on.
    *
@@ -600,6 +655,8 @@ export function ComputerView({
    */
   const openedOn = useRef<string | null>(null);
   const [startAsked, setStartAsked] = useState(false);
+  /** Starting it was refused for good: what the screen says while the computer stays off (`NothingToSee`). */
+  const [startBlocked, setStartBlocked] = useState<ClientError | null>(null);
   // A picture is a computer that is up, whatever the state reads have or have not said yet.
   const hasFrame = shot !== null;
   useEffect(() => {
@@ -612,13 +669,17 @@ export function ComputerView({
      * "Starting" only once the server says it is. Until then, and for a server that has no such
      * call or refuses it, the screen says what it always said: the computer is off.
      */
-    void startComputer(computerId).then((state) => {
+    void startComputer(computerId).then(({ state, refused }) => {
       if (state === "starting" || state === "ready") setStartAsked(true);
+      if (refused) setStartBlocked(refused);
     });
   }, [computerId, computerState, hasFrame, settled, toolCallId, visualVisible]);
   useEffect(() => {
     // Up, or on its way: what the server says is the news again, and a later "off" is one.
-    if (computerState && computerState !== "absent") setStartAsked(false);
+    if (computerState && computerState !== "absent") {
+      setStartAsked(false);
+      setStartBlocked(null);
+    }
   }, [computerState]);
   /**
    * Off, and staying off until the Bot uses it. In a turn, an absent computer is one the Bot's action
@@ -668,7 +729,8 @@ export function ComputerView({
    */
   const botBrowser = useQuery({
     ...botBrowserStateQueryOptions(computerId),
-    enabled: expanded && !settled,
+    // Not for a computer refused a start, which has no browser to read.
+    enabled: expanded && !settled && !startBlocked,
   });
   /*
    * Read again the moment the wheel changes hands, rather than up to a second later: the bar and Record go live, or
@@ -759,8 +821,12 @@ export function ComputerView({
    * believed somebody was driving it.
    */
   const wheelHere = driving && !settled;
-  /** What the Bot asked for the wheel for, when it asked. Never the person's own take. */
-  const reason = botsReason(control);
+  /** What the Bot asked for the wheel for, when it asked, and that the page wants a passkey once it does. */
+  const reason = waitingReason(control);
+  /** The page in front of the person holding the wheel asked for a passkey: the way through, said where they are. */
+  const passkey = passkeyNotice(control);
+  /** Said to the person holding the wheel: the passkey's way through when there is one, else the Bot's reason. */
+  const drivingReason = passkey ?? botsReason(control);
 
   const polledScreen = showScreen ? (
     <img
@@ -872,6 +938,8 @@ export function ComputerView({
             {showScreen ? null : (
               <NothingToSee
                 blankBrowser={blankBrowser}
+                blocked={startBlocked}
+                inButton
                 owner={owner}
                 page={knownPage}
                 problem={shownProblem}
@@ -880,7 +948,22 @@ export function ComputerView({
               />
             )}
           </button>
-          {!settled && !(driving && !control?.transitioning) ? (
+          {/*
+            A computer refused a start: said over the tile, beside its button rather than in it, so the admin's way to
+            Computers is a link that can be pressed. Compact, so the whole sentence and the link fit the tile.
+          */}
+          {!settled && startBlocked ? (
+            <ComputerBlocked
+              className="absolute inset-0 bg-background"
+              compact
+              refusal={startBlocked}
+              title={`Can't start ${owner} computer`}
+            />
+          ) : null}
+          {/* Nothing to take on a computer that was refused a start: there is no screen to drive. */}
+          {!settled &&
+          !startBlocked &&
+          !(driving && !control?.transitioning) ? (
             // Solid, not frosted: a blur over a screen that keeps changing is redrawn with every frame of it.
             <div
               className="absolute inset-x-2 bottom-2 flex items-center justify-between gap-2 rounded-xl border bg-popover py-1.5 pr-1.5 pl-3 text-popover-foreground shadow-lg"
@@ -914,7 +997,7 @@ export function ComputerView({
 
         {/* The request reason appears above the always-available ownership controls. */}
         {!driving && !settled && control?.requested ? (
-          <div className="flex items-start justify-between gap-3 border-t bg-amber-500/10 px-3 py-2 text-sm">
+          <div className="flex items-start justify-between gap-3 border-t bg-warning/10 px-3 py-2 text-sm">
             <span>
               <strong className="font-medium">The Bot needs you.</strong>{" "}
               {reason}
@@ -1006,7 +1089,7 @@ export function ComputerView({
             </p>
             {secretProblem ? (
               <p className="mt-1 text-xs text-destructive" role="alert">
-                {secretProblem}
+                {failureSaid(secretProblem)}
               </p>
             ) : null}
           </form>
@@ -1020,7 +1103,7 @@ export function ComputerView({
             className="border-t bg-muted/40 px-3 py-2 text-sm text-destructive"
             role="alert"
           >
-            {secretProblem}
+            {failureSaid(secretProblem)}
           </p>
         ) : null}
 
@@ -1031,10 +1114,12 @@ export function ComputerView({
           quietly waiting on them.
         */}
         {!settled && driving && !control?.transitioning ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-amber-500/10 px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-warning/10 px-3 py-2">
             <span className="text-sm">
-              <strong className="font-medium">You have control.</strong> The Bot
-              waits until you hand it back. Open the screen to click and type.
+              <strong className="font-medium">You have control.</strong>{" "}
+              {passkey
+                ? `${passkey} Open the screen to click and type.`
+                : "The Bot waits until you hand it back. Open the screen to click and type."}
             </span>
             <ComputerControlButton
               computerId={computerId}
@@ -1202,6 +1287,7 @@ export function ComputerView({
                     <div className="relative w-full" style={{ aspectRatio }}>
                       <NothingToSee
                         blankBrowser={blankBrowser}
+                        blocked={startBlocked}
                         owner={owner}
                         page={knownPage}
                         problem={shownProblem}
@@ -1240,17 +1326,22 @@ export function ComputerView({
                           {name}
                         </span>
                       ) : null}
+                      {/*
+                        Wrapped, never cut short: under the screen on a phone the sentence was "Click and type
+                        on t…", and the reason after it, the one thing the person was handed the wheel to do,
+                        was not shown at all.
+                      */}
                       {driving ? (
-                        <span className="truncate text-muted-foreground lg:whitespace-normal">
+                        <span className="text-muted-foreground">
                           You have control. Click and type on the page.
-                          {reason ? ` ${reason}` : null}
+                          {drivingReason ? ` ${drivingReason}` : null}
                         </span>
                       ) : someoneElse ? (
-                        <span className="truncate text-muted-foreground lg:whitespace-normal">
+                        <span className="text-muted-foreground">
                           Someone else has control.
                         </span>
                       ) : control?.requested ? (
-                        <span className="truncate text-muted-foreground lg:whitespace-normal">
+                        <span className="text-muted-foreground">
                           <strong className="font-medium text-foreground">
                             The Bot needs you.
                           </strong>{" "}
@@ -1258,19 +1349,24 @@ export function ComputerView({
                         </span>
                       ) : null}
                     </span>
-                    <ComputerControlButton computerId={computerId} />
+                    {/* A computer refused a start has no screen to take, and so nothing to record either. */}
+                    {startBlocked ? null : (
+                      <ComputerControlButton computerId={computerId} />
+                    )}
                   </div>
                 )}
                 {/*
                   Record, under the wheel, because it is only for the person holding it. Branched on
                   the data first, so a read that fails after one has answered keeps what it showed.
                 */}
-                {settled ? null : botBrowser.data ? (
+                {settled || startBlocked ? null : botBrowser.data ? (
                   <BotRecordPanel botId={computerId} state={botBrowser.data} />
                 ) : botBrowser.error ? (
                   <p className="text-destructive text-sm" role="alert">
-                    Couldn't load the Bot's browser. Close this and open it
-                    again.
+                    {loadFailure(
+                      botBrowser.error,
+                      "Couldn't load the Bot's browser. Close this and open it again.",
+                    )}
                   </p>
                 ) : null}
               </WheelColumn>

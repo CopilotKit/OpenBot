@@ -316,6 +316,7 @@ const routines: RoutineRecord[] = [
     id: "rt-1",
     botId: fuse.id,
     schedule: "Every weekday at 9:00",
+    cron: "0 9 * * 1-5",
     timezone: "Europe/London",
     instruction: "Send me the headlines",
     title: null,
@@ -1049,7 +1050,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
         calls.some(
           (call) =>
             call.method === "POST" &&
-            call.path === `${CHECK_IN_ITEMS_PATH}/s-fuse/start`,
+            call.path === `${CHECK_IN_ITEMS_PATH}/s-fuse/work-on`,
         ),
       ).toBe(true),
     );

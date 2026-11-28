@@ -15,12 +15,14 @@ import type {
   ConversationMember,
   ConversationMessage,
 } from "@/lib/api/generated/model";
+import { attachmentUrl as storedAttachmentUrl } from "@openbot/shared/attachments";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import {
   type AgentChannel,
   channelKeys,
   channelOf,
 } from "@/lib/channels/queries";
+import type { SentFile } from "@/lib/computers/sent-file";
 
 /** A key for one write, so a retry of it is recognised as the same write. */
 const once = () => ({ "Idempotency-Key": idempotencyKey() });
@@ -59,10 +61,22 @@ function groupMessageOf(
     status: message.status,
     createdAt: message.createdAt ?? "",
     ...(message.reason === undefined ? {} : { reason: message.reason }),
+    ...(message.declined ? { declined: true } : {}),
     ...(message.answeredBy === undefined
       ? {}
       : { answeredBy: message.answeredBy }),
     ...(message.consent === undefined ? {} : { consent: message.consent }),
+    ...(message.files?.length
+      ? {
+          files: message.files.map((file) => ({
+            attachmentId: file.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            sizeBytes: file.sizeBytes,
+            url: storedAttachmentUrl(file.id),
+          })),
+        }
+      : {}),
   };
 }
 
@@ -74,14 +88,22 @@ export type GroupMessage = {
   ownerUserId: string;
   agentId: string | null;
   text: string;
-  status: "queued" | "running" | "waiting" | "completed" | "failed";
+  /**
+   * `queued`, `running`, `waiting`, `completed` or `failed`. The list can grow: a status this app
+   * doesn't know draws the line as a plain reply.
+   */
+  status: string;
   createdAt: string;
-  /** Why a waiting Bot is waiting, when it is. */
+  /** Why a waiting Bot is waiting, when it is, in words for the person reading. */
   reason?: string;
+  /** A failed reply its person chose not to share: a choice, drawn as a notice and not an error. */
+  declined?: true;
   /** For an answer relayed from another Bot through `message_bot`: which Bot answered. */
   answeredBy?: string;
   /** A Team Bot asking the person whose turn it was to use their own account. */
   consent?: { botId: string; serverId: string };
+  /** The files a Bot sent from its computer with this reply, each drawn as its card. */
+  files?: SentFile[];
 };
 export type GroupPerson = {
   userId: string;
@@ -148,9 +170,10 @@ export function groupQueryOptions(channelId: string) {
 
 /**
  * The last line is still a person's: the server has queued it but no Bot has started yet. Bounded,
- * so a turn the server gave up on before any Bot started does not poll for ever.
+ * so a turn the server gave up on before any Bot started does not poll for ever. The transcript
+ * draws "Thinking" under that line for as long as this holds (`group-chat.tsx`).
  */
-function awaitingFirstReply(data: GroupConversation | undefined) {
+export function awaitingFirstReply(data: GroupConversation | undefined) {
   const last = data?.messages.at(-1);
   return (
     last !== undefined &&

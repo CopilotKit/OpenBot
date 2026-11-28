@@ -325,8 +325,11 @@ test("Create fills in what was left blank, then hands over", async () => {
     visibility: "private",
     endpoint: "",
   });
-  // It runs on OpenBot, which the server knows without being told.
-  expect(creates[0]).not.toHaveProperty("harness");
+  /*
+   * It runs inside OpenBot, on the engine new Bots run on: OpenBot's own LangGraph (TypeScript)
+   * agent, named with no address. The server still picks each run's engine for the sign-in.
+   */
+  expect(creates[0]).toMatchObject({ harness: "langgraph-ts" });
   // For a Bot that runs here this is its system prompt, so it has to be something it can act on.
   expect(String(creates[0]?.roleDescription)).toStartWith(
     "You are Expense Review.",
@@ -337,6 +340,30 @@ test("Create fills in what was left blank, then hands over", async () => {
   });
   expect(handedOver).toEqual(["agent_new"]);
 });
+
+/*
+ * Instructions run to 5000 characters. Seen dogfooding: the field stopped taking text at 1000, so
+ * instructions pasted in were cut off without a word.
+ */
+test("instructions up to 5000 characters are sent whole, and the field takes no more", async () => {
+  const { view, user } = await opened();
+  await user.type(view.getByLabelText("Name"), "Expense Review");
+  const instructions = view.getByLabelText(
+    /^Instructions/,
+  ) as HTMLTextAreaElement;
+  const most = `${"Check receipts. ".repeat(312)}Done.res`;
+  expect(most).toHaveLength(5000);
+  // One character past the most it takes: the field stops at 5000.
+  await userEvent
+    .setup({ document: view.container.ownerDocument, delay: null })
+    .type(instructions, `${most}t`);
+  expect(instructions.value).toBe(most);
+
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
+  await waitFor(() => expect(creates).toHaveLength(1));
+  expect(creates[0]?.roleDescription).toBe(most);
+  // Typing 5000 characters a key at a time takes seconds on a busy runner.
+}, 60_000);
 
 test("refuses an empty or unreachable custom endpoint without creating", async () => {
   verdict = { ok: false, reason: "Nothing answered at that address." };
@@ -642,7 +669,7 @@ test("personal: the sheet lists every app that is turned on, with nothing to unt
       .getAttribute("href"),
   ).toBe("/routines");
   expect(
-    view.getByText("Every Bot can use every app you turn on in Connections."),
+    view.getByText("Every Bot can use every app you connect in Connections."),
   ).toBeTruthy();
   expect(view.queryAllByRole("checkbox")).toHaveLength(0);
 });
@@ -675,7 +702,8 @@ test("Mastra is offered with its mark, and picking it connects a Mastra server",
   expect(mark?.getAttribute("src")).toBe("data:image/svg+xml,mastra");
 
   await user.click(mastra);
-  expect(view.getByText("Mastra")).toBeTruthy();
+  // The framework named at the top of the address step; the trust hint's link says Mastra too.
+  expect(view.getByText("Mastra", { selector: "span" })).toBeTruthy();
   await user.type(
     await view.findByLabelText("Agent address"),
     "https://mastra.example.com",
@@ -711,4 +739,102 @@ test("the LangGraph harness is offered as LangChain, the name people know it by"
   const framework = view.getByRole("button", { name: /^LangChain/ });
   // LangChain's own name and a description that doesn't talk about graphs.
   expect(framework.textContent).not.toMatch(/Graph/);
+});
+
+/**
+ * The trust hint under the address.
+ *
+ * The LangGraph and Mastra receivers that take a Bot's role and tool guidance as AG-UI context give
+ * them full weight only to a caller they trust: one with a key, or one on a listener only it can
+ * reach, with trusted ingress turned on. Somebody connecting one of those, or an agent OpenBot
+ * can't name, is told so where they give the address, with that framework's setup linked. A
+ * framework whose adapter passes the role through as it ships is told nothing about it.
+ */
+const FRAMEWORKS_DOCS =
+  "https://github.com/CopilotKit/OpenBot/blob/main/docs/agent-frameworks.md";
+const TRUST_HINT = /your agent has to trust OpenBot/;
+
+/** The address step, reached by picking this framework. */
+async function addressStep(framework: RegExp) {
+  const { view, user } = await customFlow();
+  await user.click(view.getByRole("button", { name: framework }));
+  await view.findByLabelText("Agent address");
+  return view;
+}
+
+/** The links in the hint, by their words. */
+function setupLinks(hint: HTMLElement): Record<string, string | null> {
+  return Object.fromEntries(
+    [...hint.querySelectorAll("a")].map((link) => [
+      link.textContent,
+      link.getAttribute("href"),
+    ]),
+  );
+}
+
+test.each([
+  [/^LangChain/, { LangGraph: `${FRAMEWORKS_DOCS}#langgraph` }],
+  [/^Mastra/, { Mastra: `${FRAMEWORKS_DOCS}#mastra` }],
+  [
+    /^An agent you already run/,
+    {
+      LangGraph: `${FRAMEWORKS_DOCS}#langgraph`,
+      Mastra: `${FRAMEWORKS_DOCS}#mastra`,
+    },
+  ],
+])(
+  "%p is told how to give the Bot its full role and tool guidance",
+  async (framework, links) => {
+    const view = await addressStep(framework);
+    const hint = view.getByText(TRUST_HINT);
+    expect(hint.textContent).toBe(
+      `For the Bot to get its full role and tool guidance, your agent has to trust OpenBot. Add your agent's key below, or give the address of a listener only OpenBot can reach, with trusted ingress turned on. Set it up for ${Object.keys(links).join(" or ")}.`,
+    );
+    expect(setupLinks(hint)).toEqual(links);
+    for (const link of hint.querySelectorAll("a")) {
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    }
+  },
+);
+
+test("a framework that passes the role through as it ships is told nothing about trust", async () => {
+  const view = await addressStep(/^CrewAI/);
+  expect(view.queryByText(TRUST_HINT)).toBeNull();
+});
+
+test("the hint stays under an address the server couldn't reach", async () => {
+  verdict = { ok: false, reason: "Nothing answered at that address." };
+  const { view, user } = await connected();
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
+  expect(
+    await view.findByText("Nothing answered at that address."),
+  ).toBeTruthy();
+  expect(view.getByText(TRUST_HINT)).toBeTruthy();
+});
+
+/**
+ * Every setup the hint links is a section of docs/agent-frameworks.md, by the anchor GitHub gives
+ * its heading, so a renamed heading can't leave the hint pointing at the top of the page.
+ */
+test("every setup the hint links is a section of the frameworks guide", async () => {
+  const guide = await Bun.file(
+    `${import.meta.dir}/../../docs/agent-frameworks.md`,
+  ).text();
+  const anchors = new Set(
+    [...guide.matchAll(/^#{2,3} (.+)$/gm)].map(([, heading]) =>
+      (heading ?? "")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N} -]/gu, "")
+        .replace(/ /g, "-"),
+    ),
+  );
+  const view = await addressStep(/^An agent you already run/);
+  const linked = Object.values(setupLinks(view.getByText(TRUST_HINT)));
+  expect(linked).toHaveLength(2);
+  for (const href of linked) {
+    const [page, anchor] = (href ?? "").split("#");
+    expect(page).toBe(FRAMEWORKS_DOCS);
+    expect(anchors.has(anchor ?? "")).toBe(true);
+  }
 });

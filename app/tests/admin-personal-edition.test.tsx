@@ -17,6 +17,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, within } from "@testing-library/react";
 import type * as React from "react";
+import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
 import { IDENTITY_PROVIDERS_PATH, PEOPLE_PATH } from "./accounts-api";
@@ -24,6 +25,7 @@ import {
   COMPUTER_ACTIONS_PATH,
   isOverviewRead,
   MODEL_USAGE_PATH,
+  SETTINGS_PATH,
 } from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
 import { MODEL_CATALOGUE_PATH } from "./models-api";
@@ -42,10 +44,10 @@ import { vendoredMarkFor } from "./vendored-marks";
 mock.module("@/lib/marks", () => ({ markFor: vendoredMarkFor }));
 
 const { Route: PeopleRoute } = await import("@/routes/_authed/admin/people");
-// Admin lists Teams, whose pages are outside it, where everybody in an organization opens them.
-const { Route: TeamsRoute } = await import("@/routes/_authed/_app/teams");
+// Admin's Teams: the pages everybody opens at /teams, drawn inside Admin.
+const { Route: TeamsRoute } = await import("@/routes/_authed/admin/teams");
 const { Route: NewTeamRoute } = await import(
-  "@/routes/_authed/_app/teams_.new"
+  "@/routes/_authed/admin/teams_.new"
 );
 const { Route: IdentityProvidersRoute } = await import(
   "@/routes/_authed/admin/identity-providers"
@@ -71,6 +73,7 @@ const { Route: LearningRoute } = await import(
 const { Route: ComputersRoute } = await import(
   "@/routes/_authed/admin/computers"
 );
+const { Route: AdminRoute } = await import("@/routes/_authed/admin/index");
 const { CheckInsPage } = await import("@/routes/_authed/admin/proactive");
 const { ProvidersPage } = await import("@/routes/_authed/admin/providers");
 
@@ -234,14 +237,15 @@ test("Approvals and Automatic learning link to where the person sets their own",
   ).toBe("/skills");
 });
 
-test("Providers shows who serves the models and what the Bots ran on, without the team's settings", async () => {
+test("AI providers shows who serves the models and what the Bots ran on, without the team's settings", async () => {
   const view = await draw(ProvidersPage);
   expect(await view.findByText("OpenAI")).toBeTruthy();
   expect(
-    await view.findByText("Default gpt-5.6-terra · 2 models listed"),
+    await view.findByText("Default GPT-5.6 Terra · 2 models listed"),
   ).toBeTruthy();
   expect(await view.findByText("Every listed model")).toBeTruthy();
-  expect(await view.findByText("openai/gpt-5.6-terra")).toBeTruthy();
+  // Usage names the model as the provider lists it, not by its id.
+  expect(await view.findByText("GPT-5.6 Terra")).toBeTruthy();
   expect(view.getByText(/3 runs by 1 person/)).toBeTruthy();
   expect(view.queryByRole("alert")).toBeNull();
   expect(view.queryByText(FOR_A_TEAM)).toBeNull();
@@ -281,3 +285,31 @@ test("in the team edition the same pages are the team's, and ask for what they s
   expect(view.queryByText(FOR_A_TEAM)).toBeNull();
   expect(asked.some((path) => path.startsWith(PEOPLE_PATH))).toBe(true);
 });
+
+/*
+ * The personal edition's one person is its admin, and its server keeps no organization settings: it
+ * answers them 404. Admin's overview and Computers asked for them anyway, for the notice about
+ * shared computers, and the personal edition's Admin journey failed on the 404s. That notice is for
+ * a team's OpenBot, where every person's Bots can share one computer; here the computer is the
+ * person's own.
+ */
+// Computers is titled Computer here: one person's one computer.
+test.each([
+  ["Admin", AdminRoute],
+  ["Computer", ComputersRoute],
+])(
+  "%s asks the one person's server for no settings it has not got",
+  async (title, route) => {
+    queryClient.setQueryData(authKeys.currentUser(), {
+      id: "dev-local-user",
+      email: "dev@openbot.local",
+      name: "Dana",
+      role: "admin",
+    } as never);
+    const view = await draw(component(route));
+    await view.findByRole("heading", { level: 1, name: title });
+    await settleReactWork();
+    expect(asked).not.toContain(SETTINGS_PATH);
+    expect(view.queryByText("Everyone's Bots share one computer.")).toBeNull();
+  },
+);

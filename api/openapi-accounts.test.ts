@@ -34,9 +34,13 @@ test("a skin is one OpenBot ships, and nothing else", () => {
 
 test("the preferences are the ones a person has, each with a default", () => {
   const preferences = schemas.Preferences;
-  // Every preference the server answers with a default for, and the one it sets itself.
+  // Every preference the server answers with a default for, and the ones it sets itself.
   expect(Object.keys(preferences?.properties ?? {}).sort()).toEqual(
-    [...Object.keys(DEFAULT_USER_PREFERENCES), "starterTourChannelId"].sort(),
+    [
+      ...Object.keys(DEFAULT_USER_PREFERENCES),
+      "starterTourChannelId",
+      "noticesDue",
+    ].sort(),
   );
   expect([...(preferences?.required ?? [])].sort()).toEqual(
     Object.keys(DEFAULT_USER_PREFERENCES).sort(),

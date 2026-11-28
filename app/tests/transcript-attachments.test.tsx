@@ -66,7 +66,7 @@ import { settleReactWork } from "./settle-react-work";
  */
 let probeAnswer: () => Response | Promise<Response> = () =>
   new Response(null, { status: 200 });
-let probes: { url: string; method?: string }[] = [];
+let probes: { url: string; method?: string; cache?: string }[] = [];
 let realFetch: typeof fetch;
 
 beforeAll(() => {
@@ -76,6 +76,7 @@ beforeAll(() => {
     probes.push({
       url: String(input),
       ...(init?.method ? { method: init.method } : {}),
+      ...(init?.cache ? { cache: init.cache } : {}),
     });
     return Promise.resolve().then(() => probeAnswer());
   }) as typeof fetch;
@@ -180,8 +181,9 @@ test("an image attachment renders as an img carrying the attachment url", () => 
   expect(url).toBe("/api/attachments/att-image");
 });
 
-test("a broken image is replaced by a stated absence, not a broken-image glyph", () => {
-  const { getByRole, getByText, queryByRole } = renderTranscript([
+test("a broken image whose file is gone is replaced by a stated absence, not a broken-image glyph", async () => {
+  probeAnswer = () => new Response(null, { status: 404 });
+  const { getByRole, findByText, queryByRole } = renderTranscript([
     userMessage([imagePart(attachmentUrl("att-image"), "gone.png")]),
   ]);
 
@@ -190,8 +192,83 @@ test("a broken image is replaced by a stated absence, not a broken-image glyph",
 
   // The <img> element is gone entirely — this reader is never left staring at the browser's own
   // broken-image box, which says nothing about what actually happened.
+  expect(await findByText("gone.png is unavailable.")).toBeTruthy();
   expect(queryByRole("img")).toBeNull();
-  expect(getByText(/unavailable/i)).toBeTruthy();
+});
+
+/*
+ * A PICTURE THAT WILL NOT DRAW IS NOT A PICTURE THAT IS GONE. With files up to 100MB, a picture can
+ * be intact on the server and still not draw in a reader's browser (a phone's memory limit, damaged
+ * bytes). Its tile used to say, in the file's own name, that the file was unavailable. Only the
+ * server can say that, so the tile asks it, and a file that is there is drawn as the file it is:
+ * name, kind, size and a download.
+ */
+test("a picture the browser cannot draw is drawn as its file, with a download, when the file is there", async () => {
+  probeAnswer = () =>
+    new Response(null, {
+      status: 200,
+      headers: { "Content-Type": "image/png", "Content-Length": "99553808" },
+    });
+  const { getByRole, findByText, getByText, queryByText } = renderTranscript([
+    userMessage([imagePart(attachmentUrl("att-image"), "big-photo.png")]),
+  ]);
+
+  fireEvent.error(getByRole("img", { name: /attachment/i }));
+
+  expect(await findByText("PNG image · 95 MB")).toBeTruthy();
+  expect(getByText("big-photo.png")).toBeTruthy();
+  // The app's own Button over a link, as the Bot's file card draws its Download.
+  const download = getByRole("button", { name: "Download big-photo.png" });
+  expect(download.getAttribute("href")).toBe(attachmentPath("att-image"));
+  expect(queryByText(/unavailable/i)).toBeNull();
+  // Past the browser's cache: answered from the picture's own failed load, the size was lost.
+  expect(probes).toEqual([
+    { url: attachmentPath("att-image"), method: "HEAD", cache: "no-store" },
+  ]);
+});
+
+/** A stored picture as a sent message carries it now: the server's type and the file's size. */
+function sizedImagePart(id: string, filename: string, sizeBytes: number) {
+  return {
+    type: "image" as const,
+    source: {
+      type: "url" as const,
+      value: attachmentUrl(id),
+      mimeType: "image/png",
+    },
+    metadata: { attachmentId: id, filename, sizeBytes },
+  };
+}
+
+/*
+ * A PICTURE OVER 8MB IS NOT DOWNLOADED TO DRAW A THUMBNAIL. Pictures go up to 100MB on an install
+ * with an object store, and a tile that draws one fetches all of it, for every reader, on first
+ * paint. Over the old image limit the tile is the file instead: what it is, how large, a way to open
+ * it full size (which fetches it then) and a Download.
+ */
+test("a picture over 8MB is drawn as its file, with Open and Download, and nothing draws its bytes", () => {
+  const { getByRole, getByText, queryByRole } = renderTranscript([
+    userMessage([sizedImagePart("att-big", "site-survey.png", 99_553_808)]),
+  ]);
+
+  expect(queryByRole("img")).toBeNull();
+  expect(getByText("site-survey.png")).toBeTruthy();
+  expect(getByText("PNG image · 95 MB")).toBeTruthy();
+  expect(getByRole("button", { name: "Open site-survey.png" })).toBeTruthy();
+  const download = getByRole("button", { name: "Download site-survey.png" });
+  expect(download.getAttribute("href")).toBe(attachmentPath("att-big"));
+  // Not asked about either: the size is on the message, and a probe is a request.
+  expect(probes).toEqual([]);
+});
+
+test("a picture of 8MB or less still draws as its thumbnail", () => {
+  const { getByRole } = renderTranscript([
+    userMessage([sizedImagePart("att-small", "photo.png", 8 * 1024 * 1024)]),
+  ]);
+
+  expect(
+    getByRole("img", { name: "Attachment: photo.png" }).getAttribute("src"),
+  ).toBe(attachmentPath("att-small"));
 });
 
 test("an off-site attachment url is never fetched, it is reported missing", () => {
@@ -426,6 +503,77 @@ test("a document whose row is still there keeps its card", async () => {
   expect(getByText("report.pdf")).toBeTruthy();
   expect(getByText("Attachment")).toBeTruthy();
   expect(queryByText("report.pdf is unavailable.")).toBeNull();
+});
+
+/*
+ * A Word, Excel or PowerPoint file a person sent reads as what it is: its own icon, its kind and
+ * size from the type the server found, and a Download, the same way a Bot's file card says it.
+ */
+test("an Office file a person sent is drawn as its kind, with its size and a download", async () => {
+  const cases = [
+    {
+      filename: "Q3 budget.xlsx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      sizeBytes: 14_336,
+      label: "Excel workbook · 14 KB",
+      icon: "tabler-icon-file-type-xls",
+    },
+    {
+      filename: "memo.docx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      sizeBytes: 2_411_724,
+      label: "Word document · 2.3 MB",
+      icon: "tabler-icon-file-type-docx",
+    },
+    {
+      filename: "deck.pptx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      sizeBytes: 31_457_280,
+      label: "PowerPoint presentation · 30 MB",
+      icon: "tabler-icon-file-type-ppt",
+    },
+  ];
+  const { container, getByRole, getByText, queryByText } = renderTranscript([
+    userMessage(
+      cases.map(({ filename, mimeType, sizeBytes }, index) => ({
+        type: "document" as const,
+        source: {
+          type: "url" as const,
+          value: attachmentUrl(`att-office-${index}`),
+          mimeType,
+        },
+        metadata: { attachmentId: `att-office-${index}`, filename, sizeBytes },
+      })),
+    ),
+  ]);
+
+  await waitFor(() => expect(probes).toHaveLength(3));
+
+  expect(queryByText("Attachment")).toBeNull();
+  for (const [index, { filename, label, icon }] of cases.entries()) {
+    expect(getByText(filename)).toBeTruthy();
+    expect(getByText(label)).toBeTruthy();
+    const download = getByRole("button", { name: `Download ${filename}` });
+    expect(download.getAttribute("href")).toBe(
+      attachmentPath(`att-office-${index}`),
+    );
+    expect(container.querySelector(`svg.${icon}`)).not.toBeNull();
+  }
+
+  /*
+   * THE SIZE IS NEVER CUT OFF. "PowerPoint presentation · 30 MB" is wider than the tile, and cut
+   * with an ellipsis it read "PowerPoint presentation ·…" in the browser, losing the size. The line
+   * may wrap to a second line, and only before the kind's last word, so the size stays with it.
+   */
+  const facts = getByText("PowerPoint presentation · 30 MB");
+  expect(facts.className).not.toContain("truncate");
+  expect(facts.className).toContain("line-clamp-2");
+  expect(facts.textContent).toBe(
+    "PowerPoint presentation\u00a0·\u00a030\u00a0MB",
+  );
 });
 
 /*
@@ -861,8 +1009,9 @@ test("a parked picture the browser mislabelled is drawn as a picture", () => {
   expect(container.querySelector("img")?.getAttribute("src")).toBe(
     attachmentPath("att-shot"),
   );
-  // Not the file card: that caption is the fixed word every document tile carries.
+  // Not the file card, whose caption is the file's kind, or "Attachment" when no type came with it.
   expect(queryByText("Attachment")).toBeNull();
+  expect(queryByText("PNG image")).toBeNull();
 });
 
 /*
@@ -880,7 +1029,8 @@ test("a parked file the browser called a picture is drawn as a file", () => {
 
   expect(container.querySelector("img")).toBeNull();
   expect(getByText("notes.txt")).toBeTruthy();
-  expect(getByText("Attachment")).toBeTruthy();
+  // The file card, captioned with the kind the server found rather than a picture's.
+  expect(getByText("TXT file")).toBeTruthy();
 });
 
 /*

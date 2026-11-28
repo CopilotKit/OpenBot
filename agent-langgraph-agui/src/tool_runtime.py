@@ -25,6 +25,7 @@ from langchain_core.messages import (
 )
 from langgraph.graph import END
 
+from .thought_signatures import from_thread, sealed_events, with_sealed_calls
 from .whole_thread import WholeThreadAgent, is_server_instruction
 
 logger = logging.getLogger(__name__)
@@ -44,24 +45,14 @@ class RunTools:
     # The server retries this run itself (`openbotSendOnce`): the model is asked once per step and
     # a failure is handed back, where the model's own client would have retried it twice first.
     send_once: bool = False
+    # Gemini's thought signature for each call this run knows of, by call id: those the thread
+    # carried as a call's `encryptedValue`, and those the model gave in this run
+    # (thought_signatures.py).
+    signatures: dict = field(default_factory=dict, compare=False, repr=False)
 
 
 # The reasoning efforts the server sends, in its own spelling. Anything else is not an effort.
 RUN_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
-
-# Server-only props, read here and never passed to the integration, so none of them can reach
-# graph state, a checkpoint or a snapshot.
-OPENBOT_PROPS = {
-    "openbotRun",
-    "openbotDeploymentTools",
-    "openbotModel",
-    "openbotSendOnce",
-    "openbot_run",
-    "openbot_deployment_tools",
-    "openbot_model",
-    "openbot_send_once",
-}
-
 
 def run_model(props) -> tuple[str, str]:
     """The `(model, effort)` the server chose for this run, or empty strings.
@@ -165,13 +156,51 @@ def provider_name() -> str:
     return "Your model provider"
 
 
+# The kinds of refusal the server names: `errorCategory`, as the Claude harness sends Claude Code's.
+ERROR_CATEGORIES = frozenset(
+    {
+        "rate_limit",
+        "billing_error",
+        "server_error",
+        "invalid_request",
+        "authentication_failed",
+        "model_not_found",
+        "outdated_client",
+        "refusal",
+        "unknown",
+    }
+)
+
+
+def provider_category(error: BaseException) -> str | None:
+    """The kind of refusal the provider's error names itself, when it is one the server names.
+
+    OpenBot's own sign-in proxy (a Google or xAI sign-in on the desktop) reads the provider's
+    status and puts the kind in its error's `type`: Google's RESOURCE_EXHAUSTED is `rate_limit`,
+    UNAVAILABLE `server_error`, NOT_FOUND `model_not_found`. Of the providers' own types, only
+    OpenAI's `server_error` is one of these names, and it means the same.
+    """
+    for link in _links(error):
+        body = getattr(link, "body", None)
+        kind = body.get("type") if isinstance(body, dict) else None
+        if isinstance(kind, str) and kind in ERROR_CATEGORIES:
+            return kind
+    return None
+
+
 def billing_refusal(error: BaseException) -> str | None:
     """The refusal as a person should read it, when the provider is out of credit or at its limit.
 
     Told as that, with which provider and in its own words, rather than as "sign in again", which
     an account with no credit cannot fix. None for any other error, which keeps its own handling.
+
+    Not when the error names another kind itself (`provider_category`). Google's free tier answers
+    its daily limit with "You exceeded your current quota, please check your plan and billing
+    details", which reads as out of credit and is a limit that resets.
     """
     if not provider_refusal(error):
+        return None
+    if provider_category(error) not in (None, "billing_error"):
         return None
     said = _provider_detail(error) or str(error)
     if not BILLING.search(f"{said} {error}"):
@@ -338,6 +367,7 @@ class ToolAwareAgent(WholeThreadAgent):
             model=model,
             effort=effort,
             send_once=props.get("openbotSendOnce") is True,
+            signatures=from_thread(input.messages or []),
         )
         # The maintained endpoint clones this subclass per request. ContextVar
         # also isolates graph tasks across concurrent requests and resets on
@@ -346,11 +376,12 @@ class ToolAwareAgent(WholeThreadAgent):
         token = _current.set(context)
         ended = False
         try:
-            clean_props = {
-                key: value for key, value in props.items() if key not in OPENBOT_PROPS
-            }
+            # None of the props goes on. The server's are read above; the rest are whatever the
+            # browser sent, and the integration takes some as orders: `nodeName` starts the graph
+            # past the model, running a call left in the thread with the arguments it carries, and
+            # `command` resumes the graph instead of starting it from the thread.
             async with aclosing(
-                super().run(input.model_copy(update={"forwarded_props": clean_props}))
+                super().run(input.model_copy(update={"forwarded_props": {}}))
             ) as stream:
                 async for event in stream:
                     if event.type == EventType.RUN_ERROR and context.connection.get(
@@ -359,6 +390,8 @@ class ToolAwareAgent(WholeThreadAgent):
                         event = event.model_copy(
                             update={"code": "OPENBOT_MODEL_AUTH_REQUIRED"}
                         )
+                    if event.type == EventType.MESSAGES_SNAPSHOT:
+                        event = with_sealed_calls(event, context.signatures)
                     if event.type in (EventType.RUN_FINISHED, EventType.RUN_ERROR):
                         ended = True
                     yield event
@@ -397,10 +430,15 @@ class ToolAwareAgent(WholeThreadAgent):
                 # Raised, it ended the response stream after RUN_STARTED with no terminal event,
                 # and the provider's reason never reached anyone. Coded as a refusal, so the server
                 # tells it in words and keeps the provider's for its log (provider-refusal.ts).
+                # The kind, when the error names it, goes with them as `errorCategory`.
                 message = provider_message(error)
+                category = provider_category(error)
                 logger.warning("The model provider refused the run: %s", message)
                 yield RunErrorEvent(
-                    type=EventType.RUN_ERROR, message=message, code="OPENBOT_MODEL_REFUSED"
+                    type=EventType.RUN_ERROR,
+                    message=message,
+                    code="OPENBOT_MODEL_REFUSED",
+                    **({"metadata": {"errorCategory": category}} if category else {}),
                 )
             elif ended:
                 raise
@@ -412,6 +450,20 @@ class ToolAwareAgent(WholeThreadAgent):
                 yield RunErrorEvent(type=EventType.RUN_ERROR, message=RUN_FAILED)
         finally:
             _current.reset(token)
+
+    async def _handle_single_event(self, event, state):
+        async for result in super()._handle_single_event(event, state):
+            yield result
+        if event.get("event") != "on_chat_model_end":
+            return
+        # A finished step's calls have all ended above: each one Gemini signed now gets its
+        # signature, which the caller keeps on the call and sends back with it.
+        message = (event.get("data") or {}).get("output")
+        for sealed in sealed_events(message, self._resolve_public_tool_call_id):
+            current_tools().signatures[sealed.entity_id] = sealed.encrypted_value
+            dispatched = self._dispatch_event(sealed)
+            if dispatched is not None:
+                yield dispatched
 
 
 # What a system row that is not the server's own is introduced with when it reaches the model.
@@ -446,19 +498,86 @@ def model_messages(messages):
     Only here, at the model's door, is a system row that is not the server's own relabelled. The
     graph state keeps it as it arrived, so the snapshot the Bot returns gives the thread back as
     the server sent it.
+
+    A context entry that repeats one of the server's instruction rows is not said again. OpenBot
+    sends a Bot's standing role, its tool guidance and its learned Skills catalog both as system
+    messages and as reserved context entries ("OpenBot standing role", "OpenBot granted tools
+    guidance", "OpenBot learned skills"), with the same text, so that an agent reading only one
+    still sees them. Here the thread carries them, so the model is told each once, as an
+    instruction. Only an instruction row counts: a context entry that repeats a row this function
+    quotes as conversation is not dropped for it.
+
+    The person's memory ("OpenBot personal memory", which OpenBot sends as context alone) is data,
+    never an instruction: it is said once, quoted as conversation, after the instructions.
     """
+    thread = convert_to_messages(messages)
+    instructions = {
+        _text(message.content).strip()
+        for message in thread
+        if is_server_instruction(message)
+    }
+    quoted = {
+        _text(message.content).strip()
+        for message in thread
+        if isinstance(message, SystemMessage) and not is_server_instruction(message)
+    }
+    context = [
+        entry
+        for entry in current_tools().context
+        if str(entry.value).strip() not in instructions
+    ]
+    data = [
+        _as_conversation_data(entry)
+        for entry in context
+        if entry.description in DATA_CONTEXT and str(entry.value).strip() not in quoted
+    ]
+    said = [
+        _as_conversation(message)
+        if isinstance(message, SystemMessage) and not is_server_instruction(message)
+        else message
+        for message in thread
+    ]
+    # The data goes after the system messages the thread opens with, so every instruction stays
+    # ahead of every turn of conversation, as a provider that takes one system prompt needs.
+    first_turn = next(
+        (index for index, message in enumerate(said) if not isinstance(message, SystemMessage)),
+        len(said),
+    )
     return [
         *[
             SystemMessage(content=f"{entry.description}\n{entry.value}")
-            for entry in current_tools().context
+            for entry in context
+            if entry.description not in DATA_CONTEXT
         ],
-        *[
-            _as_conversation(message)
-            if isinstance(message, SystemMessage) and not is_server_instruction(message)
-            else message
-            for message in convert_to_messages(messages)
-        ],
+        *said[:first_turn],
+        *data,
+        *said[first_turn:],
     ]
+
+
+# Context entries that carry data and never instructions: the person's memory, its records quoted
+# as untrusted data by the server (`PersonalMemoryMiddleware` in server/src/memory/tools.ts).
+DATA_CONTEXT = frozenset({"OpenBot personal memory"})
+
+
+def _as_conversation_data(entry):
+    """A context entry that is data, as a labelled entry in the conversation, like a quoted row."""
+    return HumanMessage(
+        content=f"{CONVERSATION_SYSTEM_ROW}\n"
+        + json.dumps({"role": "context", "description": entry.description, "content": entry.value})
+    )
+
+
+def _text(content) -> str:
+    """A message's words, whether its content is a string or a list of parts."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "") if isinstance(part, dict) and part.get("type") == "text" else ""
+            for part in content
+        )
+    return ""
 
 
 def bind_tools(model):

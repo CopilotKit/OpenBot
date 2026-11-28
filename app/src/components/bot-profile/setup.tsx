@@ -10,9 +10,10 @@ import {
   IconTextCaption,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Fragment, useState } from "react";
+import { Fragment, useId, useState } from "react";
 import type { ZodType } from "zod";
 import { CallbackTokenPanel } from "@/components/agents/callback-token-panel";
+import { DefaultModelSection } from "@/components/bot-profile/default-model";
 import { BusinessComputerLink } from "@/components/edition/team-features-dialog";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ import {
   Dialog,
   DialogBody,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -45,24 +47,28 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   type AgentFormValues,
+  agentEndpointSchema,
   agentFormSchema,
   profileUpdateInput,
 } from "@/lib/agents/form";
 import {
   ISOLATED_MAKING_PUBLIC,
   ISOLATED_PUBLIC_SHARES_LOGINS,
-  ISOLATION_GONE,
   ISOLATION_NOT_ALLOWED,
-  ISOLATION_UNAVAILABLE,
   ISOLATION_WITHDRAWN,
   isolatedExplained,
+  isolationGone,
+  isolationUnavailable,
 } from "@/lib/agents/isolation";
 import { updateAgentMutationOptions } from "@/lib/agents/mutations";
+import { publicVisibilityWords } from "@/lib/agents/public-words";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { shownSubtitle } from "@/lib/agents/subtitle";
 import { isComposing } from "@/lib/composing";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
+import { useOrganizationAudience } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
 
 type TextField = "name" | "title" | "roleDescription" | "instructions";
@@ -107,7 +113,7 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const update = useMutation(updateAgentMutationOptions(queryClient));
-  const [editing, setEditing] = useState<TextField | null>(null);
+  const [editing, setEditing] = useState<TextField | "endpoint" | null>(null);
   const save = (patch: Partial<AgentFormValues>) =>
     update.mutateAsync({
       agentId: agent.id,
@@ -204,7 +210,22 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
           ) : null}
         </PageRows>
       </PageSection>
-      <ConnectionSection agent={agent} />
+      <ConnectionSection
+        agent={agent}
+        onEditEndpoint={() => setEditing("endpoint")}
+      />
+      {agent.defaultModel !== undefined ? (
+        <DefaultModelSection
+          agent={agent}
+          onSave={(defaultModel) =>
+            update.mutateAsync({
+              agentId: agent.id,
+              input: { ...profileUpdateInput(agent, {}), defaultModel },
+            })
+          }
+          saving={update.isPending}
+        />
+      ) : null}
       {open ? (
         <EditTextDialog
           label={open.label}
@@ -213,6 +234,21 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
           onSave={(value) => saveText(open.field, value)}
           schema={TEXT_SCHEMAS[open.field]}
           value={shown(open.field) ?? ""}
+        />
+      ) : null}
+      {editing === "endpoint" ? (
+        <EditTextDialog
+          address
+          description="This Bot’s replies come from the agent at this address."
+          label="Agent URL"
+          multiline={false}
+          onClose={() => setEditing(null)}
+          // The same address saved back changes nothing, so it is not sent to be checked again.
+          onSave={async (endpoint) => {
+            if (endpoint !== agent.endpoint) await save({ endpoint });
+          }}
+          schema={agentEndpointSchema}
+          value={agent.endpoint ?? ""}
         />
       ) : null}
     </>
@@ -228,7 +264,9 @@ function VisibilityRow({
   onSave: (visibility: AgentProfile["visibility"]) => Promise<unknown>;
 }) {
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Failure | null>(null);
+  // Public is everyone in this organization, by name where the app knows it.
+  const everyone = publicVisibilityWords(useOrganizationAudience());
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
@@ -237,14 +275,14 @@ function VisibilityRow({
       <ItemContent>
         <ItemTitle>Visibility</ItemTitle>
         <ItemDescription>
-          {error ??
+          {failureSaid(error) ??
             (agent.visibility === "private"
               ? agent.isolationActive
                 ? `Only you can see it and start conversations with it. ${ISOLATED_MAKING_PUBLIC}`
                 : "Only you can see it and start conversations with it."
               : agent.isolationActive
-                ? `Everyone on OpenBot can find and use it. ${ISOLATED_PUBLIC_SHARES_LOGINS}`
-                : "Everyone on OpenBot can find and use it.")}
+                ? `${everyone} ${ISOLATED_PUBLIC_SHARES_LOGINS}`
+                : everyone)}
         </ItemDescription>
       </ItemContent>
       <ItemActions>
@@ -260,11 +298,7 @@ function VisibilityRow({
               try {
                 await onSave(next as AgentProfile["visibility"]);
               } catch (failure) {
-                setError(
-                  failure instanceof Error
-                    ? failure.message
-                    : "Couldn't save. Try again.",
-                );
+                setError(failureOf(failure, "Couldn't save. Try again."));
               } finally {
                 setSaving(false);
               }
@@ -311,8 +345,10 @@ function IsolatedRow({
   const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
   const { data: mine } = useQuery(myCapabilitiesQueryOptions());
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Failure | null>(null);
   const available = capabilities?.isolatedBots ?? false;
+  // OpenBot Cloud gives each person one computer; the row says so and where a Bot can have its own.
+  const cloud = capabilities?.hostedSignIn === true;
   const allowed = mine?.capabilities.isolatedComputers !== false;
   const isPublic = agent.visibility === "public";
   // A Bot that comes with OpenBot belongs to nobody, and the switch is a person's.
@@ -321,6 +357,10 @@ function IsolatedRow({
     !agent.systemOwned &&
     (agent.isolated || (available && allowed));
 
+  // Whether the row says this OpenBot can't give a Bot a computer of its own.
+  const deploymentCant = agent.isolated
+    ? !agent.isolationActive && agent.isolationOffReason === "deployment"
+    : !available;
   const summary = agent.systemOwned
     ? "Comes with OpenBot, so it runs on the computer of whoever is using it."
     : agent.isolated
@@ -329,10 +369,10 @@ function IsolatedRow({
         : agent.isolationOffReason === "admin"
           ? ISOLATION_WITHDRAWN
           : agent.isolationOffReason === "deployment"
-            ? ISOLATION_GONE
+            ? isolationGone(cloud)
             : sharedSummary(isPublic)
       : !available
-        ? ISOLATION_UNAVAILABLE
+        ? isolationUnavailable(cloud)
         : !allowed && agent.canManage
           ? ISOLATION_NOT_ALLOWED
           : sharedSummary(isPublic);
@@ -345,8 +385,11 @@ function IsolatedRow({
       <ItemContent>
         <ItemTitle id={`isolated-${agent.id}`}>Isolated</ItemTitle>
         <ItemDescription className="line-clamp-none">
-          {error ?? summary}
+          {failureSaid(error) ?? summary}
         </ItemDescription>
+        {cloud && deploymentCant && !agent.systemOwned && !error ? (
+          <BusinessComputerLink className="text-xs" />
+        ) : null}
       </ItemContent>
       <ItemActions>
         {agent.canManage && !agent.systemOwned ? (
@@ -360,11 +403,7 @@ function IsolatedRow({
               try {
                 await onSave(next);
               } catch (failure) {
-                setError(
-                  failure instanceof Error
-                    ? failure.message
-                    : "Couldn't save. Try again.",
-                );
+                setError(failureOf(failure, "Couldn't save. Try again."));
               } finally {
                 setSaving(false);
               }
@@ -391,31 +430,50 @@ function sharedSummary(isPublic: boolean): string {
  * One text field in a dialog, validated against the same limits the server enforces. Enter saves a
  * single-line field — but not the Enter that confirms a composed character, which would save the
  * value before the person finished typing it.
+ *
+ * What is wrong shows under the field, whether this check or the server's refusal found it, and
+ * the field is marked invalid and described by it only while it is shown, so a screen reader reads
+ * it with the field and not before anything went wrong. `address` is a web address: the URL
+ * keyboard, monospace like the row it edits, and nothing corrected as it is typed.
  */
 function EditTextDialog({
   label,
+  description,
   value,
   multiline,
+  address = false,
   schema,
   onSave,
   onClose,
 }: {
   label: string;
+  description?: string;
   value: string;
   multiline: boolean;
+  address?: boolean;
   schema: ZodType<string>;
   onSave: (value: string) => Promise<unknown>;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // A refused save is kept whole, not as its words, so a hold is drawn calmly (`failureSaid`).
+  const [error, setError] = useState<Failure | null>(null);
+  const errorId = useId();
+  const [field, setField] = useState<
+    HTMLInputElement | HTMLTextAreaElement | null
+  >(null);
+  const refuse = (failure: Failure) => {
+    setError(failure);
+    field?.focus();
+  };
   const submit = async () => {
     const parsed = schema.safeParse(draft);
     if (!parsed.success) {
-      setError(
-        parsed.error.issues[0]?.message ?? "Check this field and try again.",
-      );
+      refuse({
+        message:
+          parsed.error.issues[0]?.message ?? "Check this field and try again.",
+      });
       return;
     }
     setSaving(true);
@@ -423,29 +481,37 @@ function EditTextDialog({
       await onSave(parsed.data);
       onClose();
     } catch (failure) {
-      setError(
-        failure instanceof Error
-          ? failure.message
-          : "Couldn't save. Try again.",
-      );
+      refuse(failureOf(failure, "Couldn't save. Try again."));
     } finally {
       setSaving(false);
     }
   };
+  const invalid = error
+    ? { "aria-invalid": true, "aria-describedby": errorId }
+    : {};
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{label}</DialogTitle>
+          {description ? (
+            <DialogDescription>{description}</DialogDescription>
+          ) : null}
         </DialogHeader>
-        <DialogBody className="mt-4 grid gap-2">
+        {/*
+         * The body scrolls, so it clips what is drawn outside it: 4px of padding above and below keep
+         * the field's focus and error rings whole, and the margins are 4px less to keep the gaps.
+         */}
+        <DialogBody className="mt-3 grid gap-2 py-1">
           {multiline ? (
             <Textarea
               aria-label={label}
               autoFocus
               onChange={(event) => setDraft(event.target.value)}
+              ref={setField}
               rows={5}
               value={draft}
+              {...invalid}
             />
           ) : (
             <Input
@@ -458,16 +524,29 @@ function EditTextDialog({
                   void submit();
                 }
               }}
+              ref={setField}
               value={draft}
+              {...invalid}
+              {...(address
+                ? {
+                    autoCapitalize: "off",
+                    autoComplete: "off",
+                    autoCorrect: "off",
+                    className: "font-mono",
+                    inputMode: "url" as const,
+                    spellCheck: false,
+                    type: "url",
+                  }
+                : {})}
             />
           )}
           {error ? (
-            <p className="text-destructive text-sm" role="alert">
-              {error}
+            <p className="text-destructive text-sm" id={errorId} role="alert">
+              {failureSaid(error)}
             </p>
           ) : null}
         </DialogBody>
-        <DialogFooter className="mt-4">
+        <DialogFooter className="mt-3">
           <Button
             disabled={saving}
             onClick={onClose}
@@ -486,33 +565,50 @@ function EditTextDialog({
 }
 
 /**
- * Where it runs. A built-in Bot runs on the deployment's own Bot, whose process already holds the
- * deployment's tool credential, so there is nothing to show but that sentence.
+ * The address a Bot connected from outside OpenBot answers at, for the developer who connected it.
+ * A Bot that runs inside OpenBot has no such section: what runs it is not the person's concern, and
+ * there is nothing to connect.
+ *
+ * Whoever manages the Bot can move it to another address: the row opens a dialog, like the Identity
+ * rows above it.
  */
-function ConnectionSection({ agent }: { agent: AgentProfile }) {
-  const builtIn = !agent.endpoint || agent.builtIn;
+function ConnectionSection({
+  agent,
+  onEditEndpoint,
+}: {
+  agent: AgentProfile;
+  onEditEndpoint: () => void;
+}) {
+  if (!agent.endpoint || agent.builtIn) return null;
+  const editable = agent.canManage;
   return (
     <PageSection title="Connection">
       <PageRows>
-        <Item size="sm">
+        <Item
+          render={
+            editable ? (
+              <button onClick={onEditEndpoint} type="button" />
+            ) : undefined
+          }
+          size="sm"
+        >
           <ItemMedia variant="icon">
             <IconPlugConnected />
           </ItemMedia>
           <ItemContent>
-            <ItemTitle>{builtIn ? "Built in" : "Agent URL"}</ItemTitle>
-            <ItemDescription
-              className={
-                builtIn ? undefined : "line-clamp-none break-all font-mono"
-              }
-            >
-              {builtIn
-                ? "Runs inside OpenBot. There's nothing to connect."
-                : agent.endpoint}
+            <ItemTitle>Agent URL</ItemTitle>
+            <ItemDescription className="line-clamp-none break-all font-mono">
+              {agent.endpoint}
             </ItemDescription>
           </ItemContent>
+          {editable ? (
+            <ItemActions>
+              <IconChevronRight className="size-4 text-muted-foreground" />
+            </ItemActions>
+          ) : null}
         </Item>
       </PageRows>
-      {!builtIn && agent.canManage ? (
+      {agent.canManage ? (
         <CallbackTokenPanel
           agentId={agent.id}
           hasToken={agent.hasCallbackToken}

@@ -7,7 +7,7 @@ export interface UpdateTeamRequest {
    * What people call it.
    * @minLength 1
    * @maxLength 100
-   * @pattern ^[^\x00]*\S[^\x00]*$
+   * @pattern ^[^\x00]*[^\s\x00][^\x00]*$
    */
   name?: string;
   /**

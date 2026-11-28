@@ -16,13 +16,25 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { updateRoutingQueryOptions } from "@/lib/bot-lifecycle/queries";
 import {
   type Delivery,
   deliveriesQueryOptions,
   devicesQueryOptions,
   removePushDeviceMutationOptions,
 } from "@/lib/delivery";
+import { failureSaid, isHeld } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
+
+/**
+ * Whether OpenBot holding off is already said on this page, by "Where updates go" above
+ * (`UpdateRoutingSection`), whose read it holds off at the same time. Said there once, not again
+ * under each section.
+ */
+function useHoldSaidAbove(): boolean {
+  const routing = useQuery(updateRoutingQueryOptions());
+  return routing.data === undefined && isHeld(routing.error);
+}
 
 const PLATFORM: Record<"ios" | "android", string> = {
   ios: "iOS",
@@ -53,7 +65,7 @@ const KIND: Record<Delivery["kind"], string> = {
  * Where a delivery got to. `accepted` is the provider taking it without saying yet that it arrived,
  * and `unknown` is a send that may or may not have gone; the error under the row says which.
  */
-const STATE: Record<Delivery["state"], string> = {
+const STATE: Partial<Record<string, string>> = {
   queued: "Waiting to send",
   running: "Sending",
   accepted: "Sending",
@@ -64,11 +76,28 @@ const STATE: Record<Delivery["state"], string> = {
   opted_out: "Not sent",
 };
 
+/**
+ * A delivery's line under its kind: how it went out, where it got to, and when. A state a newer
+ * server sends that this app doesn't know is left out.
+ */
+export function deliveryLine(
+  delivery: Pick<Delivery, "transport" | "state" | "createdAt">,
+): string {
+  return [
+    CHANNEL[delivery.transport],
+    STATE[delivery.state],
+    new Date(delivery.createdAt).toLocaleString(),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 /** The phones that receive push notifications for every one of the person's Bots. */
 export function NativeDevices() {
   const devices = useQuery(devicesQueryOptions());
   const remove = useMutation(removePushDeviceMutationOptions(queryClient));
-  const error = devices.error ?? remove.error;
+  const saidAbove = useHoldSaidAbove() && isHeld(devices.error);
+  const error = (saidAbove ? null : devices.error) ?? remove.error;
   return (
     <PageSection
       description="Sign in to the OpenBot app on your phone and turn on notifications to add it here."
@@ -76,7 +105,7 @@ export function NativeDevices() {
     >
       {error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
       {devices.isPending || !devices.data ? null : devices.data.length === 0 ? (
@@ -117,11 +146,12 @@ export function NativeDevices() {
 /** What was sent to the person outside the web app, most recent first, with any failure. */
 export function RecentDeliveries() {
   const deliveries = useQuery(deliveriesQueryOptions());
+  const saidAbove = useHoldSaidAbove() && isHeld(deliveries.error);
   return (
     <PageSection title="Recent deliveries">
-      {deliveries.error ? (
+      {deliveries.error && !saidAbove ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {deliveries.error.message}
+          {failureSaid(deliveries.error)}
         </p>
       ) : null}
       {deliveries.isPending || !deliveries.data ? null : deliveries.data
@@ -140,10 +170,7 @@ export function RecentDeliveries() {
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>{KIND[delivery.kind]}</ItemTitle>
-                  <ItemDescription>
-                    {CHANNEL[delivery.transport]} · {STATE[delivery.state]} ·{" "}
-                    {new Date(delivery.createdAt).toLocaleString()}
-                  </ItemDescription>
+                  <ItemDescription>{deliveryLine(delivery)}</ItemDescription>
                   {delivery.error ? (
                     <ItemDescription className="line-clamp-none text-destructive">
                       {delivery.error}

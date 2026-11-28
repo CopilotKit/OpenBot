@@ -32,6 +32,7 @@ import {
   localReadiness,
   onInstalledReleaseSaid,
   podmanTooSmallSaid,
+  resourcesShortSaid,
 } from "./localReadiness";
 import { PodmanTooSmall, usePodmanPlan } from "./PodmanTooSmall";
 import {
@@ -81,6 +82,13 @@ export type StartOutcome = "started" | "failed" | "deferred" | "opening";
  */
 const POLL_DELAYS: number[] = [2_000, 4_000, 8_000, ...Array(12).fill(15_000)];
 
+/** While a status call has run out of time and the wait asks again. */
+export const BACKEND_SLOW_SAID =
+  "OpenBot's services are slow to answer. OpenBot keeps checking.";
+/** When no status call answered before the wait's checks ran out. */
+export const BACKEND_SILENT_SAID =
+  "OpenBot's services didn't answer in time. Retry to check again.";
+
 /** How often a running setup or update asks how far its download has got. */
 const DOWNLOAD_EVERY_MS = 1_000;
 
@@ -107,6 +115,21 @@ const PHASES: [Phase, string][] = [
   // Not "Starting OpenBot": that is the screen's own heading.
   ["start", "Opening OpenBot"],
 ];
+
+/**
+ * The rows as a first run's Finishing setup says them. There OpenBot opens only on Open OpenBot,
+ * once it is up, so its last row is "Starting OpenBot", which is not that screen's heading.
+ */
+export function firstRunRows(sequence: LocalSequence): LocalSequence {
+  return {
+    ...sequence,
+    steps: sequence.steps.map((row) =>
+      row.step === "Opening OpenBot"
+        ? { ...row, step: "Starting OpenBot" }
+        : row,
+    ),
+  };
+}
 
 /** The readiness sentence for one CLI answer or failure category. */
 function said(intelligence: LocalReport | LocalFailure): string {
@@ -140,6 +163,43 @@ function isReady(report: LocalReport): boolean {
     openBot: "connected",
     provider: "validated",
   }).open;
+}
+
+/*
+ * A back end that runs but does not answer yet because some of its services are still coming up:
+ * `degraded`, its checks failing, and a service the CLI saw running or pending but not ready. It
+ * gets there on its own, so it is waited on like one that says `starting`. Found in a dogfooding
+ * report on a Mac: the server stopped mid-use, and on Retry six of eight services were ready and
+ * the other two were running but not ready yet. The window gave up on the first answer.
+ *
+ * Not a back end with a disk OpenBot found short (`shortfall`), or with an update on record: those
+ * do not come back by themselves, and their rows say what to do. Not one the CLI did not say the
+ * services of, as an older one does not: nothing says it is on its way.
+ */
+/**
+ * Degraded with nothing that waiting will not change: no reason, no shortfall, no update on record,
+ * and a licence that is valid or not said. What a backend still coming up, or coming back from a
+ * slow spell, reports while its checks catch up.
+ */
+function degradedWhileStarting(report: LocalReport): boolean {
+  return !(
+    report.outcome !== "completed" ||
+    report.reason !== null ||
+    report.readiness !== "degraded" ||
+    report.checksPassed === true ||
+    report.shortfall ||
+    (report.licence !== "valid" && report.licence !== "unknown") ||
+    report.stack?.unfinishedUpdate
+  );
+}
+
+function servicesComingUp(report: LocalReport): boolean {
+  if (!degradedWhileStarting(report)) return false;
+  return (report.stack?.observed?.services ?? []).some(
+    (service) =>
+      !service.ready &&
+      (service.phase === "Running" || service.phase === "Pending"),
+  );
 }
 
 type State = {
@@ -575,8 +635,18 @@ export function useLocalSequence({
     const unfollowSteps = followUpdateSteps(started.attempt, token, updating);
     let updated = false;
     let stalled = false;
+    // Not started, for lack of room (`local_eval::update_room`): nothing changed, and the run stops
+    // here with what is short, before OpenBot's own update.
+    let short: Shortfall | null = null;
     try {
-      updated = (await started.report).outcome === "completed";
+      const answer = await started.report;
+      updated = answer.outcome === "completed";
+      if (
+        answer.reason === "resources-short" &&
+        answer.shortfall?.updating === true
+      ) {
+        short = answer.shortfall;
+      }
     } catch (error) {
       updated = false;
       stalled =
@@ -592,6 +662,20 @@ export function useLocalSequence({
     if (generation.current === token)
       update({ trailKind: null, since: Date.now() });
     if (generation.current !== token) return false;
+    if (short) {
+      update({
+        detail: null,
+        download: null,
+        updating: false,
+        running: false,
+        blocked: {
+          said: resourcesShortSaid(short),
+          reason: "resources-short",
+          shortfall: short,
+        },
+      });
+      return false;
+    }
     update({
       detail: null,
       download: null,
@@ -644,7 +728,8 @@ export function useLocalSequence({
 
   /**
    * Status until the CLI reports ready and valid, or anything that waiting will not change.
-   * Only "starting" is waited on: unknown is what an older CLI always says. A stopped stack is
+   * Only "starting" is waited on, and a back end whose services are still coming up
+   * (`servicesComingUp`): unknown is what an older CLI always says. A stopped stack is
    * started once, as its own readiness row offers.
    */
   async function waitForReady(
@@ -671,9 +756,52 @@ export function useLocalSequence({
     let woken = false;
     // The release an update that just failed was moving to, until the next answer says where.
     let failedTo: string | null = null;
+    /*
+     * A status call that runs out of time is a backend slow to answer, not a setup that failed.
+     * Found in a dogfooding report: the container engine stalled for a few minutes, the CLI's
+     * service listing took 115 seconds, and the one status call ran out at its 120-second limit.
+     * The window took that single call as the whole setup timing out, stopped at the first check
+     * and said "took too long to set up". Retry four minutes later answered in a tenth of a second.
+     * So it is asked again on the wait's own schedule, like a backend still starting.
+     */
+    const status = () => {
+      const started = runLocalEval("status", id);
+      const answer = started.report.catch((error: unknown) => {
+        if (error instanceof LocalEvalError && error.category === "timeout")
+          return "timeout" as const;
+        throw error;
+      });
+      return call({ attempt: started.attempt, answer }, token);
+    };
+    let slow = false;
+    // Whether any status call in this wait ran out of time. A backend coming back from a slow spell
+    // says degraded while its checks catch up: found on the Windows pass of this fix, after the
+    // backend's CPU was held back for four and a half minutes, the first answer was degraded and
+    // the wait ended at once with "OpenBot is running but not working properly".
+    let wasSlow = false;
     for (let tries = 0; ; tries += 1) {
-      const found = await report("status");
+      const found = await status();
       if (!found) return null;
+      if (found === "timeout") {
+        if (tries >= pollDelays.length) {
+          // The log says how long it waited and that the last call ran out of time.
+          backEndWaitEnded(BACKEND_SILENT_SAID);
+          update({
+            detail: null,
+            blocked: { said: BACKEND_SILENT_SAID, reason: null },
+          });
+          return null;
+        }
+        slow = true;
+        wasSlow = true;
+        update({ detail: BACKEND_SLOW_SAID });
+        if (!(await pause(pollDelays[tries], token))) return null;
+        continue;
+      }
+      if (slow) {
+        slow = false;
+        update({ detail: null });
+      }
       // How many of its services are up: how far along the back end's start is.
       const services = found.stack?.observed?.services;
       if (services?.length)
@@ -792,12 +920,17 @@ export function useLocalSequence({
       }
       const waking =
         woken && found.readiness === "degraded" && unfinished !== null;
+      const comingUp =
+        servicesComingUp(found) || (wasSlow && degradedWhileStarting(found));
       if (
         !waking &&
+        !comingUp &&
         (found.readiness !== "starting" || row.state === "blocked")
       ) {
         return stuck(found);
       }
+      // Still not working when the time is up: said as it is, and the log says how long it waited.
+      if (comingUp && tries >= pollDelays.length) return stuck(found);
       if (tries >= pollDelays.length) {
         const timedOut =
           "OpenBot didn't get ready in time. Retry to check again.";
@@ -1013,16 +1146,25 @@ export function useLocalSequence({
    * itself when its cluster is gone (`lost_stack` in local_eval.rs) and sets up a new one, and
    * connect, wait and start follow as on a first setup: one journey forward. The sign-in and the AI
    * connection are kept: neither was in what went.
+   *
+   * The same for a backend whose cluster alone is gone (`backend-gone`), as after
+   * `docker container prune` removed its stopped node: setup makes the cluster again for the same
+   * stack, with its saved licence and keys, so OpenBot's own data and its link to the backend stay.
+   * OpenBot's own installation is left as it is there, never installed again: a Mac whose folder
+   * was still on 1.0.3 under Desktop 1.1.2 failed a first install that asked for a Bot 1.0.3 did
+   * not have, while Start takes the update path, moving the folder to this app's release first.
    */
   async function startFresh() {
     if (now.current.running) return;
+    // Only the backend went: OpenBot's own installation is as it was, and is not installed again.
+    const backendOnly = now.current.blocked?.reason === "backend-gone";
     halt();
     const token = generation.current;
     go.current = true;
     latest.current.onForgotten();
     // Nothing of the lost backend's rows is left to show: the install's rows come first.
     update(idle);
-    if (!(await latest.current.installAgain())) return;
+    if (!backendOnly && !(await latest.current.installAgain())) return;
     // Stopped or left while it installed.
     if (generation.current !== token) return;
     void run("setup");
@@ -1130,9 +1272,18 @@ export function LocalIntelligence({
   open = [],
   releaseDue = false,
   waitingOn = null,
+  room = null,
+  presentation = "default",
 }: {
   sequence: LocalSequence;
+  presentation?: "default" | "rail";
   offerStart?: boolean;
+  /**
+   * An update this computer has no room for (`local_eval::update_room`), said with its figures
+   * under the screen's heading, with Retry beside it. The row that stopped says why in a few
+   * words, the rows hold no Retry of their own, and the logs are offered once, here.
+   */
+  room?: { reason: string; logs: Problem } | null;
   /**
    * What the person has to choose before the sequence can go on, when it stopped for that: its
    * row waits on them, with no Failed and no Retry (leftover data, `StartFresh`).
@@ -1148,49 +1299,89 @@ export function LocalIntelligence({
   const { at, running, stopped, problem } = sequence;
   const tooSmall = stopped ? sequence.blocked?.shortfall : undefined;
   const plan = usePodmanPlan(tooSmall);
-  // While it runs, one journey says what is happening and how far along the whole Start is. The
-  // rows then say which part is done and which is left, and nothing twice.
-  // Paused for room: its row says so, with Try again, and no time left counts down.
+  // The journey owns the current operation. Only finished work belongs in its quiet milestones;
+  // update notes and recovery directions stay visible separately, without claiming completion.
   const journeying = offerStart && running && !stopped && !sequence.held;
-  // Its download's bar is the journey's too: the running row keeps only what is particular to it.
   const releasing = open.some((row) => row.step === "release" && row.running);
+  const releaseDetail = at === "start" && releasing;
+  const detail = releaseDetail ? RELEASE_SAID : sequence.detail;
+  const completed = (row: Progress) =>
+    row.ok &&
+    !row.running &&
+    !row.waiting &&
+    !row.paused &&
+    !row.pending &&
+    !row.note;
+  const notices = journeying
+    ? sequence.steps.filter((row) => !completed(row) && !row.running)
+    : [];
   const rows = journeying
-    ? sequence.steps.map((row) =>
-        row.running
-          ? {
-              ...row,
-              downloads: undefined,
-              detail: at === "start" && releasing ? RELEASE_SAID : row.detail,
-            }
-          : row,
-      )
+    ? sequence.steps.filter(completed)
     : waitingOn && stopped
       ? sequence.steps.map((row) =>
           row.ok ? row : { ...row, ok: true, waiting: true, detail: waitingOn },
         )
-      : plan && tooSmall
-        ? // What happened on the row; what to do in the card under it.
-          sequence.steps.map((row) =>
-            row.ok
-              ? row
-              : { ...row, detail: podmanTooSmallSaid(tooSmall, plan) },
+      : room && stopped
+        ? sequence.steps.map((row) =>
+            row.ok ? row : { ...row, detail: room.reason },
           )
-        : sequence.steps;
+        : plan && tooSmall
+          ? // What happened on the row; what to do in the card under it.
+            sequence.steps.map((row) =>
+              row.ok
+                ? row
+                : { ...row, detail: podmanTooSmallSaid(tooSmall, plan) },
+            )
+          : sequence.steps;
 
   return (
-    <section aria-label="OpenBot on this computer">
+    <section
+      aria-label="OpenBot on this computer"
+      className={
+        presentation === "rail" && journeying ? "update-progress" : undefined
+      }
+    >
       {journeying && (
         <StartJourney
           sequence={sequence}
           open={open}
           now={handOff}
           releaseDue={releaseDue}
+          description={
+            presentation === "rail"
+              ? "OpenBot opens by itself when it's ready."
+              : undefined
+          }
         />
       )}
-      <SetupProgress steps={rows} showElapsed={!journeying} />
+      {journeying && !releaseDetail && detail && <p>{detail}</p>}
+      {notices.length > 0 && (
+        <SetupProgress steps={notices} presentation="focus" />
+      )}
+      {!(presentation === "rail" && journeying) && (
+        <SetupProgress
+          steps={rows}
+          showElapsed={!journeying}
+          presentation={
+            offerStart ? (journeying ? "milestones" : "focus") : "list"
+          }
+        />
+      )}
+      {/* The release reassurance arrives after Start begins. Keep it below completed work so
+          those milestones stay anchored when the update starts or its download changes. */}
+      {journeying && releaseDetail && presentation !== "rail" && (
+        <p>{detail}</p>
+      )}
+      {journeying && presentation === "rail" && (
+        <p className="update-data-reassurance">
+          Your Bots, sign-ins and data stay as they are.
+        </p>
+      )}
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
-      {stopped && problem && !waitingOn && <Failure problem={problem} />}
+      {stopped && problem && !waitingOn && !room && (
+        <Failure problem={problem} />
+      )}
       {plan && tooSmall && !waitingOn && (
         <PodmanTooSmall
           key={plan.machine}
@@ -1200,7 +1391,7 @@ export function LocalIntelligence({
         />
       )}
       {/* Nothing else to offer under a too-small Podman machine: its card holds Retry. */}
-      {!(plan && tooSmall) && (
+      {!(plan && tooSmall) && !(room && stopped) && (
         <div className="row">
           {running && at !== "start" && (
             <button type="button" className="quiet" onClick={sequence.cancel}>
@@ -1218,11 +1409,15 @@ export function LocalIntelligence({
             </p>
           )}
           {/* A Podman machine too small has its Retry in its card (`PodmanTooSmall`). */}
-          {stopped && !waitingOn && !backendLost(sequence) && !plan && (
-            <button type="button" onClick={sequence.retry}>
-              Retry
-            </button>
-          )}
+          {stopped &&
+            !waitingOn &&
+            !room &&
+            !backendLost(sequence) &&
+            !plan && (
+              <button type="button" onClick={sequence.retry}>
+                Retry
+              </button>
+            )}
           {offerStart && !running && at === null && (
             <button type="button" onClick={sequence.start}>
               Start OpenBot
@@ -1235,7 +1430,9 @@ export function LocalIntelligence({
           with a problem has them in its own card (`Failure`), a stop the person clears (signing
           in, the agreement, Start fresh) has its own action instead, and their own Cancel is no
           failure to troubleshoot. */}
+      {stopped && room && <TroubleshootingLogs problem={room.logs} />}
       {stopped &&
+        !room &&
         !problem &&
         !waitingOn &&
         !needsPerson(sequence) &&
@@ -1360,10 +1557,11 @@ export function LocalNeeds({
   const reason = sequence.blocked?.reason;
   if (reason === "authentication-required")
     return <SignInToCopilotKit onSignedIn={sequence.retry} />;
-  if (reason === "stack-lost")
+  if (reason === "stack-lost" || reason === "backend-gone")
     return (
       <StartFresh
         said={explain ? (sequence.blocked?.said ?? null) : null}
+        label={reason === "backend-gone" ? "Set up again" : "Start fresh"}
         onStartFresh={sequence.startFresh}
       />
     );
@@ -1383,21 +1581,27 @@ function needsPerson(sequence: LocalSequence): boolean {
   return (
     reason === "authentication-required" ||
     reason === "eula-acceptance-required" ||
-    reason === "stack-lost"
+    reason === "stack-lost" ||
+    reason === "backend-gone"
   );
 }
 
-/** The backend is gone: Retry would only ask again about it, so Start fresh is the one way on. */
+/** The backend is gone: Retry would only ask again about it, so setting up again is the one way on. */
 function backendLost(sequence: LocalSequence): boolean {
-  return sequence.stopped && sequence.blocked?.reason === "stack-lost";
+  const reason = sequence.blocked?.reason;
+  return (
+    sequence.stopped && (reason === "stack-lost" || reason === "backend-gone")
+  );
 }
 
 /** The one way on once the backend is gone: set OpenBot up again. What is gone is said with it. */
 function StartFresh({
   said,
+  label,
   onStartFresh,
 }: {
   said: string | null;
+  label: string;
   onStartFresh: () => void;
 }) {
   return (
@@ -1405,7 +1609,7 @@ function StartFresh({
       {said && <p>{said}</p>}
       <div className="row">
         <button type="button" onClick={onStartFresh}>
-          Start fresh
+          {label}
         </button>
       </div>
     </div>
@@ -1460,7 +1664,7 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
 
   return (
     <div className="local-needs">
-      <Lockup byCopilotKit />
+      <Lockup byCopilotKit size={22} />
       <p>Sign in to finish setting up OpenBot.</p>
       {waiting ? (
         <CopilotKitSignInWait

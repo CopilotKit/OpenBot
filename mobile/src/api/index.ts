@@ -33,16 +33,20 @@ export type {
   Memory,
   Routine,
   RoutineRun,
-  RoutineRunStatus,
   Task,
   TaskStatus,
 } from "./generated/model";
 export {
   ApiError,
+  chooseOrganization,
   DEPLOYMENT_ORGANIZATION_ID,
+  readDeployment,
   ME,
   ORGANIZATION_ID,
   organizationAddress,
+  organizationChoices,
+  organizationsHeld,
+  setSignedInPerson,
 } from "./request";
 
 /** One page of a list the API pages (`limit`, `cursor`, `nextCursor`). */

@@ -88,7 +88,7 @@ OpenBot has three parts. On your laptop, setup runs the backend and Intelligence
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-overview-dark.svg">
-  <img src="docs/assets/architecture-overview-light.svg" alt="Mac, Windows, web, iOS, Android, Slack, and Teams connect to the OpenBot backend. Built-in Bots in the server and your agents on any execution platform share an AG-UI lane. Computer execution uses Kubernetes by default or a compatible sandbox provider; tools use MCP and adapters. CopilotKit Intelligence runs alongside OpenBot on your infrastructure." width="100%">
+  <img src="docs/assets/architecture-overview-light.svg" alt="Open-source frontends (web, Mac, Windows, iOS, Android, Slack, Teams, or your own) reach the OpenBot backend through the OpenBot API. Its core includes CopilotKit Intelligence for memory, learning, and governance. Lanes run from the core, each with a built-in option inside the backend and your own outside it: agents (Built-in Bots or your own custom agents, or any agent such as ADK, LangChain, or Claude Agent SDK, hosted on AgentCore, LangSmith, Gemini Agent Runtime, or elsewhere), computers (a virtual machine for every user and bot, or your own sandbox such as Daytona, E2B, or Modal), tools (thousands of built-in connectors, or any MCP server or hub), and vaults (the built-in vault, or 1Password, HashiCorp Vault, or AWS Secrets Manager). More lanes follow the same pattern." width="100%">
 </picture>
 
 | Part | What it does |
@@ -143,14 +143,19 @@ For a first evaluation, you need a cluster with a **default StorageClass**, `kub
 
 2. **Install** the `openbot-bundle` chart published with the release.
 
+   This evaluation runs **shared computers**: every Bot runs on one computer, and a command one Bot runs can read another person's files. That suits a proof of concept only, and `openbot.computers.sharedModeAcknowledged=true` says you know it. For people, use sandbox mode instead, which gives each person a computer of their own and is more secure: install the agent-sandbox controller in the cluster and set `openbot.computers.mode=sandbox` (the Helm guide has the command).
+
    ```sh
    helm install openbot https://github.com/CopilotKit/OpenBot/releases/download/v1.1.0/openbot-bundle-0.1.0.tgz \
      --namespace openbot --create-namespace \
      --values openbot-values.yaml \
+     --set openbot.computers.sharedModeAcknowledged=true \
      --timeout 15m
    ```
 
    On arm64 nodes, add `--set intelligence.embeddings.enabled=false`. The OpenBot image runs on amd64 and arm64, but the embeddings server Intelligence runs for Memory is amd64 only. Without it, Memory recalls by keyword.
+
+   From the release after v1.1.2, the chart also installs CopilotKit's management agent into `openbot-system`, which connects a team-licensed install to CopilotKit by default (see [CopilotKit management](#copilotkit-management-on-by-default)). To leave it out, add `--set openbot.management.enabled=false`.
 
 3. **Open your evaluation.**
 
@@ -166,6 +171,16 @@ The chart generates every password, key and token both products need, creates bo
 For OpenBot against managed Intelligence, or an Intelligence you already run, install the `openbot` chart instead (`https://github.com/CopilotKit/OpenBot/releases/download/v1.1.0/openbot-0.3.0.tgz`) with `config.intelligence.apiUrl`, `config.intelligence.gatewayWsUrl` and `secrets.intelligenceApiKey`; its guide has the commands. A release of the 0.2 chart that still runs the Intelligence it installed is refused at upgrade to 0.3: keep it on 0.2, or install `openbot-bundle` as a new release in a namespace of its own.
 
 For a team deployment, follow the Helm guide (`helm show readme` on the chart) to configure authentication, TLS, your database, secrets, persistent storage, and network policies. For a single-container alternative, see [Deploy it](#deploy-it).
+
+### CopilotKit management, on by default
+
+From the release after v1.1.2, both charts install a management agent into the namespace `openbot-system` (`management.enabled`). With a team licence, the OpenBot server connects the install to CopilotKit's management service by itself, with no enrollment step. It never connects on OpenBot Desktop, on the personal edition, on OpenBot Cloud, or without a team licence.
+
+- **What it sends.** A heartbeat every minute over mutual TLS: OpenBot's version, chart and image digests, the last database migration, pod readiness counts, and upgrade state. No conversations, messages, files, prompts, names, secrets or logs.
+- **What it does.** It can restart a workload and write a support bundle to a volume in your cluster, on commands CopilotKit signs. It upgrades nothing until you set managed upgrades up, and then only in a maintenance window, after a verified backup.
+- **How to turn it off.** Set `management.enabled=false` (`openbot.management.enabled=false` on `openbot-bundle`), or have an admin press Disconnect on Admin → Managed updates. Connect there turns it back on.
+
+[CopilotKit management on Kubernetes](docs/managed-upgrades.md) lists every field that leaves your cluster and how to set up managed upgrades.
 
 ## Run from source
 
@@ -520,6 +535,7 @@ Full reference: [docs/configuration.md](docs/configuration.md).
 | `server`                 | 3001                       | Hono API, CopilotKit runtime, auth, policy, audit, plugins, components, coworkers, and channels. |
 | `agent-computer`         | 4100                       | Chromium plus `/workspace` and browser profile.                                                  |
 | `agent-langgraph-agui`   | 4201 host / 4206 container | The managed Bot: the LangGraph harness the team edition's Risk Analyst runs on.                  |
+| `agent-langgraph-ts`     | 4215                       | The TypeScript LangGraph engine new Bots run on. Compose runs it in every edition.               |
 | `agent-harness`          | 4202 to 4214, per framework | The agent framework picked in OpenBot Desktop setup, behind the `harness` Compose profile.       |
 | `supervisor`             | 4500 host / 4300 container | Creates and manages one computer per person, and one per Isolated Bot.                           |
 | PostgreSQL               | 5432                       | Product data, policy, audit, credentials, grants, channels, and component metadata.              |
@@ -536,7 +552,7 @@ More detail: [docs/architecture.md](docs/architecture.md).
 
 Every OpenBot client uses one API, and its spec is in this repository under [`api/`](api/README.md):
 
-- **REST**, in OpenAPI 3.1: [`api/openapi.yaml`](api/openapi.yaml), bundled from one file per area in `api/openapi/`. Every resource is under `/api/v2/organizations/{organizationId}/`, where `organizationId` is an organization's id or its slug. `default` is the first organization, the one that holds everything from before organizations, so its Bots are at `/api/v2/organizations/default/bots`. An OpenBot holds more than one when `OPENBOT_MULTIPLE_ORGANIZATIONS=true`, and a caller who isn't a member of the organization an address names gets the same not found as one that doesn't exist.
+- **REST**, in OpenAPI 3.1: [`api/openapi.yaml`](api/openapi.yaml), bundled from one file per area in `api/openapi/`. Every resource is under `/api/v2/organizations/{organizationId}/`, where `organizationId` is an organization's id or its slug. `default` is the first organization, the one that holds everything from before organizations, so its Bots are at `/api/v2/organizations/default/bots`. An OpenBot holds more than one when `OPENBOT_ORGANIZATION_AUTHORITY` is `intelligence-platform` or `ops`, and a caller who isn't a member of the organization an address names gets the same not found as one that doesn't exist.
 - **Live channels**, on WebSockets, in AsyncAPI 3.1: [`api/asyncapi.yaml`](api/asyncapi.yaml). A Bot's run as it streams, what changed in your conversations, a Bot's screen and its terminal.
 
 The conventions are the same everywhere. An error is a problem detail (`application/problem+json`, RFC 9457). A list pages with `cursor` and `limit`. Every write takes an `Idempotency-Key` header, and repeating a request with the same key within 24 hours does it once. The web app signs in with its session cookie; anything else sends `Authorization: Bearer` with an API key, which acts as the person who made it, or with an access token from OAuth 2.1 with PKCE. Both work on `/api/v2` only.
@@ -667,6 +683,8 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 - [docs/automatic-learning.md](docs/automatic-learning.md)
 - [docs/deployment.md](docs/deployment.md)
 - The Helm charts, `openbot` and `openbot-bundle`, published with each release: `helm show readme` on either is its Helm guide
+- [docs/managed-upgrades.md](docs/managed-upgrades.md): CopilotKit management on Kubernetes, what it sends, how to turn it off, and managed upgrades
+- [docs/TELEMETRY.md](docs/TELEMETRY.md): what OpenBot sends, and how to turn it off
 - [docs/releasing.md](docs/releasing.md)
 - [docs/web-research.md](docs/web-research.md): public-web search and extraction through Parallel, Exa or Firecrawl
 

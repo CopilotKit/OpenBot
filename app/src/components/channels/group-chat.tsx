@@ -20,11 +20,13 @@ import {
 } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
+  awaitingFirstReply,
   type GroupMessage,
   groupKeys,
   groupQueryOptions,
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import {
   BotMarkdown,
   markdownComponents,
@@ -32,9 +34,13 @@ import {
   replyRemarkPlugins,
 } from "@/lib/markdown";
 import { newId } from "@/lib/new-id";
+import { DELETED_USER, isDeletedUser } from "@/lib/people/deleted-user";
+import { cn } from "@/lib/utils";
 import { ChannelAvatar } from "./avatar";
 import { RestoringTranscript } from "./chat-transcript";
 import { Composer, toAgentOptions } from "./composer";
+import { ComposerColumn, transcriptColumn } from "./conversation-columns";
+import { SentFileCard } from "./sent-file-card";
 import { TeamBotConsentCard } from "./team-bot-consent";
 
 /**
@@ -59,6 +65,13 @@ export function GroupChat({ channelId }: { channelId: string }) {
   );
   const bots = group.data?.bots ?? [];
   const names = new Map(bots.map((bot) => [bot.id, bot.name]));
+  // The people in it, as its members list names them: a person's line is headed with who sent it.
+  const people = new Map(
+    (group.data?.people ?? []).map((person) => [
+      person.userId,
+      person.name || person.email,
+    ]),
+  );
   const messages = group.data?.messages ?? [];
   const working = messages.some(
     (message) => message.status === "running" || message.status === "queued",
@@ -125,7 +138,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
 
   if (group.isPending)
     return (
-      <div className="mx-auto w-full max-w-3xl px-4 py-6">
+      <div className={cn("py-6", transcriptColumn)}>
         <RestoringTranscript />
       </div>
     );
@@ -133,11 +146,14 @@ export function GroupChat({ channelId }: { channelId: string }) {
   if (group.data === undefined)
     return (
       <div
-        className="mx-auto flex w-full max-w-3xl flex-col items-start gap-3 px-4 py-8"
+        className={cn("flex flex-col items-start gap-3 py-8", transcriptColumn)}
         role="alert"
       >
         <p className="text-sm text-destructive">
-          Couldn't load this conversation. Try again.
+          {loadFailure(
+            group.error,
+            "Couldn't load this conversation. Try again.",
+          )}
         </p>
         <Button
           disabled={group.isFetching}
@@ -153,14 +169,21 @@ export function GroupChat({ channelId }: { channelId: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div
-        className="min-h-0 flex-1 overflow-y-auto"
+        // The scrollbar a conversation with one Bot draws (`MessageScroller`): thin, and its room
+        // kept while nothing scrolls, so where scrollbars take room the column sits where that
+        // conversation's does and does not shift when the lines first overflow.
+        className="min-h-0 flex-1 scrollbar-thin scrollbar-gutter-stable overflow-y-auto"
         onScroll={(event) => {
           atBottom.current = isNearBottom(event.currentTarget);
         }}
         ref={viewportRef}
       >
+        {/*
+         * The transcript's column and the composer's below are a conversation with one Bot's
+         * (`conversation-columns.tsx`), so a group keeps its side margin on a phone too.
+         */}
         <div
-          className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-6"
+          className={cn("flex flex-col gap-5 py-6", transcriptColumn)}
           data-transcript-column
         >
           {messages.length === 0 ? (
@@ -178,7 +201,11 @@ export function GroupChat({ channelId }: { channelId: string }) {
                   ? (names.get(message.agentId) ?? "A Bot no longer here")
                   : message.ownerUserId === me?.id
                     ? "You"
-                    : "Someone else"
+                    : // A message whose sender deleted their account stays, with no sender: a deleted user's.
+                      !message.ownerUserId || isDeletedUser(message.ownerUserId)
+                      ? DELETED_USER
+                      : // Only the people still in it are named: someone taken out is no longer the reader's to see.
+                        people.get(message.ownerUserId) || "Someone who left"
               }
               answeredBy={
                 message.answeredBy
@@ -188,18 +215,32 @@ export function GroupChat({ channelId }: { channelId: string }) {
               mine={message.ownerUserId === me?.id}
             />
           ))}
+          {/*
+           * A person's message the server has taken and no Bot has started on yet. Each Bot's line
+           * says "Thinking" once its run starts, but the page only learns that on its next read, up
+           * to a second and a half later: a first message sat alone under the box for that long,
+           * and read as broken. Which Bot goes first is the server's to say, so the line names none.
+           */}
+          {awaitingFirstReply(group.data) ? (
+            <p
+              className="tool-line-running text-sm text-muted-foreground"
+              role="status"
+            >
+              Thinking
+            </p>
+          ) : null}
         </div>
       </div>
       {/* The same column and the same compact composer as a conversation with one Bot. */}
-      <div className="mx-auto w-full max-w-2xl shrink-0 pb-4">
+      <ComposerColumn>
         {send.error ? (
           <p className="pb-2 text-sm text-destructive" role="alert">
-            {send.error.message}
+            {failureSaid(send.error)}
           </p>
         ) : null}
         {answer.error ? (
           <p className="pb-2 text-sm text-destructive" role="alert">
-            {answer.error.message}
+            {failureSaid(answer.error)}
           </p>
         ) : null}
         {/* The same drawer a conversation with one Bot draws its question in. */}
@@ -226,6 +267,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
           disabled={bots.length === 0}
           pending={send.isPending || answer.isPending || working}
           autoFocus
+          draftKey={`conversation:${channelId}`}
           onSubmit={async (draft) => {
             if (!draft.text) return;
             if (question && (!draft.agentId || draft.agentId === askerId)) {
@@ -239,7 +281,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
             });
           }}
         />
-      </div>
+      </ComposerColumn>
     </div>
   );
 }
@@ -303,15 +345,28 @@ function GroupLine({
             Thinking
           </p>
         ) : message.status === "waiting" ? (
-          <p className="text-sm text-muted-foreground">
-            {message.reason ?? "Waiting for your response."}{" "}
-            <Link
-              className="underline"
-              params={{ agentId: message.agentId }}
-              to="/bots/$agentId"
-            >
-              Open {name}
-            </Link>
+          /*
+           * Only the person whose turn it was can answer what the Bot is waiting on, on the Bot's
+           * page. Everyone else reads why it waits, in words the server writes for them, and is
+           * given nothing to do: the link would open a page with nothing of theirs to answer.
+           */
+          <p className="text-sm text-muted-foreground" role="status">
+            {message.reason ??
+              (mine
+                ? "Waiting for your response."
+                : "Waiting for someone else to answer.")}
+            {mine ? (
+              <>
+                {" "}
+                <Link
+                  className="underline"
+                  params={{ agentId: message.agentId }}
+                  to="/bots/$agentId"
+                >
+                  Open {name}
+                </Link>
+              </>
+            ) : null}
           </p>
         ) : message.consent ? (
           // Only the person whose account it asked for can answer; everyone else sees the ask.
@@ -327,27 +382,43 @@ function GroupLine({
               {message.consent.serverId} account.
             </p>
           )
+        ) : message.status === "failed" && message.declined ? (
+          // A reply its person chose not to share is a choice, not a fault: a notice, never red.
+          <p className="text-sm text-muted-foreground" role="status">
+            {message.text}
+          </p>
         ) : message.status === "failed" ? (
           <p className="text-sm text-destructive" role="alert">
             {message.text || "This Bot couldn't answer."}
           </p>
         ) : (
-          <Bubble
-            align="start"
-            aria-busy={message.status === "running"}
-            variant="ghost"
-            className="w-full"
-          >
-            <BubbleContent className="w-full">
-              <BotMarkdown
-                components={markdownComponents}
-                plugins={markdownPlugins}
-                remarkPlugins={replyRemarkPlugins}
-              >
-                {message.text}
-              </BotMarkdown>
-            </BubbleContent>
-          </Bubble>
+          <>
+            <Bubble
+              align="start"
+              aria-busy={message.status === "running"}
+              variant="ghost"
+              className="w-full"
+            >
+              <BubbleContent className="w-full">
+                <BotMarkdown
+                  components={markdownComponents}
+                  files={message.files}
+                  plugins={markdownPlugins}
+                  remarkPlugins={replyRemarkPlugins}
+                >
+                  {message.text}
+                </BotMarkdown>
+              </BubbleContent>
+            </Bubble>
+            {/*
+             * The files the Bot sent from its computer with this reply, each as the card a
+             * conversation of its own draws, under its words: the reply is all a group keeps of a
+             * turn, so without them the file was a name in the words and nothing to open.
+             */}
+            {message.files?.map((file) => (
+              <SentFileCard file={file} key={file.attachmentId} />
+            ))}
+          </>
         )}
       </MessageContent>
     </MessageRow>

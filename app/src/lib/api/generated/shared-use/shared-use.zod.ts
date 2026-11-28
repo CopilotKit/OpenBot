@@ -146,7 +146,7 @@ export const ListSharedUseRequestsResponse = zod.object({
             ),
           requestedBy: zod.string().describe("The id of the person who asked."),
           status: zod
-            .enum(["pending", "approved", "declined", "superseded"])
+            .string()
             .describe(
               "pending until an administrator answers it. superseded when a later request for the same Bot and app replaced it.",
             ),
@@ -168,7 +168,7 @@ export const ListSharedUseRequestsResponse = zod.object({
 });
 
 /**
- * Ask an administrator to approve a Bot's use of a shared app's one account. What is asked for is never sent: it is the Bot's audience as the server reads it now, so a request can't be worded wider than the Bot is. A request already waiting for the same audience is answered again rather than filed twice, and one waiting for a different audience is replaced. Recorded on the audit trail. Only the Bot's owner or an administrator may ask.
+ * Ask an administrator to approve a Bot's use of a shared app's one account. What is asked for is never sent: it is the Bot's audience as the server reads it now, so a request can't be worded wider than the Bot is. A request already waiting for the same audience is answered again rather than filed twice, and one waiting for a different audience is replaced. Recorded on the audit trail. Only the Bot's owner or an administrator may ask. Asking matters only where the organization's apps are locked down (getAppsSetting): while they're open, anybody who can use a Bot may use its shared accounts, and there is nothing to approve.
  * @summary Ask that a Bot may use a shared app account
  */
 
@@ -358,7 +358,7 @@ export const ApproveSharedUseRequestResponse = zod
       ),
     requestedBy: zod.string().describe("The id of the person who asked."),
     status: zod
-      .enum(["pending", "approved", "declined", "superseded"])
+      .string()
       .describe(
         "pending until an administrator answers it. superseded when a later request for the same Bot and app replaced it.",
       ),
@@ -497,7 +497,7 @@ export const DeclineSharedUseRequestResponse = zod
       ),
     requestedBy: zod.string().describe("The id of the person who asked."),
     status: zod
-      .enum(["pending", "approved", "declined", "superseded"])
+      .string()
       .describe(
         "pending until an administrator answers it. superseded when a later request for the same Bot and app replaced it.",
       ),
@@ -508,7 +508,7 @@ export const DeclineSharedUseRequestResponse = zod
   );
 
 /**
- * Return the shared apps a Bot holds, each with the audience it is approved for, the audience the Bot needs now, and whether the first covers the second, and the Bot's requests still waiting for an administrator. A Bot that holds no shared app answers with none. Only the Bot's owner or an administrator may read it.
+ * Return the shared apps a Bot holds, each with the audience it is approved for, the audience the Bot needs now, and whether the first covers the second, and the Bot's requests still waiting for an administrator. A Bot that holds no shared app answers with none. While the organization's apps are open (getAppsSetting), every shared app reads as covered. Only the Bot's owner or an administrator may read it.
  * @summary Read a Bot's use of shared app accounts
  */
 
@@ -712,7 +712,7 @@ export const GetBotSharedUseResponse = zod.object({
             ),
           requestedBy: zod.string().describe("The id of the person who asked."),
           status: zod
-            .enum(["pending", "approved", "declined", "superseded"])
+            .string()
             .describe(
               "pending until an administrator answers it. superseded when a later request for the same Bot and app replaced it.",
             ),

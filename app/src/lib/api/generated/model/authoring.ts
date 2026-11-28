@@ -10,7 +10,7 @@ export interface Authoring {
   /**
    * @minLength 1
    * @maxLength 2000
-   * @pattern ^[^\x00]*\S[^\x00]*$
+   * @pattern ^[^\x00]*[^\s\x00][^\x00]*$
    */
   text: string;
 }

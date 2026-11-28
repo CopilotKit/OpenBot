@@ -113,7 +113,25 @@ def boundary(monkeypatch):
                 [captured["force_call"]] if captured["force_call"] else names
             )
             offered = {t["function"]["name"] for t in body.get("tools", [])}
-            if messages[-1]["role"] == "tool":
+            done = sum(1 for m in messages if m["role"] == "tool")
+            if captured.get("steps") and done < captured["steps"]:
+                # A long task: one more call after each result, until it has taken its steps.
+                delta = {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": f"call-step-{done}",
+                            "type": "function",
+                            "function": {
+                                "name": names[0],
+                                "arguments": json.dumps({"value": f"step {done}"}),
+                            },
+                        }
+                    ],
+                }
+                finish = "tool_calls"
+            elif messages[-1]["role"] == "tool":
                 content = "Observed tool result: " + (
                     " | ".join(m["content"] for m in messages if m["role"] == "tool")
                     if captured.get("all_results")
@@ -346,6 +364,86 @@ async def test_a_provider_out_of_credit_is_told_as_that_never_as_sign_in_again(
     assert said in message
 
 
+# OpenBot's sign-in proxy answering for Google, as it passes on Google's own refusals: Google's
+# words (captured with a free-tier Gemini sign-in on 2026-11-17), and the kind of refusal as `type`.
+GEMINI_SIGN_IN_QUOTA = (
+    429,
+    {
+        "error": {
+            "message": "You exceeded your current quota, please check your plan and billing "
+            "details. For more information on this error, head to: "
+            "https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head "
+            "to: https://ai.dev/rate-limit. Quota exceeded for metric… Please retry in "
+            "9h10m18.213644379s.",
+            "type": "rate_limit",
+            "code": "RESOURCE_EXHAUSTED",
+            "param": None,
+        }
+    },
+)
+GEMINI_SIGN_IN_BUSY = (
+    503,
+    {
+        "error": {
+            "message": "This model is currently experiencing high demand. Spikes in demand are "
+            "usually temporary. Please try again later.",
+            "type": "server_error",
+            "code": "UNAVAILABLE",
+            "param": None,
+        }
+    },
+)
+GEMINI_SIGN_IN_RETIRED = (
+    404,
+    {
+        "error": {
+            "message": "This model models/gemini-2.5-flash is no longer available to new users. "
+            "Please update your code to use models/gemini-3.8-flash for the latest features and "
+            "improvements. We recommend you to use the Interactions API "
+            "(https://aistudio.google.com/docs/get-started).",
+            "type": "model_not_found",
+            "code": "NOT_FOUND",
+            "param": None,
+        }
+    },
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "refusal,category",
+    [
+        (GEMINI_SIGN_IN_QUOTA, "rate_limit"),
+        (GEMINI_SIGN_IN_BUSY, "server_error"),
+        (GEMINI_SIGN_IN_RETIRED, "model_not_found"),
+    ],
+)
+async def test_a_sign_in_refusal_keeps_google_words_and_the_kind_it_names(
+    boundary, refusal, category
+):
+    """Found on OpenBot Desktop signed in with Gemini: "ping" got no answer anybody could read.
+
+    The run ends with Google's own words and the kind the sign-in proxy named, as `errorCategory`,
+    for the server to say. Google's free-tier quota is a limit that resets, never out of credit,
+    however much its words mention billing.
+    """
+    boundary["model_refusal"] = refusal
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR", "every run ends with a terminal event"
+    status, body = refusal
+    assert events[-1]["code"] == "OPENBOT_MODEL_REFUSED"
+    assert events[-1]["message"] == f"Error code: {status} - {body['error']['message']}"
+    assert events[-1]["metadata"] == {"errorCategory": category}
+
+
+@pytest.mark.asyncio
+async def test_a_provider_type_that_is_not_a_category_sends_none(boundary):
+    boundary["model_refusal"] = OPENAI_TOO_MANY_TOOLS
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["code"] == "OPENBOT_MODEL_REFUSED"
+    assert not events[-1].get("metadata")
+
+
 def closed_port():
     """A loopback port with nothing listening on it."""
     import socket
@@ -576,6 +674,22 @@ async def test_deployment_tool_executes_only_via_signed_callback_and_continues(
     )
     assert "synthetic-run-assertion" not in json.dumps(events)
     assert "synthetic-callback-token" not in json.dumps(events)
+
+
+@pytest.mark.asyncio
+async def test_a_turn_of_many_deployment_tool_steps_runs_to_its_answer(boundary):
+    """No count ends a turn. The deployment's tools are answered here, so a long task is many steps
+    in one run, and LangGraph's 25 graph steps ended it at its twelfth call with an error."""
+    boundary["steps"] = 30
+    events = await run_protocol(
+        run_input(["granted_lookup"], deployment=["granted_lookup"])
+    )
+    assert len(boundary["callback"]) == 30
+    assert len(boundary["model"]) == 31
+    assert any(
+        m.get("role") == "assistant" and "Observed tool result" in (m.get("content") or "")
+        for m in snapshot(events)
+    ), "the turn ends in the model's answer"
 
 
 @pytest.mark.asyncio

@@ -417,7 +417,8 @@ test.each([
       async () => new NativeResponse("failed", { status: 500 }),
       snapshot,
     );
-    await view.findByText(unavailable);
+    // Said once the retries a failed read on opening gets have failed too.
+    await view.findByText(unavailable, {}, { timeout: 6000 });
     if (snapshot.length > 0)
       expect(view.getByText(initial.content)).toBeTruthy();
     const user = userEvent.setup({ document: view.container.ownerDocument });
@@ -602,6 +603,80 @@ test("a same-tab activity echo does not append a lagging durable partial beside 
   expect(currentAgent().messages.map((message) => message.id)).not.toContain(
     partialEcho.id,
   );
+});
+
+/*
+ * AN ANSWER STREAMED UNDER ONE ID AND HANDED BACK IN THE RUN'S SNAPSHOT UNDER ANOTHER IS SHOWN ONCE.
+ * LlamaIndex's AG-UI adapter (llama-index-protocols-ag-ui 0.5.0, agent.py: `resp_id = uuid4()` for
+ * the stream, and utils.py's `llama_index_message_to_ag_ui_message` minting a fresh id for the reply
+ * in every snapshot) streams its answer as chunks and then ends the run with a MESSAGES_SNAPSHOT that
+ * holds the same words under a new id. AG-UI's snapshot is the whole set of the roles it carries:
+ * the copies it repeats replace the client's, and the ones it leaves out are removed
+ * (docs.ag-ui.com/concepts/events, MessagesSnapshot). So the streamed copy is gone from the
+ * conversation, and the store, which compacts the thread's events the same way, drops it too once
+ * it has read that far. FOUND IN THE STOCK AG-UI CONFORMANCE SUITE: a read of the stored thread taken
+ * while the store was still part way through the stream held the streamed copy half written, the
+ * merge added it as a message the screen did not have, and the full answer sat over a second, cut-off
+ * copy of itself ("Order 4471 was shipp") until the conversation was opened again.
+ */
+test("an answer a run's snapshot handed back under a new id is shown once, even when a lagging read of the store still holds the streamed copy", async () => {
+  const words =
+    "Order 4471 was shipped with Parcelway, tracking number PW-88213. You have 42 packets of Moonglow tomato in stock. Over.";
+  const streamedId = "streamed-reply";
+  const snapshotId = "snapshot-reply";
+  const view = mounting(async () => stored([initial]), [initial]);
+  await view.findByText(initial.content);
+  runEvents = (input) => [
+    { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+    {
+      type: "TEXT_MESSAGE_CHUNK",
+      messageId: streamedId,
+      role: "assistant",
+      delta: words.slice(0, 20),
+    },
+    {
+      type: "TEXT_MESSAGE_CHUNK",
+      messageId: streamedId,
+      role: "assistant",
+      delta: words.slice(20),
+    },
+    {
+      type: "MESSAGES_SNAPSHOT",
+      messages: [
+        ...input.messages,
+        { id: snapshotId, role: "assistant", content: words },
+      ],
+    },
+    { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+  ];
+
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "Look up both at once",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await view.findByText(words);
+  await waitFor(() => expect(currentAgent().isRunning).toBe(false));
+  const sent = runRequests[0]?.input.messages ?? [];
+
+  // The store, a beat behind: it has read the stream part way, and not yet the snapshot.
+  history = async () =>
+    stored([
+      ...sent,
+      { id: streamedId, role: "assistant", content: words.slice(0, 20) },
+    ]);
+  await announce(5, channel, { text: words });
+  await waitFor(() => expect(historyReads.length).toBeGreaterThan(1));
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  expect(view.getAllByText(words)).toHaveLength(1);
+  expect(view.queryByText(words.slice(0, 20))).toBeNull();
+  expect(
+    currentAgent()
+      .messages.filter((message) => message.role === "assistant")
+      .map((message) => message.id),
+  ).toEqual([initial.id, snapshotId]);
 });
 
 test("a same-timestamp different activity after a self echo still refreshes durable history", async () => {
@@ -919,7 +994,14 @@ test.each([false, true])(
   },
 );
 
-test("a stalled mount history read releases the send gate and shows unavailable history", async () => {
+/*
+ * A STALL RELEASES THE SEND GATE AT ONCE, AND IS SAID ONLY ONCE ASKING AGAIN HAS FAILED TOO. The
+ * read on opening gives up after its deadline, and the message waiting behind it goes then, as it
+ * always has. What changed is the notice: a read that was only slow (seen on a link busy with a
+ * 95MB picture) used to say "Couldn't load earlier messages" on its first deadline. It is asked
+ * again the way a refresh is, and the notice comes only when every try has failed.
+ */
+test("a stalled mount history read releases the send gate at once, and says so only after its retries fail", async () => {
   const pending = delayedResponse();
   const view = mounting((_threadId) => pending.promise, [initial]);
   await waitFor(() => expect(historyReads).toHaveLength(1));
@@ -930,8 +1012,12 @@ test("a stalled mount history read releases the send gate and shows unavailable 
   );
   await user.click(view.getByRole("button", { name: "Send message" }));
 
-  await view.findByText(unavailable, {}, { timeout: 4000 });
+  // Released by the first read's deadline, as before, and no notice yet: it is being asked again.
   await waitFor(() => expect(runRequests).toHaveLength(1), { timeout: 4000 });
+  expect(view.queryByText(unavailable)).toBeNull();
+
+  await view.findByText(unavailable, {}, { timeout: 12_000 });
+  expect(historyReads.length).toBeGreaterThanOrEqual(4);
   expect(runRequests[0]?.path).toBe("/api/copilotkit/agent/refresh-bot/run");
   expect(runRequests[0]?.input.threadId).toBe(channel.threadId);
   expect(runRequests[0]?.input.messages.slice(0, -1)).toEqual([initial]);
@@ -945,7 +1031,21 @@ test("a stalled mount history read releases the send gate and shows unavailable 
   expect(currentAgent().messages.map((message) => message.id)).not.toContain(
     fresh.id,
   );
-});
+}, 20_000);
+
+test("a mount history read that succeeds on a retry shows its messages and no notice", async () => {
+  let reads = 0;
+  const view = mounting(async () => {
+    reads += 1;
+    return reads === 1
+      ? new NativeResponse("failed", { status: 500 })
+      : stored([initial, fresh]);
+  });
+
+  await view.findByText(fresh.content, {}, { timeout: 6000 });
+  expect(view.queryByText(unavailable)).toBeNull();
+  expect(historyReads.length).toBeGreaterThanOrEqual(2);
+}, 10_000);
 
 test("a UI send waits for mount history before adding its message", async () => {
   const pending = delayedResponse();
@@ -1208,7 +1308,12 @@ test.each([false, true])(
         ? stored([initial])
         : new NativeResponse("failed", { status: 500 }),
     );
-    await view.findByText(prefixPresent ? initial.content : unavailable);
+    // A failed read on opening is said once its retries have failed too.
+    await view.findByText(
+      prefixPresent ? initial.content : unavailable,
+      {},
+      { timeout: 6000 },
+    );
     const user = userEvent.setup({ document: view.container.ownerDocument });
     const editor = view.getByRole("textbox", { name: "Message" });
     await user.type(editor, "Local turn after mount completed");
@@ -1292,7 +1397,8 @@ test.each(["mount", "refresh"])(
     ];
     const durable = [
       prefix,
-      { ...initial, content: "Stale opening content" },
+      // A store behind holds an older version of the reply: its start. It never cuts the reply short.
+      { ...initial, content: "Stored open" },
       interior,
       { ...secondAnchor, content: "Stale anchor content" },
       fresh,

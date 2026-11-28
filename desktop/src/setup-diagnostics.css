@@ -1,0 +1,42 @@
+/* Diagnostics stay in the finishing footer, separate from the scrolling progress. */
+.finishing-layout > .setup-footer .usage-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 9px;
+  align-items: start;
+  margin: 0;
+  padding-top: 17px;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
+.finishing-layout > .setup-footer .usage-choice p {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.finishing-layout > .setup-footer .usage-choice input[type="checkbox"] {
+  flex: none;
+  margin: 3px 0 0;
+}
+
+.finishing-layout > .setup-footer .usage-choice:has(input:disabled) label {
+  cursor: default;
+}
+
+.finishing-layout > .setup-footer .usage-choice .usage-choice-failed {
+  grid-column: 2;
+}
+
+/* Open OpenBot, once OpenBot is ready: under the choice, as far from it as the footer is from the rows. */
+main
+  > .rail
+  + .sheet.setup-layout.finishing-layout
+  > .setup-footer
+  > .usage-choice
+  + .row {
+  margin-top: 20px;
+}

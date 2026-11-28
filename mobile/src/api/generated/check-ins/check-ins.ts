@@ -4,6 +4,7 @@
 import type {
   CheckInItemPage,
   CheckInItemResponse,
+  CheckInItemWork,
   CheckInPage,
   CheckInResponse,
   CheckInRunAnswer,
@@ -268,6 +269,31 @@ export const startCheckInItem = async (
 ): Promise<StartedCheckInItem> => {
   return apiRequest<StartedCheckInItem>(
     getStartCheckInItemUrl(organizationId, checkInItemId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getWorkOnCheckInItemUrl = (
+  organizationId: string,
+  checkInItemId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/check-in-items/${encodeURIComponent(String(checkInItemId))}/work-on`;
+};
+
+/**
+ * Start an item the way this server takes work on. Where the server runs tasks in conversations of their own, it becomes a task, as startCheckInItem makes one, and `task` names it. Where it does not, no task and no conversation is made: the item is started, and `conversation` names the caller's own conversation with the item's Bot (made if they have none yet) and the message to send there as the caller's own, so the Bot works on it in that conversation like any other request. One that is no longer open, or is somebody else's, is refused.
+ * @summary Work on an item
+ */
+export const workOnCheckInItem = async (
+  organizationId: string,
+  checkInItemId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<CheckInItemWork> => {
+  return apiRequest<CheckInItemWork>(
+    getWorkOnCheckInItemUrl(organizationId, checkInItemId),
     {
       ...options,
       method: "POST",

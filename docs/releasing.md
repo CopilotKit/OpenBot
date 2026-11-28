@@ -9,6 +9,9 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
 2. Check `## Unreleased` in [CHANGELOG.md](../CHANGELOG.md) reads the way you want it to. It is the
    release notes. Nothing is generated from commit subjects, because a commit subject is written for
    the person reading the diff and these notes are for the person deciding whether to upgrade.
+   Anything the API deprecated since the last release is in the Deprecated list under "Before
+   upgrading", with its sunset; CI fails a deprecation the changelog doesn't list
+   ([api/README.md](../api/README.md#deprecating)).
 3. Run **Create release PR** from the Actions tab, choosing `patch`, `minor` or `major`. Leave
    `kind` as `stable`. Use `dry_run` first if you want to see the version and the notes without
    opening anything.
@@ -331,8 +334,7 @@ environment **secrets**:
 | `TAURI_SIGNING_PRIVATE_KEY` | The Tauri updater private key (`tauri signer generate`) |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | That key's password |
 
-The job also reads the existing `OPENBOT_GOOGLE_MODEL_OAUTH_*` variables and secret, as the other
-desktop builds do. Desktop Windows signing's **Sign the installer for the updater** job reads the
+Desktop Windows signing's **Sign the installer for the updater** job reads the
 two `TAURI_SIGNING_*` secrets from this environment too; nothing else outside it holds them.
 
 Put the matching updater **public** key in `plugins.updater.pubkey` in
@@ -520,6 +522,13 @@ another version. Its candidates, betas and final share it, so **Create release P
 else. A policy written for an earlier release is left alone: write the new release's policy into
 the release PR before merging it. A final may not change the policy beyond its version.
 
+`requiresDowntime` is false for a release whose migrations the previous release still works
+against, which is the rule: old and new servers share the database while a rolling upgrade runs. A
+release that cannot keep to it declares `true`, and the `openbot` chart it attaches must say the
+same in its `Chart.yaml` annotation `openbot.ai/requires-downtime`, which makes `helm upgrade`
+stop every old server before a new one starts. Publishing refuses a policy and a chart that
+disagree.
+
 ## Finishing a candidate
 
 Run **Create release PR** with `kind` set to `final`, from `release/X.Y`. A final started from
@@ -646,7 +655,9 @@ by hand. Each run:
 - checks it carries `latest.json` and every installer under its fixed download name, and that each
   versioned installer is the same file as its fixed-name copy, so both are the signed build;
 - compares each file's SHA-256 with what the bucket holds, uploads only what differs, and
-  invalidates `/latest/*` only when something under `latest/` changed.
+  invalidates `/latest/*` only when something under `latest/` changed;
+- removes the installers of every release older than the Latest one from `releases/<tag>/`, and
+  invalidates each removed path ([Older installers](#older-installers)).
 
 It also copies everything else the Desktop app downloads for that release, so the app can fetch it
 all from this address and go to GitHub only when it does not answer
@@ -731,7 +742,8 @@ When the Latest release lacks some of those files, the run fails and changes not
 addresses keep serving the previous signed installers. A Latest release with none of them was
 published before signing attached any, as v0.2.0 was: that is not drift, so the run succeeds with
 "no signed installers yet; nothing to sync" and does not touch AWS. A release asked for by tag must
-have them all. Nothing is ever deleted.
+have them all. Apart from the installers of releases older than the Latest one
+([Older installers](#older-installers)), nothing is ever deleted.
 
 To run it by hand, from `main`:
 
@@ -759,8 +771,78 @@ Origin Shield in us-east-1, and uses the managed CachingOptimized policy, which 
 Cache-Control and leaves query strings out of the cache key. All of it is managed by hand in the
 console, not by infrastructure as code. The workflow signs in as the role `openbot-release-downloads`
 with GitHub's OIDC token, so there is no stored key. The role trusts only `downloads-sync.yml` on
-`main`, and may only read and write the bucket's objects and invalidate that distribution. The role
+`main`, and may only read and write the bucket's objects, delete those under `releases/` (the
+installers of older releases, [Older installers](#older-installers)), and invalidate that
+distribution. The role
 ARN, bucket and distribution are written in the workflow; none is a secret.
+
+### Older installers
+
+When a stable release becomes Latest, the installers of every older release are removed, from the
+GitHub releases and from `releases/<tag>/` in the bucket. A fresh install lays out the Latest
+release's server stack whatever installer started it, and an older app may not set that stack up
+as it needs: an installer from 1.0.3 or before writes no install token, which the 1.1 server
+requires, so it crash-loops. One rule decides what goes, for both places
+([`scripts/release-older-installers.sh`](../scripts/release-older-installers.sh)).
+
+- **Older** means a tag that is a version (`vX.Y.Z` or `vX.Y.Z-<pre>`) below the Latest one by
+  semver: a lower `X.Y.Z`, or a candidate or beta of the Latest version itself.
+- **Removed**, from each older release: every installer, under its versioned name and its fixed
+  name (`.dmg`, `.exe` and `-setup.exe`, `.msi`, `.AppImage`, `.deb`, `.rpm`), and each one's `.sig`.
+- **Kept**: everything else, on every release. `latest.json`, the updater archives
+  (`.app.tar.gz`) and their `.sig`, `container-images.json`, `desktop-images.json`, the source
+  archives, `release-manifest.json` and the provenance. Installed apps fetch
+  `container-images.json` and the source at run time to repair, and update from the Latest
+  release's feed. The Latest release, anything newer (such as the next candidate), and any tag that
+  is not a version keep everything.
+
+Both sides read the Latest release from GitHub, never from an argument, so a mistyped tag cannot
+remove the installers the website links to. Running either again changes nothing.
+
+When it runs:
+
+- **GitHub, signing path:** `scripts/release-make-latest.sh` runs
+  `scripts/release-older-installers.sh github` right after it makes the release Latest and starts
+  Downloads sync, with the attach job's `contents: write`. If a removal fails, the feed is still
+  checked and the job then fails, naming the command to run again.
+- **GitHub, finish at 100%:** by hand, as a step of [Ramp, finish and roll back](#ramp-finish-and-roll-back).
+- **Bucket, both paths:** the last step of Downloads sync, `scripts/release-older-installers.sh bucket`,
+  on every run for the Latest release (the one the signing run starts, the one step 3 of finish at
+  100% starts, and the scheduled ones), never on a run for one tag. It removes the selected objects
+  and invalidates each removed path on the distribution, as they were cached for a year. The role
+  `openbot-release-downloads` may delete only under `releases/` (`s3:DeleteObject` on
+  `arn:aws:s3:::copilotkit-openbot-downloads/releases/*`).
+
+Downloads sync has only `contents: read` on the repository, so it never touches the GitHub
+releases; the finish-at-100% path removes those by hand. To see what would go, and then remove it,
+from a checkout of `main` with `gh` signed in:
+
+```sh
+GITHUB_REPOSITORY=CopilotKit/OpenBot scripts/release-older-installers.sh github --dry-run
+GITHUB_REPOSITORY=CopilotKit/OpenBot scripts/release-older-installers.sh github
+```
+
+The bucket side lists the same way with admin credentials for the account:
+`GITHUB_REPOSITORY=CopilotKit/OpenBot DOWNLOADS_BUCKET=copilotkit-openbot-downloads DOWNLOADS_DISTRIBUTION_ID=EQ4EH8L79LPGX scripts/release-older-installers.sh bucket --dry-run`.
+
+**Restoring one.** The bucket is versioned, so a removal only adds a delete marker and the
+installer's earlier version is still there. Removing the marker brings it back, then invalidate its
+path. This needs admin credentials for the account, as deleting a version is not something the
+sync's role may do:
+
+```sh
+key=releases/v1.0.3/OpenBot_1.0.3_aarch64.dmg
+aws s3api list-object-versions --bucket copilotkit-openbot-downloads --prefix "$key" \
+  --query 'DeleteMarkers[?IsLatest].VersionId' --output text
+aws s3api delete-object --bucket copilotkit-openbot-downloads --key "$key" --version-id <that id>
+aws cloudfront create-invalidation --distribution-id EQ4EH8L79LPGX --paths "/$key"
+```
+
+On GitHub a removed asset is gone. To put one back, download it from the bucket (restored as above
+if needed) and attach it again: `gh release upload v1.0.3 OpenBot_1.0.3_aarch64.dmg -R CopilotKit/OpenBot`.
+The fixed-name copies and installer `.sig` files are not in the bucket, so they cannot be put back
+this way; the fixed names are the same files as the versioned ones, and can be uploaded again under
+their fixed names from those.
 
 ## Staged rollout
 
@@ -815,20 +897,92 @@ aws cloudfront-keyvaluestore put-key --kvs-arn "$kvs" --if-match "$(etag)" --key
   already installed the newer release keep it.
 - **Finish at 100%:**
   1. Remove the tag from `RELEASE_HOLD_LATEST`.
-  2. Mark the release Latest on its release page, or `gh release edit v1.1.0 --latest`.
+  2. Carry the security floor to it, if the Latest release has one
+     (`GITHUB_REPOSITORY=CopilotKit/OpenBot scripts/release-security-floor.sh v1.1.0`), then mark the
+     release Latest on its release page, or `gh release edit v1.1.0 --latest`.
   3. Run Downloads sync for the Latest release, `gh workflow run downloads-sync.yml --ref main`, and
      wait for it to finish, so `latest/` serves the release.
-  4. Remove the function's association from the default behavior (console: the distribution,
+  4. Remove the installers of every older release from GitHub, which the signing run would have
+     done had it made the release Latest ([Older installers](#older-installers)):
+     `GITHUB_REPOSITORY=CopilotKit/OpenBot scripts/release-older-installers.sh github`. The sync in
+     step 3 has already removed them from the bucket.
+  5. Remove the function's association from the default behavior (console: the distribution,
      Behaviors, the default behavior, Function associations, Viewer request: No association), then
      put `rollout-percent` to `0`.
 
-Between steps 3 and 4, `latest/` and `rollout/<tag>/` hold the same release, so nobody in the share
+Between steps 3 and 5, `latest/` and `rollout/<tag>/` hold the same release, so nobody in the share
 is sent back to the older one.
 
 The test path `/rollout-test/latest/<file>` routes the same way, to `latest/` or `rollout/<tag>/`.
 It exists so the function can be attached to a test cache behavior (`/rollout-test/*`) and shown
 answering both ways through the real distribution before it touches `latest/`. With no such
 behavior it is never reached, and on the default behavior it serves what `latest/` would.
+
+## Security floor
+
+A forced update, for a release with a security problem and for nothing else. The security floor
+names the lowest safe release of OpenBot Desktop, the back end OpenBot Desktop runs on the computer,
+the phone app and the Recorder. An app below its floor shows one notice, "This version of OpenBot
+has a security problem. Update to keep using it.", and nothing else until it is updated. OpenBot
+Desktop also stops the back end it runs on the computer: no Bot runs and routines pause, and nothing
+is deleted. Update and restart then upgrades the back end at the next start, as every update does.
+
+**Never for a company's own OpenBot.** OpenBot Desktop's own back end always follows the floor,
+because it ships with the app. Any other OpenBot follows it only when the floor lists its address
+under `cloud`, which names OpenBot Cloud's addresses and nothing else. So OpenBot Desktop, the phone
+app and the Recorder connected to a company's server ignore the floor, and so does that server.
+
+### How it works
+
+- **The document.** `security-floor.json`, beside `latest.json` on the Latest release, and copied by
+  Downloads sync to `downloads.copilotkit.ai/latest/security-floor.json`. The apps read it from
+  there first and from `releases/latest/download/security-floor.json` when that fails. Each app
+  names both itself, never `shared/`, which every self-hosted OpenBot ships
+  ([`tests/security-floor-addresses.test.ts`](../tests/security-floor-addresses.test.ts) holds the
+  copies equal).
+- **Its own signature.** Tauri signs each installer, and nothing signs `latest.json` itself, so a
+  field there would be unauthenticated. The floor is `{ "payload": <base64>, "signature": <base64> }`:
+  the signature is Ed25519 over the payload's exact bytes. An app reads nothing in the payload until
+  the signature verifies against a public key it was built with (`keys` in
+  `shared/security-floor.json`). The payload names `kind: "openbot-security-floor"`, a `serial`, when
+  it was `issued`, the `floors` per app and the `cloud` addresses.
+- **Only up.** An app keeps the floor with the highest serial it has verified and ignores any with a
+  lower one, so a replayed old floor can't lift a block. Each new floor's serial is the published
+  one's plus one, and a floor raised by mistake is undone by signing a newer one with a lower floor
+  (`lower`).
+- **When apps check.** At launch and every six hours, with the update check. Offline, the floor the
+  app kept still holds. An app that has never verified a floor runs as normal.
+- **OpenBot Cloud.** Cloud's server reads the same signed floor and raises its oldest supported app
+  releases with it, so an app below the floor is refused with the update screen even if it has not
+  read the floor yet. A server reads it only when its deployment turns that on; it is off by default.
+- **Releases carry it.** A release that becomes Latest carries the Latest release's floor on
+  ([`scripts/release-security-floor.sh`](../scripts/release-security-floor.sh), run by
+  [`scripts/release-make-latest.sh`](../scripts/release-make-latest.sh)), so a new release never
+  drops it. A release keeps the floor with the higher serial.
+
+### Raising it
+
+1. Publish the fixed release first and let it become Latest. The workflow refuses a floor above the
+   Latest release, because an app below it would have no update to reach.
+2. Run the Security floor workflow on `main`
+   ([`.github/workflows/security-floor.yml`](../.github/workflows/security-floor.yml)) with the
+   lowest safe release of each affected app. An empty input keeps the published floor for that app.
+3. A required reviewer of the `security-floor` environment approves the `sign` job. It is the only
+   place the signing key can be read, and it has no write access. The `publish` job puts the signed
+   floor on the Latest release and starts Downloads sync; it never sees the key.
+
+### One-time setup
+
+- **The key pair.** Made on the release owner's own machine, never on a release host or a runner:
+  `openssl genpkey -algorithm ed25519 -out security-floor.pem`. The private key goes in the
+  `security-floor` environment's secret `SECURITY_FLOOR_SIGNING_KEY` and in the company password
+  manager, and nowhere else. The public key, in the form the apps read, comes from
+  `SECURITY_FLOOR_SIGNING_KEY="$(cat security-floor.pem)" bun scripts/security-floor-sign.ts --public`.
+  It goes in `keys` in `shared/security-floor.json`, in a reviewed PR, before the next release:
+  only apps built with it can verify a floor.
+- **The environment.** Create the protected GitHub environment `security-floor` with required
+  reviewers and deployment branches limited to `main`, and add the secret above.
+- **A second key.** `keys` is a list so a new key can ship in releases before the old one is retired.
 
 ## What merging does
 
@@ -949,12 +1103,13 @@ A job added to `ci.yml` is covered by it without anybody updating a list.
 | `format, lint, types` | the ordinary things, across every workspace, and a desktop version that has left the release version |
 | `API spec` | a bundled spec that is not what its sources bundle to, a broken API convention, a generated client that is not the committed one, or, on a pull request, a breaking change to the API or the live channels |
 | `native types` | a type error in the `mobile` app, which installs from its own npm lockfile |
-| `app (real browser)` | the app and desktop setup window behavior only a real Chromium shows, such as layout, and following the system's light or dark |
+| `app (real browser)`, `app (real browser, WebKit)`, `app (real browser, desktop setup window)` | the app and desktop setup window behavior only a real Chromium shows, such as layout, and following the system's light or dark, and dictation's languages in WebKit, the engine the Mac window draws with |
 | `tests` | a decision made wrongly, in isolation |
-| `python harness regressions` | a provider-boundary regression in the Python Bot harnesses, or a Compose file an older Compose cannot read |
+| `python harness (agent-crewai)` and one per harness | a provider-boundary regression in that Python Bot harness |
+| `compose config` | a Compose file an older Compose cannot read |
 | `startup (macos-latest)`, `startup (windows-latest)` | the app's serve-or-build cache deciding wrongly on macOS or Windows |
 | `build` | the app not compiling |
-| `component dockerfiles` | a Dockerfile a release would publish that no longer builds, or one the publish list has stopped covering |
+| `component list`, `component dockerfile (<image>)` | a Dockerfile the publish list has stopped covering, or one a release would publish that no longer builds, one check per image |
 
 None of these runs the OpenBot server. It comes as published images, which a release pins by digest
 and refuses to publish without (see [What merging does](#what-merging-does)).
@@ -972,7 +1127,7 @@ release commit:
   `backend-images.env` and the `openbot-desktop` version line in
   `desktop/src-tauri/Cargo.toml` and `Cargo.lock`, which may change nothing else. Only a run of `ci.yml` for a push to this repository's `main`, at
   exactly that commit, counts; a pull request's run tests a merge of the PR, not the commit, and
-  skips `component dockerfiles` unless it was labelled `full-ci`. A run still in progress is waited for, up to 40 minutes. In
+  skips the component dockerfile checks unless it was labelled `full-ci`. A run still in progress is waited for, up to 40 minutes. In
   their place the job re-runs the checks that read the files the release did change: formatting and
   lint, the desktop version against `package.json`, and every test that names
   `CHANGELOG.md` or `release-policy.json`.
@@ -986,12 +1141,120 @@ seen as the source file it removed. Every commit on `main` keeps its own CI run 
 in progress still gets a result. A final's parent is its candidate on `release/X.Y`, which main's CI
 never ran on, so a final always runs the full suite.
 
+The release PR's own CI run is as small, for the same reason
+([`scripts/ci-changes.ts`](../scripts/ci-changes.ts)). A PR labelled `release`, from this repository's
+`release/publish/v*` branch, whose diff from main is the release files alone, each version file
+changed only by its version, runs `format, lint, types` and the tests that name `CHANGELOG.md` or
+`release-policy.json`, and builds no Desktop app. Everything else is skipped, and `verify` reads a
+skipped check as a pass. Main's CI on the merge commit still runs every check, which is the run the
+publish gate waits for.
+
 **No secrets are required to release.** CI and **Create release PR** use only the built-in
-`GITHUB_TOKEN`. **Publish release**, **Internal build** and the desktop build workflows also pass
-`OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET` to the installer build when it is set, and build without
-it when it is not. Signed desktop builds are the exception: they read the `macos-signing` and
+`GITHUB_TOKEN`. Signed desktop builds are the exception: they read the `macos-signing` and
 `windows-signing` environments described above and in [Windows signing](windows-signing.md).
 Downloads sync signs in to AWS with GitHub's OIDC token rather than a stored key.
+
+## Model compatibility
+
+The model picker lists each provider's models live, but every harness image carries its model
+client at a fixed version: the Claude Agent SDK harness bundles a Claude Code CLI (through
+`claude-agent-sdk` in `agent-claude-sdk/requirements.txt`), the LangGraph harness sends the ChatGPT
+plan's backend a fixed Codex client version (`DEFAULT_CLIENT_VERSION` in
+`agent-langgraph-agui/src/chatgpt_models.py`), and the others carry the provider SDKs they were built
+with. A provider can refuse a new model to an older client while the picker keeps offering it:
+"Claude Code 2.1.259 does not support this model; version 2.1.290 or newer is required".
+
+**Model compatibility** (`.github/workflows/model-compat.yml`) checks for that daily, and by hand
+from the Actions tab. One job per harness in `.github/published-images.json` runs
+[`scripts/model-compat.ts`](../scripts/model-compat.ts), which:
+
+- lists each provider's models from the same source, with the same filter, as the picker (see
+  [The model list](configuration.md#the-model-list));
+- starts the harness image on each provider the way the Desktop configures it, and sends one AG-UI
+  run per model, so the harness's own client makes the call. It checks `latest`, the published
+  image people run, and `source`, the image built from this commit;
+- compares the LangGraph harness's Codex client version with the minimum each ChatGPT plan model
+  needs, from openai/codex's published model catalogue. A plan sign-in cannot run in CI. A Claude
+  plan runs through the same Claude Code CLI as an Anthropic key, so the key's rows cover it.
+
+It writes a pass, fail or skipped row per harness, image, provider and model, with the provider's
+own words, to the run's summary. On any failure the run fails and opens or updates one issue,
+**Model compatibility check failing**, and the first passing run closes it. It runs only on a
+schedule or by hand on `main`, never on a pull request.
+
+Each provider needs its key as a repository secret: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`GEMINI_API_KEY` (Google, also used for Antigravity) and `XAI_API_KEY`. A provider without one is
+reported as skipped, not failed, and the summary names the missing secrets. TrustedRouter, a
+gateway in front of many providers, is excluded from this check.
+
+**When it fails**, read the provider's words in the table:
+
+- A version refusal (a model "not supported" by the client's version, or a ChatGPT plan model that
+  needs a newer Codex) means bumping the pinned client: `claude-agent-sdk` in
+  `agent-claude-sdk/requirements.txt` (each release bundles a newer Claude Code CLI), or
+  `DEFAULT_CLIENT_VERSION` in `agent-langgraph-agui/src/chatgpt_models.py`, or the harness's
+  provider SDK in its `requirements.txt` or `package.json`. Run the check by hand: the `source` rows
+  show whether the bump fixed it before a release ships it, and the `latest` rows stay red until
+  one does.
+- A refused parameter or endpoint (a model that takes tools only through `/v1/responses`, or
+  refuses a `temperature`) means that harness builds its request in a way the model no longer
+  accepts: fix how the harness sets up its model, or bump the framework if a newer one does.
+- Billing, rate limits or a refused key are the key's problem, not a client's: fix the key.
+
+To run it locally (needs Docker), with keys in the environment or an env file:
+
+```sh
+bun scripts/model-compat.ts --env-file .env --harness agent-claude-sdk --provider anthropic
+```
+
+`--model <regex>` narrows the models, `--tags latest` skips building from source.
+
+### Model lock
+
+The picker offers a model only when this check has proven it on the Bot's harness.
+`shared/model-lock.json` holds, per harness, the model clients its `source` image carried and, per
+provider, the models that answered and the ones refused, in the provider's words. The server's model
+catalogue reads it (`shared/model-lock.ts` has the rule): a live model the lock doesn't verify for
+the harness is hidden, and a conversation already set to one runs on the default and says so.
+
+- **Which harness.** A Claude plan runs every Bot through `agent-claude-sdk`, a ChatGPT plan through
+  `agent-langgraph-agui`, and with a key, the harness picked in setup when it takes OpenBot's model
+  choice.
+- **What is locked.** Only an engine and provider pair that has been checked. A pair never checked (a
+  provider with no key here, such as xAI today) stays open, and a gateway is never locked.
+- **A new engine** can be locked before its first release, by giving it empty pairs for the
+  providers it runs on. Nothing is offered on it until a run proves a model, including on a
+  provider the check has no key for. The check runs every engine the lock names, published or not
+  yet, from its `source` image (`bun scripts/model-compat.ts harnesses` lists them). An engine new
+  Bots run on by default (`DEFAULT_ENGINES` in `shared/model-lock.ts`, today the LangGraph
+  (TypeScript) engine, `agent-langgraph-ts`) must verify at least one model on every provider it is
+  locked for, or `scripts/model-lock.test.ts` fails: write its entry from a run, never empty. The
+  lock can't reach main before an engine it names has its row in `shared/harnesses.json`.
+- **A new model** stays hidden until a daily run proves it. The run then opens or updates one pull
+  request, **Refresh the model lock**, on the branch `model-lock/refresh`, listing the models that
+  started and stopped answering and the clients that moved. Merging it lets the picker offer them.
+  Every failure is asked once more before it counts. A failure that says nothing about the client
+  keeps what the lock said before: the harness never started, a timeout, a rate limit, or a bare
+  404 for a model the check's key can't see. A model the provider retires ("no longer available to
+  new users") is refused, so a person set to it is told, and it never fails a pull request.
+- **A client bump** is held to the lock: a pull request from this repository that changes a
+  harness's `requirements.txt`, `package.json`, `bun.lock`, `Dockerfile` or the Codex client version
+  runs the **Model lock** workflow, which builds that harness, sends every listed model a request
+  through it and through the published image, and fails when a model the lock verifies no longer
+  answers through the change's image but still does through the published one. Models the bump
+  newly fixes are added by the next daily refresh.
+- **The lock matches the pins.** The lock records the clients it was proven on, and
+  `scripts/model-lock.test.ts` fails when a harness pins a different version (an exact
+  `requirements.txt` pin, `agent-mastra/bun.lock`, or the Codex client version): a lock proven on
+  other clients may hide models that now work. Write it again from the change's own **Model lock**
+  run, whose results each harness uploads as `model-lock-<harness>`: download them and run `lock`.
+
+To write the lock from results by hand:
+
+```sh
+bun scripts/model-compat.ts lock --changes changes.md results/*.json
+bun scripts/model-compat.ts guard results/*.json
+```
 
 ## The one thing CI cannot do
 

@@ -1,6 +1,7 @@
 import { infiniteQueryOptions } from "@tanstack/react-query";
 import { listPeople } from "@/lib/api/generated/people/people";
 import { organizationId } from "@/lib/api/request";
+import { knownRole } from "@/lib/auth/roles";
 
 /**
  * Somebody who has signed in to this deployment.
@@ -28,6 +29,19 @@ export type Person = {
    */
   configuredAdmin: boolean;
 };
+
+/**
+ * A person as the API answers them, in the shape this screen reads. A role a newer server names that
+ * this app doesn't know is read as the least it could be, a member.
+ */
+export function personOf(
+  person: Omit<Person, "role"> & { role: string },
+): Person {
+  return { ...person, role: knownRole(person.role) };
+}
+
+/** The most a search of a list of people, invitations or teams may hold: the API's cap. */
+export const SEARCH_MAX = 200;
 
 export const peopleKeys = {
   all: ["people"] as const,
@@ -62,7 +76,10 @@ export function peopleListQueryOptions(search = "") {
         },
         { signal, fallback: "Could not load people" },
       );
-      return { people: page.people, nextCursor: page.nextCursor };
+      return {
+        people: page.people.map(personOf),
+        nextCursor: page.nextCursor,
+      };
     },
     getNextPageParam: (page: PeoplePage) => page.nextCursor ?? undefined,
   });

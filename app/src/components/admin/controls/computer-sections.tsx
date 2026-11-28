@@ -49,13 +49,15 @@ import {
   setNetworkPolicyMutationOptions,
   terminateInactiveComputersMutationOptions,
 } from "@/lib/enterprise/mutations";
-import type {
-  EgressRule,
-  EnterpriseOverview,
-  NetworkMode,
-  NetworkPolicy,
-  NetworkScopeKind,
+import {
+  type EgressRule,
+  type EnterpriseOverview,
+  knownNetworkScope,
+  type NetworkMode,
+  type NetworkPolicy,
+  type NetworkScopeKind,
 } from "@/lib/enterprise/queries";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { MISSING_TEAM, teamName } from "@/lib/teams/names";
 import { type TeamSummary, teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
@@ -184,12 +186,17 @@ function NetworkPolicies({ data }: { data: EnterpriseOverview }) {
   const organizationPolicy = data.network.find(
     (row) => row.scopeKind === "organization",
   );
-  // A team's rows wait for the teams' names: a row is never titled with an id.
-  const scopedPolicies = data.network.filter(
-    (row) =>
-      row.scopeKind === "group" ||
-      (row.scopeKind === "team" && teams.data !== undefined),
-  );
+  /*
+   * A team's rows wait for the teams' names: a row is never titled with an id. A policy of a kind a
+   * newer server names that this app doesn't know is left out, so it is never opened or sent back.
+   */
+  const scopedPolicies = data.network
+    .filter(knownNetworkScope)
+    .filter(
+      (row) =>
+        row.scopeKind === "group" ||
+        (row.scopeKind === "team" && teams.data !== undefined),
+    );
   const titleOf = (policy: NetworkPolicy) => {
     if (policy.scopeKind === "group") return `Group: ${policy.scopeId}`;
     const name = teamName(known, policy.scopeId);
@@ -260,7 +267,10 @@ function NetworkPolicies({ data }: { data: EnterpriseOverview }) {
       </PageRows>
       {teams.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load teams. Try again in a moment.
+          {loadFailure(
+            teams.error,
+            "Couldn't load teams. Try again in a moment.",
+          )}
         </p>
       ) : null}
       {known.some(
@@ -309,7 +319,7 @@ function SweepNow() {
       ) : null}
       {sweep.error ? (
         <span className="text-destructive text-sm" role="alert">
-          {sweep.error.message}
+          {failureSaid(sweep.error)}
         </span>
       ) : null}
     </div>
@@ -525,7 +535,7 @@ function NetworkDialog({
           </form>
           {(save.error ?? remove.error) ? (
             <p className="text-destructive text-sm" role="alert">
-              {(save.error ?? remove.error)?.message}
+              {failureSaid(save.error ?? remove.error)}
             </p>
           ) : null}
         </DialogBody>

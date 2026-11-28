@@ -272,6 +272,23 @@ pub fn give_back_with(
     }
 }
 
+/**
+Stop's and Quit's last part: OpenBot's own machine, `own`, stopped when it runs, telling `stopping`
+just before. Answers whether it stopped it. Every other machine is left exactly as it is: the
+person's own are never stopped here, running or not.
+*/
+pub fn stop_own_with(
+    machines: &mut dyn Machines,
+    own: &str,
+    stopping: &mut dyn FnMut(),
+) -> Result<bool, String> {
+    if !machines.running()?.iter().any(|name| name == own) {
+        return Ok(false);
+    }
+    stopping();
+    machines.stop(own).map(|()| true)
+}
+
 /// Whether OpenBot has a machine of the person's paused, for Quit to say so.
 pub fn has_paused(record: &Path) -> bool {
     !read_paused(record).machines.is_empty()

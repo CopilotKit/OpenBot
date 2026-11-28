@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { createRoot } from "react-dom/client";
 import { ConnectAppCard } from "@/components/channels/connect-app-card";
+import { BrokerDirectoryPage } from "@/components/manage/broker-directory-page";
 import { setCurrentOrganization } from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
 import { Route as AccountRoute } from "@/routes/_authed/_app/connections.$key";
@@ -19,8 +20,8 @@ import { Route as DesktopReturnRoute } from "@/routes/desktop-return";
  * The screens a sign-in through Composio passes through, as pages of their own for
  * consent-handoff.test.tsx to bundle and load in a real browser: an app's page under Connections
  * (where Connect leaves this tab), a Bot's Connect card in a conversation (where it opens a new
- * one), the step that new tab shows (`/connecting`), and the page OpenBot Desktop's sign-in comes
- * back to (`/desktop-return`). Each is the app's own route or component; what the server answers
+ * one), Browse apps (where Add starts a sign-in the same way), the step that new tab shows
+ * (`/connecting`), and the page OpenBot Desktop's sign-in comes back to (`/desktop-return`). Each is the app's own route or component; what the server answers
  * comes from the test's routes.
  *
  * The tree is built the way `routeTree.gen.ts` builds it, a pathless `_authed` and `_app` above
@@ -83,6 +84,16 @@ const cardRoute = createRoute({
   },
 });
 
+/**
+ * Browse apps, as the personal edition draws it under Connections: the route's own component,
+ * without the edition guard in front of it (this page asks the server which edition it is).
+ */
+const browseRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/connections/browse/composio",
+  component: () => <BrokerDirectoryPage provider="composio" />,
+});
+
 const router = createRouter({
   history: createBrowserHistory(),
   routeTree: rootRoute.addChildren([
@@ -95,8 +106,8 @@ const router = createRouter({
           "/connections/$key",
         ),
         cardRoute,
+        browseRoute,
         elsewhere("/connections"),
-        elsewhere("/connections/browse/composio"),
         elsewhere("/settings/vault"),
       ]),
     ]),

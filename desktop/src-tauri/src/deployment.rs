@@ -80,6 +80,16 @@ pub const IMAGE_VARIABLES: [(&str, &str); 3] = [
     ("agent-computer", "COMPUTER_IMAGE"),
 ];
 
+/// Images pinned when the manifest names them, and left out when it does not.
+///
+/// The ChatGPT plan's model service (`crate::plan::CHATGPT_PLAN_SERVICE`), which only a ChatGPT-plan
+/// installation starts. Pinned whenever the release publishes it, because unpinned its Compose
+/// default is a name built on this machine, and a start that raised it would have nothing to run.
+/// Not required: a release laid out by an older app, or a test manifest, need not name it, and an
+/// installation that never starts the service never reads the variable.
+pub const OPTIONAL_IMAGE_VARIABLES: [(&str, &str); 1] =
+    [("agent-langgraph-agui", "LANGGRAPH_IMAGE")];
+
 /// Read the manifest laid down beside the deployment and turn it into Compose variables.
 ///
 /// Digests, not tags. A tag can be moved to point at a different image after the version that was
@@ -104,15 +114,59 @@ pub fn image_variables(root: &Path) -> Result<Vec<(String, String)>, String> {
 /// actionable one: the alternative is somebody debugging registry permissions for an image that
 /// was never pushed.
 pub fn reference(root: &Path, published: &str) -> Result<String, String> {
-    let text = std::fs::read_to_string(images_path(root))
-        .map_err(|error| format!("could not read {}: {error}", images_path(root).display()))?;
-    let manifest: Images = serde_json::from_str(&text)
-        .map_err(|error| format!("{IMAGES} is not readable: {error}"))?;
+    image_reference(root, published).map_err(String::from)
+}
+
+/// Why [`image_reference`] has no reference to give.
+///
+/// Two answers that call for different things. A release that does not publish an image is a fact
+/// about the release, and the person picks another Bot or updates. An image list that is missing or
+/// cannot be read is a damaged installation, and Install puts it back (it re-downloads only the
+/// list, see [`needs_fetch`]). Read as the first, a list something else deleted told the person
+/// their Bot was not in this version, and every Retry failed the same way.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReferenceError {
+    /// The image list beside the deployment is missing or is not a list. The installation's fault.
+    Unreadable(String),
+    /// The list is there and this release does not publish the image.
+    NotIncluded(String),
+}
+
+impl std::fmt::Display for ReferenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unreadable(detail) | Self::NotIncluded(detail) => f.write_str(detail),
+        }
+    }
+}
+
+impl From<ReferenceError> for String {
+    fn from(error: ReferenceError) -> Self {
+        error.to_string()
+    }
+}
+
+/// [`reference`], saying whether the image list could not be read or the release lacks the image.
+pub fn image_reference(root: &Path, published: &str) -> Result<String, ReferenceError> {
+    let text = std::fs::read_to_string(images_path(root)).map_err(|error| {
+        ReferenceError::Unreadable(format!(
+            "could not read {}: {error}",
+            images_path(root).display()
+        ))
+    })?;
+    let manifest: Images = serde_json::from_str(&text).map_err(|error| {
+        ReferenceError::Unreadable(format!("{IMAGES} is not readable: {error}"))
+    })?;
     manifest
         .images
         .get(published)
         .map(|image| image.reference.clone())
-        .ok_or_else(|| format!("OpenBot {} does not include {published}.", manifest.version))
+        .ok_or_else(|| {
+            ReferenceError::NotIncluded(format!(
+                "OpenBot {} does not include {published}.",
+                manifest.version
+            ))
+        })
 }
 
 /// Every image the stack runs, or a failure that names the one that is missing.
@@ -130,6 +184,11 @@ pub fn pin(manifest: &Images) -> Result<Vec<(String, String)>, String> {
             )
         })?;
         pinned.push((variable.to_string(), image.reference.clone()));
+    }
+    for (published, variable) in OPTIONAL_IMAGE_VARIABLES {
+        if let Some(image) = manifest.images.get(published) {
+            pinned.push((variable.to_string(), image.reference.clone()));
+        }
     }
     Ok(pinned)
 }
@@ -1220,6 +1279,40 @@ mod tests {
         std::fs::write(images_path(&dir), "{}").unwrap();
         assert!(!needs_fetch(&dir, "v0.0.7"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A list that is gone or is not a list is the installation's fault; a list without the image is
+    /// the release's. Start and Change AI connection say the two differently.
+    #[test]
+    fn an_unreadable_image_list_is_told_apart_from_a_release_without_the_image() {
+        let root = crate::test_support::temp_root("deployment-reference-errors");
+        std::fs::create_dir_all(&root).unwrap();
+
+        assert!(matches!(
+            image_reference(&root, "server"),
+            Err(ReferenceError::Unreadable(detail)) if detail.contains("could not read")
+        ));
+        std::fs::write(images_path(&root), "not a list").unwrap();
+        assert!(matches!(
+            image_reference(&root, "server"),
+            Err(ReferenceError::Unreadable(detail)) if detail.contains("is not readable")
+        ));
+        std::fs::write(
+            images_path(&root),
+            serde_json::to_vec(&manifest(&["server"])).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            image_reference(&root, "agent-langgraph-ts"),
+            Err(ReferenceError::NotIncluded(
+                "OpenBot v0.0.7 does not include agent-langgraph-ts.".into()
+            ))
+        );
+        assert_eq!(
+            reference(&root, "server").unwrap(),
+            "ghcr.io/copilotkit/openbot-server@sha256:abc"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// A GitHub tag tarball, with every path given its own body.

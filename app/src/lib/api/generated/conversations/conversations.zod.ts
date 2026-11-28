@@ -86,7 +86,7 @@ export const CreateConversationJoinTokenResponse = zod
   );
 
 /**
- * Return one page of the caller's conversations: pinned ones first, then the most recently used. Each says what was last said in it, whether the caller has read it, and what a Bot is still working on there. With q the page holds only the conversations whose name or words match, for a search of the whole list; a search page holds at most 50. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the caller's conversations: pinned ones first, then the most recently used. Each says what was last said in it, whether the caller has read it, and what a Bot is still working on there. With q the page holds only the conversations whose name or words match, for a search of the whole list; a search page holds at most 50. With botId it holds only the conversations that Bot takes part in, in the same order. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List conversations
  */
 
@@ -101,6 +101,8 @@ export const ListConversationsParams = zod.object({
 
 export const listConversationsQueryQMin = 2;
 export const listConversationsQueryQMax = 200;
+
+export const listConversationsQueryBotIdMax = 200;
 
 export const listConversationsQueryLimitDefault = 50;
 export const listConversationsQueryLimitMax = 200;
@@ -119,6 +121,14 @@ export const ListConversationsQueryParams = zod.object({
     .optional()
     .describe(
       "What the person typed to search their conversations: 2 to 200 characters, with no control characters.",
+    ),
+  botId: zod
+    .string()
+    .min(1)
+    .max(listConversationsQueryBotIdMax)
+    .optional()
+    .describe(
+      "Only the conversations this Bot takes part in, one-Bot and group alike. A Bot the caller has no conversations with answers an empty page. Cannot be combined with q.",
     ),
   limit: zod
     .int()
@@ -208,7 +218,11 @@ export const ListConversationsResponse = zod.object({
           .array(
             zod
               .object({
-                kind: zod.enum(["handoff", "routine"]),
+                kind: zod
+                  .string()
+                  .describe(
+                    "What kind of work it is. turn holds from the turn's first step the server runs until the Bot answers or the turn waits on the person, between one run and the next too, so a page opened in the middle reads the conversation as working. A kind the app doesn't know is still work: the conversation is working. The server lists turn only for a caller that names the capability conversation-work-turn in its OpenBot-Capabilities header. Any other caller gets work without the turn, and busy true on the conversation in its list instead, because 1.2.1 drew any work that was not a handoff as a routine.",
+                  ),
                 key: zod
                   .string()
                   .describe(
@@ -217,7 +231,7 @@ export const ListConversationsResponse = zod.object({
                 botId: zod
                   .string()
                   .describe(
-                    "The Bot that was asked, or that the routine runs as.",
+                    "The Bot that was asked, that the routine runs as, or that is answering the turn.",
                   ),
                 botName: zod
                   .string()
@@ -225,14 +239,16 @@ export const ListConversationsResponse = zod.object({
                   .describe("That Bot's name when the work started."),
                 since: zod.iso
                   .datetime({ offset: true })
-                  .describe("When it started."),
+                  .describe(
+                    "When it started. For a turn, when the server took it on.",
+                  ),
                 routineId: zod
                   .string()
                   .optional()
                   .describe("The routine, for a routine."),
               })
               .describe(
-                "Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), or a routine running into it (routine).",
+                "Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), a routine running into it (routine), or the person's own turn, which the server is carrying on with no page open (turn).",
               ),
           )
           .describe("What a Bot is still working on in it."),
@@ -332,7 +348,11 @@ export const CreateConversationResponse = zod.object({
         .array(
           zod
             .object({
-              kind: zod.enum(["handoff", "routine"]),
+              kind: zod
+                .string()
+                .describe(
+                  "What kind of work it is. turn holds from the turn's first step the server runs until the Bot answers or the turn waits on the person, between one run and the next too, so a page opened in the middle reads the conversation as working. A kind the app doesn't know is still work: the conversation is working. The server lists turn only for a caller that names the capability conversation-work-turn in its OpenBot-Capabilities header. Any other caller gets work without the turn, and busy true on the conversation in its list instead, because 1.2.1 drew any work that was not a handoff as a routine.",
+                ),
               key: zod
                 .string()
                 .describe(
@@ -341,7 +361,7 @@ export const CreateConversationResponse = zod.object({
               botId: zod
                 .string()
                 .describe(
-                  "The Bot that was asked, or that the routine runs as.",
+                  "The Bot that was asked, that the routine runs as, or that is answering the turn.",
                 ),
               botName: zod
                 .string()
@@ -349,14 +369,16 @@ export const CreateConversationResponse = zod.object({
                 .describe("That Bot's name when the work started."),
               since: zod.iso
                 .datetime({ offset: true })
-                .describe("When it started."),
+                .describe(
+                  "When it started. For a turn, when the server took it on.",
+                ),
               routineId: zod
                 .string()
                 .optional()
                 .describe("The routine, for a routine."),
             })
             .describe(
-              "Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), or a routine running into it (routine).",
+              "Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), a routine running into it (routine), or the person's own turn, which the server is carrying on with no page open (turn).",
             ),
         )
         .optional()
@@ -493,7 +515,11 @@ export const GetConversationResponse = zod.object({
         .array(
           zod
             .object({
-              kind: zod.enum(["handoff", "routine"]),
+              kind: zod
+                .string()
+                .describe(
+                  "What kind of work it is. turn holds from the turn's first step the server runs until the Bot answers or the turn waits on the person, between one run and the next too, so a page opened in the middle reads the conversation as working. A kind the app doesn't know is still work: the conversation is working. The server lists turn only for a caller that names the capability conversation-work-turn in its OpenBot-Capabilities header. Any other caller gets work without the turn, and busy true on the conversation in its list instead, because 1.2.1 drew any work that was not a handoff as a routine.",
+                ),
               key: zod
                 .string()
                 .describe(
@@ -502,7 +528,7 @@ export const GetConversationResponse = zod.object({
               botId: zod
                 .string()
                 .describe(
-                  "The Bot that was asked, or that the routine runs as.",
+                  "The Bot that was asked, that the routine runs as, or that is answering the turn.",
                 ),
               botName: zod
                 .string()
@@ -510,14 +536,16 @@ export const GetConversationResponse = zod.object({
                 .describe("That Bot's name when the work started."),
               since: zod.iso
                 .datetime({ offset: true })
-                .describe("When it started."),
+                .describe(
+                  "When it started. For a turn, when the server took it on.",
+                ),
               routineId: zod
                 .string()
                 .optional()
                 .describe("The routine, for a routine."),
             })
             .describe(
-              "Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), or a routine running into it (routine).",
+              "Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), a routine running into it (routine), or the person's own turn, which the server is carrying on with no page open (turn).",
             ),
         )
         .optional()
@@ -1019,6 +1047,10 @@ export const ListConversationMessagesQueryParams = zod.object({
 
 export const listConversationMessagesResponseMessagesItemToolCallsMin = 0;
 
+export const listConversationMessagesResponseMessagesItemFilesItemSizeBytesMin = 0;
+
+export const listConversationMessagesResponseMessagesItemFilesMax = 20;
+
 export const listConversationMessagesResponseNextCursorMax = 4096;
 
 export const listConversationMessagesResponseNextCursorRegExp = new RegExp(
@@ -1051,7 +1083,7 @@ export const ListConversationMessagesResponse = zod.object({
             "What was said. Empty while another person's Bot is still writing it.",
           ),
         status: zod
-          .enum(["queued", "running", "waiting", "completed", "failed"])
+          .string()
           .describe(
             "Where a Bot's reply stands. A person's message is completed.",
           ),
@@ -1062,7 +1094,15 @@ export const ListConversationMessagesResponse = zod.object({
         reason: zod
           .string()
           .optional()
-          .describe("Why a waiting Bot is waiting."),
+          .describe(
+            "Why a waiting Bot is waiting, in words for the person reading the conversation.",
+          ),
+        declined: zod
+          .boolean()
+          .optional()
+          .describe(
+            "True on a failed Bot reply in a group that the person whose turn it answered chose not to share. It was a choice, not a fault, and nothing was sent. text says whose choice it was.",
+          ),
         answeredBy: zod
           .string()
           .optional()
@@ -1084,6 +1124,28 @@ export const ListConversationMessagesResponse = zod.object({
           .optional()
           .describe(
             "How many tools the Bot called in this message, when it called any.",
+          ),
+        files: zod
+          .array(
+            zod
+              .object({
+                id: zod.string().describe("The attachment's id."),
+                name: zod.string().describe("The file's name."),
+                mimeType: zod
+                  .string()
+                  .describe("The type OpenBot recognised it as."),
+                sizeBytes: zod
+                  .int()
+                  .min(
+                    listConversationMessagesResponseMessagesItemFilesItemSizeBytesMin,
+                  ),
+              })
+              .describe("A file held for a message, or sent with one."),
+          )
+          .max(listConversationMessagesResponseMessagesItemFilesMax)
+          .optional()
+          .describe(
+            "In a group conversation, the files a Bot sent from its computer with this reply, in the order it sent them. Each is an attachment of the conversation, read at its attachment address by anyone in it.",
           ),
       })
       .describe(
@@ -1176,6 +1238,136 @@ export const SendConversationMessageResponse = zod.object({
 });
 
 /**
+ * Return one page of the caller's own turns in the conversation that were refused before they ran, newest first: a model they may not run (MODEL_NOT_ALLOWED), a permission they don't have (CAPABILITY_REQUIRED), no OpenBot plan (PLAN_REQUIRED), an AI connection that can't run now or no default connection to run on (AI_CONNECTION_STOPPED; getModelChoice's stopped says which), or a Bot whose engine couldn't take the run (BOT_ENGINE_UNAVAILABLE). Each says what the turn was for (the person's message, or what a routine or a task asked) and why it was refused, in the words the refusal said. Nothing of a refused turn reaches the conversation's thread, so a client draws these into the transcript itself: each after the message named by afterMessageId, or after the thread's messages where that is null. BOT_ENGINE_UNAVAILABLE is the exception: its run started, so the person's message is in the thread, and the run ended in a RUN_ERROR carrying the same code and words; a client draws the refusal under that message, once, and not as how the run ended. botId narrows the list to one Bot's. A missing cursor starts at the newest page and nextCursor null ends the list.
+ * @summary List the caller's turns in a conversation that were refused
+ */
+
+export const listRefusedTurnsPathConversationIdRegExp = new RegExp("\\S");
+
+export const ListRefusedTurnsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  conversationId: zod
+    .string()
+    .min(1)
+    .regex(listRefusedTurnsPathConversationIdRegExp)
+    .describe("The conversation's id."),
+});
+
+export const listRefusedTurnsQueryBotIdMax = 200;
+
+export const listRefusedTurnsQueryLimitDefault = 50;
+export const listRefusedTurnsQueryLimitMax = 100;
+
+export const listRefusedTurnsQueryCursorMax = 4096;
+
+export const listRefusedTurnsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
+export const ListRefusedTurnsQueryParams = zod.object({
+  botId: zod
+    .string()
+    .min(1)
+    .max(listRefusedTurnsQueryBotIdMax)
+    .optional()
+    .describe("Only the turns of this Bot. Leave it out for every Bot's."),
+  limit: zod
+    .int()
+    .min(1)
+    .max(listRefusedTurnsQueryLimitMax)
+    .default(listRefusedTurnsQueryLimitDefault)
+    .describe("Most items in one page."),
+  cursor: zod
+    .string()
+    .min(1)
+    .max(listRefusedTurnsQueryCursorMax)
+    .regex(listRefusedTurnsQueryCursorRegExp)
+    .optional()
+    .describe(
+      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
+    ),
+});
+
+export const listRefusedTurnsResponseNextCursorMax = 4096;
+
+export const listRefusedTurnsResponseNextCursorRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+
+export const ListRefusedTurnsResponse = zod.object({
+  refusedTurns: zod
+    .array(
+      zod
+        .object({
+          id: zod.string().describe("The refused turn's id. Opaque."),
+          botId: zod.string().describe("The Bot the turn was for."),
+          threadId: zod
+            .string()
+            .describe("The thread the turn would have run in."),
+          afterMessageId: zod
+            .string()
+            .nullable()
+            .describe(
+              "The id of the thread's message the turn came after, as the app that sent it held the thread. Null where nothing says (a routine's or a task's turn, or the first turn of a thread): draw it after the thread's messages.",
+            ),
+          message: zod
+            .union([
+              zod
+                .object({
+                  id: zod
+                    .string()
+                    .nullable()
+                    .describe(
+                      "The message's id, as the app that sent it named it. Null for what a routine or a task asked.",
+                    ),
+                  text: zod.string().describe("What it said."),
+                })
+                .describe("The message a refused turn was for."),
+              zod.null(),
+            ])
+            .describe(
+              "What the turn was for: the person's message, or what a routine or a task asked. Null when nothing was said.",
+            ),
+          initiator: zod
+            .string()
+            .describe(
+              "Who started the turn: the person (person), a routine, check-in or goal (routine), or a task a Bot handed the work to (task).",
+            ),
+          code: zod
+            .string()
+            .describe("Why it was refused, as the refusal's problem code."),
+          detail: zod
+            .string()
+            .describe("The refusal, in the words the person was told."),
+          model: zod
+            .string()
+            .nullable()
+            .describe(
+              "The model it was refused on, as provider/model, for MODEL_NOT_ALLOWED. Null otherwise.",
+            ),
+          createdAt: zod.iso
+            .datetime({ offset: true })
+            .describe("When it was refused."),
+        })
+        .describe(
+          "One of the caller's turns that was refused before it ran, so nothing of it is in the conversation's thread: what it was for, and why.",
+        ),
+    )
+    .describe("Newest first."),
+  nextCursor: zod
+    .string()
+    .max(listRefusedTurnsResponseNextCursorMax)
+    .regex(listRefusedTurnsResponseNextCursorRegExp)
+    .nullable()
+    .describe(
+      "Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.",
+    ),
+});
+
+/**
  * Upload one file to send with the caller's next message in the conversation. The file is held until that message is sent, or removed, or a day has passed. OpenBot refuses a file no Bot could read, and says what the file was. A message takes up to 8 files.
  * @summary Attach a file to the next message
  */
@@ -1235,7 +1427,7 @@ export const UploadConversationAttachmentResponse = zod
   .describe("A file held for a message, or sent with one.");
 
 /**
- * Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it.
+ * Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it. A picture is served to open in place. Every other file, a PDF or a Word, Excel or PowerPoint file among them, is served as a download.
  * @summary Download an attachment
  */
 
@@ -1394,4 +1586,52 @@ export const CreateTranscriptionBody = zod.object({
 
 export const CreateTranscriptionResponse = zod.object({
   text: zod.string().describe("What was said."),
+});
+
+/**
+ * Say how one of a Bot's runs in the conversation ended, as the run's own last event said: it finished, it stopped to ask a person, it was stopped, or it failed. The run is named by the runId its events carry (RUN_STARTED on the threadStream channel of api/asyncapi.yaml). A client that stopped hearing a run before its end asks this, once createConversationJoinToken says the conversation has no run going, to tell a run that finished from one that stopped part way. outcome is null while the run is going, and for a run that ended without saying how (its server stopped under it). A run this server keeps no record of, or one of another conversation, is not found. Only a person in the conversation may ask, about the thread they see there.
+ * @summary See how a Bot's run in a conversation ended
+ */
+
+export const getConversationRunPathConversationIdRegExp = new RegExp("\\S");
+export const getConversationRunPathRunIdMax = 256;
+
+export const getConversationRunPathRunIdRegExp = new RegExp("\\S");
+
+export const GetConversationRunParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  conversationId: zod
+    .string()
+    .min(1)
+    .regex(getConversationRunPathConversationIdRegExp)
+    .describe("The conversation's id."),
+  runId: zod
+    .string()
+    .min(1)
+    .max(getConversationRunPathRunIdMax)
+    .regex(getConversationRunPathRunIdRegExp)
+    .describe("The run's id, as its events carry it."),
+});
+
+export const GetConversationRunResponse = zod.object({
+  run: zod
+    .object({
+      id: zod.string().min(1).describe("The run's id, as its events carry it."),
+      outcome: zod
+        .string()
+        .nullable()
+        .describe(
+          "How the run ended, as its own last event said. succeeded: it finished. interrupted: it stopped to ask a person (an approval, a missing value). cancelled: it was stopped. failed: it ended with an error, or its stream failed, or its server ended it on the way down. Null while the run is going, and for a run that ended without saying how.",
+        ),
+      endedAt: zod.iso
+        .datetime({ offset: true })
+        .nullable()
+        .describe("When the run ended, or null while outcome is null."),
+    })
+    .describe("One of a Bot's runs in a conversation, and how it ended."),
 });

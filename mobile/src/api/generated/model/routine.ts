@@ -14,6 +14,8 @@ export interface Routine {
   botId: string;
   /** When it runs, as text to show. */
   schedule: string;
+  /** The schedule as it is kept, five cron fields: minute, hour, day of month, month, day of week. What a form that changes the schedule starts from. */
+  cron: string;
   /** The IANA time zone the schedule is read in. */
   timezone: string;
   /** What the Bot does on each run. */

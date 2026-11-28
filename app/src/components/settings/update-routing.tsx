@@ -27,6 +27,7 @@ import {
 import { transportsQueryOptions } from "@/lib/delivery";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import { loadFailure } from "@/lib/load-failure";
 import { mayOpenSetup } from "@/lib/setup/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -118,7 +119,10 @@ export function UpdateRoutingSection() {
     >
       {routing.isPending || transports.isPending ? null : routing.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load where your updates go. Try again in a moment.
+          {loadFailure(
+            routing.error,
+            "Couldn't load where your updates go. Try again in a moment.",
+          )}
         </p>
       ) : shown.length === 0 ? (
         <PageEmpty

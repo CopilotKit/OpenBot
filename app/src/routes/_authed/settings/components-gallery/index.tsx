@@ -12,6 +12,7 @@ import {
 import { componentListQueryOptions } from "@/lib/components/queries";
 import { galleryComponent } from "@/lib/copilot/gallery-registry";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 
 /**
  * What a Bot can draw, for the person it draws for.
@@ -63,7 +64,10 @@ function RouteComponent() {
     <PageShell description={words.intro} title="Components gallery">
       {components.isPending ? null : components.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load components. Try again in a moment.
+          {loadFailure(
+            components.error,
+            "Couldn't load components. Try again in a moment.",
+          )}
         </p>
       ) : published?.length === 0 ? (
         <Empty className="mt-12 min-h-[30dvh] border border-dashed">

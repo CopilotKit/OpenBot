@@ -19,3 +19,8 @@ Once the change is on the base branch, the check no longer reports it and its li
 - 2026-11-14 `remove /operations/receiveLegacyBotScreenInput`: an operation of the retired screen address. `receiveBotScreenInput` takes the same messages.
 - 2026-11-14 `remove /operations/sendLegacyBotTerminal`: an operation of the retired terminal address. `sendBotTerminal` carries the same messages.
 - 2026-11-14 `remove /operations/receiveLegacyBotTerminalInput`: an operation of the retired terminal address. `receiveBotTerminalInput` takes the same messages.
+- 2026-11-26 `add /channels/conversationEvents/bindings/ws/query`: the socket gains one optional query parameter, `capabilities`, naming the newer messages an app understands. A socket opened without it is sent what every release reads, so no client loses anything.
+- 2026-11-26 `remove /components/schemas/ConversationWork/properties/kind/enum`: a kind of work is declared open (x-extensible-enum) with every value it had, so a turn the server carries can be named (turn). turn is sent only on a socket opened with the capability conversation-work-turn; every other socket is sent the work it was sent before, and busy while the turn goes on, so no released app reads a value it doesn't know.
+- 2026-11-26 `add /components/schemas/ConversationWork/properties/kind/x-extensible-enum`: the same change, its open list.
+- 2026-11-26 `remove /components/schemas/ConversationActivity/properties/work/items/properties/kind/enum`: the same change, where the message's work is resolved.
+- 2026-11-26 `add /components/schemas/ConversationActivity/properties/work/items/properties/kind/x-extensible-enum`: the same change, its open list there.

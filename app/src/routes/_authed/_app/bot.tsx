@@ -1,14 +1,20 @@
-import { TelemetryAssistantMessage } from "@/components/channels/telemetry-assistant-message";
 import { CopilotChat } from "@copilotkit/react-core/v2";
 import { IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { ConversationApprovals } from "@/components/approvals/inline-approval";
+import { TelemetryAssistantMessage } from "@/components/channels/telemetry-assistant-message";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
-import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
-import { DetailPanel } from "@/components/layout/detail-panel";
+import { useCardsFirst } from "@/components/computer/use-cards-first";
+import {
+  DetailPanel,
+  detailFitsBeside,
+} from "@/components/layout/detail-panel";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
+import { AddCardButton } from "@/components/plan/add-card-button";
+import { StarPrompt } from "@/components/star-prompt/star-prompt";
 import { Button } from "@/components/ui/button";
 import { defaultAgentId } from "@/lib/agents/default-agent";
 import {
@@ -19,12 +25,14 @@ import {
 import { getBot } from "@/lib/api/generated/bots/bots";
 import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotActivity } from "@/lib/copilot/bot-activity";
 import { useBotThread } from "@/lib/copilot/bot-thread";
 import { LiveThreadUpdates } from "@/lib/copilot/live-thread-updates";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
 import { useNoBotComputers } from "@/lib/deployment/queries";
+import { failureSaid, isHeld, loadFailure } from "@/lib/load-failure";
 import { searchTextEntry } from "@/lib/search-text";
 
 export const Route = createFileRoute("/_authed/_app/bot")({
@@ -78,6 +86,7 @@ function RouteComponent() {
   const agent = search.agent === "" ? undefined : search.agent;
   const {
     data: agents,
+    error,
     isError,
     isPending,
   } = useQuery(agentListQueryOptions());
@@ -88,6 +97,7 @@ function RouteComponent() {
     Boolean(agent) && agents !== undefined && listedBot === undefined;
   const {
     data: detail,
+    error: detailError,
     isError: isDetailError,
     isPending: isDetailPending,
   } = useQuery({
@@ -105,7 +115,10 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load your Bots. Try again in a moment.
+          {loadFailure(
+            error,
+            "Couldn't load your Bots. Try again in a moment.",
+          )}
         </p>
       </div>
     );
@@ -114,7 +127,10 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this Bot. Try again in a moment.
+          {loadFailure(
+            detailError,
+            "Couldn't load this Bot. Try again in a moment.",
+          )}
         </p>
       </div>
     );
@@ -148,7 +164,9 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
    * page can say so instead of letting the Bot answer as if nothing were missing. `startNew`
    * mints another fresh thread on demand for the New chat control below.
    */
-  const { threadId, liveThreadId, history, startNew } = useBotThread(agentId);
+  const { threadId, liveThreadId, history, historyError, startNew } =
+    useBotThread(agentId);
+  const historyHeld = isHeld(historyError);
   /*
    * A turn that ends without an answer has to be said out loud here, because the packaged chat says
    * nothing. It reports a failed run to an `onError` prop and otherwise carries on as though the
@@ -168,12 +186,23 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
   // A command in the chat clicked opens the Computer on its terminal.
   useOpenComputerOnRequest(agentId, () => showComputer(true));
   const noComputers = useNoBotComputers() === true;
+  // With no room beside the chat the Computer is a sheet over it, which gives way to a waiting card.
+  const [computerFits, setComputerFits] = useState(false);
+  useCardsFirst({
+    botId: agentId,
+    threadId,
+    covers: !computerFits,
+    watching: watch === true,
+    close: () => showComputer(false),
+    computers: !noComputers,
+  });
 
   return (
     <DetailPanel
       title="Computer"
       open={watch === true}
       onClose={() => showComputer(false)}
+      onRoomChange={(room) => setComputerFits(detailFitsBeside(room))}
       waiting={threadId ? <ConversationApprovals threadId={threadId} /> : null}
       detail={<ComputerViewPanel agentId={agentId} name={name} />}
     >
@@ -198,6 +227,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
               <ComputerChatControls
                 computerId={agentId}
                 noComputers={noComputers}
+                fitsBeside={computerFits}
                 open={watch === true}
                 onOpenChange={showComputer}
               />
@@ -218,11 +248,18 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
          */}
         {history === "unavailable" ? (
           <p
-            className="border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
+            className={
+              historyHeld
+                ? "border-b bg-muted/40 px-6 py-2 text-muted-foreground text-sm"
+                : "border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
+            }
             data-testid="bot-chat-history-unavailable"
             role="alert"
           >
-            Couldn't load earlier messages. The Bot is answering without them.
+            {loadFailure(
+              historyError,
+              "Couldn't load earlier messages. The Bot is answering without them.",
+            )}
           </p>
         ) : null}
         {/*
@@ -233,15 +270,39 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
          * beside the gap it explains; what it buys is that it is always on screen, whatever the
          * transcript has been scrolled to, and that it survives the next release of the chat.
          */}
+        {/* OpenBot holding off (a move, a brief outage) is said calmly: nothing failed. */}
         {stopped ? (
-          <p
-            className="border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
-            data-testid="bot-chat-stopped"
-            role="alert"
+          <div
+            className={
+              isHeld(stopped)
+                ? "flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-muted/40 px-6 py-2"
+                : "flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-destructive/10 px-6 py-2"
+            }
           >
-            {stopped}
-          </p>
+            <p
+              className="text-destructive text-sm"
+              data-testid="bot-chat-stopped"
+              role="alert"
+            >
+              {failureSaid(stopped)}
+            </p>
+            {/* A run refused because the organization needs a card is answered here. */}
+            <AddCardButton />
+          </div>
         ) : null}
+        {/*
+         * The ask to star OpenBot on GitHub, when the server says it is due: this is the screen where
+         * a Bot's answer can be copied, which is one of the wins it follows (`StarPrompt`). Under the
+         * header with the banners, for the same reason as them: the packaged chat owns the space
+         * above its message box. Never while this chat shows an error. As wide as the chat's own
+         * column, with the conversation's composer column's gutters, so it lines up with the message
+         * box under it.
+         */}
+        {stopped || history === "unavailable" ? null : (
+          <div className="mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] px-4 pt-3 empty:hidden">
+            <StarPrompt />
+          </div>
+        )}
         <div className="min-h-0 flex-1">
           {/*
            * Keyed on the thread as well as the agent. Switching agents was already handled by

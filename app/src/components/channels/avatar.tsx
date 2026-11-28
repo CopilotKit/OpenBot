@@ -45,7 +45,7 @@ export const ChannelAvatar = memo(function ChannelAvatar({
     );
 
   return (
-    <div className="relative" style={{ height: size, width: size }}>
+    <div className="relative flex" style={{ height: size, width: size }}>
       {avatar}
       {typing ? <TypingBadge /> : null}
     </div>
@@ -142,7 +142,9 @@ function GroupFaces({
         const mask = cuts.length > 0 ? cuts.join(", ") : undefined;
         return (
           <div
-            className="absolute overflow-hidden rounded-full"
+            // Flex, so the face fills the circle from its top: as an inline block on a line, a face
+            // smaller than the line (12px, in a compact row) sat on its baseline and was cut.
+            className="absolute flex overflow-hidden rounded-full"
             key={id}
             style={{
               left: at[i][0],

@@ -32,6 +32,7 @@ export const localFailures = [
   "invalid-acceptance",
   "rootless-podman",
   "download-stalled",
+  "below-security-floor",
 ] as const;
 export type LocalFailure = (typeof localFailures)[number];
 
@@ -60,6 +61,10 @@ export type LocalReason =
   // Not the CLI's: OpenBot's own finding that the backend it set up here is gone, cluster and all
   // (`local_eval::Reason::StackLost`). Start fresh sets it up again.
   | "stack-lost"
+  // OpenBot's own finding too: the backend's cluster is gone from the engine, as after
+  // `docker container prune` removed its stopped node, and OpenBot's own database is still there
+  // (`local_eval::Reason::BackendGone`). Set up again makes the backend again.
+  | "backend-gone"
   | "unrecognized";
 
 /** `local_eval::Readiness`: the CLI's own end-to-end check. Running pods are not this. */
@@ -110,6 +115,14 @@ export type Shortfall = {
   drive?: string;
   /** `diskGb` is what is free on `drive`, which ran short rather than the machine's own disk. */
   freeOnDrive?: boolean;
+  /** That drive is this Mac's own disk, under Docker Desktop's or Podman's machine disk. */
+  mac?: boolean;
+  /**
+   * What is short is room for an update (`local_eval::update_room`): `neededGb` is what the
+   * update needs free where `diskGb` was measured.
+   */
+  updating?: boolean;
+  neededGb?: string;
 };
 
 /** How far an unfinished update got, as the CLI recorded it (`local_eval::UpdateState`). */

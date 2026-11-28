@@ -7,10 +7,13 @@ import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 import type {
   CreateRoutineRequest,
   RoutinePage,
+  RoutineReading,
   RoutineResponse,
   RoutineRunAccepted,
   RoutineRunPage,
+  RoutineSentence,
   RoutineSwitch,
+  UpdateRoutineRequest,
 } from "../model";
 
 export const getListRoutinesResponseMock = (): RoutinePage => ({
@@ -19,6 +22,7 @@ export const getListRoutinesResponseMock = (): RoutinePage => ({
       id: "4a0d6f6e-1c1b-4f3e-8a52-0d9b7c6e5f41",
       botId: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
       schedule: "Weekdays at 09:00",
+      cron: "0 9 * * 1-5",
       timezone: "America/New_York",
       instruction: "Summarize my unread mail and today's calendar.",
       title: "Morning brief",
@@ -43,6 +47,45 @@ export const getCreateRoutineResponseMock = (): RoutineResponse => ({
     id: "4a0d6f6e-1c1b-4f3e-8a52-0d9b7c6e5f41",
     botId: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
     schedule: "Weekdays at 09:00",
+    cron: "0 9 * * 1-5",
+    timezone: "America/New_York",
+    instruction: "Summarize my unread mail and today's calendar.",
+    title: "Morning brief",
+    conversation: {
+      id: "5f0c2a52-3f1e-4a55-9d0a-7f6d2b1c8e90",
+      name: "General Assistant",
+      title: "Morning brief",
+      gone: false,
+    },
+    enabled: true,
+    nextRunAt: "2026-11-16T14:00:00.000Z",
+    lastRun: { status: "succeeded", at: "2026-11-13T14:00:41.000Z" },
+    goalId: null,
+    createdAt: "2026-11-02T16:21:09.000Z",
+  },
+});
+
+export const getReadRoutineSentenceResponseMock = (): RoutineReading => ({
+  outcome: "ready",
+  draft: {
+    does: "act",
+    instruction: "Summarize my unread mail.",
+    title: "Morning mail summary",
+    starts: "schedule",
+    cron: "0 9 * * 1-5",
+    timezone: "America/New_York",
+    doneWhen: "",
+    conversationId: null,
+    intervalMinutes: null,
+  },
+});
+
+export const getUpdateRoutineResponseMock = (): RoutineResponse => ({
+  routine: {
+    id: "4a0d6f6e-1c1b-4f3e-8a52-0d9b7c6e5f41",
+    botId: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
+    schedule: "Weekdays at 09:00",
+    cron: "0 9 * * 1-5",
     timezone: "America/New_York",
     instruction: "Summarize my unread mail and today's calendar.",
     title: "Morning brief",
@@ -137,6 +180,75 @@ export const getCreateRoutineMockHandler = (
             : overrideResponse
           : getCreateRoutineResponseMock(),
         { status: 201 },
+      );
+    },
+    options,
+  );
+};
+
+export const getReadRoutineSentenceMockHandler = (
+  overrideResponse?:
+    | RoutineReading
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string }, RoutineSentence>
+        >[0],
+      ) => Promise<RoutineReading> | RoutineReading),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ organizationId: string }, RoutineSentence>(
+    "*/api/v2/organizations/:organizationId/routines/read",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string }, RoutineSentence>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReadRoutineSentenceResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getUpdateRoutineMockHandler = (
+  overrideResponse?:
+    | RoutineResponse
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; routineId: string },
+            UpdateRoutineRequest
+          >
+        >[0],
+      ) => Promise<RoutineResponse> | RoutineResponse),
+  options?: RequestHandlerOptions,
+) => {
+  return http.patch<
+    { organizationId: string; routineId: string },
+    UpdateRoutineRequest
+  >(
+    "*/api/v2/organizations/:organizationId/routines/:routineId",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; routineId: string },
+          UpdateRoutineRequest
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getUpdateRoutineResponseMock(),
+        { status: 200 },
       );
     },
     options,
@@ -292,6 +404,8 @@ export const getListRoutineRunsMockHandler = (
 export const getRoutinesMock = () => [
   getListRoutinesMockHandler(),
   getCreateRoutineMockHandler(),
+  getReadRoutineSentenceMockHandler(),
+  getUpdateRoutineMockHandler(),
   getDeleteRoutineMockHandler(),
   getPauseRoutineMockHandler(),
   getResumeRoutineMockHandler(),

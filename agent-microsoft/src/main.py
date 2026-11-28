@@ -9,6 +9,7 @@ from pathlib import Path
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import bot_settings
+from run_model_key import RunModelKey
 
 from agent_framework.anthropic import AnthropicClient
 from agent_framework.openai import OpenAIChatClient
@@ -43,6 +44,8 @@ agent = _client().as_agent(
 )
 
 app = FastAPI()
+# Each run's model calls carry its own gateway token, in its organization. See run_model_key.py.
+app.add_middleware(RunModelKey)
 
 
 @app.middleware("http")

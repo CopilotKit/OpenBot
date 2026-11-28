@@ -160,11 +160,27 @@ export interface RecorderConnectionGrant {
   token: string;
   connection: RecorderConnection;
   user: RecorderUser;
+  /** The organization the connection works in, the one the connect code was made in. The Recorder names it in every address it calls from now on. Absent from a server that keeps every connection in `default`. */
+  organizationId?: string;
+  /** What people call that organization, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`. */
+  organizationName?: string;
 }
+
+/**
+ * The organization this connection records into, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`.
+ */
+export type RecorderIdentityOrganization = {
+  /** The organization's id. Opaque. */
+  id: string;
+  /** What people call it. */
+  name: string;
+};
 
 export interface RecorderIdentity {
   user: RecorderUser;
   connectionId: string;
+  /** The organization this connection records into, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`. */
+  organization?: RecorderIdentityOrganization;
 }
 
 /**
@@ -289,6 +305,24 @@ export interface Problem {
   capability?: string;
   /** What is wrong, item by item, when a refusal has more than one reason: each entry names the item and says what is wrong with it. */
   problems?: ProblemProblemsItem[];
+  /** On CLIENT_UPDATE_REQUIRED, the app the OpenBot-Client header named that is older than this OpenBot serves. A later OpenBot may name another app; read one you don't know as other. */
+  client?: string;
+  /** On CLIENT_UPDATE_REQUIRED, the oldest release of that app this OpenBot serves. */
+  minimumVersion?: string;
+  /** On CLIENT_UPDATE_REQUIRED, true when the minimum the app is below was raised because of a security problem in older releases. */
+  security?: boolean;
+  /**
+   * On PLAN_REQUIRED, where an owner or an admin goes in the browser to add a card, or to update it after a failed payment. Null for a member, who asks an admin.
+   * @maxLength 2048
+   * @nullable
+   */
+  addCardUrl?: string | null;
+  /**
+   * On SEAT_REQUIRED, where an owner or an admin goes in the browser to add one more seat to the organization's plan. It comes back to OpenBot once the seat is added, and the invitation can be sent then. Null for anyone who can't add a seat.
+   * @maxLength 2048
+   * @nullable
+   */
+  addSeatUrl?: string | null;
 }
 
 /**
@@ -392,7 +426,7 @@ export type RecorderOriginRefusedResponse = Problem;
 export type RecorderSignedOutResponse = RecorderProblem;
 
 /**
- * The caller holds no role in this organization.
+ * The caller holds no role in this organization, or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED). Or the caller's account is scheduled to be deleted (ACCOUNT_PENDING_DELETION), which every operation but getAccountDeletion and cancelAccountDeletion answers until the deletion is cancelled.
  */
 export type ForbiddenResponse = Problem;
 

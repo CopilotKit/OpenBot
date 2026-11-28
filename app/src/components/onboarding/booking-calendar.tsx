@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  type AppBusinessPlace,
   BOOKING_CALENDAR_ORIGIN,
   type BookingCalendarColors,
   bookingCalendarSrc,
@@ -71,19 +72,24 @@ type CalendlyMessage = {
  * booking made in it calls `onBooked`. Its height follows what it reports, so it never scrolls
  * inside the step.
  *
+ * IT SAYS WHERE IT WAS OPENED FROM. `place` is the screen that put it in front of the person, and
+ * its address carries it as `utm_content`, which Calendly keeps on the booking.
+ *
  * Links in it that leave Calendly are the Desktop window's business: it opens them in the
  * person's browser. A browser opens them in a new tab.
  */
 export function BookingCalendar({
+  place,
   onFailed,
   onBooked,
 }: {
+  place: AppBusinessPlace;
   onFailed: () => void;
   onBooked: () => void;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [src] = useState(() =>
-    bookingCalendarSrc(window.location.host, appColors()),
+    bookingCalendarSrc(window.location.host, place, appColors()),
   );
   const [ready, setReady] = useState(false);
   const [height, setHeight] = useState(DEFAULT_HEIGHT);

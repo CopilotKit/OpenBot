@@ -445,11 +445,12 @@ test("a conversation opened while nothing answers says its history could not be 
   );
 
   const view = opened();
+  // Said once the read on opening and the retries after it have all run out of time.
   await view.findByText(/Couldn't load earlier messages\./, undefined, {
-    timeout: 12_000,
+    timeout: 20_000,
   });
   expect(view.queryByRole("button", { name: "Stop the Bot" })).toBeNull();
-}, 20_000);
+}, 30_000);
 
 /*
  * The conversation's real route, under the app's layout ids, beside a home page to leave it for.
@@ -504,6 +505,7 @@ test("a reply is shown once and whole after leaving its conversation and coming 
   queryClient.setQueryData(channelKeys.detail(channel.id), channel);
 
   const router = createRouter({
+    context: { queryClient },
     routeTree: rootRoute.addChildren([
       authedRoute.addChildren([
         appRoute.addChildren([homeRoute, conversationRoute]),

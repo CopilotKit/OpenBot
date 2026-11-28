@@ -22,6 +22,7 @@ import {
   IconKeyboard,
   IconListDetails,
   IconPointer,
+  IconSend,
   IconTerminal2,
   IconWorld,
 } from "@tabler/icons-react";
@@ -41,6 +42,7 @@ const ICONS = {
   read_file: IconFile,
   write_file: IconFile,
   list_files: IconFolder,
+  send_file: IconSend,
 } as const;
 
 /** What the line says was done. The subject beside it says what it was done to. */
@@ -49,6 +51,7 @@ const LABELS = {
   read_file: "Read",
   write_file: "Saved",
   list_files: "Listed",
+  send_file: "Sent",
 } as const;
 
 const BROWSER_ICONS: Record<BrowserStepName, typeof IconWorld> = {
@@ -122,6 +125,7 @@ function CommandEntry({
           byYou: entry.doneByPerson === true,
           ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}),
           timedOut: entry.timedOut === true,
+          failed: entry.failed === true,
         })}
         truncated={entry.truncated === true}
       />
@@ -189,6 +193,7 @@ const NOT_DONE_LABELS = {
   read_file: "Didn't read",
   write_file: "Didn't save",
   list_files: "Didn't list",
+  send_file: "Didn't send",
 } as const;
 
 function Entry({ entry }: { entry: ComputerActivity }) {

@@ -5,6 +5,8 @@
   "windows": ["main", "status"],
   "permissions": [
     "core:event:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
     "openbot-desktop:allow-quit",
     "openbot-desktop:allow-zoom",
     "openbot-desktop:allow-usage-data",

@@ -5,9 +5,20 @@ import {
 } from "@/lib/api/generated/boundaries/boundaries";
 import {
   getComputer,
+  getWorkspaceSnapshots,
   listComputers,
 } from "@/lib/api/generated/computers/computers";
+import type {
+  ComputerRestore,
+  WorkspaceSnapshot,
+  WorkspaceSnapshots,
+} from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
+
+/** A computer's saved copies, its latest restore, and whether the caller may restore it. */
+export type ComputerSnapshots = WorkspaceSnapshots;
+export type ComputerSnapshot = WorkspaceSnapshot;
+export type ComputerRestoreRun = ComputerRestore;
 
 /**
  * One computer as Admin sees it: a person's, or an isolated Bot's.
@@ -71,7 +82,11 @@ export type ComputerState = "absent" | "starting" | "ready" | "unreachable";
 
 export type ComputerStatus = {
   botId: string;
-  state: ComputerState;
+  /**
+   * One of `ComputerState`, or a state a newer server sends that this app doesn't know: the screen
+   * then neither starts the computer nor calls it asleep, and waits for a frame.
+   */
+  state: string;
   /** Set when `state` is `unreachable`. Written for an admin, so not shown on a screen anybody can open. */
   reason?: string;
 };
@@ -83,7 +98,39 @@ export const computerKeys = {
   dryRun: (candidate: ActionPolicy) =>
     ["computers", "policy", "dry-run", candidate] as const,
   status: (botId: string) => ["computers", "status", botId] as const,
+  /** `computer` absent is the caller's own computer for this Bot; an admin may name another. */
+  snapshots: (botId: string, computer?: string) =>
+    ["computers", "snapshots", botId, { computer: computer ?? null }] as const,
 };
+
+/** How often a running restore is read again, until it is done or failed. */
+export const RESTORE_POLL_MS = 5_000;
+
+/**
+ * The saved copies of the computer this Bot runs on, newest first, and its latest restore.
+ *
+ * Read again every few seconds while a restore of it runs, so the screen sees it end without being
+ * asked. Reading it never starts the computer. A refusal (not an admin, no such Bot) is not retried:
+ * it is the answer, and the screen draws nothing for it.
+ */
+export function workspaceSnapshotsQueryOptions(
+  botId: string,
+  computer?: string,
+) {
+  return queryOptions({
+    queryKey: computerKeys.snapshots(botId, computer),
+    queryFn: ({ signal }): Promise<ComputerSnapshots> =>
+      getWorkspaceSnapshots(
+        organizationId(),
+        botId,
+        computer ? { computer } : undefined,
+        { signal, fallback: "Couldn't load this computer's saved copies." },
+      ),
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.restore?.state === "running" ? RESTORE_POLL_MS : false,
+  });
+}
 
 /**
  * One Bot's computer's state, read without waking it.

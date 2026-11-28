@@ -5,6 +5,7 @@ import {
 } from "@/lib/api/generated/capabilities/capabilities";
 import { getCheckInUsage } from "@/lib/api/generated/check-ins/check-ins";
 import type {
+  AppsSetting,
   NetworkPolicy as ApiNetworkPolicy,
   BotCheckInUsage,
   Capability,
@@ -12,13 +13,15 @@ import type {
   CheckInUsage,
   EgressRule as EgressRuleEntry,
   NetworkMode as NetworkModeName,
-  NetworkPolicyScopeKind,
+  NetworkPolicyCandidateScopeKind,
+  OrganizationSettingsContextComputerMode,
 } from "@/lib/api/generated/model";
 import {
   listNetworkPolicies,
   replayNetworkPolicy,
 } from "@/lib/api/generated/network-policies/network-policies";
 import {
+  getAppsSetting,
   getModelUsage,
   getOrganizationSettings,
   listComputerActions,
@@ -44,11 +47,29 @@ export type EgressRule = EgressRuleEntry;
 
 export type NetworkMode = NetworkModeName;
 
-/** Whose a network policy is: the organization's, a team's (by id), or a directory group's (by name). */
-export type NetworkScopeKind = NetworkPolicyScopeKind;
+/**
+ * Whose a network policy is: the organization's, a team's (by id), or a directory group's (by name).
+ * The kinds this app knows and sends, as the API takes them in a request.
+ */
+export type NetworkScopeKind = NetworkPolicyCandidateScopeKind;
 
-/** One network policy: the API's `NetworkPolicy`, without its address. */
+/**
+ * One network policy: the API's `NetworkPolicy`, without its address. Its `scopeKind` is as the
+ * server answered it, and the list can grow: a policy of a kind this app doesn't know is neither
+ * listed nor sent back (`knownNetworkScope`).
+ */
 export type NetworkPolicy = Omit<ApiNetworkPolicy, "id">;
+
+/** Whether a policy is of a kind this app knows, and so can list, open and save. */
+export function knownNetworkScope<T extends { scopeKind: string }>(
+  policy: T,
+): policy is T & { scopeKind: NetworkScopeKind } {
+  return (
+    policy.scopeKind === "organization" ||
+    policy.scopeKind === "team" ||
+    policy.scopeKind === "group"
+  );
+}
 
 export type EnterpriseSettings = {
   ssoRequired: boolean;
@@ -151,7 +172,44 @@ export const enterpriseKeys = {
   /* Under the root, so saving a policy, which changes the one in force, asks the replay again. */
   networkReplay: (candidate: NetworkCandidate) =>
     ["enterprise", "network-replay", candidate] as const,
+  computerMode: () => ["enterprise", "computer-mode"] as const,
+  appsSetting: () => ["enterprise", "apps-setting"] as const,
 };
+
+/**
+ * Whether the organization's apps are open (the default) or locked down. Its own resource, which
+ * every member may read: locked down, an admin approves each request, one press gives an app's
+ * read-only actions, and an app is open to Bot owners only once an admin opens it.
+ */
+export function appsSettingQueryOptions() {
+  return queryOptions({
+    queryKey: enterpriseKeys.appsSetting(),
+    queryFn: ({ signal }): Promise<AppsSetting> =>
+      getAppsSetting(organizationId(), {
+        signal,
+        fallback: "Couldn't load how apps are given.",
+      }),
+  });
+}
+
+/**
+ * How Bots get computers here: the settings' read-only `computerMode`. Null from a server that
+ * predates it, which the screens read as nothing to say.
+ */
+export type ComputerMode = NonNullable<OrganizationSettingsContextComputerMode>;
+
+export function computerModeQueryOptions() {
+  return queryOptions({
+    queryKey: enterpriseKeys.computerMode(),
+    queryFn: async ({ signal }): Promise<ComputerMode | null> =>
+      (
+        await getOrganizationSettings(organizationId(), {
+          signal,
+          fallback: OVERVIEW_FALLBACK,
+        })
+      ).context.computerMode ?? null,
+  });
+}
 
 /** A network policy as the dialog holds it, not yet saved. */
 export type NetworkCandidate = {

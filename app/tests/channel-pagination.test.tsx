@@ -31,6 +31,7 @@ import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { organizationKeys } from "@/lib/organizations/queries";
+import { CONVERSATION_VIEW_STORAGE_KEY } from "@/lib/settings/conversation-view";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 import {
   CONVERSATIONS_PATH,
@@ -127,6 +128,15 @@ beforeAll(() => {
   globalThis.IntersectionObserver = ScrollObserver;
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
+      /*
+       * The panel reads the person's tasks too, for a conversation whose Bot handed work to one
+       * (`delegatingConversationsQueryOptions`). None here, and not one of the roster's requests.
+       */
+      if (
+        new URL(String(input), "http://localhost:3010").pathname ===
+        "/api/v2/organizations/default/tasks"
+      )
+        return Response.json({ tasks: [], nextCursor: null });
       requests.push(String(input));
       signals.push(init?.signal ?? undefined);
       return respond(String(input));
@@ -135,6 +145,8 @@ beforeAll(() => {
   );
 });
 beforeEach(() => {
+  // These rows are found by the Bot's name, which only the Detailed view shows.
+  window.localStorage.setItem(CONVERSATION_VIEW_STORAGE_KEY, "detailed");
   requests.length = 0;
   signals.length = 0;
   respond = async () => {
@@ -179,6 +191,7 @@ function renderSidebar() {
   queryClient.setQueryData(userPreferencesQueryOptions("user").queryKey, {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
+    dismissedNotices: [],
     narration: null,
     skin: "openbot",
     proactive: "on",
@@ -258,6 +271,7 @@ test("message emphasis updates mounted rows from the account preferences cache",
     clients[0]?.setQueryData(userPreferencesQueryOptions("user").queryKey, {
       messageListEmphasis: "agent",
       selfHostBannerDismissed: false,
+      dismissedNotices: [],
       narration: null,
       skin: "openbot",
       proactive: "on",

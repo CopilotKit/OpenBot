@@ -3,6 +3,11 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
 import { asProblem, type Problem } from "./Problem";
 import { StatusLine } from "./SetupProgress";
+import {
+  APP_TOO_OLD,
+  APP_TOO_OLD_SECURITY,
+  UpdateOpenBot,
+} from "./UpdateOpenBot";
 
 /**
  * What the screen offers after something went wrong, chosen by the problem's `kind`. The sentence
@@ -10,10 +15,11 @@ import { StatusLine } from "./SetupProgress";
  *
  * `field`: the address is what to fix, so the sentence sits under the field and the field has the
  * focus. `sign-in` and `retry`: the screen's one button says Sign in again or Try again. `browser`:
- * this app can't connect to that OpenBot, and a link opens it in the browser. A kind this app does
- * not know is offered Try again.
+ * this app can't connect to that OpenBot, and a link opens it in the browser. `update`: this app is
+ * too old for that OpenBot, and the way on is this app's own update. A kind this app does not know
+ * is offered Try again.
  */
-type Offer = "field" | "retry" | "sign-in" | "browser";
+type Offer = "field" | "retry" | "sign-in" | "browser" | "update";
 
 function offerFor(kind: string | null | undefined): Offer {
   switch (kind) {
@@ -23,6 +29,9 @@ function offerFor(kind: string | null | undefined): Offer {
       return "field";
     case "too-old":
       return "browser";
+    case APP_TOO_OLD:
+    case APP_TOO_OLD_SECURITY:
+      return "update";
     case "sign-in-cancelled":
     case "sign-in-failed":
     case "access-refused":
@@ -142,7 +151,7 @@ export function useConnectToOpenBot({
       if (offer !== "retry") setReopens(false);
       setPhase("idle");
       // To the field when the address is what to fix, to the button when it is the way on.
-      if (offer !== "browser")
+      if (offer !== "browser" && offer !== "update")
         setFocus({ on: offer === "field" ? "field" : "action" });
     }
   }
@@ -188,11 +197,32 @@ export function useConnectToOpenBot({
   };
 }
 
+/** The address field's label, in the person's words: where their company's OpenBot is. */
+export const ADDRESS_LABEL = "Your company's OpenBot address";
+
+/** Who has the address. */
+export const ADDRESS_HELP =
+  "Ask your IT team or whoever set up OpenBot at your company for this address.";
+
+/** What Connect does next: the browser, then straight back to this app. */
+export const CONNECT_HAND_OFF =
+  "You'll sign in to it in your browser, then come straight back here.";
+
 /**
  * The first screen's lower half when OpenBot runs elsewhere: one field for its address, what
  * happens next, and Connect. While the browser is waited on, Cancel is the only control.
+ *
+ * Back goes back to the choice of where OpenBot runs, leaving any saved connection
+ * (`connecting.leave`). Every choice there uses this app on this computer, so it is Back, not a way
+ * to "use OpenBot on this computer". `onBack` is the screen's own way back, where it has one.
  */
-export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
+export function ConnectToOpenBot({
+  connecting,
+  onBack,
+}: {
+  connecting: Connecting;
+  onBack?: () => void;
+}) {
   const id = useId();
   const { address, phase, trouble, busy } = connecting;
   const underField = trouble?.offer === "field";
@@ -206,7 +236,7 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
       }}
     >
       <div className="field">
-        <label htmlFor={`${id}-address`}>OpenBot address</label>
+        <label htmlFor={`${id}-address`}>{ADDRESS_LABEL}</label>
         <input
           id={`${id}-address`}
           ref={connecting.field}
@@ -222,9 +252,16 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
           // Held, not greyed out: the address being signed in to stays readable while it waits.
           readOnly={busy}
           aria-invalid={underField || undefined}
-          aria-describedby={underField ? `${id}-problem` : `${id}-next`}
+          aria-describedby={
+            underField ? `${id}-problem` : `${id}-help ${id}-next`
+          }
           onChange={(event) => connecting.change(event.target.value)}
         />
+        {!underField && (
+          <p id={`${id}-help`} className="footnote address-help">
+            {ADDRESS_HELP}
+          </p>
+        )}
         {trouble && underField && (
           <p
             id={`${id}-problem`}
@@ -253,31 +290,39 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
       ) : (
         <>
           <p id={`${id}-next`} className="footnote">
-            You'll sign in to it in your browser. Nothing is installed on this
-            computer.
+            {CONNECT_HAND_OFF}
           </p>
-          {trouble && !underField && <Trouble trouble={trouble} />}
-          <div className="row">
-            <button
-              type="submit"
-              ref={connecting.action}
-              disabled={busy || !address.trim()}
-            >
-              {trouble?.offer === "sign-in"
-                ? "Sign in again"
-                : trouble?.offer === "retry"
-                  ? "Try again"
-                  : "Connect"}
-            </button>
-            {trouble?.offer === "browser" && address.trim() && (
-              <ExternalLink
-                className="button-link"
-                href={browserAddress(address)}
+          {trouble && !underField && trouble.offer !== "update" && (
+            <Trouble trouble={trouble} />
+          )}
+          {/* This app is too old for that OpenBot: its own update is the way on, and Connect
+              comes back once the address is another. The update draws the notice, so a build
+              that never updates itself says so in it. */}
+          {trouble?.offer === "update" ? (
+            <UpdateOpenBot said={trouble.problem.said} />
+          ) : (
+            <div className="row">
+              <button
+                type="submit"
+                ref={connecting.action}
+                disabled={busy || !address.trim()}
               >
-                Open in browser
-              </ExternalLink>
-            )}
-          </div>
+                {trouble?.offer === "sign-in"
+                  ? "Sign in again"
+                  : trouble?.offer === "retry"
+                    ? "Try again"
+                    : "Connect"}
+              </button>
+              {trouble?.offer === "browser" && address.trim() && (
+                <ExternalLink
+                  className="button-link"
+                  href={browserAddress(address)}
+                >
+                  Open in browser
+                </ExternalLink>
+              )}
+            </div>
+          )}
           {phase === "checking" && (
             <StatusLine>Checking the address…</StatusLine>
           )}
@@ -285,9 +330,9 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
             type="button"
             className="text-link"
             disabled={busy}
-            onClick={() => void connecting.leave()}
+            onClick={() => (onBack ? onBack() : void connecting.leave())}
           >
-            Use OpenBot on this computer instead
+            Back
           </button>
         </>
       )}

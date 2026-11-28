@@ -7,18 +7,24 @@ import {
 import { useRouter } from "@tanstack/react-router";
 import {
   type ComponentProps,
+  createContext,
+  useContext,
   useEffect,
   useMemo,
   useSyncExternalStore,
 } from "react";
 import {
   type CodeHighlighterPlugin,
+  defaultRehypePlugins,
   defaultRemarkPlugins,
   type MathPlugin,
   type PluginConfig,
   Streamdown,
   type StreamdownProps,
 } from "streamdown";
+import { attachmentUrl as storedAttachmentUrl } from "@openbot/shared/attachments";
+import { attachmentAddress } from "@/lib/channels/attachments";
+import { MarkdownTable, TABLE_EXPORT_SKIP } from "@/lib/markdown-table";
 import { hasMaths, withMathDelimiters } from "@/lib/maths";
 import {
   NO_SLACK_NAMES,
@@ -151,10 +157,206 @@ function AppLink({
   );
 }
 
+/**
+ * The address a link to a stored file downloads it from, or null for a link that is not one.
+ *
+ * A Bot that sends a file names it in its words, linked to the form a message stores
+ * (`/api/attachments/<id>`, from the send's answer), or now and then to the API's own address. Read
+ * as a page of the app, a click asked the router for it, found no such page and landed on home, so
+ * the person never got the file from the words (found by the end-to-end pass). It is the file, from
+ * the conversation's own address, the one the card's Download button uses.
+ */
+export function fileAddress(path: string): string | null {
+  if (path.startsWith(storedAttachmentUrl(""))) return attachmentAddress(path);
+  return /^\/api\/v2\/organizations\/[^/]+\/attachments\/[^/?#]+/.test(path)
+    ? path
+    : null;
+}
+
+/** A file the conversation was sent, by its name and the stored form of its address. */
+export type LinkedFile = { name: string; url: string };
+
+const NO_FILES: readonly LinkedFile[] = [];
+
+/**
+ * The files a conversation was sent (a Bot's `computer_send_file` answers), for the Bot's words that
+ * link one of them. The transcript provides it; a surface with no conversation has none.
+ */
+export const SentFilesContext = createContext<readonly LinkedFile[]>(NO_FILES);
+
+/** Schemes that are never a link, whatever the rest of the address says. */
+const NEVER_A_LINK = /^\s*(?:javascript|vbscript|data):/i;
+
+/**
+ * The file name a link names when it points at a place on a computer rather than at an address the
+ * chat can open, or null for one that does not.
+ *
+ * A Bot that made a file sometimes links it by where it sits on its own computer: its workspace path
+ * (`historical_mystery.pptx`, `decks/q3.pptx`), a folder there (`/tmp/outputs/q3.pptx`), or the
+ * address some models give a file in their own sandbox (`sandbox:/mnt/data/q3.pptx`, `file:///…`).
+ * The last part of any of them is the file's name. A web address, a mail or phone link, and a
+ * protocol-relative address are addresses, not places on a computer.
+ */
+export function linkedFileName(href: string): string | null {
+  if (NEVER_A_LINK.test(href)) return null;
+  if (/^(?:https?|mailto|tel):/i.test(href) || href.startsWith("//"))
+    return null;
+  const path = href.split(/[?#]/, 1)[0] ?? "";
+  let name = path.split(/[\\/]/).at(-1) ?? "";
+  try {
+    name = decodeURIComponent(name);
+  } catch {
+    // A malformed escape is not a name worth throwing over; match it as written.
+  }
+  // `sandbox:q3.pptx`: the scheme is not part of the name.
+  name = name.replace(/^[a-z][a-z0-9+.-]*:/i, "").trim();
+  return name || null;
+}
+
+/** The part of an HTML tree the link plugin reads and changes. */
+type HastNode = {
+  type: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+};
+
+/**
+ * A rehype plugin: a link in a Bot's words that names, by its place on the Bot's computer, a file
+ * the conversation was sent becomes a link to that stored file. `markdownComponents.a` then draws it
+ * as the download the card's Download button is (`fileAddress`).
+ *
+ * WHY. Asked for a slide deck, a Bot made historical_mystery.pptx and sent it, and the card downloaded
+ * it fine, but the Bot's words said "Download the presentation [blocked]". It had linked the file by
+ * its workspace path, which no browser can open, and Streamdown's safety step (rehype-harden) swapped
+ * the link for its words and a marker that reads like a security error. The person meant the file
+ * the card holds, so that is where the link goes.
+ *
+ * RUNS BEFORE THE SANITIZER, which drops an href with a scheme it does not know (`sandbox:`,
+ * `file:`) before anything after it can read the name. Only a name the conversation was sent is
+ * changed, and only to that file's stored address, so it never makes a link out of anything else.
+ *
+ * THE FILES ARE ITS OPTIONS, NOT SOMETHING IT CLOSES OVER: Streamdown keeps one processor per set of
+ * plugins, keyed by each plugin's name and the JSON of its options (as `remarkSlackMentions`).
+ */
+export function rehypeSentFileLinks(options?: {
+  files?: readonly (readonly [string, string])[];
+}) {
+  // A later send of the same name is the one the words mean.
+  const exact = new Map(options?.files ?? []);
+  const anyCase = new Map(
+    [...exact].map(([name, url]) => [name.toLowerCase(), url]),
+  );
+  const visit = (node: HastNode) => {
+    if (node.type === "element" && node.tagName === "a") {
+      const href = node.properties?.href;
+      const name = typeof href === "string" ? linkedFileName(href) : null;
+      const url =
+        name === null
+          ? undefined
+          : (exact.get(name) ?? anyCase.get(name.toLowerCase()));
+      if (url !== undefined)
+        node.properties = { ...node.properties, href: url };
+    }
+    for (const child of node.children ?? []) visit(child);
+  };
+  return (tree: HastNode) => visit(tree);
+}
+
+const {
+  raw: rehypeRaw,
+  sanitize: rehypeSanitize,
+  harden: hardenPluggable,
+} = defaultRehypePlugins;
+const [harden, hardenOptions] = hardenPluggable as unknown as [
+  (...args: never[]) => unknown,
+  Record<string, unknown>,
+];
+
+/**
+ * Streamdown's own safety step, with one setting changed: a link it refuses is drawn as its words,
+ * not as its words and " [blocked]" (rehype-harden's `linkBlockPolicy`, "text-only"). What it
+ * refuses is unchanged: `javascript:`, `data:`, `file:`, `vbscript:` and anything it can't read as
+ * an address are never links. A Bot's words are not a security report; a link the chat can't open
+ * is still what the Bot meant to say.
+ */
+const hardenWithoutMarker = [
+  harden,
+  { ...hardenOptions, linkBlockPolicy: "text-only" },
+] as const;
+
+const rehypePluginsByFiles = new Map<
+  string,
+  NonNullable<StreamdownProps["rehypePlugins"]>
+>();
+
+/** The rehype plugins for a Bot's words, given the files its conversation was sent. */
+function botRehypePlugins(
+  files: readonly LinkedFile[],
+): NonNullable<StreamdownProps["rehypePlugins"]> {
+  // Only a stored file's own address, never anything else a caller handed in.
+  const named = files
+    .filter((file) => file.name && fileAddress(file.url) !== null)
+    .map((file) => [file.name, file.url] as const);
+  const key = JSON.stringify(named);
+  let plugins = rehypePluginsByFiles.get(key);
+  if (!plugins) {
+    plugins = [
+      rehypeRaw,
+      ...(named.length > 0
+        ? [[rehypeSentFileLinks, { files: named }] as const]
+        : []),
+      rehypeSanitize,
+      hardenWithoutMarker,
+    ] as NonNullable<StreamdownProps["rehypePlugins"]>;
+    rehypePluginsByFiles.set(key, plugins);
+  }
+  return plugins;
+}
+
+/**
+ * A link to a stored file: a download, so it never replaces the conversation. Saved under the
+ * file's own name when the conversation was sent it, as the card's Download button saves it;
+ * otherwise the server names it.
+ */
+function FileLink({
+  address,
+  children,
+  // A download stays in the window it was asked from.
+  target: _target,
+  rel: _rel,
+  ...rest
+}: ComponentProps<"a"> & { address: string }) {
+  const files = useContext(SentFilesContext);
+  const name = files.findLast(
+    (each) => fileAddress(each.url) === address,
+  )?.name;
+  return (
+    <a
+      {...rest}
+      className="underline underline-offset-2 hover:no-underline"
+      download={name ?? true}
+      href={address}
+    >
+      {children}
+    </a>
+  );
+}
+
 export const markdownComponents = {
+  // Streamdown's table, whose Copy and Download keep the table's links (`lib/markdown-table.tsx`).
+  table: MarkdownTable,
   a: ({ href, children, ...rest }: ComponentProps<"a">) => {
     const path = inAppPath(href);
-    if (path !== null)
+    const file = path === null ? null : fileAddress(path);
+    if (file !== null)
+      return (
+        <FileLink {...rest} address={file}>
+          {children}
+        </FileLink>
+      );
+    // Any other address under /api is the server's, not a page: the router has nothing to open.
+    if (path !== null && !path.startsWith("/api/"))
       return (
         <AppLink {...rest} path={path}>
           {children}
@@ -184,7 +386,12 @@ export const markdownComponents = {
            * The type, after the name. It answers "can I open this, and with what" without the reader
            * hovering to read a URL, and it is the part a file name often leaves out.
            */}
-          <span className="shrink-0 text-muted-foreground">{kind.label}</span>
+          <span
+            className="shrink-0 text-muted-foreground"
+            {...TABLE_EXPORT_SKIP}
+          >
+            {kind.label}
+          </span>
         </a>
       );
     }
@@ -398,8 +605,19 @@ function pluginsWithMath(
 export function BotMarkdown({
   children,
   plugins,
+  files,
   ...props
-}: Omit<StreamdownProps, "children"> & { children: string }) {
+}: Omit<StreamdownProps, "children"> & {
+  children: string;
+  /**
+   * The files sent with these words, for a surface that keeps them on the message (a group's).
+   * Without it, the conversation's (`SentFilesContext`).
+   */
+  files?: readonly LinkedFile[];
+}) {
+  const conversationFiles = useContext(SentFilesContext);
+  const sent = files ?? conversationFiles;
+  const rehypePlugins = botRehypePlugins(sent);
   const markdown = useMemo(() => withMathDelimiters(children), [children]);
   const wantsMaths = hasMaths(markdown);
   const math = useSyncExternalStore(
@@ -411,8 +629,15 @@ export function BotMarkdown({
     if (wantsMaths && !math) void loadMathPlugin();
   }, [wantsMaths, math]);
   return (
-    <Streamdown {...props} plugins={pluginsWithMath(plugins, math)}>
-      {markdown}
-    </Streamdown>
+    // The links in the words read the same files (`FileLink`).
+    <SentFilesContext.Provider value={sent}>
+      <Streamdown
+        rehypePlugins={rehypePlugins}
+        {...props}
+        plugins={pluginsWithMath(plugins, math)}
+      >
+        {markdown}
+      </Streamdown>
+    </SentFilesContext.Provider>
   );
 }

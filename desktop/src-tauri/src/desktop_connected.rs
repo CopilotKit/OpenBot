@@ -37,6 +37,9 @@ pub struct State {
     config_dir: Mutex<Option<PathBuf>>,
     /// In place of the system's credential store, in a test.
     store: Mutex<Option<credentials::Store>>,
+    /// The account the app is signed in to, by the address it is signed in at, once that OpenBot
+    /// has said (`learn_account`). About names it. Gone with a sign-out or an ended sign-in.
+    signed_in_as: Mutex<Option<SignedInAs>>,
     /// The origin of a relay taken to be showing, in a test of the window's own rules: a real one
     /// needs an OpenBot to sign in to, which the library's tests have and these do not.
     #[cfg(test)]
@@ -46,6 +49,11 @@ pub struct State {
 struct Live {
     relay: relay::Relay,
     session: Arc<sign_in::Session>,
+}
+
+struct SignedInAs {
+    address: String,
+    email: String,
 }
 
 /// What the setup window shows when it loads after a connection ended, or after Settings asked to
@@ -66,13 +74,19 @@ pub struct Connection {
     /// Whether a sign-in for that address is in the credential store. Only the setup window asks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signed_in: Option<bool>,
+    /// Whether Settings offers the move to OpenBot Cloud (`desktop_move::offered_in_settings`).
+    /// Only OpenBot's page asks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub move_to_cloud: Option<bool>,
 }
 
 fn state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::State<'_, Shell> {
     app.state::<Shell>()
 }
 
-fn config_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+/// The app's configuration folder, where `connection.json` is (and the move's answer,
+/// `desktop_move`). In a test, only the folder the test gave.
+pub(crate) fn config_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
     let given = state(app).connected.config_dir.lock().unwrap().clone();
     // A test never reads the choice of whoever runs it: only the folder it was given.
     if cfg!(test) {
@@ -130,6 +144,20 @@ pub fn relay_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<Stri
         .map(|live| live.relay.origin())
 }
 
+/// The relay's entry address, while the window shows OpenBot through it: where the window goes
+/// whenever it comes to the relay from a page of the shell's own. Going straight to the relay's
+/// origin from there, WebKit leaves the window's cookie off, and the relay refuses the page
+/// (`relay` says why). It holds the run's secret, so it is never logged.
+fn relay_entry<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
+    state(app)
+        .connected
+        .live
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|live| live.relay.entry())
+}
+
 /// The address of the OpenBot the window shows through the relay, while it does.
 pub fn connected_address<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
     state(app)
@@ -139,6 +167,44 @@ pub fn connected_address<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option
         .unwrap()
         .as_ref()
         .map(|live| live.session.address().to_owned())
+}
+
+/// The address of the OpenBot the app is connected to: the one it shows, or else the one on record.
+pub fn address_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
+    connected_address(app).or_else(|| chosen(app).connected_to().map(str::to_owned))
+}
+
+/**
+What that OpenBot says about itself, for Get Troubleshooting Logs…, asked by the gathering's
+deadline (`connected::about`): through the app's sign-in while it shows that OpenBot, and only
+whether it answers while it doesn't. The organization is the one the app works in there.
+*/
+pub fn about<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> openbot_desktop_lib::troubleshooting::Ask<openbot_desktop_lib::connected::about::About> {
+    let address = address_now(app);
+    let organization = chosen(app).organization_id;
+    let session = state(app)
+        .connected
+        .live
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|live| live.session.clone());
+    Box::new(move |deadline| {
+        let Some(address) = address else {
+            return Ok(None);
+        };
+        let token = session.map(|session| move || session.access().map_err(|problem| problem.said));
+        Ok(Some(openbot_desktop_lib::connected::about::ask(
+            &address,
+            organization.as_deref(),
+            token
+                .as_ref()
+                .map(|token| token as openbot_desktop_lib::connected::about::Token),
+            deadline,
+        )))
+    })
 }
 
 /// Whether `url` is a page the relay serves: OpenBot's own, from the OpenBot it is connected to.
@@ -200,6 +266,7 @@ pub fn connection_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>, for_setup: b
         address: chosen.address.filter(|_| connected || for_setup),
         organization_id: chosen.organization_id.filter(|_| connected),
         signed_in,
+        move_to_cloud: (!for_setup).then(|| crate::desktop_move::offered_in_settings(app)),
     }
 }
 
@@ -213,6 +280,7 @@ pub async fn connection<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Connecti
             address: None,
             organization_id: None,
             signed_in: Some(false),
+            move_to_cloud: None,
         })
 }
 
@@ -288,9 +356,113 @@ pub fn come_forward_after_sign_in<R: tauri::Runtime>(
 /// Stop a sign-in that is waiting for the browser.
 #[tauri::command]
 pub async fn cancel_connect<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
-    if let Some(attempt) = state(&app).connected.attempt.lock().unwrap().as_ref() {
+    cancel_sign_in(&app);
+}
+
+/// Stop a sign-in that is waiting for the browser: Connect's, or the move to OpenBot Cloud's.
+pub fn cancel_sign_in<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(attempt) = state(app).connected.attempt.lock().unwrap().as_ref() {
         attempt.cancel();
     }
+}
+
+/**
+The move to OpenBot Cloud's sign-in at `typed`, in the browser, exactly as Connect signs in (and
+kept in the credential store as Connect keeps it). Always the browser's: a sign-in kept from before
+may not carry the scopes the move asks for, which OpenBot Cloud lists in its metadata and this
+sign-in asks for. Nothing is shown and nothing on this computer is stopped: the move still needs
+the OpenBot here, and shows OpenBot Cloud only once it is done (`keep_moved_choice`,
+`show_connected_at`). `opened` says whether the browser was opened.
+*/
+pub fn sign_in_for_move<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    typed: &str,
+    opened: &std::sync::atomic::AtomicBool,
+) -> Result<Arc<sign_in::Session>, Problem> {
+    let (address, metadata) = address::check(typed)?;
+    let attempt = Arc::new(sign_in::Attempt::default());
+    if let Some(earlier) = state(app)
+        .connected
+        .attempt
+        .lock()
+        .unwrap()
+        .replace(attempt.clone())
+    {
+        earlier.cancel();
+    }
+    let signed_in = sign_in::sign_in(
+        &address,
+        &metadata,
+        store(app),
+        &attempt,
+        sign_in::WAIT,
+        |authorize| {
+            opened.store(true, std::sync::atomic::Ordering::SeqCst);
+            open_in_browser(authorize)
+        },
+    );
+    {
+        let shell = state(app);
+        let mut waiting = shell.connected.attempt.lock().unwrap();
+        if waiting
+            .as_ref()
+            .is_some_and(|waiting| Arc::ptr_eq(waiting, &attempt))
+        {
+            *waiting = None;
+        }
+    }
+    signed_in.map(Arc::new)
+}
+
+/// The move to OpenBot Cloud kept: the app connected to `address`, in the organization the move
+/// went into, from the next launch on. Nothing is shown yet.
+pub fn keep_moved_choice<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    address: &str,
+    organization: &str,
+) -> Result<(), Problem> {
+    let mut moved = choice::signed_in_at(address);
+    moved.organization_id =
+        Some(organization.to_owned()).filter(|id| choice::valid_organization(id));
+    keep(app, &moved)?;
+    log::info!(
+        "[move] the choice is the OpenBot at {}",
+        openbot_desktop_lib::connected::host_of(address)
+    );
+    crate::refresh_menus(app);
+    Ok(())
+}
+
+/// After the move: OpenBot Cloud in the window, at the app's page `to` (`/`, or `/connections`
+/// for Reconnect), from the sign-in the move kept.
+pub fn show_connected_at<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    to: &str,
+) -> Result<(), Problem> {
+    if let Some(entry) = state(app)
+        .connected
+        .live
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|live| live.relay.entry_to(to))
+    {
+        return navigate(app, &entry);
+    }
+    let chosen = chosen(app);
+    let Some(address) = chosen.connected_to() else {
+        return Err(Problem::plain(
+            "OpenBot isn't connected to an address. Choose where OpenBot runs.",
+        ));
+    };
+    let metadata = address::probe(address)?;
+    let session = sign_in::resume(address, &metadata, store(app))?;
+    show(
+        app,
+        Arc::new(session),
+        chosen.organization_id.as_deref(),
+        to,
+    )
 }
 
 /// At launch, connected and signed in: the saved sign-in made current, the relay started, and the
@@ -417,11 +589,9 @@ fn connect_now<R: tauri::Runtime>(
         store(app),
         &attempt,
         sign_in::WAIT,
-        // The person's own browser, where they are signed in to their accounts.
         |authorize| {
             opened.store(true, std::sync::atomic::Ordering::SeqCst);
-            tauri_plugin_opener::open_url(authorize, None::<&str>)
-                .map_err(|error| error.to_string())
+            open_in_browser(authorize)
         },
     );
     {
@@ -436,26 +606,39 @@ fn connect_now<R: tauri::Runtime>(
     }
     let session = Arc::new(signed_in?);
 
+    // A sign-in the app could not use is revoked, and the browser is left as it is: the person
+    // who signed in there a moment ago is still here, and tries again.
+    let keep_browser = |_: &str| Ok(());
     // An OpenBot running on this computer is stopped first, as Stop stops it.
     if let Err(problem) = stop_local_first(app) {
-        let _ = session.sign_out();
+        let _ = session.sign_out(keep_browser);
         return Err(problem);
     }
-    // The organisation picked at this address before, through a sign-out; none at a new address.
-    let chosen = choice::signed_in_at(&chosen(app), &address);
-    let shown = show(app, session.clone(), chosen.organization_id.as_deref())
+    // No organisation named: the app works in the one the person picked as they signed in, which
+    // the token keeps, until they pick another in the switcher.
+    let chosen = choice::signed_in_at(&address);
+    let shown = show(app, session.clone(), chosen.organization_id.as_deref(), "/")
         .and_then(|()| keep(app, &chosen));
     if shown.is_err() {
         stop_relay(app);
-        let _ = session.sign_out();
+        let _ = session.sign_out(keep_browser);
     }
     shown
 }
 
+/// The person's own browser, where they are signed in to their accounts: where the sign-in goes,
+/// and where sign-out ends that browser's session at the OpenBot. Never opened by a test.
+fn open_in_browser(address: &str) -> Result<(), String> {
+    if cfg!(test) {
+        return Err("a test opens no browser".into());
+    }
+    tauri_plugin_opener::open_url(address, None::<&str>).map_err(|error| error.to_string())
+}
+
 fn show_connected_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), Problem> {
-    // Already showing in this session: the window goes back to it.
+    // Already showing in this session: the window goes back to it, through the entry.
     if let Some(origin) = relay_origin(app) {
-        return navigate(app, &origin);
+        return navigate(app, &relay_entry(app).unwrap_or(origin));
     }
     let chosen = chosen(app);
     let Some(address) = chosen.connected_to() else {
@@ -465,14 +648,20 @@ fn show_connected_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<()
     };
     let metadata = address::probe(address)?;
     let session = sign_in::resume(address, &metadata, store(app))?;
-    show(app, Arc::new(session), chosen.organization_id.as_deref())
+    show(
+        app,
+        Arc::new(session),
+        chosen.organization_id.as_deref(),
+        "/",
+    )
 }
 
-/// Start the relay for `session` and point the window at it.
+/// Start the relay for `session` and point the window at it, at the app's page `to`.
 fn show<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     session: Arc<sign_in::Session>,
     organization: Option<&str>,
+    to: &str,
 ) -> Result<(), Problem> {
     let host = session.host().to_owned();
     let listening = app.clone();
@@ -496,18 +685,91 @@ fn show<R: tauri::Runtime>(
         )
     })?;
     let origin = relay.origin();
-    let entry = relay.entry();
+    let entry = relay.entry_to(to);
     stop_relay(app);
-    *state(app).connected.live.lock().unwrap() = Some(Live { relay, session });
+    *state(app).connected.live.lock().unwrap() = Some(Live {
+        relay,
+        session: session.clone(),
+    });
     // The relay's pages are OpenBot's own: the window's controls, theme, notifications and the
     // rest, exactly as for an OpenBot this computer runs.
     crate::trust_owned_app(app, &origin);
     crate::refresh_menus(app);
+    learn_account(app, session, organization);
     log::info!("[connect] showing the OpenBot at {host}");
     // First to the relay's entry, which gives the window this run's cookie and sends it on.
     navigate(app, &entry)?;
     crate::bring_to_front(app, "OpenBot is showing");
     Ok(())
+}
+
+/**
+Ask the OpenBot the app is now signed in to which account it is, on its own thread, and build the
+menus again once it says, so About names it. The same question the move to OpenBot Cloud asks of
+the account it went into (`move_to_cloud::Api::account`), in the organization the app works in, or
+the person's own when none is on record. One that can't be answered leaves About without the
+account, and nothing else waits on it.
+*/
+fn learn_account<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    session: Arc<sign_in::Session>,
+    organization: Option<&str>,
+) {
+    use openbot_desktop_lib::move_to_cloud::{their_own_organization, Api};
+    let app = app.clone();
+    let organization = organization.map(str::to_owned);
+    std::thread::spawn(move || {
+        let address = session.address().to_owned();
+        let credentials = Box::new(crate::desktop_move::SessionCredentials(session));
+        let cloud = match &organization {
+            Some(organization) => Api::at(&address, credentials, organization),
+            None => Api::open(&address, credentials, their_own_organization),
+        };
+        match cloud.and_then(|cloud| cloud.account()) {
+            // Only while that sign-in still shows: one signed out meanwhile is not named.
+            Ok(account) if connected_address(&app).as_deref() == Some(address.as_str()) => {
+                remember_account(&app, &address, &account.email)
+            }
+            Ok(_) => {}
+            Err(detail) => log::warn!(
+                "[connect] could not ask {} which account this app is signed in to: {detail}",
+                openbot_desktop_lib::connected::host_of(&address)
+            ),
+        }
+    });
+}
+
+/// The account the app is signed in to at `address`, for About, which is built again to say it.
+pub(crate) fn remember_account<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    address: &str,
+    email: &str,
+) {
+    *state(app).connected.signed_in_as.lock().unwrap() = Some(SignedInAs {
+        address: address.to_owned(),
+        email: email.to_owned(),
+    });
+    crate::refresh_menus(app);
+}
+
+/// Signed out, or the sign-in ended: About no longer names an account.
+fn forget_account<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    *state(app).connected.signed_in_as.lock().unwrap() = None;
+}
+
+/// The email the app is signed in with at the OpenBot it is connected to, once that OpenBot has
+/// said. None on this computer, and for an account at another address than the one on record.
+pub fn signed_in_as<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
+    let chosen = chosen(app);
+    let address = chosen.connected_to()?;
+    state(app)
+        .connected
+        .signed_in_as
+        .lock()
+        .unwrap()
+        .as_ref()
+        .filter(|known| known.address == address)
+        .map(|known| known.email.clone())
 }
 
 fn navigate<R: tauri::Runtime>(app: &tauri::AppHandle<R>, to: &str) -> Result<(), Problem> {
@@ -541,9 +803,12 @@ fn forget_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, origin: &str) {
 }
 
 /// Sign out of the OpenBot on record: revoked there as far as it answers, forgotten here, and the
-/// relay stopped. The address stays, and so does the organisation picked there: a token remembers
-/// nothing, so this is what lets the next sign-in at that address go on where the person left off.
-/// It goes only with a new address (`choice::signed_in_at`) and back on this computer.
+/// relay stopped. The address stays. The next sign-in names no organisation: it works in the one
+/// the person picks as they sign in (`choice::signed_in_at`).
+///
+/// Then, when the OpenBot publishes where a browser ends its session there, the person's browser
+/// is sent there, the same browser the sign-in went through (`open_in_browser`): it stays signed in
+/// otherwise, and the next person's sign-in on this computer would come back as this one.
 pub fn sign_out_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(attempt) = state(app).connected.attempt.lock().unwrap().take() {
         attempt.cancel();
@@ -553,7 +818,7 @@ pub fn sign_out_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     match live {
         Some(live) => {
             forget_origin(app, &live.relay.origin());
-            if let Err(problem) = live.session.sign_out() {
+            if let Err(problem) = live.session.sign_out(open_in_browser) {
                 log::warn!(
                     "[connect] could not forget the sign-in: {}",
                     problem.detail.unwrap_or(problem.said)
@@ -563,9 +828,12 @@ pub fn sign_out_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         None => {
             if let Some(address) = chosen.connected_to() {
                 let metadata = address::probe(address).ok();
-                if let Err(problem) =
-                    sign_in::sign_out_saved(address, metadata.as_ref(), &store(app))
-                {
+                if let Err(problem) = sign_in::sign_out_saved(
+                    address,
+                    metadata.as_ref(),
+                    &store(app),
+                    open_in_browser,
+                ) {
                     log::warn!(
                         "[connect] could not forget the sign-in: {}",
                         problem.detail.unwrap_or(problem.said)
@@ -574,6 +842,7 @@ pub fn sign_out_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             }
         }
     }
+    forget_account(app);
     crate::refresh_menus(app);
 }
 
@@ -586,6 +855,7 @@ pub(crate) fn session_ended<R: tauri::Runtime>(app: &tauri::AppHandle<R>, host: 
         message: Some(Kind::SessionEnded.said(host)),
     };
     *state(app).connected.notice.lock().unwrap() = Some(notice.clone());
+    forget_account(app);
     crate::refresh_menus(app);
     if let Err(error) = crate::show_setup(app.clone()) {
         log::warn!("[connect] could not show setup after the sign-in ended: {error}");
@@ -633,7 +903,9 @@ pub fn show_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             .as_ref()
             .is_some_and(|current| crate::same_window_app(current, &destination));
         if !already_showing {
-            let _ = window.navigate(destination);
+            // Onto the relay through its entry, which hands the window its cookie on the way.
+            let entry = relay_entry(app).and_then(|entry| entry.parse::<tauri::Url>().ok());
+            let _ = window.navigate(entry.unwrap_or(destination));
         }
     }
     let _ = window.show();

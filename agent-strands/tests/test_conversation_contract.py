@@ -20,11 +20,14 @@ from harness_contract import (
     LATEST_QUESTION,
     STANDING_ROLE,
     anthropic_environment,
+    check_run_keys,
     conversation,
     fake_provider,
+    gateway_environment,
     missing_from,
     openai_environment,
     run_events,
+    with_run_key,
 )
 
 TOKEN = "contract-token"
@@ -189,6 +192,21 @@ def test_a_row_the_run_also_sends_as_context_is_said_once(monkeypatch):
     assert bodies, "the model was never called"
     assert memory not in _system_text(bodies[-1]), "the memory is not an instruction"
     assert json.dumps(bodies[-1]).count(memory) == 1, "the memory reaches the model once"
+
+
+@pytest.mark.parametrize("wire", ["openai", "anthropic"])
+def test_a_run_calls_the_gateway_with_its_own_key(monkeypatch, wire):
+    """The run's own gateway token, in its organization, for that run; the environment's otherwise.
+
+    See `shared/run_model_key.py`.
+    """
+    keys: list[str] = []
+    with fake_provider(keys) as (base, bodies):
+        client = TestClient(_app(monkeypatch, gateway_environment(wire), base))
+        _post(client, with_run_key(conversation(), wire))
+        ran_with_token = len(keys)
+        _post(client, conversation(run_id="contract-run-2"))
+    check_run_keys(keys, ran_with_token, bodies)
 
 
 def test_a_warm_process_takes_the_role_from_this_run_not_the_first(monkeypatch):

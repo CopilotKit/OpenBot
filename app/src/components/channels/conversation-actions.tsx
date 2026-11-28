@@ -10,6 +10,7 @@ import { conversationTitle } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import { DeleteConversationDialog } from "./delete-conversation-dialog";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * Pin and Delete for the conversation that is open, in the Bot panel beside it.
@@ -80,7 +81,7 @@ export function ConversationActions({
       {/* No toast in this app: why a pin did not take is said where it was asked for. */}
       {setPinned.error ? (
         <p className="text-destructive text-xs" role="alert">
-          {setPinned.error.message}
+          {failureSaid(setPinned.error)}
         </p>
       ) : null}
       <DeleteConversationDialog

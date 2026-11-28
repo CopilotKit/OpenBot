@@ -13,7 +13,7 @@
 //! Unix has no equivalent problem and no equivalent flag, so there the wrapper is the identity.
 
 use std::io::Read;
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -42,10 +42,14 @@ pub fn command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
 /**
 `Command::output`, to the command's end or `limit`, whichever comes first.
 
-A command still running at `limit` is killed through its own handle and answers
-`ErrorKind::TimedOut`, so the caller can tell "it did not say in time" apart from "it said no" or
-"it could not start". Both streams are kept, as `output` keeps them, because a probe's diagnostic
-is often on the one its answer is not.
+A command still running at `limit` is stopped (see `stop`: on Windows with everything it started,
+elsewhere through its own handle) and answers `ErrorKind::TimedOut`, so the caller can tell "it did
+not say in time" apart from "it said no" or "it could not start". Both streams are kept, as
+`output` keeps them, because a probe's diagnostic is often on the one its answer is not.
+
+A command that exited while something it started kept its output open also answers
+`ErrorKind::TimedOut`, because its answer is incomplete, but carries `StayedOpen`: `stayed_open`
+tells a caller that needs to know that it did exit, and was not stopped at `limit`.
 
 `local_images::run_within` is the same wait for engine commands, but it drops stderr and caps
 stdout, which is right for `kubectl` output and wrong for a probe whose failure has to be shown.
@@ -77,14 +81,12 @@ pub fn output_watching(
             Ok(Some(status)) => break status,
             Ok(None) => {}
             Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop(&mut child);
                 return Err(error);
             }
         }
         if Instant::now() >= until {
-            let _ = child.kill();
-            let _ = child.wait();
+            stop(&mut child);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 format!("still running after {limit:?}, so it was stopped"),
@@ -111,9 +113,45 @@ pub fn output_watching(
         }),
         _ => Err(std::io::Error::new(
             std::io::ErrorKind::TimedOut,
-            format!("exited with {status} but its output stayed open"),
+            StayedOpen(status),
         )),
     }
+}
+
+/// `output_watching`'s error for a command that exited with its output still held open by
+/// something it started. Its kind stays `TimedOut`, which every other caller relies on; only the
+/// type says the command did exit.
+#[derive(Debug)]
+pub struct StayedOpen(pub std::process::ExitStatus);
+
+impl std::fmt::Display for StayedOpen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "exited with {} but its output stayed open", self.0)
+    }
+}
+
+impl std::error::Error for StayedOpen {}
+
+/// Whether `error` is `StayedOpen`: the command exited, and was not stopped at its limit.
+pub fn stayed_open(error: &std::io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|inner| inner.is::<StayedOpen>())
+}
+
+/// Stop `child` and reap it. On Windows, also stop what it started: `podman machine ssh` runs
+/// `ssh.exe`, which kept waiting for a password nobody could type after `podman` itself was killed.
+/// `taskkill /T` reaches the processes `child` still parents, as `local_eval::stop_tree` does.
+fn stop(child: &mut Child) {
+    #[cfg(windows)]
+    let _ = command("taskkill")
+        .args(["/PID", &child.id().to_string(), "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Everything `pipe` says until it closes, read on a thread of its own.
@@ -206,6 +244,23 @@ mod tests {
         // Past the moment it would have finished: killed, not abandoned to run on.
         std::thread::sleep(Duration::from_secs(3));
         assert!(!marker.exists(), "the probe ran on after its limit");
+        let _ = std::fs::remove_dir_all(cli.parent().unwrap());
+    }
+
+    /// What the command started is stopped with it. `podman machine ssh` timed out with its
+    /// `ssh.exe` still waiting on a password prompt, and every retry left one more behind.
+    #[test]
+    #[cfg(windows)]
+    fn a_command_stopped_at_its_limit_takes_what_it_started_with_it() {
+        let cli = crate::test_support::probe_cli("output-within-tree");
+        let error = output_within(command(&cli).arg("parent"), Duration::from_secs(1)).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut, "{error}");
+        // The child sleeps two seconds, then leaves `probe-child-outlived` beside it.
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(
+            !cli.with_file_name("probe-child-outlived").exists(),
+            "the command's child ran on after its limit"
+        );
         let _ = std::fs::remove_dir_all(cli.parent().unwrap());
     }
 

@@ -32,6 +32,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -91,6 +93,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -138,6 +142,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -194,6 +200,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -237,6 +245,9 @@ paths:
       responses:
         '204':
           description: The question no longer waits.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -276,6 +287,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -327,6 +340,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -374,6 +389,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -433,6 +450,8 @@ paths:
               schema:
                 type: string
               example: /api/v2/organizations/default/people/me/approval-rules/1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -490,6 +509,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -528,6 +549,9 @@ paths:
       responses:
         '204':
           description: The rule was removed.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -569,6 +593,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -610,6 +636,9 @@ paths:
       responses:
         '204':
           description: It was turned off.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -650,6 +679,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -657,6 +688,61 @@ paths:
               examples:
                 ordinary:
                   $ref: '#/components/examples/ApprovalModeExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ApprovalsOwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/conversations/{conversationId}/approvals:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/ApprovalConversationId'
+    get:
+      tags: [Approvals]
+      operationId: listConversationApprovals
+      summary: List a person's approvals in one conversation
+      description: >-
+        Return one page of the actions a person's Bots asked them about in one
+        of their conversations, however long ago: the ones still waiting and
+        every one already decided, newest first. Unlike the person's whole list,
+        which keeps only the last hundred, this reaches every approval the
+        conversation has, so an old conversation can still show what the person
+        answered. What an action was called with is cut short for showing, with
+        values that look like secrets masked. Only the person themselves may
+        read them, and only the approvals they were asked: anybody else's
+        conversation, and one that does not exist, reads as an empty list. A
+        missing cursor starts at the first page and nextCursor null ends the
+        list.
+      security:
+        - webSession: []
+        - appOAuth: [approvals:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of the conversation's approvals.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalPage'
+              examples:
+                answered:
+                  $ref: '#/components/examples/ConversationApprovalPageExample'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -683,11 +769,13 @@ paths:
         through. The body names the Bot and carries the conversation with the
         unanswered call in it. The answer says what came of it: done, with what
         the computer answered; waiting, when the person must approve it first,
-        and then the decision runs it once and carries the conversation on; or
-        held, when the computer is held for a person, with what to tell them.
-        Only computer tools may be called this way, and the call must match an
-        unanswered one in the conversation. Only the person themselves may take
-        a step.
+        and then the decision runs it once and carries the conversation on;
+        held, when the computer is held for a person, with what to tell them;
+        or taken, when the server already ran, or is running, this step (the
+        same tool call in the same conversation), so it is not run a second
+        time, with the first run's result once it has one. Only computer tools
+        may be called this way, and the call must match an unanswered one in
+        the conversation. Only the person themselves may take a step.
       security:
         - webSession: []
         - appOAuth: [approvals:write]
@@ -730,6 +818,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -741,6 +831,10 @@ paths:
                   $ref: '#/components/examples/ComputerStepWaitingExample'
                 held:
                   $ref: '#/components/examples/ComputerStepHeldExample'
+                taken:
+                  $ref: '#/components/examples/ComputerStepTakenExample'
+                takenRunning:
+                  $ref: '#/components/examples/ComputerStepTakenRunningExample'
         '400':
           $ref: '#/components/responses/ApprovalRefused'
         '401':
@@ -780,6 +874,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -832,6 +928,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -878,6 +976,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -934,6 +1034,8 @@ paths:
               schema:
                 type: string
               example: /api/v2/organizations/default/approval-rules/7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -990,6 +1092,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1029,6 +1133,9 @@ paths:
       responses:
         '204':
           description: The rule was removed.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -1080,6 +1187,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1145,6 +1254,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1213,6 +1324,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1256,6 +1369,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1307,6 +1422,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1349,6 +1466,9 @@ paths:
       responses:
         '204':
           description: There is no guidance now.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -1398,6 +1518,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1448,6 +1570,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1504,6 +1628,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1549,6 +1675,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1608,6 +1736,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1667,6 +1797,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1732,6 +1864,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1778,6 +1912,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1834,6 +1970,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1908,6 +2046,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1954,6 +2094,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -2000,6 +2142,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -2030,7 +2174,10 @@ paths:
         Bot is. A request already waiting for the same audience is answered
         again rather than filed twice, and one waiting for a different
         audience is replaced. Recorded on the audit trail. Only the Bot's
-        owner or an administrator may ask.
+        owner or an administrator may ask. Asking matters only where the
+        organization's apps are locked down (getAppsSetting): while they're
+        open, anybody who can use a Bot may use its shared accounts, and there
+        is nothing to approve.
       security:
         - webSession: []
         - appOAuth: [shared-use:write]
@@ -2055,6 +2202,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -2102,6 +2251,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -2148,6 +2299,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -2181,8 +2334,10 @@ paths:
         Return the shared apps a Bot holds, each with the audience it is
         approved for, the audience the Bot needs now, and whether the first
         covers the second, and the Bot's requests still waiting for an
-        administrator. A Bot that holds no shared app answers with none. Only
-        the Bot's owner or an administrator may read it.
+        administrator. A Bot that holds no shared app answers with none.
+        While the organization's apps are open (getAppsSetting), every shared
+        app reads as covered. Only the Bot's owner or an administrator may
+        read it.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -2194,6 +2349,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -2238,6 +2395,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -2295,6 +2454,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -2339,6 +2500,9 @@ paths:
       responses:
         '204':
           description: The Bot no longer has the folder.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -2375,6 +2539,9 @@ paths:
       responses:
         '204':
           description: Folder access was stopped.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -2500,7 +2667,7 @@ components:
         Where an approval stands. pending waits for the person. approved and
         denied are decided, and consumed is started; the server then carries
         the conversation on. completed is finished.
-      enum: [pending, approved, denied, consumed, completed]
+      x-extensible-enum: [pending, approved, denied, consumed, completed]
     ApprovalActionKind:
       type: string
       description: >-
@@ -2754,7 +2921,7 @@ components:
           type: string
           minLength: 1
           maxLength: 6000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The person's answer. Trimmed.
         inConversation:
           type: boolean
@@ -2808,7 +2975,7 @@ components:
       type: string
       minLength: 1
       maxLength: 300
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: >-
         An exact value, or a pattern where * matches anything, so
         mcp/gmail/* names every Gmail tool. Trimmed.
@@ -3131,18 +3298,49 @@ components:
           type: string
         handoff:
           $ref: '#/components/schemas/ComputerStepHandoff'
+    ComputerStepTaken:
+      type: object
+      description: >-
+        The server already ran, or is running, this step: the same tool call
+        in the same conversation. It is not run a second time. While the first
+        run goes on, running is true and there is no result yet; ask again
+        for it. Once the first run has ended, result is what it answered. A
+        first run that was cut off before it answered has, as its result, a
+        note that its outcome is unknown, to check before doing it again.
+        Sent only to a request whose OpenBot-Capabilities header names
+        computer-step-taken.
+      required: [outcome, threadId, toolCallId, running]
+      properties:
+        outcome:
+          type: string
+          const: taken
+        threadId:
+          type: string
+          description: The conversation's thread the step belongs to.
+        toolCallId:
+          type: string
+          description: The tool call the step answers.
+        running:
+          type: boolean
+          description: True while the first run of the step has not ended.
+        result:
+          description: >-
+            What the first run answered, as the tool's result, once it has
+            ended. Any JSON value.
     ComputerStepOutcome:
       description: What came of a computer step, by its outcome.
       oneOf:
         - $ref: '#/components/schemas/ComputerStepDone'
         - $ref: '#/components/schemas/ComputerStepWaiting'
         - $ref: '#/components/schemas/ComputerStepHeld'
+        - $ref: '#/components/schemas/ComputerStepTaken'
       discriminator:
         propertyName: outcome
         mapping:
           done: '#/components/schemas/ComputerStepDone'
           waiting: '#/components/schemas/ComputerStepWaiting'
           held: '#/components/schemas/ComputerStepHeld'
+          taken: '#/components/schemas/ComputerStepTaken'
     ApprovalActionKinds:
       type: object
       additionalProperties: false
@@ -3205,7 +3403,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The rule in a sentence or two, at most 1,000 characters once trimmed.
     ApprovalRuleDraftBehaviour:
       type: string
@@ -3468,7 +3666,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The sentence the rules were written from, at most 2,000 characters once trimmed.
     ApprovalRuleDraftBatch:
       type: object
@@ -3533,7 +3731,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The guidance, at most 2,000 characters once trimmed.
     ReviewerGuidanceCheck:
       type: object
@@ -3589,7 +3787,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The guidance to test, at most 2,000 characters once trimmed.
         limit:
           type: integer
@@ -3714,7 +3912,7 @@ components:
           type: string
           minLength: 1
           maxLength: 80
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: 1 to 80 characters once trimmed.
         description:
           type: string
@@ -4058,7 +4256,7 @@ components:
           type: string
           minLength: 1
           maxLength: 500
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The question, 1 to 500 characters once trimmed.
     WhatIfActionRead:
       type: object
@@ -4397,7 +4595,7 @@ components:
           description: The id of the person who asked.
         status:
           type: string
-          enum: [pending, approved, declined, superseded]
+          x-extensible-enum: [pending, approved, declined, superseded]
           description: >-
             pending until an administrator answers it. superseded when a later
             request for the same Bot and app replaced it.
@@ -4609,6 +4807,9 @@ components:
         The caller asked about somebody else's approvals, questions,
         preferences or rules, which only that person may read or change: an
         administrator can't either.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4630,6 +4831,9 @@ components:
         The caller asked about somebody else's, or an administrator hasn't
         turned Custom rules on for them, which saving a rule or a preference
         of their own needs.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4662,6 +4866,9 @@ components:
       description: >-
         The request is malformed, or the approval, question or rule can't
         take it as it stands.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4702,6 +4909,9 @@ components:
                 traceId: trace_example
     ApprovalNotFound:
       description: The person has no such approval, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4720,6 +4930,9 @@ components:
                 traceId: trace_example
     QuestionNotFound:
       description: The person has no such question waiting, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4738,6 +4951,9 @@ components:
                 traceId: trace_example
     ApprovalRuleNotFound:
       description: There is no such rule in force, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4758,6 +4974,9 @@ components:
       description: >-
         The person allowed no such thing for a conversation, or turned it off
         already, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4779,6 +4998,9 @@ components:
         The rules are malformed, or one does not match a real tool, kind of
         action or Bot. The problem's problems member lists each one as its
         rule (row, counted from 1), its field and a message. Nothing is saved.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4800,6 +5022,9 @@ components:
         The words are missing or too long, or they do not read as guidance
         about reviewing a Bot's actions: they try to switch built-in safety
         off, or are about something else. Nothing is saved.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4820,6 +5045,9 @@ components:
       description: >-
         The replay cannot run here: the deployment has no model for
         auto-review, or it keeps no requests to test against.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4851,6 +5079,9 @@ components:
       description: >-
         The boundaries could not be saved, so the previous ones still apply.
         Saving again may work.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4871,6 +5102,9 @@ components:
       description: >-
         The action the model named still failed its check on its second try,
         so none is given.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4889,6 +5123,9 @@ components:
                 traceId: trace_example
     AuditEventNotFound:
       description: No audit event has that id, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4909,6 +5146,9 @@ components:
       description: >-
         The event is not a Bot's computer action or app call, so no control
         decided it.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4928,6 +5168,9 @@ components:
     InvalidSharedUseRequest:
       description: >-
         The body is malformed, names no Bot, app or reason, holds a character OpenBot can't keep, or names an app the Bot does not hold as a shared app.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4958,6 +5201,9 @@ components:
     SharedUseOwnerOnly:
       description: >-
         The caller is neither the Bot's owner nor an administrator.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -4988,6 +5234,9 @@ components:
     SharedUseRequestDecided:
       description: >-
         The request is not waiting for an answer: it was approved, declined or replaced already, or was never filed. Or the Idempotency-Key was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -5018,6 +5267,9 @@ components:
     HostAccessOwnOnly:
       description: >-
         The caller asked about somebody else's folder access, which only that person may read or change: an administrator can't either.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -5037,6 +5289,9 @@ components:
     HostAccessForbidden:
       description: >-
         The caller asked for somebody else, or an administrator has not let them use this computer.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -5068,6 +5323,9 @@ components:
     HostAccessGrantNotFound:
       description: >-
         The person gave no such folder, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -5087,6 +5345,9 @@ components:
     HostAccessConflict:
       description: >-
         This OpenBot does not run in OpenBot Desktop, Desktop is not connected, the person turned the folder down or let the chooser run out of time, or the Idempotency-Key was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -5178,6 +5439,36 @@ components:
             decidedAt: null
             consumedAt: null
             completedAt: null
+            action:
+              botId: research-assistant
+              toolRef: mcp/gmail/send_email
+              effect: write
+              scope: gmail
+              threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+              toolCallId: call_8c1f
+              args:
+                to: sam.okafor@acme.com
+                subject: Q4 numbers
+              target:
+                app: gmail
+              policy:
+                behaviour: ask
+                source: safety
+                reason: Sending a message asks first.
+                kind: sending
+        nextCursor: null
+    ConversationApprovalPageExample:
+      summary: One conversation's only approval, answered, on the last page.
+      value:
+        approvals:
+          - id: 6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b
+            status: completed
+            decision: allow_once
+            result: null
+            createdAt: '2026-08-03T09:12:44.501Z'
+            decidedAt: '2026-08-03T09:13:02.118Z'
+            consumedAt: '2026-08-03T09:13:02.640Z'
+            completedAt: '2026-08-03T09:13:09.902Z'
             action:
               botId: research-assistant
               toolRef: mcp/gmail/send_email
@@ -5311,6 +5602,22 @@ components:
         outcome: held
         error: "Not done: the person has control of the computer right now. Tell them you'll do this once they hand it back."
         humanHasControl: true
+    ComputerStepTakenExample:
+      summary: The server already ran this step, and this is what it answered.
+      value:
+        outcome: taken
+        threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+        toolCallId: call_8c1f
+        running: false
+        result:
+          ok: true
+    ComputerStepTakenRunningExample:
+      summary: The server is running this step, and it has not answered yet.
+      value:
+        outcome: taken
+        threadId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+        toolCallId: call_8c1f
+        running: true
     ApprovalSettingsExample:
       summary: Payments are left to the person, and everything else is open.
       value:
