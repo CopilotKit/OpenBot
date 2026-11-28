@@ -4,7 +4,7 @@
 import type { DestinationTransport } from "./destinationTransport";
 
 /**
- * Somewhere outside OpenBot a person continues one conversation with one Bot: a Slack or Microsoft Teams chat, or a phone number.
+ * Somewhere outside OpenBot a person continues one conversation with one Bot: a Slack, Microsoft Teams or Telegram chat, or a phone number.
  */
 export interface Destination {
   /** The destination's id. */
@@ -14,7 +14,7 @@ export interface Destination {
   conversationId: string;
   /** The Bot that answers there. */
   botId: string;
-  /** Where the Bot sends: the phone number for text messages, or the chat's own id in Slack or Teams. */
+  /** Where the Bot sends: the phone number for text messages, or the chat's own id in Slack, Teams or Telegram. */
   address: string;
   /**
    * Text messages only: when the person texted STOP. Nothing is texted until they text START. Null while they can be texted.

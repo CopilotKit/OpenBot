@@ -46,6 +46,7 @@ const CHANNEL: Record<Delivery["transport"], string> = {
   push: "Push",
   slack: "Slack",
   teams: "Microsoft Teams",
+  telegram: "Telegram",
   sms: "SMS",
 };
 

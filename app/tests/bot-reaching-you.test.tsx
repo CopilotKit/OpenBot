@@ -8,6 +8,7 @@ import { answerBotsList } from "./bots-api";
 import { CONVERSATIONS_PATH, conversationPage } from "./conversations-api";
 import {
   CONFIRM_PHONE_PATH,
+  CONNECT_TELEGRAM_PATH,
   LINK_CHAT_PATH,
   notificationsResponse,
   VERIFY_PHONE_PATH,
@@ -51,14 +52,15 @@ const binding = (id: string, agentId: string, address: string) => ({
 });
 
 const writes: { request: string; body: unknown }[] = [];
-function serving(sms = false) {
+function serving(options: { sms?: boolean; telegram?: boolean } = {}) {
+  const { sms = false, telegram = false } = options;
   writes.length = 0;
   const today = {
     bindings: [
       binding("b1", "expenses", "finance-bot-dm"),
       binding("b2", "knowledge", "docs-bot-dm"),
     ],
-    available: { slack: true, teams: false, sms, push: false },
+    available: { slack: true, teams: false, sms, telegram, push: false },
   };
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -212,7 +214,7 @@ test("a transport the deployment cannot reach says why instead of opening", asyn
 });
 
 test("a phone is verified for the chosen conversation, then asks for its code", async () => {
-  serving(true);
+  serving({ sms: true });
   sessionStorage.clear();
   const view = draw();
   const user = userEvent.setup({ document });
@@ -241,4 +243,44 @@ test("a phone is verified for the chosen conversation, then asks for its code", 
       body: { verificationId: "challenge-1", code: "123456" },
     }),
   );
+});
+
+test("Telegram takes a bot token for the chosen conversation, then shows the link code", async () => {
+  serving({ telegram: true });
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await view.findByRole("button", { name: "Disconnect" });
+  await user.click(view.getByRole("button", { name: /^Connect Telegram/ }));
+  await chooseConversation(view, user, "Finance desk");
+  await user.type(
+    view.getByLabelText("Bot token"),
+    "123456789:AAHeHeHeHeHeHeHeHeHeHeHeHeHeHeHeHeHe",
+  );
+  await user.click(view.getByRole("button", { name: "Connect Telegram" }));
+  await waitFor(() =>
+    expect(writes).toContainEqual({
+      request: `POST ${CONNECT_TELEGRAM_PATH}`,
+      body: {
+        botToken: "123456789:AAHeHeHeHeHeHeHeHeHeHeHeHeHeHeHeHeHe",
+        conversationId: "channel-expenses",
+        botId: "expenses",
+      },
+    }),
+  );
+  expect(
+    await view.findByText("link 6f2b9d4e-1a3c-4e5f-8b7a-0c9d2e1f3a4b"),
+  ).toBeTruthy();
+  expect(view.getByText(/@openbot_test_bot/)).toBeTruthy();
+});
+
+test("Telegram that the deployment cannot reach says why instead of opening", async () => {
+  serving();
+  const view = draw();
+  await view.findByRole("button", { name: "Disconnect" });
+  expect(view.queryByRole("button", { name: /^Connect Telegram/ })).toBeNull();
+  expect(
+    view.getByText(
+      "Telegram isn't set up yet. An admin has to turn it on first.",
+    ),
+  ).toBeTruthy();
 });

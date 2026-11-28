@@ -40,7 +40,13 @@ const everyKind = {
   question: "all",
   attention: "all",
 };
-const everyChannel = { slack: true, teams: true, sms: true, push: true };
+const everyChannel = {
+  slack: true,
+  teams: true,
+  telegram: true,
+  sms: true,
+  push: true,
+};
 let routing: Record<string, unknown> = everyKind;
 let available: Record<string, boolean> = everyChannel;
 afterEach(() => {
@@ -132,7 +138,13 @@ function draw(who: { role: string; localEvaluation: boolean } = ADMIN) {
 }
 
 test("only channels that are set up get a switch, and a save keeps the others as they were", async () => {
-  available = { slack: true, teams: false, sms: false, push: true };
+  available = {
+    slack: true,
+    teams: false,
+    telegram: false,
+    sms: false,
+    push: true,
+  };
   routing = { ...everyKind, progress: ["push", "sms"] };
   serving();
   const view = draw();
@@ -150,14 +162,20 @@ test("only channels that are set up get a switch, and a save keeps the others as
 });
 
 test("with no channel set up, it says updates stay in OpenBot, and whoever can set them up gets the way to", async () => {
-  available = { slack: false, teams: false, sms: false, push: false };
+  available = {
+    slack: false,
+    teams: false,
+    telegram: false,
+    sms: false,
+    push: false,
+  };
   serving();
   const view = draw(ADMIN);
   expect(await view.findByText("Updates stay in OpenBot")).toBeTruthy();
   expect(view.queryAllByRole("switch")).toHaveLength(0);
   expect(
     view.getByText(
-      "Push, Slack, Microsoft Teams and text messages show up here once they're set up where OpenBot runs.",
+      "Push, Slack, Microsoft Teams, Telegram and text messages show up here once they're set up where OpenBot runs.",
     ),
   ).toBeTruthy();
   const how = view.getByRole("link", { name: "How to set them up" });
@@ -167,7 +185,13 @@ test("with no channel set up, it says updates stay in OpenBot, and whoever can s
 
 test("the section asks where updates go only above switches to choose with", async () => {
   const ASK = /Choose where to receive each type of update/;
-  available = { slack: false, teams: false, sms: false, push: false };
+  available = {
+    slack: false,
+    teams: false,
+    telegram: false,
+    sms: false,
+    push: false,
+  };
   serving();
   const empty = draw(ADMIN);
   expect(await empty.findByText("Updates stay in OpenBot")).toBeTruthy();
@@ -188,12 +212,18 @@ test("in OpenBot Desktop, where these channels can't reach anyone, it says so an
     transformCallback: () => 0,
   };
   try {
-    available = { slack: false, teams: false, sms: false, push: false };
+    available = {
+      slack: false,
+      teams: false,
+      telegram: false,
+      sms: false,
+      push: false,
+    };
     serving();
     const view = draw({ role: "member", localEvaluation: true });
     expect(
       await view.findByText(
-        "Push, Slack, Microsoft Teams and text messages need OpenBot running on a server.",
+        "Push, Slack, Microsoft Teams, Telegram and text messages need OpenBot running on a server.",
       ),
     ).toBeTruthy();
     expect(view.queryByRole("link", { name: "How to set them up" })).toBeNull();
@@ -203,7 +233,13 @@ test("in OpenBot Desktop, where these channels can't reach anyone, it says so an
 });
 
 test("someone running OpenBot on their own computer gets the way to set channels up too", async () => {
-  available = { slack: false, teams: false, sms: false, push: false };
+  available = {
+    slack: false,
+    teams: false,
+    telegram: false,
+    sms: false,
+    push: false,
+  };
   serving();
   const view = draw({ role: "member", localEvaluation: true });
   expect(
@@ -212,12 +248,18 @@ test("someone running OpenBot on their own computer gets the way to set channels
 });
 
 test("a member who can't set channels up is told their admin does, with no link", async () => {
-  available = { slack: false, teams: false, sms: false, push: false };
+  available = {
+    slack: false,
+    teams: false,
+    telegram: false,
+    sms: false,
+    push: false,
+  };
   serving();
   const view = draw({ role: "member", localEvaluation: false });
   expect(
     await view.findByText(
-      "Push, Slack, Microsoft Teams and text messages show up here once your admin sets them up.",
+      "Push, Slack, Microsoft Teams, Telegram and text messages show up here once your admin sets them up.",
     ),
   ).toBeTruthy();
   expect(view.queryByRole("link", { name: "How to set them up" })).toBeNull();

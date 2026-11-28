@@ -21,6 +21,8 @@ import type {
   ChatLinkCode,
   ConfirmPhoneDestinationHeaders,
   ConfirmPhoneDestinationRequest,
+  ConnectTelegramDestinationHeaders,
+  ConnectTelegramDestinationRequest,
   DeleteDestinationHeaders,
   DestinationForbiddenResponse,
   DestinationNotFoundResponse,
@@ -36,6 +38,7 @@ import type {
   OwnOnlyResponse,
   PhoneVerification,
   ServerErrorResponse,
+  TelegramLinkCode,
   TextMessagesUnavailableResponse,
   TransportUnavailableResponse,
   UnauthenticatedResponse,
@@ -91,7 +94,7 @@ export const getListDestinationsUrl = (
 };
 
 /**
- * Return one page of the places outside OpenBot a person continues their conversations with Bots: a Slack or Microsoft Teams chat, or a phone number for text messages, each tied to one conversation with one Bot. A Slack account, a Teams account or a phone number is connected in one organization at a time: connecting one that is connected in another organization answers 400 until it is disconnected there. The first connected first. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the places outside OpenBot a person continues their conversations with Bots: a Slack, Microsoft Teams or Telegram chat, or a phone number for text messages, each tied to one conversation with one Bot. A Slack account, a Teams account, a Telegram chat or a phone number is connected in one organization at a time: connecting one that is connected in another organization answers 400 until it is disconnected there. The first connected first. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List where a person's Bots reach them
  */
 export const listDestinations = async (
@@ -821,6 +824,169 @@ export const useConfirmPhoneDestination = <
     queryClient,
   );
 };
+export const getConnectTelegramDestinationUrl = (
+  organizationId: string,
+  personId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/destinations/connect-telegram`;
+};
+
+/**
+ * Accept the person's Telegram bot token (the one BotFather gave them), check it with Telegram, store it encrypted, and make a one-time code that ties the Telegram chat they send it from to one of their conversations with one Bot. The token is never returned. Only that chat is allow-listed afterwards; messages from any other chat are refused and nothing runs. Nothing is connected until they send the command it answers to that bot in a direct message. The conversation must be the person's and the Bot one of its own. Only the person themselves may connect, and only where this deployment reaches people on Telegram.
+ * @summary Start continuing a conversation in Telegram
+ */
+export const connectTelegramDestination = async (
+  organizationId: string,
+  personId: string,
+  connectTelegramDestinationRequest: ConnectTelegramDestinationRequest,
+  headers: ConnectTelegramDestinationHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<TelegramLinkCode> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<TelegramLinkCode>(
+    getConnectTelegramDestinationUrl(organizationId, personId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(connectTelegramDestinationRequest),
+    },
+  );
+};
+
+export const getConnectTelegramDestinationMutationKey = () =>
+  ["connectTelegramDestination"] as const;
+
+export const getConnectTelegramDestinationMutationOptions = <
+  TError =
+    | InvalidDestinationResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | TransportUnavailableResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof connectTelegramDestination>>,
+    TError,
+    ConnectTelegramDestinationMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof connectTelegramDestination>>,
+  TError,
+  ConnectTelegramDestinationMutationVariables,
+  TContext
+> => {
+  const mutationKey = getConnectTelegramDestinationMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof connectTelegramDestination>>,
+    ConnectTelegramDestinationMutationVariables
+  > = (props) => {
+    const { organizationId, personId, data, headers } = props ?? {};
+
+    return connectTelegramDestination(
+      organizationId,
+      personId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConnectTelegramDestinationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof connectTelegramDestination>>
+>;
+export type ConnectTelegramDestinationMutationBody =
+  ConnectTelegramDestinationRequest;
+export type ConnectTelegramDestinationMutationError =
+  | InvalidDestinationResponse
+  | UnauthenticatedResponse
+  | OwnOnlyResponse
+  | TransportUnavailableResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type ConnectTelegramDestinationMutationVariables = {
+  organizationId: string;
+  personId: string;
+  data: ConnectTelegramDestinationRequest;
+  headers: ConnectTelegramDestinationHeaders;
+};
+
+/**
+ * @summary Start continuing a conversation in Telegram
+ */
+export const useConnectTelegramDestination = <
+  TError =
+    | InvalidDestinationResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | TransportUnavailableResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof connectTelegramDestination>>,
+      TError,
+      ConnectTelegramDestinationMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof connectTelegramDestination>>,
+  TError,
+  ConnectTelegramDestinationMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getConnectTelegramDestinationMutationOptions(options),
+    queryClient,
+  );
+};
 export const getDeleteDestinationUrl = (
   organizationId: string,
   personId: string,
@@ -830,7 +996,7 @@ export const getDeleteDestinationUrl = (
 };
 
 /**
- * Stop continuing a conversation in that Slack or Teams chat, or by text to that phone. Only the person themselves may disconnect their destinations. A destination already disconnected is not found, which a client can read as done.
+ * Stop continuing a conversation in that Slack, Teams or Telegram chat, or by text to that phone. Only the person themselves may disconnect their destinations. A destination already disconnected is not found, which a client can read as done.
  * @summary Disconnect a destination
  */
 export const deleteDestination = async (

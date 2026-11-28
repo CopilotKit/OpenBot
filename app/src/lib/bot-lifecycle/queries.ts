@@ -21,7 +21,7 @@ import { idempotencyKey, organizationId } from "@/lib/api/request";
 export type BotNotify = BotNotifyModel;
 /** `attention` is a ping: what the person's Bots found in their check-ins that needs them. */
 export type UpdateKind = "progress" | "decision" | "question" | "attention";
-export type UpdateTransport = "slack" | "teams" | "sms" | "push";
+export type UpdateTransport = "slack" | "teams" | "sms" | "telegram" | "push";
 
 /** The signed-in person's own state with one Bot, nobody else's: the API's `BotLifecycle`. */
 export type BotLifecycle = BotLifecycleModel;

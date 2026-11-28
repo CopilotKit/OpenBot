@@ -63,6 +63,7 @@ const TRANSPORT_LABEL: Record<string, string> = {
   slack: "Slack",
   teams: "Microsoft Teams",
   sms: "SMS",
+  telegram: "Telegram",
 };
 
 /** Where this Bot's conversations continue outside OpenBot, each place once. */

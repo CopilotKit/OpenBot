@@ -76,7 +76,7 @@ tags:
   - name: Devices
     description: The phones a person signed in to the OpenBot app on and turned notifications on for, which their Bots send push notifications to.
   - name: Destinations
-    description: 'Where a person continues a conversation with a Bot outside OpenBot: a Slack or Microsoft Teams chat, or a phone number for text messages.'
+    description: 'Where a person continues a conversation with a Bot outside OpenBot: a Slack, Microsoft Teams or Telegram chat, or a phone number for text messages.'
   - name: Deliveries
     description: What Bots sent a person outside OpenBot, and where each one got to.
   - name: Notification settings
@@ -9839,7 +9839,7 @@ paths:
         - Destinations
       operationId: listDestinations
       summary: List where a person's Bots reach them
-      description: 'Return one page of the places outside OpenBot a person continues their conversations with Bots: a Slack or Microsoft Teams chat, or a phone number for text messages, each tied to one conversation with one Bot. A Slack account, a Teams account or a phone number is connected in one organization at a time: connecting one that is connected in another organization answers 400 until it is disconnected there. The first connected first. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the places outside OpenBot a person continues their conversations with Bots: a Slack, Microsoft Teams or Telegram chat, or a phone number for text messages, each tied to one conversation with one Bot. A Slack account, a Teams account, a Telegram chat or a phone number is connected in one organization at a time: connecting one that is connected in another organization answers 400 until it is disconnected there. The first connected first. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -10052,6 +10052,64 @@ paths:
           $ref: '#/components/responses/TextMessagesUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/connect-telegram:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    post:
+      tags:
+        - Destinations
+      operationId: connectTelegramDestination
+      summary: Start continuing a conversation in Telegram
+      description: Accept the person's Telegram bot token (the one BotFather gave them), check it with Telegram, store it encrypted, and make a one-time code that ties the Telegram chat they send it from to one of their conversations with one Bot. The token is never returned. Only that chat is allow-listed afterwards; messages from any other chat are refused and nothing runs. Nothing is connected until they send the command it answers to that bot in a direct message. The conversation must be the person's and the Bot one of its own. Only the person themselves may connect, and only where this deployment reaches people on Telegram.
+      security:
+        - webSession: []
+        - appOAuth:
+            - destinations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectTelegramDestinationRequest'
+            examples:
+              bot:
+                value:
+                  botToken: 123456789:AAHeHeHeHeHeHeHeHeHeHeHeHeHeHeHeHeHe
+                  conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+                  botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+      responses:
+        '200':
+          description: The bot's username, the code, and the command to send with it.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelegramLinkCode'
+              examples:
+                pending:
+                  $ref: '#/components/examples/TelegramLinkCodeExample'
+        '400':
+          $ref: '#/components/responses/InvalidDestination'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/TransportUnavailable'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people/{personId}/destinations/{destinationId}:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -10062,7 +10120,7 @@ paths:
         - Destinations
       operationId: deleteDestination
       summary: Disconnect a destination
-      description: Stop continuing a conversation in that Slack or Teams chat, or by text to that phone. Only the person themselves may disconnect their destinations. A destination already disconnected is not found, which a client can read as done.
+      description: Stop continuing a conversation in that Slack, Teams or Telegram chat, or by text to that phone. Only the person themselves may disconnect their destinations. A destination already disconnected is not found, which a client can read as done.
       security:
         - webSession: []
         - appOAuth:
@@ -10337,7 +10395,7 @@ paths:
         - Notification settings
       operationId: listNotificationTransports
       summary: List the ways OpenBot can reach people here
-      description: 'Return the ways this deployment can reach a person outside OpenBot. One appears only once it is set up where OpenBot runs: push is always there for browsers (web push, saveWebPushSubscription) and reaches phones once the OpenBot phone app''s project is set up, Slack and Microsoft Teams need the OpenTag pairing, and text messages need Twilio. A person''s settings keep their choice for one that is not, for when it is. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return the ways this deployment can reach a person outside OpenBot. One appears only once it is set up where OpenBot runs: push is always there for browsers (web push, saveWebPushSubscription) and reaches phones once the OpenBot phone app''s project is set up, Slack and Microsoft Teams need the OpenTag pairing, Telegram needs the Telegram channel (a bot token connected under Reaching you, or the OpenTag- shaped Telegram front), and text messages need Twilio. A person''s settings keep their choice for one that is not, for when it is. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -24238,8 +24296,8 @@ components:
             skills:write: Write and delete the signed-in person's skills, and for an admin the organization's and anybody's.
             devices:read: Read the phones the signed-in person registered for push notifications, and the key a browser subscribes to push notifications with.
             devices:write: Register the signed-in person's phones and browsers for push notifications, and remove them.
-            destinations:read: Read where the signed-in person continues conversations in Slack, Microsoft Teams and text messages.
-            destinations:write: Connect and disconnect the signed-in person's Slack, Microsoft Teams and text message destinations.
+            destinations:read: Read where the signed-in person continues conversations in Slack, Microsoft Teams, Telegram and text messages.
+            destinations:write: Connect and disconnect the signed-in person's Slack, Microsoft Teams, Telegram and text message destinations.
             deliveries:read: Read what Bots sent the signed-in person outside OpenBot.
             notification-settings:read: Read where the signed-in person's updates go, how much each Bot may send them, and the ways this deployment can reach people.
             notification-settings:write: Change where the signed-in person's updates go and how much each Bot may send them.
@@ -32583,14 +32641,15 @@ components:
           $ref: '#/components/schemas/Device'
     DestinationTransport:
       type: string
-      enum:
+      x-extensible-enum:
         - slack
         - teams
         - sms
-      description: Slack, Microsoft Teams, or text messages.
+        - telegram
+      description: Slack, Microsoft Teams, Telegram, or text messages. Open so a new way of reaching someone can be named without breaking a client.
     Destination:
       type: object
-      description: 'Somewhere outside OpenBot a person continues one conversation with one Bot: a Slack or Microsoft Teams chat, or a phone number.'
+      description: 'Somewhere outside OpenBot a person continues one conversation with one Bot: a Slack, Microsoft Teams or Telegram chat, or a phone number.'
       required:
         - id
         - transport
@@ -32613,7 +32672,7 @@ components:
           description: The Bot that answers there.
         address:
           type: string
-          description: 'Where the Bot sends: the phone number for text messages, or the chat''s own id in Slack or Teams.'
+          description: 'Where the Bot sends: the phone number for text messages, or the chat''s own id in Slack, Teams or Telegram.'
         optedOutAt:
           type:
             - string
@@ -32749,6 +32808,49 @@ components:
       properties:
         destination:
           $ref: '#/components/schemas/Destination'
+    ConnectTelegramDestinationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - botToken
+        - conversationId
+        - botId
+      properties:
+        botToken:
+          type: string
+          minLength: 40
+          maxLength: 200
+          pattern: ^[0-9]{5,12}:[A-Za-z0-9_-]{30,}$
+          description: 'The bot token BotFather gave the person. It is a credential: OpenBot stores it encrypted and never sends it back.'
+        conversationId:
+          $ref: '#/components/schemas/DestinationConversationId'
+        botId:
+          $ref: '#/components/schemas/DestinationBotId'
+    TelegramLinkCode:
+      type: object
+      description: A one-time code the person sends their Telegram bot, after OpenBot accepted their bot token.
+      required:
+        - botUsername
+        - code
+        - command
+        - expiresAt
+      properties:
+        botUsername:
+          type: string
+          minLength: 5
+          maxLength: 32
+          pattern: ^[A-Za-z0-9_]{5,32}$
+          description: The bot's Telegram username, without the leading @, as Telegram answered when the token was checked.
+        code:
+          type: string
+          description: The code. It works once, and only for the person it was made for.
+        command:
+          type: string
+          description: The message to send the Telegram bot in a direct message, the code in it.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the code stops working.
     NotificationTransport:
       type: string
       enum:
@@ -32756,7 +32858,8 @@ components:
         - slack
         - teams
         - sms
-      description: 'A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.'
+        - telegram
+      description: 'A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.'
     DeliveryKind:
       type: string
       enum:
@@ -32839,7 +32942,7 @@ components:
           enum:
             - all
         - type: array
-          maxItems: 4
+          maxItems: 5
           uniqueItems: true
           items:
             $ref: '#/components/schemas/NotificationTransport'
@@ -32933,7 +33036,7 @@ components:
       properties:
         notificationTransports:
           type: array
-          description: Push, then Slack, Microsoft Teams and text messages, as set up.
+          description: Push, then Slack, Microsoft Teams, Telegram and text messages, as set up.
           items:
             $ref: '#/components/schemas/NotificationTransportOption'
         nextCursor:
@@ -46015,7 +46118,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     TransportUnavailable:
-      description: 'This deployment hasn''t set up that way of reaching people: push notifications, the Slack and Teams pairing, or text messages. Or the organization does not exist.'
+      description: 'This deployment hasn''t set up that way of reaching people: push notifications, the Slack and Teams pairing, Telegram, or text messages. Or the organization does not exist.'
       headers:
         X-Request-Id:
           $ref: '#/components/headers/RequestId'
@@ -52451,6 +52554,13 @@ components:
           address: '+14155550123'
           optedOutAt: null
           createdAt: '2026-11-10T08:03:19.000Z'
+    TelegramLinkCodeExample:
+      summary: A code to send the person's Telegram bot.
+      value:
+        botUsername: openbot_sarah_bot
+        code: 6f2b9d4e-1a3c-4e5f-8b7a-0c9d2e1f3a4b
+        command: link 6f2b9d4e-1a3c-4e5f-8b7a-0c9d2e1f3a4b
+        expiresAt: '2026-11-14T09:15:00.000Z'
     DeliveryPageLast:
       summary: A push notification and a text message.
       value:

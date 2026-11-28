@@ -29,13 +29,13 @@ export const GetNotificationSettingsParams = zod.object({
     ),
 });
 
-export const getNotificationSettingsResponseRoutingProgressTwoMax = 4;
+export const getNotificationSettingsResponseRoutingProgressTwoMax = 5;
 
-export const getNotificationSettingsResponseRoutingDecisionTwoMax = 4;
+export const getNotificationSettingsResponseRoutingDecisionTwoMax = 5;
 
-export const getNotificationSettingsResponseRoutingQuestionTwoMax = 4;
+export const getNotificationSettingsResponseRoutingQuestionTwoMax = 5;
 
-export const getNotificationSettingsResponseRoutingAttentionTwoMax = 4;
+export const getNotificationSettingsResponseRoutingAttentionTwoMax = 5;
 
 export const GetNotificationSettingsResponse = zod
   .object({
@@ -47,9 +47,9 @@ export const GetNotificationSettingsResponse = zod
             zod
               .array(
                 zod
-                  .enum(["push", "slack", "teams", "sms"])
+                  .enum(["push", "slack", "teams", "sms", "telegram"])
                   .describe(
-                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
+                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.",
                   ),
               )
               .max(getNotificationSettingsResponseRoutingProgressTwoMax),
@@ -63,9 +63,9 @@ export const GetNotificationSettingsResponse = zod
             zod
               .array(
                 zod
-                  .enum(["push", "slack", "teams", "sms"])
+                  .enum(["push", "slack", "teams", "sms", "telegram"])
                   .describe(
-                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
+                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.",
                   ),
               )
               .max(getNotificationSettingsResponseRoutingDecisionTwoMax),
@@ -79,9 +79,9 @@ export const GetNotificationSettingsResponse = zod
             zod
               .array(
                 zod
-                  .enum(["push", "slack", "teams", "sms"])
+                  .enum(["push", "slack", "teams", "sms", "telegram"])
                   .describe(
-                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
+                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.",
                   ),
               )
               .max(getNotificationSettingsResponseRoutingQuestionTwoMax),
@@ -95,9 +95,9 @@ export const GetNotificationSettingsResponse = zod
             zod
               .array(
                 zod
-                  .enum(["push", "slack", "teams", "sms"])
+                  .enum(["push", "slack", "teams", "sms", "telegram"])
                   .describe(
-                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
+                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.",
                   ),
               )
               .max(getNotificationSettingsResponseRoutingAttentionTwoMax),
@@ -150,13 +150,13 @@ export const UpdateNotificationSettingsHeader = zod.object({
     ),
 });
 
-export const updateNotificationSettingsBodyRoutingProgressTwoMax = 4;
+export const updateNotificationSettingsBodyRoutingProgressTwoMax = 5;
 
-export const updateNotificationSettingsBodyRoutingDecisionTwoMax = 4;
+export const updateNotificationSettingsBodyRoutingDecisionTwoMax = 5;
 
-export const updateNotificationSettingsBodyRoutingQuestionTwoMax = 4;
+export const updateNotificationSettingsBodyRoutingQuestionTwoMax = 5;
 
-export const updateNotificationSettingsBodyRoutingAttentionTwoMax = 4;
+export const updateNotificationSettingsBodyRoutingAttentionTwoMax = 5;
 
 export const UpdateNotificationSettingsBody = zod.object({
   routing: zod
@@ -167,9 +167,9 @@ export const UpdateNotificationSettingsBody = zod.object({
           zod
             .array(
               zod
-                .enum(["push", "slack", "teams", "sms"])
+                .enum(["push", "slack", "teams", "sms", "telegram"])
                 .describe(
-                  "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
+                  "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.",
                 ),
             )
             .max(updateNotificationSettingsBodyRoutingProgressTwoMax),
@@ -184,9 +184,9 @@ export const UpdateNotificationSettingsBody = zod.object({
           zod
             .array(
               zod
-                .enum(["push", "slack", "teams", "sms"])
+                .enum(["push", "slack", "teams", "sms", "telegram"])
                 .describe(
-                  "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
+                  "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.",
                 ),
             )
             .max(updateNotificationSettingsBodyRoutingDecisionTwoMax),
@@ -201,9 +201,9 @@ export const UpdateNotificationSettingsBody = zod.object({
           zod
             .array(
               zod
-                .enum(["push", "slack", "teams", "sms"])
+                .enum(["push", "slack", "teams", "sms", "telegram"])
                 .describe(
-                  "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
+                  "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.",
                 ),
             )
             .max(updateNotificationSettingsBodyRoutingQuestionTwoMax),
@@ -218,9 +218,9 @@ export const UpdateNotificationSettingsBody = zod.object({
           zod
             .array(
               zod
-                .enum(["push", "slack", "teams", "sms"])
+                .enum(["push", "slack", "teams", "sms", "telegram"])
                 .describe(
-                  "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
+                  "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.",
                 ),
             )
             .max(updateNotificationSettingsBodyRoutingAttentionTwoMax),
@@ -233,13 +233,13 @@ export const UpdateNotificationSettingsBody = zod.object({
     .describe("The kinds of update to change. At least one."),
 });
 
-export const updateNotificationSettingsResponseRoutingProgressTwoMax = 4;
+export const updateNotificationSettingsResponseRoutingProgressTwoMax = 5;
 
-export const updateNotificationSettingsResponseRoutingDecisionTwoMax = 4;
+export const updateNotificationSettingsResponseRoutingDecisionTwoMax = 5;
 
-export const updateNotificationSettingsResponseRoutingQuestionTwoMax = 4;
+export const updateNotificationSettingsResponseRoutingQuestionTwoMax = 5;
 
-export const updateNotificationSettingsResponseRoutingAttentionTwoMax = 4;
+export const updateNotificationSettingsResponseRoutingAttentionTwoMax = 5;
 
 export const UpdateNotificationSettingsResponse = zod
   .object({
@@ -251,9 +251,9 @@ export const UpdateNotificationSettingsResponse = zod
             zod
               .array(
                 zod
-                  .enum(["push", "slack", "teams", "sms"])
+                  .enum(["push", "slack", "teams", "sms", "telegram"])
                   .describe(
-                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
+                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.",
                   ),
               )
               .max(updateNotificationSettingsResponseRoutingProgressTwoMax),
@@ -267,9 +267,9 @@ export const UpdateNotificationSettingsResponse = zod
             zod
               .array(
                 zod
-                  .enum(["push", "slack", "teams", "sms"])
+                  .enum(["push", "slack", "teams", "sms", "telegram"])
                   .describe(
-                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
+                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.",
                   ),
               )
               .max(updateNotificationSettingsResponseRoutingDecisionTwoMax),
@@ -283,9 +283,9 @@ export const UpdateNotificationSettingsResponse = zod
             zod
               .array(
                 zod
-                  .enum(["push", "slack", "teams", "sms"])
+                  .enum(["push", "slack", "teams", "sms", "telegram"])
                   .describe(
-                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
+                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.",
                   ),
               )
               .max(updateNotificationSettingsResponseRoutingQuestionTwoMax),
@@ -299,9 +299,9 @@ export const UpdateNotificationSettingsResponse = zod
             zod
               .array(
                 zod
-                  .enum(["push", "slack", "teams", "sms"])
+                  .enum(["push", "slack", "teams", "sms", "telegram"])
                   .describe(
-                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
+                    "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.",
                   ),
               )
               .max(updateNotificationSettingsResponseRoutingAttentionTwoMax),
@@ -423,7 +423,7 @@ export const UpdateBotNotificationSettingsResponse = zod.object({
 });
 
 /**
- * Return the ways this deployment can reach a person outside OpenBot. One appears only once it is set up where OpenBot runs: push is always there for browsers (web push, saveWebPushSubscription) and reaches phones once the OpenBot phone app's project is set up, Slack and Microsoft Teams need the OpenTag pairing, and text messages need Twilio. A person's settings keep their choice for one that is not, for when it is. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return the ways this deployment can reach a person outside OpenBot. One appears only once it is set up where OpenBot runs: push is always there for browsers (web push, saveWebPushSubscription) and reaches phones once the OpenBot phone app's project is set up, Slack and Microsoft Teams need the OpenTag pairing, Telegram needs the Telegram channel (a bot token connected under Reaching you, or the OpenTag- shaped Telegram front), and text messages need Twilio. A person's settings keep their choice for one that is not, for when it is. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the ways OpenBot can reach people here
  */
 
@@ -474,15 +474,15 @@ export const ListNotificationTransportsResponse = zod.object({
     .array(
       zod.object({
         id: zod
-          .enum(["push", "slack", "teams", "sms"])
+          .enum(["push", "slack", "teams", "sms", "telegram"])
           .describe(
-            "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.",
+            "A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.",
           ),
         title: zod.string().describe("Its name, as a person reads it."),
       }),
     )
     .describe(
-      "Push, then Slack, Microsoft Teams and text messages, as set up.",
+      "Push, then Slack, Microsoft Teams, Telegram and text messages, as set up.",
     ),
   nextCursor: zod
     .string()

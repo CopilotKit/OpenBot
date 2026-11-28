@@ -4,7 +4,7 @@
 import type { NotificationTransportOption } from "./notificationTransportOption";
 
 export interface NotificationTransportPage {
-  /** Push, then Slack, Microsoft Teams and text messages, as set up. */
+  /** Push, then Slack, Microsoft Teams, Telegram and text messages, as set up. */
   notificationTransports: NotificationTransportOption[];
   /**
    * Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.

@@ -3,13 +3,6 @@
  */
 
 /**
- * Slack, Microsoft Teams, or text messages.
+ * Slack, Microsoft Teams, Telegram, or text messages. Open so a new way of reaching someone can be named without breaking a client.
  */
-export type DestinationTransport =
-  (typeof DestinationTransport)[keyof typeof DestinationTransport];
-
-export const DestinationTransport = {
-  slack: "slack",
-  teams: "teams",
-  sms: "sms",
-} as const;
+export type DestinationTransport = string;

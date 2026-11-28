@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * This deployment hasn't set up that way of reaching people: push notifications, the Slack and Teams pairing, or text messages. Or the organization does not exist.
+ * This deployment hasn't set up that way of reaching people: push notifications, the Slack and Teams pairing, Telegram, or text messages. Or the organization does not exist.
  */
 export type TransportUnavailableResponse = Problem;

@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the places outside OpenBot a person continues their conversations with Bots: a Slack or Microsoft Teams chat, or a phone number for text messages, each tied to one conversation with one Bot. A Slack account, a Teams account or a phone number is connected in one organization at a time: connecting one that is connected in another organization answers 400 until it is disconnected there. The first connected first. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the places outside OpenBot a person continues their conversations with Bots: a Slack, Microsoft Teams or Telegram chat, or a phone number for text messages, each tied to one conversation with one Bot. A Slack account, a Teams account, a Telegram chat or a phone number is connected in one organization at a time: connecting one that is connected in another organization answers 400 until it is disconnected there. The first connected first. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List where a person's Bots reach them
  */
 
@@ -67,8 +67,10 @@ export const ListDestinationsResponse = zod.object({
         .object({
           id: zod.string().describe("The destination's id."),
           transport: zod
-            .enum(["slack", "teams", "sms"])
-            .describe("Slack, Microsoft Teams, or text messages."),
+            .string()
+            .describe(
+              "Slack, Microsoft Teams, Telegram, or text messages. Open so a new way of reaching someone can be named without breaking a client.",
+            ),
           conversationId: zod
             .string()
             .describe("The conversation it continues."),
@@ -76,7 +78,7 @@ export const ListDestinationsResponse = zod.object({
           address: zod
             .string()
             .describe(
-              "Where the Bot sends: the phone number for text messages, or the chat's own id in Slack or Teams.",
+              "Where the Bot sends: the phone number for text messages, or the chat's own id in Slack, Teams or Telegram.",
             ),
           optedOutAt: zod.iso
             .datetime({ offset: true })
@@ -89,7 +91,7 @@ export const ListDestinationsResponse = zod.object({
             .describe("When it was connected."),
         })
         .describe(
-          "Somewhere outside OpenBot a person continues one conversation with one Bot: a Slack or Microsoft Teams chat, or a phone number.",
+          "Somewhere outside OpenBot a person continues one conversation with one Bot: a Slack, Microsoft Teams or Telegram chat, or a phone number.",
         ),
     )
     .describe("The first connected first, then by id."),
@@ -318,14 +320,16 @@ export const ConfirmPhoneDestinationResponse = zod.object({
     .object({
       id: zod.string().describe("The destination's id."),
       transport: zod
-        .enum(["slack", "teams", "sms"])
-        .describe("Slack, Microsoft Teams, or text messages."),
+        .string()
+        .describe(
+          "Slack, Microsoft Teams, Telegram, or text messages. Open so a new way of reaching someone can be named without breaking a client.",
+        ),
       conversationId: zod.string().describe("The conversation it continues."),
       botId: zod.string().describe("The Bot that answers there."),
       address: zod
         .string()
         .describe(
-          "Where the Bot sends: the phone number for text messages, or the chat's own id in Slack or Teams.",
+          "Where the Bot sends: the phone number for text messages, or the chat's own id in Slack, Teams or Telegram.",
         ),
       optedOutAt: zod.iso
         .datetime({ offset: true })
@@ -338,12 +342,123 @@ export const ConfirmPhoneDestinationResponse = zod.object({
         .describe("When it was connected."),
     })
     .describe(
-      "Somewhere outside OpenBot a person continues one conversation with one Bot: a Slack or Microsoft Teams chat, or a phone number.",
+      "Somewhere outside OpenBot a person continues one conversation with one Bot: a Slack, Microsoft Teams or Telegram chat, or a phone number.",
     ),
 });
 
 /**
- * Stop continuing a conversation in that Slack or Teams chat, or by text to that phone. Only the person themselves may disconnect their destinations. A destination already disconnected is not found, which a client can read as done.
+ * Accept the person's Telegram bot token (the one BotFather gave them), check it with Telegram, store it encrypted, and make a one-time code that ties the Telegram chat they send it from to one of their conversations with one Bot. The token is never returned. Only that chat is allow-listed afterwards; messages from any other chat are refused and nothing runs. Nothing is connected until they send the command it answers to that bot in a direct message. The conversation must be the person's and the Bot one of its own. Only the person themselves may connect, and only where this deployment reaches people on Telegram.
+ * @summary Start continuing a conversation in Telegram
+ */
+
+export const connectTelegramDestinationPathPersonIdMax = 200;
+
+export const connectTelegramDestinationPathPersonIdRegExp = new RegExp("\\S");
+
+export const ConnectTelegramDestinationParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  personId: zod
+    .string()
+    .min(1)
+    .max(connectTelegramDestinationPathPersonIdMax)
+    .regex(connectTelegramDestinationPathPersonIdRegExp)
+    .describe(
+      "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
+    ),
+});
+
+export const connectTelegramDestinationHeaderIdempotencyKeyMax = 128;
+
+export const ConnectTelegramDestinationHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(connectTelegramDestinationHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const connectTelegramDestinationBodyBotTokenMin = 40;
+export const connectTelegramDestinationBodyBotTokenMax = 200;
+
+export const connectTelegramDestinationBodyBotTokenRegExp = new RegExp(
+  "^[0-9]{5,12}:[A-Za-z0-9_-]{30,}$",
+);
+export const connectTelegramDestinationBodyConversationIdMax = 200;
+
+export const connectTelegramDestinationBodyConversationIdRegExp = new RegExp(
+  "\\S",
+);
+export const connectTelegramDestinationBodyBotIdMax = 200;
+
+export const connectTelegramDestinationBodyBotIdRegExp = new RegExp("\\S");
+
+export const ConnectTelegramDestinationBody = zod.object({
+  botToken: zod
+    .string()
+    .min(connectTelegramDestinationBodyBotTokenMin)
+    .max(connectTelegramDestinationBodyBotTokenMax)
+    .regex(connectTelegramDestinationBodyBotTokenRegExp)
+    .describe(
+      "The bot token BotFather gave the person. It is a credential: OpenBot stores it encrypted and never sends it back.",
+    ),
+  conversationId: zod
+    .string()
+    .min(1)
+    .max(connectTelegramDestinationBodyConversationIdMax)
+    .regex(connectTelegramDestinationBodyConversationIdRegExp)
+    .describe("One of the person's conversations, by its id."),
+  botId: zod
+    .string()
+    .min(1)
+    .max(connectTelegramDestinationBodyBotIdMax)
+    .regex(connectTelegramDestinationBodyBotIdRegExp)
+    .describe("A Bot in that conversation, by its id."),
+});
+
+export const connectTelegramDestinationResponseBotUsernameMin = 5;
+export const connectTelegramDestinationResponseBotUsernameMax = 32;
+
+export const connectTelegramDestinationResponseBotUsernameRegExp = new RegExp(
+  "^[A-Za-z0-9_]{5,32}$",
+);
+
+export const ConnectTelegramDestinationResponse = zod
+  .object({
+    botUsername: zod
+      .string()
+      .min(connectTelegramDestinationResponseBotUsernameMin)
+      .max(connectTelegramDestinationResponseBotUsernameMax)
+      .regex(connectTelegramDestinationResponseBotUsernameRegExp)
+      .describe(
+        "The bot's Telegram username, without the leading @, as Telegram answered when the token was checked.",
+      ),
+    code: zod
+      .string()
+      .describe(
+        "The code. It works once, and only for the person it was made for.",
+      ),
+    command: zod
+      .string()
+      .describe(
+        "The message to send the Telegram bot in a direct message, the code in it.",
+      ),
+    expiresAt: zod.iso
+      .datetime({ offset: true })
+      .describe("When the code stops working."),
+  })
+  .describe(
+    "A one-time code the person sends their Telegram bot, after OpenBot accepted their bot token.",
+  );
+
+/**
+ * Stop continuing a conversation in that Slack, Teams or Telegram chat, or by text to that phone. Only the person themselves may disconnect their destinations. A destination already disconnected is not found, which a client can read as done.
  * @summary Disconnect a destination
  */
 

@@ -3,7 +3,7 @@
  */
 
 /**
- * A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, or text messages.
+ * A way OpenBot reaches a person outside it: push notifications to their phones and browsers, Slack, Microsoft Teams, Telegram, or text messages.
  */
 export type NotificationTransport =
   (typeof NotificationTransport)[keyof typeof NotificationTransport];
@@ -13,4 +13,5 @@ export const NotificationTransport = {
   slack: "slack",
   teams: "teams",
   sms: "sms",
+  telegram: "telegram",
 } as const;

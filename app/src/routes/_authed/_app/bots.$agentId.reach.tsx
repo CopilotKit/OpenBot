@@ -11,7 +11,7 @@ function ReachPage() {
   return (
     <BotSubpage
       agentId={agentId}
-      description="Continue a conversation with this Bot in Slack, Microsoft Teams, or by text message."
+      description="Continue a conversation with this Bot in Slack, Microsoft Teams, Telegram, or by text message."
       title="Reaching you"
     >
       {(agent) => <ReachingYou agentId={agent.id} />}

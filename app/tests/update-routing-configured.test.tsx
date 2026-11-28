@@ -26,6 +26,7 @@ afterEach(() => {
 function serving(available: {
   slack: boolean;
   teams: boolean;
+  telegram: boolean;
   sms: boolean;
   push: boolean;
 }) {
@@ -58,7 +59,13 @@ const disabled = (element: HTMLElement) =>
   element.hasAttribute("disabled");
 
 test("channels the deployment has not set up have no switch; one that is set up shows the choice", async () => {
-  serving({ slack: false, teams: false, sms: false, push: true });
+  serving({
+    slack: false,
+    teams: false,
+    telegram: false,
+    sms: false,
+    push: true,
+  });
   const view = draw();
   const push = await view.findByRole("switch", { name: "Progress by Push" });
   expect(checked(push)).toBe(true);
@@ -70,7 +77,7 @@ test("channels the deployment has not set up have no switch; one that is set up 
 });
 
 test("a configured channel shows the person's preference", async () => {
-  serving({ slack: true, teams: true, sms: true, push: true });
+  serving({ slack: true, teams: true, telegram: false, sms: true, push: true });
   const view = draw();
   const slack = await view.findByRole("switch", { name: "Progress by Slack" });
   expect(checked(slack)).toBe(true);
