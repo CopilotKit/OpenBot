@@ -1,7 +1,7 @@
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BackHandler, Keyboard, type KeyboardEvent, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { BackHandler, Dimensions, Keyboard, type KeyboardEvent, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import WebView from "react-native-webview";
 import type {
@@ -74,6 +74,13 @@ function Shell() {
   // The keyboard: the web view ends at its top edge, and the tab bar hides while it is up.
   useEffect(() => {
     const show = (event: KeyboardEvent) => {
+      // keyboardWillChangeFrame also fires on the way down, with the keyboard below the screen.
+      const screenHeight = Dimensions.get("screen").height;
+      if (event.endCoordinates.height <= 0 || event.endCoordinates.screenY >= screenHeight - 1) {
+        setKeyboardTop(null);
+        dispatch({ type: "keyboard", visible: false });
+        return;
+      }
       setKeyboardTop(event.endCoordinates.screenY);
       dispatch({ type: "keyboard", visible: true });
     };

@@ -163,7 +163,7 @@ jobs:
           python3 rn-shell/ci/run_flows.py --platform ios --suite mock --artifacts "$ARTIFACTS" --only "$ONLY"
 
       - name: Run the real-backend suite
-        if: always() && steps.mock.conclusion != 'cancelled'
+        if: always() && (steps.mock.conclusion == 'success' || steps.mock.conclusion == 'failure')
         timeout-minutes: 12
         env:
           OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}

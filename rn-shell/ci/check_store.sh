@@ -9,6 +9,10 @@ unset EXPO_PUBLIC_OPENBOT_TEST_BUILD
 # The names only a test build may contain (src/testHooks.ts, the debug label, the log prefix).
 HOOKS='openbot\.base_url|openbot\.test_session_cookie|openbot\.plain_session_cookie|openbot\.probe_url|openbot\.force_offline|launchArguments|debug-state|OPENBOT_DIAG'
 report() { echo "$1" | tee -a "$ART/STORE.md"; }
+# Metro keeps transformed modules across runs, and EXPO_PUBLIC_ values are inlined at transform time:
+# a store bundle made after a test bundle on the same machine reused the test build's modules (hooks
+# included) even with --reset-cache in CI mode. Every bundle here starts from no cache at all.
+clear_metro() { rm -rf "${TMPDIR:-/tmp}"/metro-* "${TMPDIR:-/tmp}"/haste-map-* node_modules/.cache .expo/metro* 2>/dev/null || true; }
 
 case "$mode" in
   config)
@@ -38,6 +42,7 @@ PY
   bundles)
     report "## Store JavaScript"
     for platform in ios android; do
+      clear_metro
       npx expo export:embed --platform "$platform" --dev false --minify true --reset-cache \
         --bundle-output "$ART/store.$platform.js" --assets-dest "$ART/store-assets-$platform" > /dev/null 2>&1
       found="$(grep -oE "$HOOKS" "$ART/store.$platform.js" | sort -u | tr '\n' ' ' || true)"
@@ -45,14 +50,16 @@ PY
       report "- $platform: $(wc -c < "$ART/store.$platform.js") bytes, none of the test hooks' names"
     done
     # The same grep finds them in a test build, so it would catch them.
+    clear_metro
     EXPO_PUBLIC_OPENBOT_TEST_BUILD=1 npx expo export:embed --platform android --dev false --minify true --reset-cache \
       --bundle-output "$ART/test.android.js" --assets-dest "$ART/test-assets" > /dev/null 2>&1
-    count="$(grep -oE "$HOOKS" "$ART/test.android.js" | sort -u | wc -l)"
+    count="$(grep -oE "$HOOKS" "$ART/test.android.js" | sort -u | wc -l || true)"
     [ "$count" -ge 5 ] || { echo "::error::the grep does not find the hooks in a test build ($count)"; exit 1; }
     report "- control: the test build's bundle has $count of the names"
     rm -f "$ART"/store.*.js "$ART"/test.android.js
     ;;
   apk)
+    clear_metro
     npx expo prebuild --platform android --no-install --clean > /dev/null 2>&1
     sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g/' android/gradle.properties
     (cd android && ./gradlew --no-daemon :app:assembleRelease -PreactNativeArchitectures=arm64-v8a > "$ART/gradle-store.log" 2>&1) \
