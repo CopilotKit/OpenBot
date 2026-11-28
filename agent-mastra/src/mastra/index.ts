@@ -89,11 +89,13 @@ if (!port.ok) throw new Error(port.reason);
 export const openbotBaseInstructions =
   "Answer the question you are asked, briefly and correctly.";
 
-const OPENBOT_CONTEXT_DESCRIPTIONS = [
+const RUN_GUIDANCE_DESCRIPTIONS = [
   "OpenBot standing role",
   "OpenBot granted tools guidance",
-  "OpenBot learned skills",
 ] as const;
+const RUN_GUIDANCE_CAPABILITIES = {
+  custom: { "openbot.runGuidance": { version: 1 } },
+} as const;
 
 type OpenBotInstructionArgs = {
   requestContext?: {
@@ -118,21 +120,21 @@ function agUiContextEntries(
 
 type ContextEntry = { description: string; value: string };
 
-function isUsableEntry(entry: unknown): entry is ContextEntry {
+function isContextEntry(entry: unknown): entry is ContextEntry {
   return (
     typeof entry === "object" &&
     entry !== null &&
     "description" in entry &&
     typeof entry.description === "string" &&
     "value" in entry &&
-    typeof entry.value === "string" &&
-    entry.value.trim().length > 0
+    typeof entry.value === "string"
   );
 }
 
 /**
  * What the model is told: the base line, OpenBot's three model-visible entries in a fixed order,
  * then whatever the calling surface sent, as `description: value`.
+ * Role and tool guidance come from this request only. Blank or duplicate entries add no guidance.
  *
  * Every other `OpenBot …` entry is for this process, not the model: the Bot id, the deployment's
  * tool list, and the signed run assertion, which is a credential. The server keeps callers out of
@@ -147,14 +149,25 @@ export function buildOpenBotInstructions({
   requestContext,
 }: OpenBotInstructionArgs = {}) {
   const contextEntries =
-    agUiContextEntries(requestContext).filter(isUsableEntry);
-  const openbotInstructions = OPENBOT_CONTEXT_DESCRIPTIONS.flatMap(
-    (description) =>
-      contextEntries
-        .filter((entry) => entry.description === description)
-        .map((entry) => entry.value.trim()),
-  );
-  const callerInstructions = contextEntries
+    agUiContextEntries(requestContext).filter(isContextEntry);
+  const guidance = RUN_GUIDANCE_DESCRIPTIONS.flatMap((description) => {
+    const matches = contextEntries.filter(
+      (entry) => entry.description === description,
+    );
+    if (matches.length > 1) {
+      console.warn(
+        `Ignoring duplicate OpenBot run guidance entry: ${description}`,
+      );
+      return [];
+    }
+    const value = matches[0]?.value.trim();
+    return value ? [value] : [];
+  });
+  const nonBlankContext = contextEntries.filter((entry) => entry.value.trim());
+  const learnedSkills = nonBlankContext
+    .filter((entry) => entry.description === "OpenBot learned skills")
+    .map((entry) => entry.value.trim());
+  const callerInstructions = nonBlankContext
     .filter((entry) => !entry.description.startsWith("OpenBot "))
     .map((entry) =>
       entry.description.trim()
@@ -162,7 +175,7 @@ export function buildOpenBotInstructions({
         : entry.value.trim(),
     );
 
-  const instructions = [...openbotInstructions, ...callerInstructions];
+  const instructions = [...guidance, ...learnedSkills, ...callerInstructions];
   if (instructions.length === 0) return openbotBaseInstructions;
   return [openbotBaseInstructions, ...instructions].join("\n\n");
 }
@@ -192,8 +205,9 @@ export function runKeyFrom(
 ): string | undefined {
   const entry = agUiContextEntries(requestContext).find(
     (candidate): candidate is ContextEntry =>
-      isUsableEntry(candidate) &&
-      candidate.description === "OpenBot model route",
+      isContextEntry(candidate) &&
+      candidate.description === "OpenBot model route" &&
+      candidate.value.trim().length > 0,
   );
   if (!entry) return undefined;
   try {
@@ -254,6 +268,12 @@ export const mastra = new Mastra({
         method: "GET",
         handler: async (context) =>
           context.json({ ok: true, harness: "mastra" }),
+      }),
+      // Native Mastra discovery uses a per-agent route outside the built-in `/api` namespace.
+      registerApiRoute(`/${encodeURIComponent(openbot.id)}/capabilities`, {
+        method: "GET",
+        requiresAuth: true,
+        handler: async (context) => context.json(RUN_GUIDANCE_CAPABILITIES),
       }),
     ],
   },

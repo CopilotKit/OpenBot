@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -17,6 +17,12 @@ import { releaseFiles } from "./support/release-files";
 // The upgrade policy is reviewed with the release it describes: it lives in the tree, is read from
 // the release commit, and is refused unless it names the version being released and the database
 // transition its migrations actually make.
+
+// The cases that read published release files package two charts with real `helm`, as
+// release-charts.test.ts does. On a fresh GitHub-hosted runner the first `helm package` calls take
+// several seconds (ubuntu-26.04 image 20261122: over five each, then a fraction of a second), which
+// the default five-second limit stopped, failing the release gate of every release.
+setDefaultTimeout(30_000);
 
 const root = join(import.meta.dir, "..");
 const cli = join(root, "scripts/release-manifest.ts");
