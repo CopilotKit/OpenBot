@@ -20,6 +20,7 @@ import {
   channelKeys,
 } from "@/lib/channels/queries";
 import { applyChannelEvent } from "@/lib/channels/use-channel-events";
+import { forgetNativeShellForTests } from "@/lib/native-shell/shell";
 import { queryClient } from "@/query-client";
 import { Route as ChannelRoute } from "@/routes/_authed/_app/channel/$channelId";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
@@ -34,6 +35,7 @@ import {
 } from "./ask-person-replay.fixture";
 import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 import { conversationOf, conversationPath } from "./conversations-api";
 import {
   ANSWER_TEXT,
@@ -44,7 +46,6 @@ import {
   lookupsReplayStart,
   lookupsStored,
 } from "./parallel-lookups.fixture";
-import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /*
  * Opening a conversation joins its thread, and the join replays the thread onto the screen. A Bot's
@@ -610,3 +611,52 @@ test("the answers a step was still waiting on reach a conversation opened part w
     LOOKUPS.map((_, index) => answerOf(index)),
   );
 }, 15_000);
+
+/*
+ * Opening a conversation puts the caret in its message box in a browser and in OpenBot Desktop. In
+ * the phone app's native shell it does not: the keyboard would come up by itself over what the
+ * person came to read.
+ */
+test("opening a conversation focuses its message box, except inside the phone app's shell", async () => {
+  const turn = [
+    ...askPersonReplayStart(channel.threadId),
+    ...askPersonReplayEnd(channel.threadId),
+  ];
+  script = async (send) => {
+    sending(send, turn);
+    send("replay_complete", { latestEventId: `event-${turn.length - 1}` });
+    send("stream_idle", { latestEventId: `event-${turn.length - 1}` });
+  };
+  history = () => NativeResponse.json({ messages: askPersonStored("asked") });
+  roster("2026-11-08T00:00:01.000Z", "Ask me which colour of apple");
+
+  const inBrowser = opened();
+  const box = await inBrowser.findByRole("textbox", { name: "Message" });
+  await waitFor(() => expect(document.activeElement).toBe(box), {
+    timeout: 4000,
+  });
+  cleanup();
+  (document.activeElement as HTMLElement | null)?.blur();
+
+  const page = window as { __OPENBOT_NATIVE_SHELL__?: unknown };
+  page.__OPENBOT_NATIVE_SHELL__ = {
+    platform: "ios",
+    version: "0.1",
+    bridge: 1,
+  };
+  forgetNativeShellForTests();
+  try {
+    const inShell = opened();
+    await inShell.findByRole("textbox", { name: "Message" });
+    await waitFor(
+      () =>
+        expect(shown(inShell.container, ASKED_TEXT)).toBeGreaterThanOrEqual(1),
+      { timeout: 4000 },
+    );
+    await sleep(300);
+    expect(document.activeElement).toBe(document.body);
+  } finally {
+    delete page.__OPENBOT_NATIVE_SHELL__;
+    forgetNativeShellForTests();
+  }
+}, 20_000);

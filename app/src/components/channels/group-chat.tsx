@@ -33,6 +33,7 @@ import {
   markdownPlugins,
   replyRemarkPlugins,
 } from "@/lib/markdown";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { newId } from "@/lib/new-id";
 import { DELETED_USER, isDeletedUser } from "@/lib/people/deleted-user";
 import { cn } from "@/lib/utils";
@@ -266,7 +267,8 @@ export function GroupChat({ channelId }: { channelId: string }) {
           compact
           disabled={bots.length === 0}
           pending={send.isPending || answer.isPending || working}
-          autoFocus
+          // Not in the phone app, where the keyboard would come up over the conversation by itself.
+          autoFocus={nativeShell() === null}
           draftKey={`conversation:${channelId}`}
           onSubmit={async (draft) => {
             if (!draft.text) return;

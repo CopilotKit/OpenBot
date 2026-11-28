@@ -35,12 +35,12 @@
  *        With auto=1 the page follows its link by itself after 800 ms. 400 without a valid C.
  *   GET  /api/auth/shell/enter?ticket=T&verifier=V&to=/path
  *        Loaded by the web view, which sends the header `OpenBot-Shell: ios` (or `android`). With that
- *        header, a Sec-Fetch-Site that is absent, `none` or `same-origin`, and a known, unused,
- *        unexpired T whose C is base64url(sha256(V)): sets the cookie better-auth.session_token=mock,
- *        marks T used and answers 303 to `to` (an own path, else /). Otherwise 303 to
- *        /sign?native-sign-in=failed, setting nothing; a refusal for the header or Sec-Fetch-Site is
- *        made before T is looked at, so it leaves T unused. MOCK_ENTER_NO_HEADER_CHECK=1 skips both
- *        header checks, as the server did before it asked for them.
+ *        header, a Sec-Fetch-Site that is absent or `none`, a Sec-Fetch-Mode that is absent or
+ *        `navigate`, and a known, unused, unexpired T whose C is base64url(sha256(V)): sets the
+ *        cookie better-auth.session_token=mock, marks T used and answers 303 to `to` (an own path,
+ *        else /). Otherwise 303 to /sign?native-sign-in=failed, setting nothing; a refusal for any of
+ *        those headers is made before T is looked at, so it leaves T unused. MOCK_ENTER_NO_HEADER_CHECK=1 skips every
+ *        header check, as the server did before it asked for them.
  *   POST /api/auth/sign-out
  *        Ends the mock's session: its cookie stops counting until the next /enter.
  *
@@ -710,8 +710,11 @@ function enter(url: URL, request: Request): Response {
     // never a request another site started.
     const shell = request.headers.get(SHELL_HEADER)?.toLowerCase() ?? "";
     const site = request.headers.get("sec-fetch-site")?.toLowerCase();
+    const mode = request.headers.get("sec-fetch-mode")?.toLowerCase();
     if (!SHELL_PLATFORMS.has(shell)) return failed;
-    if (site === "cross-site" || site === "same-site") return failed;
+    // Only a load the web view started itself: no site, or `none`; a top-level navigation.
+    if (site !== undefined && site !== "none") return failed;
+    if (mode !== undefined && mode !== "navigate") return failed;
   }
   const ticket = tickets.get(url.searchParams.get("ticket") ?? "");
   const verifier = url.searchParams.get("verifier") ?? "";

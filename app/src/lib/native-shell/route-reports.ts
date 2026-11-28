@@ -2,7 +2,7 @@ import { useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { postToShell, type ShellMessage, tabForPath } from "./bridge";
 import { nativeShell } from "./shell";
-import { shellTabState } from "./use-tab-navigation";
+import { shellTabState, whenScrollRestored } from "./use-tab-navigation";
 
 /**
  * WHEN THE SHELL HEARS `ready`: once per page load, when the first page has drawn something a person
@@ -166,15 +166,22 @@ export function useNativeShellRouteReports(): void {
   useEffect(() => {
     if (!inShell || settled === null) return;
     const path = settled.slice(1);
-    // The tab whose stack the page is in, and whether Back can go anywhere in it. The sign-in page
-    // is in no tab: the shell shows its own sign-in over it.
-    const tabs = path === "/sign" ? null : shellTabState();
-    tellShell({
-      type: "route",
-      path,
-      tab: tabs ? tabs.tab : tabForPath(path),
-      signedIn: settled.startsWith("1"),
-      canGoBack: tabs?.canGoBack ?? false,
+    /*
+     * The tab whose stack the page is in, whether Back can go anywhere in it and how deep it is. The
+     * sign-in page is in no tab: the shell shows its own sign-in over it. A list returned to by Back
+     * is reported once its scroll position is back, so the app drops its snapshot with no jump.
+     */
+    return whenScrollRestored(() => {
+      const tabs = path === "/sign" ? null : shellTabState();
+      tellShell({
+        type: "route",
+        path,
+        tab: tabs ? tabs.tab : tabForPath(path),
+        signedIn: settled.startsWith("1"),
+        canGoBack: tabs?.canGoBack ?? false,
+        depth: tabs?.depth ?? 1,
+        scrollRestored: true,
+      });
     });
   }, [inShell, settled]);
 }
