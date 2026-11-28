@@ -369,15 +369,11 @@ describe("the Conversations page", () => {
     serve([]);
     const { view } = renderApp("/conversations");
     await view.findByText("No conversations yet");
-    // The page's own, and the empty state's.
-    expect(newConversationLinks(view.container)).toEqual([
-      "/channel/new",
-      "/channel/new",
-    ]);
-    // Nothing to search yet.
+    expect(newConversationLinks(view.container)).toEqual(["/channel/new"]);
+    expect(view.getByPlaceholderText("Search…")).toBeTruthy();
     expect(
-      view.queryByRole("textbox", { name: "Search conversations" }),
-    ).toBeNull();
+      view.container.querySelector('[data-slot="native-tab-panel"]'),
+    ).not.toBeNull();
   });
 
   test("a failure says so and offers Try again", async () => {

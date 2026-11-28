@@ -8,7 +8,8 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
 import { NewBotSheet } from "@/components/agents/new-bot-sheet";
-import { ShellAccountMenu } from "@/components/layout/native-shell-account";
+import { BotsPanel } from "@/components/app-sidebar/bots-panel";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { BotRoster } from "@/components/bots/bot-roster";
 import {
   PageRows,
@@ -36,6 +37,7 @@ import {
 } from "@/lib/organizations/queries";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
+import { channelListQueryOptions } from "@/lib/channels/queries";
 import { loadFirstScreen } from "@/lib/route-data";
 
 /** Just longer than the sheet's 200ms exit, so it has finished sliding away before the page changes. */
@@ -47,6 +49,13 @@ export const Route = createFileRoute("/_authed/_app/bots/")({
   loader: async ({ context }) => {
     // A router built without the app's context, as some tests build, has nothing to warm.
     if (!context.queryClient) return;
+    if (nativeShell()) {
+      return loadFirstScreen(context.queryClient, [
+        agentListQueryOptions(),
+        botAttentionQueryOptions(),
+        channelListQueryOptions(),
+      ]);
+    }
     /*
      * The description says whether anybody else is in the organization, which the page asks only in
      * the team edition (`useOrganizationAudience`); `ensureQueryData` ignores that condition, so the
@@ -72,37 +81,9 @@ export const Route = createFileRoute("/_authed/_app/bots/")({
 function BotsPage() {
   const { new: creating } = Route.useSearch();
   const navigate = Route.useNavigate();
-  const personal =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
-  // The only member of their organization has nobody to share a Bot with them.
-  const alone = useOrganizationAudience().alone === true;
   return (
-    <PageShell
-      action={
-        <div className="flex items-center gap-2">
-          <Button
-            render={(props) => (
-              <Link {...props} search={{ new: true }} to="/bots" />
-            )}
-            size="sm"
-            variant="ghost"
-          >
-            <IconPlus />
-            New Bot
-          </Button>
-          {/* Only inside the phone app's native shell, which has no sidebar. */}
-          <ShellAccountMenu />
-        </div>
-      }
-      description={
-        personal || alone
-          ? "Your Bots for everyday work."
-          : "Manage your Bots and access those shared with you."
-      }
-      title="Bots"
-    >
-      <BotRoster />
-      <WhatYourBotsLearn />
+    <>
+      {nativeShell() ? <BotsPanel standalone /> : <BotsDirectory />}
       <NewBotSheet
         onClose={() => void navigate({ search: {} })}
         onCreated={(agentId) => {
@@ -124,6 +105,38 @@ function BotsPage() {
         }}
         open={creating === true}
       />
+    </>
+  );
+}
+
+function BotsDirectory() {
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  // The only member of their organization has nobody to share a Bot with them.
+  const alone = useOrganizationAudience().alone === true;
+  return (
+    <PageShell
+      action={
+        <Button
+          render={(props) => (
+            <Link {...props} search={{ new: true }} to="/bots" />
+          )}
+          size="sm"
+          variant="ghost"
+        >
+          <IconPlus />
+          New Bot
+        </Button>
+      }
+      description={
+        personal || alone
+          ? "Your Bots for everyday work."
+          : "Manage your Bots and access those shared with you."
+      }
+      title="Bots"
+    >
+      <BotRoster />
+      <WhatYourBotsLearn />
     </PageShell>
   );
 }

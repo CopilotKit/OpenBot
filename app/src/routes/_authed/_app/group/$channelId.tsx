@@ -4,7 +4,7 @@ import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { GroupChat } from "@/components/channels/group-chat";
 import { GroupPeopleButton } from "@/components/channels/group-people";
-import { SidebarToggle } from "@/components/layout/sidebar-toggle";
+import { ConversationNavigation } from "@/components/layout/conversation-navigation";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
 import { channelQueryOptions } from "@/lib/channels/queries";
 import { loadFirstScreen } from "@/lib/route-data";
@@ -31,7 +31,7 @@ function RouteComponent() {
         className="sticky top-0 flex min-h-12 flex-row items-center gap-1.5 border-b border-border px-3 py-2"
         data-slot="conversation-header"
       >
-        <SidebarToggle />
+        <ConversationNavigation />
         <ChannelAvatar
           participantIds={channel.data?.agentIds ?? []}
           size={22}

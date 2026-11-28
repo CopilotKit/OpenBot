@@ -1,6 +1,11 @@
-import { useRouterState } from "@tanstack/react-router";
+import { useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect } from "react";
 import { postToShell, tabForPath } from "./bridge";
+import {
+  trackConversationParents,
+  isConversationPath,
+  conversationParent,
+} from "./conversation-navigation";
 import { nativeShell } from "./shell";
 
 /** `ready` goes once per page load, not once per mount (StrictMode mounts twice in development). */
@@ -19,6 +24,7 @@ export function forgetReadyForTests(): void {
  * Mounted once, at the root, so pages outside the gate (`/sign`) are told too.
  */
 export function useNativeShellRouteReports(): void {
+  const router = useRouter();
   const inShell = nativeShell() !== null;
   const settled = useRouterState({
     select: (state) =>
@@ -26,6 +32,10 @@ export function useNativeShellRouteReports(): void {
         ? `${state.matches.some((match) => match.routeId === "/_authed") ? "1" : "0"}${state.resolvedLocation.pathname}`
         : null,
   });
+
+  useLayoutEffect(() => {
+    if (inShell) return trackConversationParents(router.history);
+  }, [inShell, router]);
 
   // A layout effect, so `ready` goes before anything a page says from its own effects (`signed-out`).
   useLayoutEffect(() => {
@@ -40,8 +50,10 @@ export function useNativeShellRouteReports(): void {
     postToShell({
       type: "route",
       path,
-      tab: tabForPath(path),
+      tab: isConversationPath(path)
+        ? conversationParent(router.history, router.state.location).tab
+        : tabForPath(path),
       signedIn: settled.startsWith("1"),
     });
-  }, [inShell, settled]);
+  }, [inShell, settled, router]);
 }
