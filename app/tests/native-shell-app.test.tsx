@@ -384,19 +384,12 @@ describe("the Conversations page", () => {
     expect(view.queryByRole("alert")).toBeNull();
   });
 
-  test("with none, says how one arrives and offers New conversation", async () => {
+  test("with none, says how one arrives; New conversation is in the title's row", async () => {
     serve([]);
     const { view } = renderApp("/conversations");
     await view.findByText("No conversations yet");
-    // The page's own, and the empty state's.
-    expect(newConversationLinks(view.container)).toEqual([
-      "/channel/new",
-      "/channel/new",
-    ]);
-    // Nothing to search yet.
-    expect(
-      view.queryByRole("textbox", { name: "Search conversations" }),
-    ).toBeNull();
+    // The panel's own, as on Desktop.
+    expect(newConversationLinks(view.container)).toEqual(["/channel/new"]);
   });
 
   test("a failure says so and offers Try again", async () => {
@@ -405,6 +398,19 @@ describe("the Conversations page", () => {
     const alert = await view.findByRole("alert");
     expect(alert.textContent).toContain("Couldn't load your conversations.");
     expect(view.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  test("it is the sidebar's Conversations panel, with the account in its title's row", async () => {
+    serve([channel("c-1", "Quarterly forecast")]);
+    const { view } = renderApp("/conversations");
+    await view.findByText("Quarterly forecast");
+    const panel = view.container.querySelector('[data-slot="section-panel"]');
+    expect(panel).not.toBeNull();
+    const header = panel?.querySelector('[data-slot="section-panel-header"]');
+    expect(header?.textContent).toContain("Conversations");
+    expect(
+      within(header as HTMLElement).getByRole("button", { name: "Account" }),
+    ).toBeTruthy();
   });
 });
 

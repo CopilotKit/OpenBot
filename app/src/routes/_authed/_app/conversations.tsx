@@ -15,6 +15,7 @@ import {
   useDebounced,
 } from "@/components/app-sidebar/conversations-panel";
 import { ShellAccountMenu } from "@/components/layout/native-shell-account";
+import { ShellChats } from "@/components/layout/native-shell-panels";
 import { PageEmpty, PageRows, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,8 +35,16 @@ import { useMessageListEmphasis } from "@/lib/settings/message-list";
 import { delegatingConversationsQueryOptions } from "@/lib/tasks/queries";
 
 export const Route = createFileRoute("/_authed/_app/conversations")({
-  component: ConversationsPage,
+  component: ConversationsRoute,
 });
+
+/**
+ * In the phone app's native shell, the Chats tab, which is the sidebar's Conversations panel itself
+ * (`ShellChats`); in a browser, the page below.
+ */
+function ConversationsRoute() {
+  return nativeShell() ? <ShellChats /> : <ConversationsPage />;
+}
 
 /** Above this many rows a re-sort is not animated, as in the sidebar. */
 const MAX_ANIMATED_ROWS = 60;
