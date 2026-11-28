@@ -30,13 +30,19 @@ concurrency:
 
 jobs:
   emulator:
-    name: Build and test on the Android emulator
+    name: Build and test on the Android emulator (shard ${{ matrix.shard }})
     if: github.repository == 'CopilotKit/OpenBot'
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     permissions:
       contents: read
     env:
+      SHARD: ${{ matrix.shard }}
+      SHARD_LABEL: " (shard ${{ matrix.shard }})"
       API_LEVEL: "35"
       ARTIFACTS: ${{ github.workspace }}/artifacts
       PRIVATE_ARTIFACTS: ${{ github.workspace }}/private-artifacts
@@ -89,7 +95,22 @@ jobs:
       - name: Build the web app and start the servers in the background
         run: nohup rn-shell/ci/start_servers.sh "$ARTIFACTS" > /dev/null 2>&1 &
 
+      - name: Key the APK on its sources from git's index
+        id: apk-key
+        run: |
+          sum="$(git ls-files -s rn-shell/src rn-shell/modules rn-shell/plugins rn-shell/patches rn-shell/assets \
+            rn-shell/app.config.ts rn-shell/index.ts rn-shell/package.json rn-shell/package-lock.json | sha256sum | cut -c1-40)"
+          echo "key=rn-shell-android-apk-$sum" >> "$GITHUB_OUTPUT"
+
+      - name: Look for the built APK in the cache
+        id: apk-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rn-shell/build/apk
+          key: ${{ steps.apk-key.outputs.key }}
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.apk-cache.outputs.cache-hit != 'true'
         with:
           node-version: "22"
           cache: npm
@@ -101,6 +122,7 @@ jobs:
           java-version: "17"
 
       - name: Restore Gradle
+        if: steps.apk-cache.outputs.cache-hit != 'true'
         id: gradle-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -111,6 +133,7 @@ jobs:
           restore-keys: rn-shell-gradle-
 
       - name: Install, check and prebuild the test build
+        if: steps.apk-cache.outputs.cache-hit != 'true'
         timeout-minutes: 6
         working-directory: rn-shell
         env:
@@ -125,6 +148,7 @@ jobs:
           printf '\norg.gradle.caching=true\n' >> android/gradle.properties
 
       - name: Build the release APK with the test hooks (x86_64)
+        if: steps.apk-cache.outputs.cache-hit != 'true'
         timeout-minutes: 20
         working-directory: rn-shell/android
         env:
@@ -134,11 +158,14 @@ jobs:
           ./gradlew --no-daemon :app:assembleRelease -PreactNativeArchitectures=x86_64 2>&1 \
             | tee "$ARTIFACTS/gradle.log" | grep -E "BUILD|error:|^e: |FAILURE" || true
           test -f app/build/outputs/apk/release/app-release.apk || { tail -n 120 "$ARTIFACTS/gradle.log"; exit 1; }
-          ls -la app/build/outputs/apk/release/
+          mkdir -p ../build/apk
+          cp app/build/outputs/apk/release/app-release.apk ../build/apk/
+          (./gradlew --stop > /dev/null 2>&1) || true
+          pkill -f KotlinCompileDaemon || true
 
       # Saved even when a later step fails (actions/cache saves only after a successful job).
       - name: Save Gradle
-        if: always() && steps.gradle-cache.outputs.cache-hit != 'true'
+        if: always() && steps.apk-cache.outputs.cache-hit != 'true' && steps.gradle-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -146,11 +173,12 @@ jobs:
             ~/.gradle/wrapper
           key: ${{ steps.gradle-cache.outputs.cache-primary-key }}
 
-      - name: Free the build's memory for the emulator
-        run: |
-          (cd rn-shell/android && ./gradlew --stop > /dev/null 2>&1) || true
-          pkill -f KotlinCompileDaemon || true
-          free -m
+      - name: Save the built APK
+        if: steps.apk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rn-shell/build/apk
+          key: ${{ steps.apk-key.outputs.key }}
 
       - name: Install Maestro
         timeout-minutes: 4
@@ -168,20 +196,20 @@ jobs:
           GPU_MODE=guest rn-shell/ci/emulator.sh prepare
           rn-shell/ci/emulator.sh describe
           rn-shell/ci/wait_for.sh "$ARTIFACTS/servers.ready" "$ARTIFACTS/servers.failed" 420 "$ARTIFACTS/servers.log"
-          adb install -r -g rn-shell/android/app/build/outputs/apk/release/app-release.apk
+          adb install -r -g rn-shell/build/apk/app-release.apk
           adb shell pm list packages | grep ai.openbot
 
-      - name: Run the mock suite
+      - name: Run the mock suite (this shard)
         id: mock
-        timeout-minutes: 25
+        timeout-minutes: 15
         run: |
           echo "$(date +%s) mock-suite" >> "$RUNNER_TEMP/timing"
           adb logcat -c || true
           nohup adb logcat -v time ReactNativeJS:V ReactNative:W chromium:W '*:S' > "$ARTIFACTS/logcat.txt" 2>&1 &
-          python3 rn-shell/ci/run_flows.py --platform android --suite mock --artifacts "$ARTIFACTS" --only "$ONLY"
+          python3 rn-shell/ci/run_flows.py --platform android --suite mock --shard "$SHARD" --artifacts "$ARTIFACTS" --only "$ONLY"
 
       - name: Run the real-backend suite
-        if: always() && (steps.mock.conclusion == 'success' || steps.mock.conclusion == 'failure')
+        if: always() && matrix.shard == 2 && (steps.mock.conclusion == 'success' || steps.mock.conclusion == 'failure')
         timeout-minutes: 12
         env:
           OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
@@ -190,7 +218,7 @@ jobs:
           python3 rn-shell/ci/run_flows.py --platform android --suite real --artifacts "$ARTIFACTS" --private "$PRIVATE_ARTIFACTS" --only "$ONLY"
 
       - name: Keep the built web app for the next run
-        if: always() && steps.web-cache.outputs.cache-hit != 'true' && hashFiles('app/dist/index.html') != ''
+        if: always() && matrix.shard == 1 && steps.web-cache.outputs.cache-hit != 'true' && hashFiles('app/dist/index.html') != ''
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: app/dist
@@ -212,7 +240,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: rn-shell-android-${{ github.run_id }}
+          name: rn-shell-android-${{ matrix.shard }}-${{ github.run_id }}
           path: artifacts/
           retention-days: 14
           if-no-files-found: warn

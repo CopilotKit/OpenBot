@@ -1,7 +1,16 @@
 # A relaunch keeps the session (the web view's cookie store): straight to the tabs, no first screen.
 appId: ai.openbot.rnshell
+# Android: read the web view's content through DevTools (test builds enable web view debugging);
+# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
+androidWebViewHierarchy: devtools
 ---
+- runFlow: ../subflows/launch-signed-in.yaml
+# Home first, and a moment: WebKit writes cookies to disk lazily.
 - pressKey: Home
+- extendedWaitUntil:
+    visible: "a text that never appears, to wait 3 s"
+    timeout: 3000
+    optional: true
 - launchApp:
     stopApp: true
     arguments:

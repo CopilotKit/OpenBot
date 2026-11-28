@@ -1,5 +1,8 @@
 # Dark mode: the first screen and the lock screen.
 appId: ai.openbot.rnshell
+# Android: read the web view's content through DevTools (test builds enable web view debugging);
+# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
+androidWebViewHierarchy: devtools
 ---
 - launchApp:
     clearState: true

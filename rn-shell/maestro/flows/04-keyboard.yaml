@@ -2,12 +2,11 @@
 # up and comes back after, and a drag down on a page that does not scroll (Home) puts it away. In a
 # conversation, sending keeps it up.
 appId: ai.openbot.rnshell
+# Android: read the web view's content through DevTools (test builds enable web view debugging);
+# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
+androidWebViewHierarchy: devtools
 ---
-- tapOn:
-    id: "tab-home"
-- extendedWaitUntil:
-    visible: "Start a conversation"
-    timeout: 20000
+- runFlow: ../subflows/launch-signed-in.yaml
 - tapOn: "(Message|Ask anything)"
 - extendedWaitUntil:
     visible:

@@ -1,8 +1,10 @@
 # Sign out is the web app's own (Account menu); the bridge's signed-out returns to the first screen.
 appId: ai.openbot.rnshell
+# Android: read the web view's content through DevTools (test builds enable web view debugging);
+# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
+androidWebViewHierarchy: devtools
 ---
-- tapOn:
-    id: "tab-home"
+- runFlow: ../subflows/launch-signed-in.yaml
 - extendedWaitUntil:
     visible: "Account"
     timeout: 20000

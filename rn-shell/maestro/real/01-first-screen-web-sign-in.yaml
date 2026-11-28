@@ -1,0 +1,44 @@
+# REAL BACKEND (https://my.open.bot, the default of every build). The first screen, then Sign in. The
+# hosted service has no sign-in hand-off (GET /api/auth/shell/config answers 404), so the app opens the
+# web app's own sign-in in the web view, with a native Cancel bar: "Sign in to OpenBot Cloud" and
+# "Sign in or create an account", which leads to the identity provider's page (Google, GitHub,
+# Microsoft, email). The flow stops there: no credentials, no Google sign-in.
+appId: ai.openbot.rnshell
+# Android: read the web view's content through DevTools (test builds enable web view debugging);
+# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
+androidWebViewHierarchy: devtools
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.reset: "1"
+      openbot.test_name: "real-first-screen"
+- extendedWaitUntil:
+    visible:
+      id: "sign-in-button"
+    timeout: 30000
+- takeScreenshot: first-screen
+- tapOn:
+    id: "sign-in-button"
+- extendedWaitUntil:
+    visible:
+      id: "web-sign-in-cancel"
+    timeout: 30000
+- assertVisible:
+    id: "debug-state"
+    text: ".*signIn=webFallback.*"
+- extendedWaitUntil:
+    visible: "Sign in to OpenBot Cloud"
+    timeout: 45000
+- takeScreenshot: web-sign-in
+- tapOn: "Sign in or create an account"
+- extendedWaitUntil:
+    visible: "(?i).*(google|github|microsoft).*"
+    timeout: 45000
+- takeScreenshot: identity-provider
+- tapOn:
+    id: "web-sign-in-cancel"
+- extendedWaitUntil:
+    visible:
+      id: "sign-in-button"
+    timeout: 15000

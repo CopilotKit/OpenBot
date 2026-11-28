@@ -3,6 +3,9 @@
 # page then follows its own link (openbot.handoff_auto). Android: a Chrome Custom Tab, which follows it
 # too (flow 18 taps the link by hand).
 appId: ai.openbot.rnshell
+# Android: read the web view's content through DevTools (test builds enable web view debugging);
+# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
+androidWebViewHierarchy: devtools
 ---
 - tapOn:
     id: "sign-in-button"

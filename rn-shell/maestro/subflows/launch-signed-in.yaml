@@ -1,0 +1,16 @@
+# A known starting state for flows that need a signed-in app: app data cleared, then signed in with
+# the mock's session cookie (a test build's hook), straight to Home. The hand-off itself is tested on
+# its own (flow 02), so its flakiness never fails the flows after it.
+appId: ai.openbot.rnshell
+androidWebViewHierarchy: devtools
+---
+- launchApp:
+    clearState: true
+    arguments:
+      openbot.base_url: "${BASE_A}"
+      openbot.reset: "1"
+      openbot.plain_session_cookie: "mock"
+- runFlow: wait-signed-in.yaml
+- extendedWaitUntil:
+    visible: "Start a conversation"
+    timeout: 20000

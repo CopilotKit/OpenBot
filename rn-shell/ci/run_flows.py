@@ -38,36 +38,42 @@ CLOUDFLARE = re.compile(r"Verify you are human|Performing security verification|
 
 # name, flow file, platforms, before-hook, timeout seconds
 MOCK = [
-    ("first-screen", "flows/01-first-screen.yaml", "both", None, 150),
-    ("handoff-sign-in", "flows/02-handoff-sign-in.yaml", "both", None, 240),
-    ("tabs", "flows/03-tabs.yaml", "both", None, 180),
-    ("keyboard", "flows/04-keyboard.yaml", "both", None, 240),
-    ("relaunch-signed-in", "flows/05-relaunch-signed-in.yaml", "both", None, 150),
-    # The flows signed in with the mock's cookie run before sign-out, which ends the mock's session
-    # (as a server does) until the next hand-off.
-    ("skeleton", "flows/08-skeleton.yaml", "both", None, 150),
-    ("lock-recovers", "flows/10-lock-recovers.yaml", "both", None, 150),
+    # Shard 1: the hand-off first and alone (no retries: its flakiness is measured), then the flows
+    # that start signed in with the mock's cookie; sign-out last (it ends the mock's session, as a
+    # server does, until the next hand-off).
+    ("handoff-sign-in", "flows/02-handoff-sign-in.yaml", "both", None, 120),
+    ("first-screen", "flows/01-first-screen.yaml", "both", None, 120),
+    ("tabs", "flows/03-tabs.yaml", "both", None, 120),
+    ("keyboard", "flows/04-keyboard.yaml", "both", None, 120),
+    ("relaunch-signed-in", "flows/05-relaunch-signed-in.yaml", "both", None, 120),
+    ("skeleton", "flows/08-skeleton.yaml", "both", None, 120),
+    ("web-fallback", "flows/07-web-fallback.yaml", "both", None, 120),
+    ("sign-out", "flows/06-sign-out.yaml", "both", None, 120),
+    ("foreign-callback", "flows/18-foreign-callback.yaml", "android", None, 120),
+    # Shard 2.
+    ("lock-recovers", "flows/10-lock-recovers.yaml", "both", None, 120),
     ("lock-5xx", "flows/11-lock-5xx.yaml", "both", None, 120),
-    ("lock-silent", "flows/12-lock-silent.yaml", "both", None, 150),
-    ("process-death-before", "flows/15-process-death-a.yaml", "both", None, 150),
-    ("process-death-after", "flows/16-process-death-b.yaml", "both", "kill-web-process", 150),
-    ("sign-out", "flows/06-sign-out.yaml", "both", None, 150),
-    ("web-fallback", "flows/07-web-fallback.yaml", "both", None, 150),
+    ("lock-silent", "flows/12-lock-silent.yaml", "both", None, 120),
+    ("process-death-before", "flows/15-process-death-a.yaml", "both", None, 120),
+    ("process-death-after", "flows/16-process-death-b.yaml", "both", "kill-web-process", 120),
     ("lock-offline", "flows/09-lock-offline.yaml", "both", None, 120),
-    ("stale-session", "flows/13-stale-session.yaml", "both", None, 150),
-    ("header-probe", "flows/14-header-probe.yaml", "both", None, 150),
+    ("stale-session", "flows/13-stale-session.yaml", "both", None, 120),
+    ("header-probe", "flows/14-header-probe.yaml", "both", None, 120),
     ("dark", "flows/17-dark.yaml", "both", None, 120),
-    ("foreign-callback", "flows/18-foreign-callback.yaml", "android", None, 180),
 ]
 REAL = [
-    ("real-first-screen-sign-in", "real/01-first-screen-sign-in.yaml", "both", None, 180),
+    ("real-first-screen-web-sign-in", "real/01-first-screen-web-sign-in.yaml", "both", None, 150),
     ("real-lock-unreachable", "real/02-lock-unreachable.yaml", "both", None, 120),
-    ("real-signed-in-journey", "real/03-signed-in.yaml", "both", "launch-with-session", 240),
+    ("real-signed-in-journey", "real/03-signed-in.yaml", "both", "launch-with-session", 150),
 ]
 DEMO = [
     ("demo-tour", "demo/tour.yaml", "both", None, 300),
 ]
 PRIVATE = {"real-signed-in-journey"}
+# The mock suite in two shards that can run on two machines (each with its own mock stacks): the
+# hand-off journey, which ends with sign-out, and the flows signed in with the mock's cookie.
+SHARD_1 = {"handoff-sign-in", "first-screen", "tabs", "keyboard", "relaunch-signed-in", "skeleton", "web-fallback",
+           "sign-out", "foreign-callback"}
 
 
 def sh(cmd, **kwargs):
@@ -139,13 +145,15 @@ def collect(flow_dir, shots_dir, name):
     return shots
 
 
-def run(platform, suite, artifacts, private, only):
+def run(platform, suite, artifacts, private, only, shard=0):
     plan = {"mock": MOCK, "real": REAL, "demo": DEMO}[suite]
     results = []
     for name, file, platforms, before, timeout in plan:
         if only and name not in only:
             continue
         if platforms != "both" and platforms != platform:
+            continue
+        if suite == "mock" and shard and ((name in SHARD_1) != (shard == 1)):
             continue
         base = private if name in PRIVATE and private else artifacts
         flow_dir = base / "flows" / name
@@ -195,7 +203,7 @@ def run(platform, suite, artifacts, private, only):
 
 
 def summarize(platform, suite, artifacts, results):
-    lines = [f"## RN shell, {platform}, {suite} suite", "", "| Flow | Result | Seconds | Note |", "| --- | --- | --- | --- |"]
+    lines = [f"## RN shell, {platform}, {suite} suite{os.environ.get('SHARD_LABEL', '')}", "", "| Flow | Result | Seconds | Note |", "| --- | --- | --- | --- |"]
     for item in results:
         note = item["reason"].replace("|", "/") if item["reason"] else ""
         where = " (screenshots private)" if item.get("private") else ""
@@ -216,6 +224,7 @@ def main():
     parser.add_argument("--artifacts", required=True)
     parser.add_argument("--private", default="")
     parser.add_argument("--only", default="")
+    parser.add_argument("--shard", type=int, default=0, help="mock suite: 1 or 2 (0 runs both)")
     options = parser.parse_args()
     artifacts = Path(options.artifacts)
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -223,7 +232,7 @@ def main():
     if private:
         private.mkdir(parents=True, exist_ok=True)
     only = {name for name in options.only.split(",") if name}
-    results = run(options.platform, options.suite, artifacts, private, only)
+    results = run(options.platform, options.suite, artifacts, private, only, options.shard)
     counts = summarize(options.platform, options.suite, artifacts, results)
     sys.exit(1 if counts["failed"] else 0)
 

@@ -2,6 +2,9 @@
 # well-formed ticket is dropped by the trampoline: the Custom Tab stays, the sign-in stays pending,
 # and the real link still signs in.
 appId: ai.openbot.rnshell
+# Android: read the web view's content through DevTools (test builds enable web view debugging);
+# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
+androidWebViewHierarchy: devtools
 ---
 - launchApp:
     clearState: true

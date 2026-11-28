@@ -1,5 +1,8 @@
 # No network: the native lock screen, with Try again and the support address.
 appId: ai.openbot.rnshell
+# Android: read the web view's content through DevTools (test builds enable web view debugging);
+# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
+androidWebViewHierarchy: devtools
 ---
 - launchApp:
     clearState: true
