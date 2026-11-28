@@ -54,11 +54,15 @@ export const Route = createFileRoute("/sign")({
     search: Record<string, unknown>,
   ): {
     flow_id?: string;
-    shell_handoff?: string;
+    shell_challenge?: string;
+    shell_platform?: string;
+    shell_callback?: string;
     "native-sign-in"?: string;
   } => ({
     ...searchTextEntry("flow_id", search.flow_id),
-    ...searchTextEntry("shell_handoff", search.shell_handoff),
+    ...searchTextEntry("shell_challenge", search.shell_challenge),
+    ...searchTextEntry("shell_platform", search.shell_platform),
+    ...searchTextEntry("shell_callback", search.shell_callback),
     ...searchTextEntry("native-sign-in", search["native-sign-in"]),
   }),
   beforeLoad: async ({ context, search }) => {
@@ -81,7 +85,7 @@ export const Route = createFileRoute("/sign")({
        * the verifier was ever made. `reloadDocument` makes this a document navigation, which is
        * the only kind that leaves the app and therefore the only kind that arrives.
        */
-      const resume = signInResumePath(search.flow_id, search.shell_handoff);
+      const resume = signInResumePath(search.flow_id, search);
       throw resume
         ? redirect({ href: resume, reloadDocument: true })
         : redirect({ to: "/" });
@@ -112,7 +116,8 @@ function SignRoute() {
 }
 
 function SignScreen() {
-  const { flow_id: flowId, shell_handoff: shellHandoff } = Route.useSearch();
+  const search = Route.useSearch();
+  const flowId = search.flow_id;
   // Which provider is being opened, rather than whether one is: with three buttons, a single
   // boolean would put "Opening…" on all of them.
   const [opening, setOpening] = useState<AuthProviderId | "sso" | null>(null);
@@ -138,7 +143,7 @@ function SignScreen() {
       await signInWithEmailDomain(
         email,
         undefined,
-        resumeUrlFor(window.location.origin, flowId, shellHandoff),
+        resumeUrlFor(window.location.origin, flowId, search),
       );
     } catch (caughtError) {
       setError(
@@ -159,7 +164,7 @@ function SignScreen() {
       await signInWith(
         provider,
         undefined,
-        resumeUrlFor(window.location.origin, flowId, shellHandoff),
+        resumeUrlFor(window.location.origin, flowId, search),
       );
     } catch (caughtError) {
       setError(
