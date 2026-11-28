@@ -90,8 +90,7 @@ pub struct Endpoints {
 
 impl Endpoints {
     /**
-    Claude's endpoints, or a stand-in's for driving this client in a test: the same kind of override
-    `provider_oauth` gives Unbiased AI's platform. Both default to the real ones.
+    Claude's endpoints, or a stand-in's for driving this client in a test.
     */
     pub fn configured() -> Self {
         let named = |name: &str, default: &str| {

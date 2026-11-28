@@ -311,11 +311,16 @@ const OPEN_COPY: [string, Partial<AppAccess>, boolean, RegExp][] = [
     true,
     /^Gmail isn't connected yet\.$/,
   ],
+  /*
+   * FOUND IN DOGFOODING: on a shared Bot he could only view, a member was told "Connect it, and this
+   * Bot's owner can give it to the Bot", connected it, and the Bot still didn't have it. Now the first
+   * thing he reads is who can give it, and that Request access asks for it.
+   */
   [
     "not added, anybody else",
     { state: "disabled", unavailable: "absent" },
     false,
-    /^Gmail isn't connected yet\. Connect it, and this Bot's owner can give it to the Bot\.$/,
+    /^Only this Bot's owner or an admin can give it Gmail\. Request access to ask for it\. You can connect your own account now too\.$/,
   ],
   [
     "not given, the owner",
@@ -324,10 +329,32 @@ const OPEN_COPY: [string, Partial<AppAccess>, boolean, RegExp][] = [
     /^This Bot hasn't been given Gmail yet\.$/,
   ],
   [
-    "not given, anybody else",
+    "not given, anybody else, connected",
+    {
+      state: "not_granted",
+      ownerGrants: "any",
+      connectedAt: "2026-11-27T00:00:00.000Z",
+    },
+    false,
+    /^Only this Bot's owner or an admin can give it Gmail\. Request access to ask for it\.$/,
+  ],
+  [
+    "not given, anybody else, not connected",
     { state: "not_granted", ownerGrants: "any" },
     false,
-    /^This Bot hasn't been given Gmail\. Its owner can give it\.$/,
+    /^Only this Bot's owner or an admin can give it Gmail\. Request access to ask for it\. You can connect your own account now too\.$/,
+  ],
+  [
+    "not given, anybody else, already asked",
+    {
+      state: "not_granted",
+      ownerGrants: "any",
+      connectedAt: "2026-11-27T00:00:00.000Z",
+      requestKind: "grant",
+      request: { id: "r1", kind: "grant", createdAt: "2026-11-27T00:00:00Z" },
+    },
+    false,
+    /^Only this Bot's owner or an admin can give it Gmail\.$/,
   ],
   [
     "kept to admins",
@@ -683,6 +710,88 @@ test.each([
     );
   },
 );
+
+/*
+ * FOUND IN DOGFOODING. Apps open, on a shared Bot a member could only view: the card for an app the
+ * Bot wasn't given offered nothing but connecting his own account, which gave the Bot nothing, and
+ * then nothing at all. Now it offers Request access, which asks for exactly what the Bot needs, and
+ * his own Connect only where his account isn't connected, beside it.
+ */
+test.each([
+  [
+    "not given, his account connected",
+    {
+      state: "not_granted",
+      requestKind: "grant",
+      granted: false,
+      connectedAt: "2026-11-27T00:00:00.000Z",
+    },
+    false,
+  ],
+  [
+    "not given, his account not connected",
+    { state: "not_granted", requestKind: "grant", granted: false },
+    true,
+  ],
+  [
+    "nobody added it",
+    {
+      state: "disabled",
+      unavailable: "absent",
+      requestKind: "enable",
+      granted: false,
+    },
+    true,
+  ],
+] as const)(
+  "apps open, somebody else's Bot (%s): Request access asks for it",
+  async (_, overrides, connectToo) => {
+    const { view, sent } = mounted(appAccess(overrides), undefined, {
+      open: { owner: false },
+    });
+    // Once it is known that apps are open and the Bot isn't theirs.
+    await waitFor(() =>
+      expect(sent.some((call) => call.url === botPath("expenses"))).toBe(true),
+    );
+    await settleReactWork();
+    if (connectToo)
+      expect(
+        await view.findByRole("button", { name: "Connect Gmail" }),
+      ).toBeTruthy();
+    else
+      expect(view.queryByRole("button", { name: "Connect Gmail" })).toBeNull();
+    const press = await view.findByRole("button", {
+      name: "Request access to Gmail",
+    });
+    fireEvent.click(press);
+    await waitFor(() =>
+      expect(sent.find((call) => call.method === "POST")).toEqual({
+        method: "POST",
+        url: APP_ACCESS_REQUESTS_PATH,
+        body: { botId: "expenses", appId: "composio-gmail" },
+      }),
+    );
+    expect(sent.some((call) => call.url.endsWith("/approve"))).toBe(false);
+  },
+);
+
+test("apps open, somebody else's Bot: the sentence names the Bot whose owner can give it", () => {
+  expect(
+    appAccessSentence(
+      appAccess({
+        state: "not_granted",
+        connectedAt: "2026-11-27T00:00:00.000Z",
+      }),
+      "General Assistant",
+      "team",
+      false,
+      [],
+      { owner: false },
+    ),
+  ).toBe(
+    "Only General Assistant's owner or an admin can give it Gmail. Request access to ask for it.",
+  );
+});
 
 test("a pending request reads Requested, and Withdraw cancels it", async () => {
   const { view, sent } = mounted(

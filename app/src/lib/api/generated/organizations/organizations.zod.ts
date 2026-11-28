@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role in it. active marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app's token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller's own when it sends none. The header is checked against the caller's membership, as on every address that names no organization, so one they are not in answers not found. A session and an API key ignore it. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). Made with an app's token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role in it. active marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app's token has no session either: for it, active marks the organization its OpenBot-Organization header names; when it sends none, the one the token was signed in to, while the caller is a member of it, else the caller's own. The header is checked against the caller's membership, as on every address that names no organization, so one they are not in answers not found. A session and an API key ignore it. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). Made with an app's token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the caller's organizations
  */
 export const listOrganizationsQueryLimitDefault = 50;
@@ -76,7 +76,7 @@ export const ListOrganizationsResponse = zod.object({
           active: zod
             .boolean()
             .describe(
-              "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key.",
+              "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the one the token was signed in to while the caller is a member of it, else the caller's own. Always false for a request made with an API key.",
             ),
           canMoveIn: zod
             .boolean()
@@ -170,7 +170,7 @@ export const CreateOrganizationResponse = zod.object({
       active: zod
         .boolean()
         .describe(
-          "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key.",
+          "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the one the token was signed in to while the caller is a member of it, else the caller's own. Always false for a request made with an API key.",
         ),
       canMoveIn: zod
         .boolean()
@@ -369,7 +369,7 @@ export const UpdateOrganizationResponse = zod.object({
       active: zod
         .boolean()
         .describe(
-          "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key.",
+          "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the one the token was signed in to while the caller is a member of it, else the caller's own. Always false for a request made with an API key.",
         ),
       canMoveIn: zod
         .boolean()
@@ -1052,7 +1052,7 @@ export const AcceptInvitationResponse = zod.object({
       active: zod
         .boolean()
         .describe(
-          "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key.",
+          "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the one the token was signed in to while the caller is a member of it, else the caller's own. Always false for a request made with an API key.",
         ),
       canMoveIn: zod
         .boolean()

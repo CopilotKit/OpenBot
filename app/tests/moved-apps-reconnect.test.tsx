@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page, Request } from "playwright-core";
@@ -40,6 +40,7 @@ import {
   membersResponse,
   organizationMember,
 } from "./organizations-api";
+import { test } from "./renderer-crash";
 
 /**
  * After a move to OpenBot Cloud, the apps the move listed to connect again (their sign-ins stay on

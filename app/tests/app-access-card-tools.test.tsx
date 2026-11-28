@@ -326,7 +326,11 @@ test("an admin: says what the Bot can't do yet, gives exactly that action in one
   expect(opened).toEqual([]);
 });
 
-test("apps open, somebody else's Bot: is told its owner can give it, with no request to file", async () => {
+/*
+ * FOUND IN DOGFOODING: on a shared Bot a member could only view, "Its owner can give it that." with
+ * nothing to press, and no way for him to reach its owner. He asks for exactly that action instead.
+ */
+test("apps open, somebody else's Bot: is told only its owner or an admin can give it, and asks for exactly that action", async () => {
   const { sent } = serving(
     "member",
     { whole: holdsReadOnly, forActions: lacksPatch },
@@ -338,12 +342,23 @@ test("apps open, somebody else's Bot: is told its owner can give it, with no req
   const drawn = await card(view);
   await waitFor(() =>
     expect(drawn.textContent).toContain(
-      "Calendar Bot can't change an event's colour yet. Its owner can give it that.",
+      "Calendar Bot can't change an event's colour yet. Only its owner or an admin can give it that. Request access to ask for it.",
     ),
   );
-  expect(drawn.textContent).not.toMatch(/admin/i);
-  expect(view.queryByRole("button", { name: /Request access/ })).toBeNull();
-  expect(writes(sent)).toEqual([]);
+  fireEvent.click(
+    await view.findByRole("button", {
+      name: "Request access to Google Calendar",
+    }),
+  );
+  await waitFor(() =>
+    expect(writes(sent)).toEqual([
+      {
+        method: "POST",
+        url: APP_ACCESS_REQUESTS_PATH,
+        body: { botId: BOT, appId: CALENDAR, actions: [PATCH_EVENT] },
+      },
+    ]),
+  );
 });
 
 test("apps locked down, a member: is told only an admin can give it, asks for exactly that action, then sees Requested", async () => {

@@ -193,14 +193,17 @@ type AnyQuery = Query<unknown, unknown, unknown>;
 /** The reads waiting to be asked again after a 503's Retry-After: one wait each, never two. */
 const askingAgain = new WeakSet<AnyQuery>();
 
-/** The soonest a held read is asked again, whatever Retry-After said: never in a tight loop. */
-const SOONEST_ASK_AGAIN_MS = 1_000;
+/**
+ * The soonest a held read is asked again, whatever Retry-After said: never in a tight loop. The page
+ * standing in for a held app waits it too (components/layout/unavailable-page.tsx).
+ */
+export const SOONEST_ASK_AGAIN_MS = 1_000;
 /** The longest a held read waits before it is asked again, whatever Retry-After said. */
 const LONGEST_ASK_AGAIN_MS = 60_000;
 
 /**
  * A read refused 503 with a Retry-After (an organization being moved, or its database out of reach,
- * `lib/load-failure.ts`): asked again by itself after that long, and again after each refusal for as
+ * `lib/load-failure.tsx`): asked again by itself after that long, and again after each refusal for as
  * long as the hold lasts, so the screen fills in within one Retry-After of OpenBot being back. Not
  * when the read is gone by then (the person works in another organization now) or nobody shows it
  * any more: the next screen that wants it asks for it afresh.

@@ -94,30 +94,25 @@ const endpointPresets: Record<
     keyUrl: "https://console.x.ai/",
     keyLink: "Get an xAI API key",
   },
-  // Unbiased AI's gateway speaks the OpenAI API under the `pareto` model. The sign-in on this row
-  // mints the key; the dashboard is where somebody makes one by hand.
-  unbiased: {
-    baseUrl: "https://api.unbiased.ai/v1",
-    model: "pareto",
-    keyUrl: "https://platform.unbiased.ai/dashboard/keys",
-    keyLink: "Get an Unbiased AI API key",
-  },
-  // TrustedRouter's gateway speaks the OpenAI API and lists models from many providers under their
-  // vendor's prefix, so the model is named the way its /models lists it.
-  // https://trustedrouter.com/docs
   trustedrouter: {
     baseUrl: "https://api.trustedrouter.com/v1",
     model: "anthropic/claude-sonnet-5.5",
     keyUrl: "https://trustedrouter.com/console/api-keys",
     keyLink: "Get a TrustedRouter API key",
   },
+  // Privatemode's hosted, OpenAI-compatible address and recommended default model.
+  // https://docs.privatemode.ai/api/proxyless-api/
+  privatemode: {
+    baseUrl: "https://proxyless-api.privatemode.ai/v1",
+    model: "glm-latest",
+    keyUrl: "https://portal.privatemode.ai",
+    keyLink: "Get a Privatemode API key",
+  },
 };
 
 /** What approving in the browser does, for each provider that signs in that way. */
 const oauthExplanation: Record<string, string> = {
   xai: "Authorize OpenBot to use models available to your xAI account.",
-  unbiased:
-    "Sign in or create an Unbiased AI account in your browser and approve the code shown here. OpenBot receives an API key for Pareto and keeps it on this computer.",
 };
 
 /** Stop a plan's sign-in still waiting for the browser: Claude's, or ChatGPT's. */
@@ -393,15 +388,11 @@ export function ProviderPicker({
       } catch (error) {
         if (current()) setFailure(asProblem(error));
       }
-      // Nothing for a session the native side keeps for itself; the minted API key for a sign-in
-      // that produces one (Unbiased AI), held here the way a plan's token is and never shown.
-      const minted = await invoke<string | null>("finish_model_oauth", {
+      await invoke<void>("finish_model_oauth", {
         attemptId: authorization.attemptId,
       });
       if (current()) {
         continueAfterSignIn.current = true;
-        if (minted)
-          setTokens((previous) => ({ ...previous, [providerId]: minted }));
         setOauthSignedIn(providerId);
         setSignInUrl(null);
         setOauthCode(null);
@@ -570,21 +561,6 @@ export function ProviderPicker({
     const trimmedBaseUrl = baseUrl.trim();
     const trimmedModel = model.trim();
     const trimmedContainerBaseUrl = containerBaseUrl.trim();
-    /*
-     * A sign-in that minted an API key for a named endpoint (Unbiased AI) is that endpoint's key, and
-     * it goes on exactly as a typed one does: the same address, the same model, the same credential
-     * shape. Nothing after this screen has to know how the key was obtained.
-     */
-    if (login === "oauth" && trimmedToken && preset) {
-      onChoose({
-        provider: "openai-compatible",
-        login: "endpoint",
-        apiKey: trimmedToken,
-        baseUrl: preset.baseUrl,
-        ...(trimmedModel ? { model: trimmedModel } : {}),
-      });
-      return;
-    }
     onChoose({
       provider: login === "endpoint" ? "openai-compatible" : row.id,
       login,

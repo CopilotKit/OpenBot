@@ -198,3 +198,33 @@ function headingOf(html: unknown): string | null {
     oneLine(page.querySelector("title")?.textContent)
   );
 }
+
+/**
+ * How long a roster line is when the roster cut it. The roster cuts at 200 characters and adds "…"
+ * (this app can't see the server's own rule, so the length is taken a character short to allow for
+ * the "…" being counted in the 200). A shorter line ending in "…" is a reply that ended that way.
+ */
+const ROSTER_CUT_LENGTH = 199;
+
+/**
+ * Whether the roster's line is this reply. The roster keeps a reply as plain text on one line, with
+ * the Markdown removed, the white space joined and a long text cut with a trailing "…". The two are
+ * compared with the Markdown marks and the white space left out but the punctuation kept, so "Done."
+ * is not "Done!". Only a line as long as the cut counts as cut, and then it matches when the reply
+ * begins with it: a short reply that ends in "…" would otherwise match any older reply that begins
+ * with the same words. When in doubt the answer is no, which costs one extra read.
+ */
+export function rosterLineMatches(reply: string, line: string): boolean {
+  const bare = (text: string) =>
+    text
+      .normalize("NFC")
+      .replace(/^\s*(?:#{1,6}|>|[-*+]|\d+[.)])\s+/gm, "")
+      .replace(/[*_`~]+/g, "")
+      .replace(/\s+/g, "");
+  if (line.endsWith("…") && line.length - 1 >= ROSTER_CUT_LENGTH) {
+    const core = bare(line.slice(0, -1));
+    return core.length > 0 && bare(reply).startsWith(core);
+  }
+  const want = bare(line);
+  return want.length > 0 && bare(reply) === want;
+}

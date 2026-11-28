@@ -41,13 +41,20 @@ import type {
 import {
   ConnectAiConnectionBody,
   ConnectAiConnectionResponse,
+  FinishAiSignInBody,
+  FinishPersonalAiSignInBody,
   GetAiConnectionResponse,
+  GetAiSignInResponse,
   GetPersonalAiConnectionResponse,
+  GetPersonalAiSignInResponse,
   ListAiConnectionsResponse,
   MakeAiConnectionDefaultResponse,
   ReplaceAiConnectionBody,
   ReplaceAiConnectionResponse,
   StartAiSignInBody,
+  StartAiSignInResponse,
+  StartPersonalAiSignInBody,
+  StartPersonalAiSignInResponse,
 } from "@/lib/api/generated/models/models.zod";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
@@ -124,6 +131,12 @@ let personal: PersonalAiConnection | null;
 let stopsBeforeMakeDefault: AiConnectionEntry["problem"];
 /** How long the person's AI takes to answer: a real server's reads after a change aren't all as quick. */
 let personalDelay: number;
+/** The sign-ins the person's own list names. */
+let personalSignIns: AiConnectionProvider[];
+/** Set: connecting is refused (422) with this sentence, as the server refuses a connection it checked. */
+let connectRefusal: string | null;
+/** The sign-in under way, as the server keeps it: one at a time, either list's. */
+let signIn: { id: string; provider: AiConnectionProvider } | null;
 
 function json(status: number, body: unknown) {
   return new NativeResponse(JSON.stringify(body), {
@@ -202,12 +215,28 @@ async function fakeFetch(input: RequestInfo | URL, init?: RequestInit) {
             ListAiConnectionsResponse.parse({
               connections: list,
               nextCursor: null,
-              signIns: scope === "org" ? orgSignIns : PERSONAL.signIns,
+              signIns: scope === "org" ? orgSignIns : personalSignIns,
             }),
           )
         : notFound();
     if (path === base && method === "POST") {
       const input = ConnectAiConnectionBody.parse(body);
+      if (connectRefusal)
+        return new NativeResponse(
+          JSON.stringify({
+            type: "https://open.bot/errors/ai-connection-refused",
+            title: "OpenBot couldn't use that connection.",
+            status: 422,
+            detail: connectRefusal,
+            code: "AI_CONNECTION_ENGINE_NOT_READY",
+            category: "validation",
+            retryable: false,
+          }),
+          {
+            status: 422,
+            headers: { "content-type": "application/problem+json" },
+          },
+        );
       // As the server answers: a provider already connected keeps its id and whether it is the default.
       const added = entry(input.provider, {
         login: input.login,
@@ -260,17 +289,61 @@ async function fakeFetch(input: RequestInfo | URL, init?: RequestInit) {
       return new NativeResponse(null, { status: 204 });
     }
   }
-  if (path === `${ORG}/ai-connection-sign-ins` && method === "POST") {
-    StartAiSignInBody.parse(body);
-    return json(201, {
-      id: "sign-in-1",
-      provider: "anthropic",
-      url: "https://claude.com/cai/oauth/authorize?state=example",
-      userCode: null,
-      expiresAt: "2026-11-23T10:00:00.000Z",
-      interval: 5,
-      finish: "code",
-    });
+  /*
+   * The server's sign-ins, the organization's (startAiSignIn) and a person's own
+   * (startPersonalAiSignIn), as the spec has them: a Claude plan finishes with the code its page
+   * shows, every other with reads until it is approved, which here is the first read.
+   */
+  for (const [scope, base] of [
+    ["org", `${ORG}/ai-connection-sign-ins`],
+    ["personal", `${ORG}/people/me/ai-connection/sign-ins`],
+  ] as const) {
+    if (path === base && method === "POST") {
+      const input =
+        scope === "org"
+          ? StartAiSignInBody.parse(body)
+          : StartPersonalAiSignInBody.parse(body);
+      signIn = { id: `sign-in-${calls.length}`, provider: input.provider };
+      const claude = input.provider === "anthropic";
+      const started = {
+        id: signIn.id,
+        provider: input.provider,
+        url: claude
+          ? "https://claude.com/cai/oauth/authorize?state=example"
+          : "https://example.com/device",
+        userCode: claude ? null : "ABCD-1234",
+        expiresAt: "2026-11-23T10:00:00.000Z",
+        interval: 1,
+        finish: claude ? "code" : "poll",
+      };
+      return json(
+        201,
+        scope === "org"
+          ? StartAiSignInResponse.parse(started)
+          : StartPersonalAiSignInResponse.parse(started),
+      );
+    }
+    const read = new RegExp(`^${base}/([^/]+)(/code)?$`).exec(path);
+    if (read && signIn && read[1] === signIn.id) {
+      if (read[2] && method === "POST")
+        scope === "org"
+          ? FinishAiSignInBody.parse(body)
+          : FinishPersonalAiSignInBody.parse(body);
+      else if (read[2] || method !== "GET") return notFound();
+      const approved = {
+        id: signIn.id,
+        provider: signIn.provider,
+        status: "approved",
+        detail: null,
+        interval: 1,
+      };
+      return json(
+        200,
+        scope === "org"
+          ? GetAiSignInResponse.parse(approved)
+          : GetPersonalAiSignInResponse.parse(approved),
+      );
+    }
   }
   return notFound();
 }
@@ -287,6 +360,9 @@ beforeEach(() => {
   personal = null;
   stopsBeforeMakeDefault = null;
   personalDelay = 0;
+  personalSignIns = ["openai", "anthropic"];
+  connectRefusal = null;
+  signIn = null;
   global.fetch = Object.assign(fakeFetch, {
     preconnect: originalFetch.preconnect,
   }) as typeof fetch;
@@ -655,6 +731,133 @@ test("the organization's list signs in through startAiSignIn when signIns names 
   ).toBe(false);
 });
 
+/*
+ * Reported on 1.2.1: a Claude plan's sign-in showed "Signed in to Anthropic." with Connect below it,
+ * and nothing was saved until Connect was pressed, so leaving the page after the tick lost the
+ * sign-in. A sign-in that succeeds now connects at once, with the call Connect makes, and the list
+ * comes back with it checked: for every provider the server signs in to, in a person's own list and
+ * the organization's.
+ */
+const SIGN_INS: {
+  provider: AiConnectionProvider;
+  row: RegExp;
+  button: string;
+  /** What the person pastes, where the provider's page hands them something to paste. */
+  paste?: string;
+  sent: Record<string, unknown>;
+}[] = [
+  {
+    provider: "anthropic",
+    row: /^Anthropic/,
+    button: "Sign in with Anthropic",
+    paste: "claude-code#example",
+    sent: { provider: "anthropic", login: "plan" },
+  },
+  {
+    provider: "openai",
+    row: /^OpenAI/,
+    button: "Sign in with ChatGPT",
+    sent: { provider: "openai", login: "plan" },
+  },
+  {
+    provider: "xai",
+    row: /^xAI/,
+    button: "Sign in with xAI",
+    sent: { provider: "xai", login: "oauth" },
+  },
+];
+
+for (const scope of ["organization", "personal"] as const)
+  for (const signingIn of SIGN_INS)
+    test(`Connect another AI connects ${signingIn.provider} as soon as its sign-in succeeds, with nothing else pressed, in the ${scope}'s list`, async () => {
+      const list = [entry("google", { login: "endpoint", isDefault: true })];
+      const signIns = SIGN_INS.map((one) => one.provider);
+      if (scope === "personal") {
+        personal = PERSONAL;
+        personalList = list;
+        personalSignIns = signIns;
+      } else {
+        orgList = list;
+        orgSignIns = signIns;
+      }
+      const base =
+        scope === "personal"
+          ? `${ORG}/people/me/ai-connections`
+          : `${ORG}/ai-connections`;
+      const user = userEvent.setup({ document });
+      const { view, router } = renderAt(
+        scope === "personal"
+          ? "/settings/providers/new?owner=personal"
+          : "/settings/providers/new",
+      );
+      await user.click(
+        await view.findByRole("button", { name: signingIn.row }),
+      );
+      await user.click(view.getByRole("button", { name: signingIn.button }));
+      if (signingIn.paste) {
+        await user.type(
+          await view.findByLabelText("Code from your browser"),
+          signingIn.paste,
+        );
+        await user.click(view.getByRole("button", { name: "Finish" }));
+      }
+      // Connect is never pressed: the sign-in itself connects it, and the list comes back with it.
+      await waitFor(
+        () =>
+          expect(
+            within(view.getByRole("button", { name: signingIn.row })).getByRole(
+              "img",
+              { name: "Connected" },
+            ),
+          ).toBeDefined(),
+        { timeout: 8_000 },
+      );
+      const connects = writes().filter((call) => call.path === base);
+      expect(connects).toHaveLength(1);
+      expect(connects[0]?.body).toMatchObject(signingIn.sent);
+      expect(view.getAllByRole("img", { name: "Connected" })).toHaveLength(2);
+      expect(view.getByRole("status").textContent).toContain("is connected.");
+      expect(at(router)).toBe(
+        scope === "personal"
+          ? "/settings/providers/new?owner=personal"
+          : "/settings/providers/new",
+      );
+    }, 15_000);
+
+test("a connect refused after a sign-in succeeded says why on the page, and Connect tries it again", async () => {
+  orgList = [entry("openai", { isDefault: true })];
+  orgSignIns = ["anthropic"];
+  connectRefusal = "Claude hasn't started yet. Try again in a moment.";
+  const user = userEvent.setup({ document });
+  const { view } = renderAt("/settings/providers/new");
+  await user.click(await view.findByRole("button", { name: /^Anthropic/ }));
+  await user.click(
+    view.getByRole("button", { name: "Sign in with Anthropic" }),
+  );
+  await user.type(
+    await view.findByLabelText("Code from your browser"),
+    "claude-code#example",
+  );
+  await user.click(view.getByRole("button", { name: "Finish" }));
+  const alert = await view.findByRole("alert");
+  expect(alert.textContent).toBe(connectRefusal);
+  expect(view.getByText("Signed in to Anthropic.")).toBeDefined();
+  const connects = () =>
+    writes().filter((call) => call.path === `${ORG}/ai-connections`);
+  expect(connects()).toHaveLength(1);
+  // The refusal passes, and Connect makes the same call again.
+  connectRefusal = null;
+  await user.click(view.getByRole("button", { name: "Connect" }));
+  const anthropic = await view.findByRole("button", { name: /^Anthropic/ });
+  await waitFor(() =>
+    expect(
+      within(anthropic).getByRole("img", { name: "Connected" }),
+    ).toBeDefined(),
+  );
+  expect(connects()).toHaveLength(2);
+  expect(connects()[1]?.body).toEqual({ provider: "anthropic", login: "plan" });
+});
+
 test("every provider connected hides Connect another AI", async () => {
   orgList = (
     [
@@ -662,8 +865,8 @@ test("every provider connected hides Connect another AI", async () => {
       "anthropic",
       "google",
       "xai",
-      "unbiased",
       "trustedrouter",
+      "privatemode",
       "openai-compatible",
     ] as const
   ).map((provider, index) =>
@@ -819,6 +1022,121 @@ for (const isDefault of [false, true]) {
     );
   });
 }
+
+/** The server's words for a connection whose provider OpenBot no longer offers (`provider-retired`). */
+const PROVIDER_RETIRED = {
+  code: "provider-retired",
+  detail:
+    "OpenBot no longer offers this AI provider. Remove it and connect another AI.",
+};
+
+/** A connection saved for a provider this app doesn't know, as the server lists it once retired. */
+function retiredEntry(overrides: Partial<AiConnectionEntry> = {}) {
+  return entry("openai", {
+    id: "retired-ai",
+    provider: "retired-ai",
+    login: "endpoint",
+    model: "retired-model",
+    endpointHost: null,
+    ready: false,
+    problem: PROVIDER_RETIRED,
+    ...overrides,
+  });
+}
+
+/*
+ * A connection saved for a provider OpenBot no longer offers is still listed, so it can be removed.
+ * Nothing on it fixes it: its page says the server's words and leads to connecting another AI and
+ * to Disconnect, never to signing in again, a new key or Make default.
+ */
+for (const isDefault of [false, true]) {
+  test(`a retired provider ${isDefault ? "that is the default" : "beside the default"} is listed stopped by its id, and its page offers Connect another AI and Disconnect`, async () => {
+    orgList = [
+      entry("anthropic", { isDefault: !isDefault }),
+      retiredEntry({ isDefault }),
+    ];
+    const user = userEvent.setup({ document });
+    const { view, router } = renderAt("/settings/providers");
+    // Listed by the id it was saved with, stopped, with the server's words.
+    const row = await view.findByRole("link", { name: /retired-ai/ });
+    expect(within(row).getByText(PROVIDER_RETIRED.detail)).toBeDefined();
+    expect(
+      view.getByRole("link", { name: /Connect another AI/ }),
+    ).toBeDefined();
+    await user.click(row);
+
+    const notice = await view.findByRole("alert");
+    expect(within(notice).getByText(PROVIDER_RETIRED.detail)).toBeDefined();
+    expect(
+      view.queryByRole("link", { name: /Replace key|Sign in again/ }),
+    ).toBeNull();
+    expect(view.queryByRole("button", { name: "Make default" })).toBeNull();
+    // The organization's default changes in place to another AI; any other connects one beside it.
+    const another = within(notice).getByRole("button", {
+      name: "Connect another AI",
+    });
+    expect(another.getAttribute("href")).toBe(
+      isDefault
+        ? "/settings/providers/retired-ai/change"
+        : "/settings/providers/new",
+    );
+
+    await user.click(view.getByRole("button", { name: "Disconnect" }));
+    await waitFor(() =>
+      expect(writes()).toEqual([
+        { method: "DELETE", path: `${ORG}/ai-connections/retired-ai` },
+      ]),
+    );
+    await waitFor(() => expect(at(router)).toBe("/settings/providers"));
+    expect(view.queryByText(/retired-ai/)).toBeNull();
+  });
+}
+
+test("the organization's retired default is changed in place to another AI, which every Bot then runs on", async () => {
+  orgList = [retiredEntry({ isDefault: true }), entry("anthropic")];
+  orgConnection = {
+    ...ORG_CONNECTION,
+    provider: "retired-ai",
+    login: "endpoint",
+    model: "retired-model",
+    ready: false,
+  };
+  const user = userEvent.setup({ document });
+  const { view, router } = renderAt("/settings/providers/retired-ai");
+  const notice = await view.findByRole("alert");
+  await user.click(
+    within(notice).getByRole("button", { name: "Connect another AI" }),
+  );
+  await view.findByRole("heading", { name: "Change AI connection" });
+  expect(at(router)).toBe("/settings/providers/retired-ai/change");
+  // Every provider OpenBot offers, to pick from: nothing is preset to the retired one.
+  const providers = view.getByRole("group", { name: "AI provider" });
+  await user.click(within(providers).getByText("OpenAI"));
+  await user.type(view.getByLabelText(/API key/), "sk-example");
+  await user.click(view.getByRole("button", { name: /Connect/ }));
+  await waitFor(() =>
+    expect(writes()).toEqual([
+      {
+        method: "PUT",
+        path: `${ORG}/ai-connection`,
+        body: { provider: "openai", login: "api-key", apiKey: "sk-example" },
+      },
+    ]),
+  );
+});
+
+test("a retired provider's Change page offers no way back to it, only Connect another AI", async () => {
+  orgList = [entry("anthropic", { isDefault: true }), retiredEntry()];
+  const { view } = renderAt("/settings/providers/retired-ai/change");
+  expect(await view.findByText(PROVIDER_RETIRED.detail)).toBeDefined();
+  expect(
+    view
+      .getByRole("button", { name: "Connect another AI" })
+      .getAttribute("href"),
+  ).toBe("/settings/providers/new");
+  expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
+  expect(writes()).toEqual([]);
+});
 
 test("a stopped key leads with Replace key, a page that opens its provider's key field", async () => {
   orgList = [

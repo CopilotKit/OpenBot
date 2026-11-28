@@ -26,6 +26,8 @@ export interface Bot {
   pinned: boolean;
   /** Whether it comes with OpenBot rather than belonging to a person. */
   systemOwned: boolean;
+  /** Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed. */
+  readonly ownerless?: boolean;
   /**
    * Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.
    * @nullable

@@ -257,20 +257,25 @@ export class FakeServer {
           }),
         };
       // Only what the strip and the routine rows read of a Bot, as section-strip-routines answers it.
+      // Hidden Bots are asked for apart (`hidden=true`), and this person has none: a Bot answered in
+      // both lists would be grouped twice on the Routines page.
       case "/bots":
         return {
           status: 200,
           json: {
-            bots: [
-              {
-                id: "general-assistant",
-                name: "General Assistant",
-                title: "",
-                roleDescription: "",
-                avatarSeed: "General Assistant",
-                lastConversationAt: null,
-              },
-            ],
+            bots:
+              url.searchParams.get("hidden") === "true"
+                ? []
+                : [
+                    {
+                      id: "general-assistant",
+                      name: "General Assistant",
+                      title: "",
+                      roleDescription: "",
+                      avatarSeed: "General Assistant",
+                      lastConversationAt: null,
+                    },
+                  ],
             nextCursor: null,
           },
         };

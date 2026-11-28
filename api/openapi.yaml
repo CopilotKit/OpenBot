@@ -5265,13 +5265,6 @@ paths:
                   provider: anthropic
                   login: api-key
                   apiKey: sk-ant-example
-              signedIn:
-                value:
-                  provider: unbiased
-                  login: endpoint
-                  baseUrl: https://api.unbiased.ai/v1
-                  model: pareto
-                  useSavedKey: true
               chatgptPlan:
                 value:
                   provider: openai
@@ -5363,7 +5356,7 @@ paths:
         - Models
       operationId: startPersonalAiSignIn
       summary: Start signing in to an AI provider
-      description: 'Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the person approves, copies the code Claude''s page shows them or the address ChatGPT sends their browser to, and sends it back with finishPersonalAiSignIn. Inside OpenBot Desktop nobody copies anything: Desktop listens on the person''s own computer for the provider''s redirect and the app sends what arrives with finishPersonalAiSignIn. For Claude, loopbackPort names the port Desktop listens on; ChatGPT''s browser sign-in always redirects to localhost:1455. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan''s sign-in (connect with login plan), or an xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true. Google is refused: Gemini connects with an API key only.'
+      description: 'Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the person approves, copies the code Claude''s page shows them or the address ChatGPT sends their browser to, and sends it back with finishPersonalAiSignIn. Inside OpenBot Desktop nobody copies anything: Desktop listens on the person''s own computer for the provider''s redirect and the app sends what arrives with finishPersonalAiSignIn. For Claude, loopbackPort names the port Desktop listens on; ChatGPT''s browser sign-in always redirects to localhost:1455. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: a Claude or ChatGPT plan''s sign-in (connect with login plan), or an xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true. Google is refused: Gemini connects with an API key only.'
       security:
         - webSession: []
         - appOAuth:
@@ -5378,9 +5371,9 @@ paths:
             schema:
               $ref: '#/components/schemas/AiSignInInput'
             examples:
-              unbiased:
+              xai:
                 value:
-                  provider: unbiased
+                  provider: xai
               chatgpt:
                 value:
                   provider: openai
@@ -5733,7 +5726,7 @@ paths:
         - Models
       operationId: startAiSignIn
       summary: Start signing in to an AI provider for the organization
-      description: 'Start a sign-in to an AI provider that the server runs itself, for the organization, for a provider listAiConnections names in signIns. It works as startPersonalAiSignIn does, and what the provider hands back is kept for the organization: connect it with connectAiConnection and login plan or oauth (or useSavedKey for an Unbiased AI key). The server renews it itself. Offered on OpenBot Cloud and a self-hosted OpenBot; OpenBot Desktop running its own OpenBot keeps its own plan sign-in and offers none here. Only an administrator of the organization may sign in for it.'
+      description: 'Start a sign-in to an AI provider that the server runs itself, for the organization, for a provider listAiConnections names in signIns. It works as startPersonalAiSignIn does, and what the provider hands back is kept for the organization: connect it with connectAiConnection and login plan or oauth. The server renews it itself. Offered on OpenBot Cloud and a self-hosted OpenBot; OpenBot Desktop running its own OpenBot keeps its own plan sign-in and offers none here. Only an administrator of the organization may sign in for it.'
       security:
         - webSession: []
         - appOAuth:
@@ -10481,6 +10474,100 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/routines/read:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Routines
+      operationId: readRoutineSentence
+      summary: Read a sentence as a routine's answers
+      description: 'Read a sentence in English as New routine''s answers: what the Bot does, when it starts, the schedule and what ends it. It writes nothing. createRoutine, createGoal or createCheckIn makes what it read. A repeated request with the same Idempotency-Key and body returns the first reading without asking the model again.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoutineSentence'
+            examples:
+              request:
+                value:
+                  botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+                  sentence: Summarize my unread mail every weekday at 9.
+                  timezone: America/New_York
+      responses:
+        '200':
+          description: What the sentence says, or what is still missing from it.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutineReading'
+              examples:
+                ready:
+                  value:
+                    outcome: ready
+                    draft:
+                      does: act
+                      instruction: Summarize my unread mail.
+                      title: Morning mail summary
+                      starts: schedule
+                      cron: 0 9 * * 1-5
+                      timezone: America/New_York
+                      doneWhen: ''
+                      conversationId: null
+                      intervalMinutes: null
+                needsMore:
+                  value:
+                    outcome: needsMore
+                    draft:
+                      does: act
+                      instruction: Summarize my unread mail.
+                      title: Mail summary
+                      starts: unsaid
+                      cron: null
+                      timezone: America/New_York
+                      doneWhen: ''
+                      conversationId: null
+                      intervalMinutes: null
+                    missing: time
+                refused:
+                  value:
+                    outcome: refused
+                    detail: A routine can run at most every 15 minutes.
+                    fix: null
+                notRoutine:
+                  value:
+                    outcome: notRoutine
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/ModelFailed'
+        '503':
+          $ref: '#/components/responses/ModelNotConfigured'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/routines/{routineId}:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -12236,7 +12323,7 @@ paths:
         - Organizations
       operationId: listOrganizations
       summary: List the caller's organizations
-      description: 'Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller''s role in it. active marks the one the caller''s session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app''s token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller''s own when it sends none. The header is checked against the caller''s membership, as on every address that names no organization, so one they are not in answers not found. A session and an API key ignore it. To work in another one, set it as the session''s active organization (POST /api/auth/organization/set-active). Made with an app''s token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller''s role in it. active marks the one the caller''s session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app''s token has no session either: for it, active marks the organization its OpenBot-Organization header names; when it sends none, the one the token was signed in to, while the caller is a member of it, else the caller''s own. The header is checked against the caller''s membership, as on every address that names no organization, so one they are not in answers not found. A session and an API key ignore it. To work in another one, set it as the session''s active organization (POST /api/auth/organization/set-active). Made with an app''s token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -24090,9 +24177,9 @@ components:
 
         Tokens. An access token starts `oba_` and lasts one hour. A refresh token starts `obr_`, is issued only when the `offline_access` scope is asked for, and rotates on every use: each refresh answers a new refresh token and ends the one it was given. Access tokens work on /api/v2, and on four addresses outside it that an app's screens need, each with the scope given: `GET /api/me`, who is signed in (people:read); the chat runtime at `/api/copilotkit` and everything under it (conversations:write); a file's download at `GET /api/attachments/{attachmentId}`, the address a sent message keeps (conversations:read); and the relayed realtime socket at `/api/intelligence/client/websocket` (conversations:read), which is also on /api/v2 at `/api/v2/organizations/{organizationId}/realtime/websocket`. They work nowhere else.
 
-        Organization. An access token carries no memory of which organization the person is working in. An address under `/api/v2/organizations/{organizationId}` names it. Where an address names none, such as the list of the person's own organizations, an app sends the header `OpenBot-Organization` with the organization's id. It is checked against the person's membership on every request, and an organization they are not in answers not found. With no header, the app works in the person's own organization.
+        Organization. An access token keeps the organization the person signed the app in to: the one they were working in as they allowed it, which on OpenBot Cloud is the one they picked as they signed in. A token refreshed from it keeps it too. An address under `/api/v2/organizations/{organizationId}` names the organization. Where an address names none, such as the list of the person's own organizations, an app sends the header `OpenBot-Organization` with the organization's id. It is checked against the person's membership on every request, and an organization they are not in answers not found. With no header, the app works in the organization it was signed in to, while the person is a member of it, else in the person's own organization.
 
-        Consent. The person is asked once for each app, and not again for scopes they already allowed it.
+        Consent. The person is asked once for each app in each organization they sign it in to, and not again for scopes they already allowed it there.
 
         An install for one person on one computer has no sign-in, so it has no OAuth: there is nobody to authorize an app as.
       flows:
@@ -25092,6 +25179,10 @@ components:
         systemOwned:
           type: boolean
           description: Whether it comes with OpenBot rather than belonging to a person.
+        ownerless:
+          type: boolean
+          readOnly: true
+          description: Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.
         packageBotId:
           type:
             - string
@@ -29402,13 +29493,13 @@ components:
         - anthropic
         - google
         - xai
-        - unbiased
         - trustedrouter
+        - privatemode
         - openai-compatible
-      description: 'The AI provider OpenBot''s Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI''s API, at an address given. The list can grow: a client shows a provider it doesn''t know by its id. A request still names one of AiConnectionProvider.'
+      description: 'The AI provider OpenBot''s Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI''s API, at an address given. The list can grow: a client shows a provider it doesn''t know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.'
     AiConnectionLogin:
       type: string
-      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person''s xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.'
+      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person''s xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.'
       enum:
         - plan
         - api-key
@@ -29430,7 +29521,8 @@ components:
             - no-key
             - no-default
             - sign-in-retired
-          description: 'sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn''t answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider''s sign-in (a Google sign-in for Gemini), so it can''t run, and signing in again isn''t offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change.'
+            - provider-retired
+          description: 'sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn''t answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider''s sign-in (a Google sign-in for Gemini), so it can''t run, and signing in again isn''t offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change. provider-retired: OpenBot no longer offers the connection''s provider at all, so it can''t run and nothing on it fixes it. It is removed, and another AI connected in its place.'
         detail:
           type: string
           description: One sentence a person reads, saying what to do.
@@ -29629,19 +29721,19 @@ components:
             - type: 'null'
     AiConnectionProvider:
       type: string
-      description: 'The AI provider OpenBot''s Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI''s API, at an address given.'
+      description: 'The AI provider OpenBot''s Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI''s API, at an address given.'
       enum:
         - openai
         - anthropic
         - google
         - xai
-        - unbiased
         - trustedrouter
+        - privatemode
         - openai-compatible
     AiConnectionInput:
       type: object
       additionalProperties: false
-      description: 'The connection to switch to. openai and anthropic take plan or api-key; xai takes endpoint or oauth; google, unbiased, trustedrouter and openai-compatible take endpoint. Any other pair is refused: google with oauth is refused with the words of the problem sign-in-retired.'
+      description: 'The connection to switch to. openai and anthropic take plan or api-key; xai takes endpoint or oauth; google, trustedrouter, privatemode and openai-compatible take endpoint. Any other pair is refused: google with oauth is refused with the words of the problem sign-in-retired.'
       required:
         - provider
         - login
@@ -29716,7 +29808,7 @@ components:
           description: Whether the person can set an AI connection of their own here. False where the organization's AI is the only one.
         signIns:
           type: array
-          description: 'The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), an xAI sign-in, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.'
+          description: 'The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), and an xAI sign-in, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.'
           items:
             $ref: '#/components/schemas/AiConnectionProviderAnswer'
     AiSignInInput:
@@ -29901,7 +29993,14 @@ components:
           type: array
           description: The providers the server can sign in to itself for whoever owns this list (startAiSignIn for the organization, startPersonalAiSignIn for a person). Every provider not listed connects with a key or an address.
           items:
-            $ref: '#/components/schemas/AiConnectionProvider'
+            type: string
+            enum:
+              - openai
+              - anthropic
+              - google
+              - xai
+              - trustedrouter
+              - openai-compatible
     AppSource:
       type: string
       enum:
@@ -33025,6 +33124,167 @@ components:
       properties:
         routine:
           $ref: '#/components/schemas/Routine'
+    RoutineSentence:
+      type: object
+      additionalProperties: false
+      required:
+        - botId
+        - sentence
+        - timezone
+      properties:
+        botId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: The Bot the routine is for.
+        sentence:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: \S
+          description: The routine in the person's own words. At most 2,000 characters.
+        timezone:
+          type: string
+          maxLength: 100
+          description: The IANA time zone the person is in, used to read a time of day.
+    RoutineDraft:
+      type: object
+      description: What a sentence says, as the answers New routine asks for.
+      required:
+        - does
+        - instruction
+        - title
+        - starts
+        - cron
+        - timezone
+        - doneWhen
+        - conversationId
+        - intervalMinutes
+      properties:
+        does:
+          type: string
+          enum:
+            - act
+            - tell
+          description: act carries out the instruction. tell only reports back.
+        instruction:
+          type: string
+          description: What the Bot does on each run.
+        title:
+          type: string
+          description: What to call it.
+        starts:
+          type: string
+          enum:
+            - schedule
+            - event
+            - now
+            - unsaid
+          description: What starts it. schedule is a time, event is something that happens, now is straight away, and unsaid is a start the sentence doesn't give.
+        cron:
+          type:
+            - string
+            - 'null'
+          description: The schedule, as five cron fields. Set only when starts is schedule, and null otherwise.
+        timezone:
+          type: string
+          description: The IANA time zone the schedule is read in.
+        doneWhen:
+          type: string
+          description: 'The outcome that ends it, in the sentence''s words. Empty when the sentence gives none: on a schedule that makes a routine, and an outcome makes a goal that ends when it is met.'
+        conversationId:
+          type:
+            - string
+            - 'null'
+          description: The conversation it posts in. Null means a new conversation.
+        intervalMinutes:
+          type:
+            - integer
+            - 'null'
+          enum:
+            - 60
+            - 240
+            - 720
+            - 1440
+            - null
+          description: How often a check-in looks, in minutes. Set only when does is tell, and null otherwise.
+    RoutineReadingReady:
+      type: object
+      description: The sentence says everything a routine needs.
+      required:
+        - outcome
+        - draft
+      properties:
+        outcome:
+          type: string
+          const: ready
+        draft:
+          $ref: '#/components/schemas/RoutineDraft'
+    RoutineReadingNeedsMore:
+      type: object
+      description: The sentence is a routine but leaves something out.
+      required:
+        - outcome
+        - draft
+        - missing
+      properties:
+        outcome:
+          type: string
+          const: needsMore
+        draft:
+          $ref: '#/components/schemas/RoutineDraft'
+        missing:
+          type: string
+          x-extensible-enum:
+            - time
+            - event
+            - once
+          description: What to ask next. time is when it runs, event is what starts it, and once is whether it runs once or keeps going.
+    RoutineReadingRefused:
+      type: object
+      description: The sentence asks for something a routine can't do.
+      required:
+        - outcome
+        - detail
+        - fix
+      properties:
+        outcome:
+          type: string
+          const: refused
+        detail:
+          type: string
+          description: Why it can't, in a sentence for the person.
+        fix:
+          type:
+            - string
+            - 'null'
+          x-extensible-enum:
+            - connectApp
+          description: What the person can do about it. connectApp is to connect an app first. Null when there is nothing to do but ask differently.
+    RoutineReadingNotRoutine:
+      type: object
+      description: The sentence is not a request for a routine.
+      required:
+        - outcome
+      properties:
+        outcome:
+          type: string
+          const: notRoutine
+    RoutineReading:
+      description: A sentence read as a routine's answers, or why it can't be.
+      oneOf:
+        - $ref: '#/components/schemas/RoutineReadingReady'
+        - $ref: '#/components/schemas/RoutineReadingNeedsMore'
+        - $ref: '#/components/schemas/RoutineReadingRefused'
+        - $ref: '#/components/schemas/RoutineReadingNotRoutine'
+      discriminator:
+        propertyName: outcome
+        mapping:
+          ready: '#/components/schemas/RoutineReadingReady'
+          needsMore: '#/components/schemas/RoutineReadingNeedsMore'
+          refused: '#/components/schemas/RoutineReadingRefused'
+          notRoutine: '#/components/schemas/RoutineReadingNotRoutine'
     UpdateRoutineRequest:
       type: object
       additionalProperties: false
@@ -34441,7 +34701,7 @@ components:
           $ref: '#/components/schemas/PersonRoleAnswer'
         active:
           type: boolean
-          description: 'Whether the caller is working in this one: the organization their session works in, or for an app''s token the one its OpenBot-Organization header names, else the caller''s own. Always false for a request made with an API key.'
+          description: 'Whether the caller is working in this one: the organization their session works in, or for an app''s token the one its OpenBot-Organization header names, else the one the token was signed in to while the caller is a member of it, else the caller''s own. Always false for a request made with an API key.'
         canMoveIn:
           type: boolean
           description: 'Whether the caller may move their Bots into this organization (createImport): true where the organization lets them use Bots. The server''s verdict, by the organization''s own rules. Present only where OpenBot takes moves (OpenBot Cloud).'
@@ -51067,7 +51327,6 @@ components:
           - openai
           - anthropic
           - xai
-          - unbiased
     PersonalAiConnectionOrganizationExample:
       summary: Nothing of their own, so their runs use the organization's.
       value:
@@ -51092,7 +51351,6 @@ components:
           - openai
           - anthropic
           - xai
-          - unbiased
     PersonalAiConnectionNoneExample:
       summary: Neither theirs nor the organization's, so they connect one first.
       value:
@@ -51117,13 +51375,12 @@ components:
           - openai
           - anthropic
           - xai
-          - unbiased
     AiSignInExample:
-      summary: An Unbiased AI sign-in, waiting for approval.
+      summary: An xAI sign-in, waiting for approval.
       value:
         id: c2lnbi1pbi1leGFtcGxl
-        provider: unbiased
-        url: https://platform.unbiased.ai/activate?user_code=BCDF-GHJK
+        provider: xai
+        url: https://accounts.x.ai/oauth2/device?user_code=BCDF-GHJK
         userCode: BCDF-GHJK
         expiresAt: '2026-11-21T09:10:00.000Z'
         interval: 5
@@ -51162,15 +51419,15 @@ components:
       summary: Not approved yet.
       value:
         id: c2lnbi1pbi1leGFtcGxl
-        provider: unbiased
+        provider: xai
         status: pending
         detail: null
         interval: 5
     AiSignInApprovedExample:
-      summary: Approved, with the key kept for the person.
+      summary: Approved, with the sign-in kept for the person.
       value:
         id: c2lnbi1pbi1leGFtcGxl
-        provider: unbiased
+        provider: xai
         status: approved
         detail: null
         interval: 5

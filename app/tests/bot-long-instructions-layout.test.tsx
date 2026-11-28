@@ -1,9 +1,10 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { still } from "./page-still";
+import { test } from "./renderer-crash";
 
 /**
  * A Bot's instructions at the most they take, 5000 characters, in a real browser, in light and
@@ -270,6 +271,48 @@ describe.skipIf(!asked)("a Bot's instructions at 5000 characters", () => {
           await page.getByRole("button", { name: "Save" }).click();
           await page.getByRole("dialog").waitFor({ state: "hidden" });
           expect((await measure(page)).sideways).toBe(false);
+          await page.close();
+        }, 90_000);
+
+        /*
+         * The address step of a connected agent, with the hint that says how to give the Bot its
+         * full role and tool guidance under the address. It wraps inside the sheet, on a phone as
+         * well, and its links are there to press.
+         */
+        test(`New Bot's address step says how to give the Bot its full role and tool guidance, in ${engine}, ${theme}, ${window.width}px`, async () => {
+          const page = await open(engine, theme, window, "new-bot");
+          const name = page.getByLabel("Name");
+          await name.waitFor();
+          await name.fill("Expense Review");
+          // Styled first: unstyled, the sheet's backdrop lies over everything and takes the press.
+          await styled(page);
+          await page
+            .getByRole("button", { name: /^Bring your own agent/ })
+            .click();
+          const langChain = page.getByRole("button", { name: /^LangChain/ });
+          await langChain.waitFor();
+          await styled(page);
+          await langChain.click();
+          const address = page.getByLabel("Agent address");
+          await address.waitFor();
+          await address.fill("https://agent.example.com/ag-ui");
+          await styled(page);
+          await shoot(page, `new-bot-address-${at}.png`);
+          const hint = page.getByText(/your agent has to trust OpenBot/);
+          await hint.waitFor({ timeout: 5_000 });
+          const placed = await hint.evaluate((element) => {
+            const box = element.getBoundingClientRect();
+            return {
+              inside: box.left >= 0 && box.right <= innerWidth,
+              sideways:
+                document.documentElement.scrollWidth > innerWidth ||
+                document.body.scrollWidth > innerWidth,
+            };
+          });
+          expect(placed).toEqual({ inside: true, sideways: false });
+          expect(
+            await page.getByRole("link", { name: "LangGraph" }).isVisible(),
+          ).toBe(true);
           await page.close();
         }, 90_000);
 

@@ -27,7 +27,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { connectionName } from "@/lib/ai-connection/describe";
-import { providerById } from "@/lib/ai-connection/providers";
+import { providerById, providerRetired } from "@/lib/ai-connection/providers";
 import { markFor } from "@/lib/marks";
 import {
   canChoose,
@@ -192,21 +192,24 @@ export function ModelPicker({
 }) {
   if (!catalogue || (!canChoose(catalogue) && !allowSingle)) return null;
   const groups = pickerGroups(catalogue);
+  const fallback = connectionOf(catalogue, null);
   if (groups.length > 0) {
+    // A provider OpenBot no longer offers is never offered: nothing on it runs, or fixes it here.
+    const selectable = groups.filter((group) => !providerRetired(group));
+    if (selectable.length === 0) return null;
     // Several connections: the pick's own, and nothing selected while there is no default.
     const on = value ? connectionOf(catalogue, value.connection) : undefined;
     // A stopped connection may list nothing: its pick is still named, by its id.
     const selected =
       on?.models.find((model) => model.id === value?.model) ??
-      (on && !on.ready && value
+      (on && !on.ready && value?.model
         ? { id: value.model, label: value.model }
         : undefined);
-    const fallback = connectionOf(catalogue, null);
     return (
       <Picker
         catalogue={catalogue}
         className={className}
-        connections={groups}
+        connections={selectable}
         defaultConnection={fallback?.id}
         defaultModel={defaultModel ?? fallback?.default ?? catalogue.default}
         disabled={disabled || saving}
@@ -277,6 +280,7 @@ function Picker({
   className?: string;
 }) {
   const grouped = connections.length > 0;
+  const selectedTab = connections.find(({ id }) => id === selectedConnection);
   const { contains } = ComboboxPrimitive.useFilter();
   /** What is typed in the search, to say when no model matches: the efforts always do. */
   const [query, setQuery] = useState("");
@@ -335,7 +339,8 @@ function Picker({
           ])
         : catalogue.models.map((model) => ({ kind: "model", model })),
     };
-    if (!selected || !thinks(selected)) return [models];
+    if (!selected || (grouped && !selectedTab) || !thinks(selected))
+      return [models];
     const efforts: Choice[] = (selected.efforts ?? []).map((level) => ({
       kind: "effort",
       effort: level,
@@ -346,7 +351,15 @@ function Picker({
       efforts.unshift({ kind: "effort", effort: null, label: "Default" });
     const thinking: ChoiceGroup = { value: "thinking", items: efforts };
     return effortStep ? [thinking] : [models, thinking];
-  }, [catalogue.models, connections, listed, grouped, selected, effortStep]);
+  }, [
+    catalogue.models,
+    connections,
+    listed,
+    grouped,
+    selected,
+    selectedTab,
+    effortStep,
+  ]);
 
   const matches = (model: ModelOption, typed: string) =>
     contains(model.label, typed) || contains(model.id, typed);
@@ -409,8 +422,8 @@ function Picker({
         // Opened: on the connection in use, the default's while nothing is picked.
         if (next)
           setTab(
-            selectedConnection ??
-              defaultConnection ??
+            selectedTab?.id ??
+              connections.find(({ id }) => id === defaultConnection)?.id ??
               connections[0]?.id ??
               null,
           );

@@ -70,16 +70,6 @@ const cloudProviders = [
 ];
 
 /** Signs in through a device authorization that mints an API key, then uses it like a typed one. */
-const unbiased = {
-  id: "unbiased",
-  name: "Unbiased AI",
-  baseUrl: "https://api.unbiased.ai/v1",
-  model: "pareto",
-  keyUrl: "https://platform.unbiased.ai/dashboard/keys",
-  keyLink: "Get an Unbiased AI API key",
-};
-
-/** A gateway in front of many providers, with an API key and no sign-in. */
 const trustedRouter = {
   id: "trustedrouter",
   name: "TrustedRouter",
@@ -89,9 +79,19 @@ const trustedRouter = {
   keyLink: "Get a TrustedRouter API key",
 };
 
+/** A hosted endpoint with an API key and no sign-in. */
+const privatemode = {
+  id: "privatemode",
+  name: "Privatemode",
+  baseUrl: "https://proxyless-api.privatemode.ai/v1",
+  model: "glm-latest",
+  keyUrl: "https://portal.privatemode.ai",
+  keyLink: "Get a Privatemode API key",
+};
+
 const allProviders: Provider[] = [
   ...providers,
-  ...[...cloudProviders, unbiased, trustedRouter].map(
+  ...[...cloudProviders, trustedRouter, privatemode].map(
     (provider): Provider => ({
       id: provider.id,
       name: provider.name,
@@ -1230,61 +1230,68 @@ test("recorded Claude plan intent survives reopening beside an unrelated saved A
   ).toBeTruthy();
 });
 
-test("a saved compatible endpoint restores public fields and requests its scoped key", async () => {
-  invokeHandler = async (command) => {
-    if (command === "providers") return endpointProviders;
-    throw new Error(`unexpected protected command ${command}`);
-  };
-  const user = userEvent.setup({ document });
-  const choices: unknown[] = [];
-  const view = await renderPickerWithHeld(
-    {
-      OPENAI_BASE_URL: "https://models.example/v1",
-      OPENAI_CONTAINER_BASE_URL: "http://ollama:11434/v1",
-      BOT_MODEL: "local-model",
-      saved: {
-        model: "compatible-endpoint",
-        modelApiKeys: { compatible: true },
+// The second is the address of a provider OpenBot no longer offers: it resumes as any other endpoint.
+test.each(["https://models.example/v1", "https://api.retired-ai.example/v1"])(
+  "a saved compatible endpoint at %s restores public fields and requests its scoped key",
+  async (baseUrl) => {
+    invokeHandler = async (command) => {
+      if (command === "providers") return endpointProviders;
+      throw new Error(`unexpected protected command ${command}`);
+    };
+    const user = userEvent.setup({ document });
+    const choices: unknown[] = [];
+    const view = await renderPickerWithHeld(
+      {
+        OPENAI_BASE_URL: baseUrl,
+        OPENAI_CONTAINER_BASE_URL: "http://ollama:11434/v1",
+        BOT_MODEL: "local-model",
+        saved: {
+          model: "compatible-endpoint",
+          modelApiKeys: { compatible: true },
+        },
       },
-    },
-    (choice) => choices.push(choice),
-  );
-  expect(await view.findByLabelText("Base URL")).toHaveProperty(
-    "value",
-    "https://models.example/v1",
-  );
-  expect(view.getByLabelText("Model name")).toHaveProperty(
-    "value",
-    "local-model",
-  );
-  expect(
-    view.getByLabelText("API key, if the endpoint needs one"),
-  ).toHaveProperty("value", "");
-  expect(view.getByText(/A saved API key for this endpoint/)).toBeTruthy();
-  await user.click(view.getByRole("button", { name: "Continue" }));
-  expect(choices).toEqual([
-    {
+      (choice) => choices.push(choice),
+    );
+    expect(await view.findByLabelText("Base URL")).toHaveProperty(
+      "value",
+      baseUrl,
+    );
+    expect(view.getByLabelText("Model name")).toHaveProperty(
+      "value",
+      "local-model",
+    );
+    expect(
+      view.getByLabelText("API key, if the endpoint needs one"),
+    ).toHaveProperty("value", "");
+    expect(view.getByText(/A saved API key for this endpoint/)).toBeTruthy();
+    await user.click(view.getByRole("button", { name: "Continue" }));
+    expect(choices).toEqual([
+      {
+        provider: "openai-compatible",
+        login: "endpoint",
+        baseUrl,
+        containerBaseUrl: "http://ollama:11434/v1",
+        model: "local-model",
+        saved: true,
+      },
+    ]);
+    expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
+
+    await user.clear(view.getByLabelText("Base URL"));
+    await user.type(
+      view.getByLabelText("Base URL"),
+      "https://other.example/v1",
+    );
+    expect(view.queryByText(/A saved API key for this endpoint/)).toBeNull();
+    await user.click(view.getByRole("button", { name: "Continue" }));
+    expect(choices[1]).toEqual({
       provider: "openai-compatible",
       login: "endpoint",
-      baseUrl: "https://models.example/v1",
-      containerBaseUrl: "http://ollama:11434/v1",
+      baseUrl: "https://other.example/v1",
       model: "local-model",
-      saved: true,
-    },
-  ]);
-  expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
-
-  await user.clear(view.getByLabelText("Base URL"));
-  await user.type(view.getByLabelText("Base URL"), "https://other.example/v1");
-  expect(view.queryByText(/A saved API key for this endpoint/)).toBeNull();
-  await user.click(view.getByRole("button", { name: "Continue" }));
-  expect(choices[1]).toEqual({
-    provider: "openai-compatible",
-    login: "endpoint",
-    baseUrl: "https://other.example/v1",
-    model: "local-model",
-  });
-});
+    });
+  },
+);
 
 test("saved endpoint key can be explicitly replaced or omitted", async () => {
   invokeHandler = async (command) => {
@@ -1512,7 +1519,7 @@ test("a saved Google sign-in says it ended and its button opens Gemini's API key
   expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
 });
 
-for (const provider of [...cloudProviders, unbiased, trustedRouter]) {
+for (const provider of [...cloudProviders, trustedRouter, privatemode]) {
   test(`${provider.name} opens its API key page externally without sending entered credentials`, async () => {
     invokeHandler = async (command) => {
       if (command === "providers") return allProviders;
@@ -1696,100 +1703,6 @@ for (const provider of [...cloudProviders, unbiased, trustedRouter]) {
     });
   });
 }
-
-test("an Unbiased AI sign-in mints an API key that goes on as its endpoint credential", async () => {
-  const finish = deferred<string>();
-  invokeHandler = async (command) => {
-    if (command === "providers")
-      return allProviders.map((row) =>
-        row.id === "unbiased" ? { ...row, logins: ["oauth", "endpoint"] } : row,
-      );
-    if (command === "begin_model_oauth")
-      return {
-        attemptId: "unbiased-attempt",
-        url: "https://platform.unbiased.ai/activate?user_code=BCDF-GHJK",
-        userCode: "BCDF-GHJK",
-      };
-    if (command === "plugin:opener|open_url") return null;
-    if (command === "finish_model_oauth") return finish.promise;
-    throw new Error(`unexpected command ${command}`);
-  };
-  const choices: unknown[] = [];
-  const view = await renderPicker((choice) => choices.push(choice));
-  const user = userEvent.setup({ document: view.container.ownerDocument });
-  await user.click(await view.findByRole("radio", { name: /Unbiased AI/ }));
-  // Sign-in is the way in by default, with the gateway's model already named.
-  expect(
-    view.getByRole("tab", { name: "Sign in" }).getAttribute("aria-selected"),
-  ).toBe("true");
-  expect(view.getByLabelText("Model name")).toHaveProperty("value", "pareto");
-  await user.click(
-    view.getByRole("button", { name: "Sign in with Unbiased AI" }),
-  );
-  // The code is on screen for matching against the approval page, beside the link to it.
-  await view.findByText("BCDF-GHJK");
-  expect(invokeCalls).toContainEqual({
-    command: "plugin:opener|open_url",
-    args: { url: "https://platform.unbiased.ai/activate?user_code=BCDF-GHJK" },
-  });
-  await act(async () => {
-    finish.resolve("sk_pareto_synthetic");
-  });
-  await view.findByText("Signed in to Unbiased AI.");
-  await waitFor(() => expect(choices).toHaveLength(1), { timeout: 4000 });
-  expect(choices).toEqual([
-    {
-      provider: "openai-compatible",
-      login: "endpoint",
-      apiKey: "sk_pareto_synthetic",
-      baseUrl: "https://api.unbiased.ai/v1",
-      model: "pareto",
-    },
-  ]);
-  // Held, never shown.
-  expect(view.container.textContent).not.toContain("sk_pareto_synthetic");
-});
-
-test("a refused Unbiased AI sign-in shows why, submits nothing and keeps no key", async () => {
-  invokeHandler = async (command) => {
-    if (command === "providers")
-      return allProviders.map((row) =>
-        row.id === "unbiased" ? { ...row, logins: ["oauth", "endpoint"] } : row,
-      );
-    if (command === "begin_model_oauth")
-      return {
-        attemptId: "unbiased-attempt",
-        url: "https://platform.unbiased.ai/activate?user_code=BCDF-GHJK",
-        userCode: "BCDF-GHJK",
-      };
-    if (command === "plugin:opener|open_url") return null;
-    if (command === "finish_model_oauth")
-      throw new Error(
-        "Unbiased AI sign-in was not approved: the user denied this authorization.",
-      );
-    throw new Error(`unexpected command ${command}`);
-  };
-  const choices: unknown[] = [];
-  const view = await renderPicker((choice) => choices.push(choice));
-  const user = userEvent.setup({ document: view.container.ownerDocument });
-  await user.click(await view.findByRole("radio", { name: /Unbiased AI/ }));
-  await user.click(
-    view.getByRole("button", { name: "Sign in with Unbiased AI" }),
-  );
-  await view.findByText(/not approved: the user denied this authorization/);
-  // The wait is over: no code, no link, and the button offers a fresh start, not "again".
-  expect(view.queryByText("BCDF-GHJK")).toBeNull();
-  expect(view.queryByText("Signed in to Unbiased AI.")).toBeNull();
-  expect(
-    view.getByRole("button", { name: "Sign in with Unbiased AI" }),
-  ).toBeTruthy();
-  expect(view.getByRole("button", { name: "Continue" })).toHaveProperty(
-    "disabled",
-    true,
-  );
-  await new Promise((settle) => setTimeout(settle, 1200));
-  expect(choices).toEqual([]);
-});
 
 test("a chosen provider stands alone, and Change or Escape shows them all again", async () => {
   invokeHandler = async (command) => {

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
@@ -8,6 +8,7 @@ import type {
   Page,
 } from "playwright-core";
 import { compile } from "tailwindcss";
+import { test } from "./renderer-crash";
 
 /**
  * Return on a phone's keyboard starts a new line, and only the send button sends.

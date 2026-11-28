@@ -6,7 +6,6 @@
  */
 import type {
   beginPlanSignIn,
-  finishProviderSignIn,
   ProviderSignIn,
   prepareAiConnection,
 } from "@/lib/ai-connection/desktop";
@@ -103,14 +102,6 @@ const PROVIDERS = [
     caution: null,
   },
   {
-    id: "unbiased",
-    name: "Unbiased AI",
-    summary: "Sign in with Unbiased AI to use Pareto, or use an API key.",
-    logins: ["oauth", "endpoint"],
-    mark: "unbiased",
-    caution: null,
-  },
-  {
     id: "openai-compatible",
     name: "Any OpenAI-compatible endpoint",
     summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.",
@@ -164,9 +155,7 @@ export const PAGE_DEFAULTS: Partial<Record<PageCommand, unknown>> = {
     url: "https://openbot.example.com/provider-sign-in",
     userCode: "WXYZ-1234",
   } satisfies ProviderSignIn,
-  "plugin:openbot-desktop|finish_provider_sign_in": null satisfies Awaited<
-    ReturnType<typeof finishProviderSignIn>
-  >,
+  "plugin:openbot-desktop|finish_provider_sign_in": null,
   "plugin:openbot-desktop|cancel_provider_sign_in": null,
   "plugin:openbot-desktop|prepare_ai_connection": {
     ready: true,
