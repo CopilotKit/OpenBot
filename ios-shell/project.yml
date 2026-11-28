@@ -20,6 +20,7 @@ targets:
       - path: OpenBotShell
         excludes:
           - Info.plist
+          - OpenBotShell.entitlements
     info:
       path: OpenBotShell/Info.plist
       properties:
@@ -57,6 +58,10 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openbot.shell
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # Associated domains, for the hand-off's https callback (only this app can claim
+        # https://my.open.bot/api/auth/shell/callback). Takes effect only in a build signed with the
+        # team's profile; DEVELOPMENT_TEAM is still empty (TODO), and CI builds unsigned.
+        CODE_SIGN_ENTITLEMENTS: OpenBotShell/OpenBotShell.entitlements
         PRODUCT_NAME: OpenBotShell
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: NO
@@ -67,6 +72,8 @@ targets:
     platform: iOS
     sources:
       - path: OpenBotShellUITests
+      # Pure sign-in logic, tested without launching the app (HandoffConfigTests).
+      - path: OpenBotShell/HandoffConfig.swift
     dependencies:
       - target: OpenBotShell
     settings:

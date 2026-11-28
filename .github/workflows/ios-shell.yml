@@ -89,13 +89,16 @@ jobs:
             b_page="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3011/ || true)"
             a_handoff="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3010/api/auth/shell/handoff?challenge=$challenge" || true)"
             b_handoff="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3011/api/auth/shell/handoff?challenge=$challenge" || true)"
-            if [ "$a_page" = 200 ] && [ "$b_page" = 200 ] && [ "$a_handoff" = 200 ] && [ "$b_handoff" = 404 ]; then
+            a_config="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3010/api/auth/shell/config?platform=ios" || true)"
+            b_config="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3011/api/auth/shell/config?platform=ios" || true)"
+            if [ "$a_page" = 200 ] && [ "$b_page" = 200 ] && [ "$a_handoff" = 200 ] && [ "$b_handoff" = 404 ] \
+              && [ "$a_config" = 200 ] && [ "$b_config" = 404 ]; then
               echo "mock stacks are up (A hand-off $a_handoff, B hand-off $b_handoff)"
               exit 0
             fi
             sleep 1
           done
-          echo "mock stacks did not start: A $a_page/$a_handoff, B $b_page/$b_handoff"
+          echo "mock stacks did not start: A $a_page/$a_handoff/$a_config, B $b_page/$b_handoff/$b_config"
           tail -n 40 artifacts/mock-a.log artifacts/app-a.log artifacts/mock-b.log artifacts/app-b.log
           exit 1
 

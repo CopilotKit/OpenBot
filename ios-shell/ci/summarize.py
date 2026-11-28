@@ -98,6 +98,7 @@ SUITES = [
      lambda suite, name: suite.startswith("ShellFlow")),
     ("Web view basics (local probe site)", lambda suite, name: suite.startswith("ShellUITests")),
     ("Demo recording", lambda suite, name: suite.startswith("DemoTour")),
+    ("Unit tests (pure sign-in logic)", lambda suite, name: suite.startswith("HandoffConfig")),
 ]
 lines.append("## Tests\n")
 if not results:
@@ -174,8 +175,8 @@ if os.path.exists(diag_path):
                     parity.append(f"{short}: user agent {page.get('userAgent')}")
             if entry.get("kind") == "page-websocket":
                 parity.append(f"{short}: websocket {entry.get('event')} {str(entry.get('url', '')).split('?')[0]}")
-            if entry.get("kind") == "handoff-probe":
-                probes.append(f"{test}: status {entry.get('status')} supported {entry.get('supported')}")
+            if entry.get("kind") in ("handoff-probe", "handoff-config"):
+                probes.append(f"{test}: status {entry.get('status')} {entry.get('mode', entry.get('supported'))}")
             if test.startswith("testReal") and entry.get("kind") == "navigation-action" and entry.get("mainFrame"):
                 url = str(entry.get("url", ""))
                 trail = production_trails.setdefault(test, [])

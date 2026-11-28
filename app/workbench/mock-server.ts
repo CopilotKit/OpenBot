@@ -14,14 +14,17 @@
  *   # /api/auth/shell/enter. Everybody else is answered 401, like the workbench's app-signed-out scene.
  *   MOCK_SIGNED_OUT=1 bun app/workbench/mock-server.ts
  *
- *   # As a server without the phone app's sign-in hand-off: both /api/auth/shell/* answer 404.
+ *   # As a server without the phone app's sign-in hand-off: every /api/auth/shell/* answers 404.
  *   MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 bun app/workbench/mock-server.ts
  *
  * It listens on 127.0.0.1:${SERVER_PORT:-3001}. Besides the API it answers:
  *
  *   GET  /__mock/session                    {"signedIn": boolean}: whether a request with no cookie is
  *   POST /__mock/session {"signedIn": bool}   signed in, and to change it at run time.
- *   GET  /api/auth/shell/handoff?challenge=C[&auto=1]
+ *   GET  /api/auth/shell/config?platform=ios
+ *        What the phone app asks before signing in: {"handoff":true,"callback":"scheme",
+ *        "callbackUrl":"openbotshell://signed-in"}. 404 under MOCK_NO_HANDOFF.
+ *   GET  /api/auth/shell/handoff?challenge=C[&platform=ios][&auto=1]
  *        The page the phone app opens in its sign-in sheet. C is a PKCE S256 challenge (43
  *        characters of base64url). A page titled "Mock sign-in" with one link, #mock-sign-in, "Sign in
  *        as test person", to openbotshell://signed-in?ticket=T. T is single use and lasts 60 s.
@@ -483,6 +486,15 @@ async function start() {
             signedInByDefault = body.signedIn;
         }
         return Response.json({ signedIn: signedInByDefault });
+      }
+
+      if (path === "/api/auth/shell/config") {
+        if (!HANDOFF) return new Response("Not found", { status: 404 });
+        return Response.json({
+          handoff: true,
+          callback: "scheme",
+          callbackUrl: "openbotshell://signed-in",
+        });
       }
 
       if (

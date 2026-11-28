@@ -13,8 +13,15 @@ final class ShellController: NSObject, WebControllerDelegate {
     private let signInFlow: SignInFlow
     private let network = NetworkMonitor()
     private var started = false
-    /// What the hand-off probe last answered; nil until asked.
-    private var handoffSupported: Bool?
+    /// What the server's hand-off config last said: the sheet's callback, or nil (unknown, or none).
+    private var handoffMode: HandoffMode?
+    private var handoffSupported: Bool? {
+        switch handoffMode {
+        case .none: return nil
+        case .some(.scheme), .some(.https): return true
+        default: return false
+        }
+    }
     /// A sign-in renewal (hosted sign-in intercepted while signed in) is running.
     private var renewing = false
     /// Gives up on an enter URL that never leads to a signed-in page.
@@ -159,7 +166,7 @@ final class ShellController: NSObject, WebControllerDelegate {
         if let url = config.debugSheetURL {
             // A test opens an arbitrary page in the sheet to see what it does there.
             model.signIn = .sheet
-            signInFlow.presentSheet(url, ephemeral: true) { [weak self] outcome in
+            signInFlow.presentSheet(url, mode: .scheme, ephemeral: true) { [weak self] outcome in
                 guard let self = self else { return }
                 let name: String
                 switch outcome {
@@ -175,19 +182,19 @@ final class ShellController: NSObject, WebControllerDelegate {
         #endif
         let pair = PKCEPair.make()
         model.signIn = .probing
-        signInFlow.probe(handoffURL(challenge: pair.challenge)) { [weak self] result in
+        signInFlow.fetchConfig(base: config.baseURL, baseHost: config.baseHost) { [weak self] mode in
             guard let self = self, self.model.signIn == .probing else { return }
-            switch result {
-            case .supported:
-                self.handoffSupported = true
-                self.presentSheet(pair: pair, returnTo: "/")
-            case .unsupported(let status, _) where status == nil:
+            switch mode {
+            case .unreachable:
                 // No answer at all: the lock screen, not the web sign-in.
                 self.model.signIn = .idle
-                self.showLoadFailure(.signIn, detail: "handoff-probe-no-answer")
-            case .unsupported:
-                self.handoffSupported = false
+                self.showLoadFailure(.signIn, detail: "handoff-config-no-answer")
+            case .webSignIn:
+                self.handoffMode = mode
                 self.startWebSignIn()
+            case .scheme, .https:
+                self.handoffMode = mode
+                self.presentSheet(pair: pair, mode: mode, returnTo: "/")
             }
         }
     }
@@ -201,7 +208,7 @@ final class ShellController: NSObject, WebControllerDelegate {
     }
 
     private func handoffURL(challenge: String) -> URL {
-        var query = "challenge=\(challenge)"
+        var query = "challenge=\(challenge)&platform=ios"
         #if DEBUG
         if config.handoffAuto { query += "&auto=1" }
         #endif
@@ -221,9 +228,9 @@ final class ShellController: NSObject, WebControllerDelegate {
         return components?.url ?? config.url("/sign?native-sign-in=failed")
     }
 
-    private func presentSheet(pair: PKCEPair, returnTo: String) {
+    private func presentSheet(pair: PKCEPair, mode: HandoffMode, returnTo: String) {
         if !renewing { model.signIn = .sheet }
-        signInFlow.presentSheet(handoffURL(challenge: pair.challenge), ephemeral: config.ephemeralSignIn) { [weak self] outcome in
+        signInFlow.presentSheet(handoffURL(challenge: pair.challenge), mode: mode, ephemeral: config.ephemeralSignIn) { [weak self] outcome in
             guard let self = self else { return }
             switch outcome {
             case .ticket(let ticket):
@@ -234,9 +241,13 @@ final class ShellController: NSObject, WebControllerDelegate {
                 } else {
                     self.model.signIn = .idle
                 }
-            case .failed:
+            case .failed(let reason):
                 if self.renewing {
                     self.renewing = false
+                } else if reason == "could not start" || reason.hasPrefix("https callback") {
+                    // The sheet could not open (or cannot take an https callback here): the web sign-in.
+                    self.model.signIn = .idle
+                    self.startWebSignIn()
                 } else {
                     self.model.signIn = .idle
                     self.model.signInMessage = "Sign-in didn't finish. Try again."
@@ -435,18 +446,18 @@ final class ShellController: NSObject, WebControllerDelegate {
         let returnTo = web.currentPath
         let pair = PKCEPair.make()
         diagnostics.log("renewal", ["returnTo": returnTo, "handoffKnown": handoffSupported != nil])
-        if handoffSupported == true {
-            presentSheet(pair: pair, returnTo: returnTo)
+        if let mode = handoffMode, handoffSupported == true {
+            presentSheet(pair: pair, mode: mode, returnTo: returnTo)
             return true
         }
-        signInFlow.probe(handoffURL(challenge: pair.challenge)) { [weak self] result in
+        signInFlow.fetchConfig(base: config.baseURL, baseHost: config.baseHost) { [weak self] mode in
             guard let self = self else { return }
-            switch result {
-            case .supported:
-                self.handoffSupported = true
-                self.presentSheet(pair: pair, returnTo: returnTo)
-            case .unsupported:
-                self.handoffSupported = false
+            switch mode {
+            case .scheme, .https:
+                self.handoffMode = mode
+                self.presentSheet(pair: pair, mode: mode, returnTo: returnTo)
+            case .webSignIn, .unreachable:
+                if case .webSignIn = mode { self.handoffMode = mode }
                 self.renewing = false
                 self.web.loadHostedSignInAfterAll(url)
             }

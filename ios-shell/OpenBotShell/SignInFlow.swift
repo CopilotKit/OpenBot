@@ -9,11 +9,6 @@ final class SignInFlow: NSObject, ASWebAuthenticationPresentationContextProvidin
     static let callbackScheme = "openbotshell"
     static let timeoutSeconds: TimeInterval = 15
 
-    enum Probe {
-        case supported(status: Int)
-        case unsupported(status: Int?, reason: String)
-    }
-
     enum SheetOutcome {
         case ticket(String)
         case cancelled
@@ -40,32 +35,38 @@ final class SignInFlow: NSObject, ASWebAuthenticationPresentationContextProvidin
         super.init()
     }
 
-    /// GET the hand-off URL. 404 or a network error: no hand-off. Anything else: it is there.
-    func probe(_ url: URL, completion: @escaping (Probe) -> Void) {
+    /// GET `<base>/api/auth/shell/config?platform=ios` (no cookies, no redirects, 15 s) and decide.
+    func fetchConfig(base: URL, baseHost: String, completion: @escaping (HandoffMode) -> Void) {
+        guard let url = URL(string: base.absoluteString + "/api/auth/shell/config?platform=ios") else {
+            completion(.webSignIn(reason: "bad-url"))
+            return
+        }
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"
         request.httpShouldHandleCookies = false
-        let task = probeSession.dataTask(with: request) { [weak self] _, response, error in
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        var httpsSupported = false
+        if #available(iOS 17.4, *) { httpsSupported = true }
+        let task = probeSession.dataTask(with: request) { [weak self] data, response, error in
             let status = (response as? HTTPURLResponse)?.statusCode
-            let result: Probe
-            if let error = error as NSError? {
-                result = .unsupported(status: nil, reason: "\(error.domain) \(error.code)")
-            } else if status == 404 {
-                result = .unsupported(status: 404, reason: "404")
-            } else {
-                result = .supported(status: status ?? 0)
-            }
+            let mode = HandoffConfig.decide(status: error == nil ? status : nil, body: data,
+                                            baseHost: baseHost, httpsCallbackSupported: httpsSupported)
             DispatchQueue.main.async {
-                switch result {
-                case .supported(let status):
-                    self?.diagnostics.log("handoff-probe", ["status": status, "supported": true])
-                case .unsupported(let status, let reason):
-                    self?.diagnostics.log("handoff-probe", ["status": status ?? -1, "supported": false, "reason": reason])
-                }
-                completion(result)
+                var entry: [String: Any] = ["status": status ?? -1, "mode": SignInFlow.describe(mode)]
+                if let error = error as NSError? { entry["error"] = "\(error.domain) \(error.code)" }
+                self?.diagnostics.log("handoff-config", entry)
+                completion(mode)
             }
         }
         task.resume()
+    }
+
+    static func describe(_ mode: HandoffMode) -> String {
+        switch mode {
+        case .unreachable(let reason): return "unreachable " + reason
+        case .webSignIn(let reason): return "web " + reason
+        case .scheme: return "scheme"
+        case .https: return "https"
+        }
     }
 
     /// Whether the server answers at all (any HTTP status), for retrying after a failure.
@@ -78,10 +79,10 @@ final class SignInFlow: NSObject, ASWebAuthenticationPresentationContextProvidin
         }.resume()
     }
 
-    /// Presents the system sign-in sheet on `url` and waits for `openbotshell://signed-in?ticket=`.
-    func presentSheet(_ url: URL, ephemeral: Bool, completion: @escaping (SheetOutcome) -> Void) {
+    /// Presents the system sign-in sheet on `url` and waits for the callback `mode` names.
+    func presentSheet(_ url: URL, mode: HandoffMode, ephemeral: Bool, completion: @escaping (SheetOutcome) -> Void) {
         session?.cancel()
-        let session = ASWebAuthenticationSession(url: url, callbackURLScheme: SignInFlow.callbackScheme) { [weak self] callbackURL, error in
+        let handler: (URL?, Error?) -> Void = { [weak self] callbackURL, error in
             DispatchQueue.main.async {
                 self?.session = nil
                 if let error = error as NSError? {
@@ -94,12 +95,7 @@ final class SignInFlow: NSObject, ASWebAuthenticationPresentationContextProvidin
                     }
                     return
                 }
-                guard let callbackURL = callbackURL,
-                      callbackURL.scheme?.lowercased() == SignInFlow.callbackScheme,
-                      callbackURL.host == "signed-in",
-                      let ticket = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?
-                        .queryItems?.first(where: { $0.name == "ticket" })?.value,
-                      !ticket.isEmpty else {
+                guard let ticket = HandoffConfig.ticket(from: callbackURL, mode: mode) else {
                     self?.diagnostics.log("sheet", ["result": "no-ticket", "host": callbackURL?.host ?? ""])
                     completion(.failed("no ticket"))
                     return
@@ -108,10 +104,23 @@ final class SignInFlow: NSObject, ASWebAuthenticationPresentationContextProvidin
                 completion(.ticket(ticket))
             }
         }
+        let session: ASWebAuthenticationSession
+        switch mode {
+        case .https(let host, let path):
+            if #available(iOS 17.4, *) {
+                session = ASWebAuthenticationSession(url: url, callback: .https(host: host, path: path), completionHandler: handler)
+            } else {
+                completion(.failed("https callback needs iOS 17.4"))
+                return
+            }
+        default:
+            session = ASWebAuthenticationSession(url: url, callbackURLScheme: SignInFlow.callbackScheme, completionHandler: handler)
+        }
         session.presentationContextProvider = self
         session.prefersEphemeralWebBrowserSession = ephemeral
         self.session = session
-        diagnostics.log("sheet", ["result": "presenting", "url": Diagnostics.redact(url), "ephemeral": ephemeral])
+        diagnostics.log("sheet", ["result": "presenting", "url": Diagnostics.redact(url), "ephemeral": ephemeral,
+                                  "callback": SignInFlow.describe(mode)])
         if !session.start() {
             self.session = nil
             diagnostics.log("sheet", ["result": "could-not-start"])

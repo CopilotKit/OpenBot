@@ -9,12 +9,18 @@ What is native:
   looks for the web app's session cookie (`better-auth.session_token` or
   `__Secure-better-auth.session_token` on the base host) in the web view's cookie store: there, it
   goes straight to the tabs; not there, this screen.
-- **Sign-in.** Sign in makes a PKCE pair and asks the server for the hand-off
-  (`GET /api/auth/shell/handoff?challenge=…`, no cookies, no redirects followed). 404 or no answer:
-  the web app's own sign-in opens full screen in the web view (`/sign?native-sign-in=web`) with a
-  Cancel bar. Anything else: the system sign-in sheet (`ASWebAuthenticationSession`, callback scheme
-  `openbotshell`, which is NOT registered in Info.plist) opens the hand-off; its ticket and the
-  verifier go to `/api/auth/shell/enter` in the web view, which sets the session cookie there. While
+- **Sign-in.** Sign in makes a PKCE pair and asks the server how to sign in:
+  `GET /api/auth/shell/config?platform=ios` (no cookies, no redirects followed, 15 s;
+  `HandoffConfig.swift` decides, strictly). No answer: the lock screen. 404, `{"handoff":false}` or
+  anything unexpected: the web app's own sign-in, full screen in the web view
+  (`/sign?native-sign-in=web`) with a Cancel bar. `{"handoff":true,"callback":"scheme",…}`: the
+  system sign-in sheet (`ASWebAuthenticationSession`) opens `/api/auth/shell/handoff?challenge=…&platform=ios`
+  and finishes on `openbotshell://signed-in?ticket=…` (the scheme is NOT registered in Info.plist:
+  only the sheet the app started can take it). `{"handoff":true,"callback":"https","callbackUrl":
+  "<base>/api/auth/shell/callback"}`: the same, finishing on that https address, which only this
+  app can claim (iOS 17.4+, associated domains; below 17.4, or if the sheet cannot start, the web
+  sign-in). The ticket and the verifier then go to `/api/auth/shell/enter` in the web view, which
+  sets the session cookie there. While
   signed in, the hosted sign-in's renewal (`/api/auth/hosted/sign-in`) runs in the sheet the same
   way when the server has the hand-off.
 - **The tab bar.** A UIKit `UITabBar` under the web view: Conversations, Home, Bots. A tap asks the
@@ -74,6 +80,14 @@ logged with the prefix `OPENBOT_DIAG `. Cookie values, query string values, toke
 response bodies are never recorded.
 
 On a simulator: `cat "$(xcrun simctl get_app_container booted ai.openbot.shell data)/Documents/diagnostics.jsonl"`.
+
+## Associated domains (TODO: Team ID)
+
+`OpenBotShell.entitlements` claims `webcredentials:my.open.bot` and `applinks:my.open.bot`, for the
+hand-off's https callback. It takes effect only in a build signed with the team's provisioning
+profile, with `DEVELOPMENT_TEAM` set in `project.yml` (still empty: a known TODO) and the
+association file (`/.well-known/apple-app-site-association`, naming `<TeamID>.ai.openbot.shell`)
+live on my.open.bot. CI builds unsigned, so the https callback cannot be proven here.
 
 ## Test hooks (DEBUG builds only)
 
