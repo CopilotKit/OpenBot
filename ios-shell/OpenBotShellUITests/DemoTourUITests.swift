@@ -100,9 +100,11 @@ final class DemoTourUITests: ShellTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 15))
         pause(1)
         row.tap()
-        let answer = webText(app, "All three moved to per-seat pricing this year.")
-        _ = answer.waitForExistence(timeout: 15)
-        pause(1)
+        // The conversation's message box (it takes the focus as the conversation opens). Waiting on
+        // the answer's text instead sat out its whole timeout in the last recording: the web view
+        // does not expose that paragraph as one static text.
+        _ = app.webViews.textViews.firstMatch.waitForExistence(timeout: 15)
+        pause(1.2)
         let box = app.webViews.textViews.firstMatch
         if box.waitForExistence(timeout: 5), focusComposer(app, box) {
             box.typeText("What changed since?")
