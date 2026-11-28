@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,7 +9,7 @@
 <body>
 <h1>Edges</h1>
 <p>Dialogs, other schemes, a download and a server error, for the shell's tests.</p>
-<button id="own-alert" onclick="alert('Hello from the page')">Own alert</button>
+<button type="button" id="own-alert" onclick="alert('Hello from the page')">Own alert</button>
 <a id="custom-link" href="openbot-test-scheme://tapped">Custom scheme link</a>
 <a id="download-link" href="/download">Download a file</a>
 <a id="error-link" href="/status/503">A server error page</a>
@@ -17,7 +17,7 @@
 <iframe src="http://127.0.0.1:8766/alert.html" width="200" height="40" title="another site"></iframe>
 <script>
   // A scheme opened by script with no tap: the shell must drop it.
-  setTimeout(function () { location.href = "openbot-test-scheme://no-tap"; }, 500);
+  setTimeout(() => { location.href = "openbot-test-scheme://no-tap"; }, 500);
 </script>
 </body>
 </html>

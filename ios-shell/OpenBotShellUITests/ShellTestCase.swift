@@ -102,12 +102,12 @@ class ShellTestCase: XCTestCase {
         return keyboard.waitForExistence(timeout: 5)
     }
 
-    /// A person's drag down the page, from the empty top of the web view to near its bottom (a drag
+    /// A person's drag down the page, from the empty top of the web view to the keyboard (a drag
     /// that starts on the focused message box moves the text, not the page).
     func dragPageDown(_ app: XCUIApplication) {
         let web = app.webViews.firstMatch
         web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08))
-            .press(forDuration: 0.05, thenDragTo: web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
+            .press(forDuration: 0.05, thenDragTo: web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.995)))
     }
 
     /// True in the video workflow: scenes are paced for watching and the background step is short.
