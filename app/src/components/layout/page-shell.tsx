@@ -92,6 +92,8 @@ export function PageShell({
         </Button>
       ) : (
         <Button
+          // In the phone app, a whole tap target: 44px tall in the bar's 56.
+          className={nativeShell() ? "h-11" : undefined}
           variant="ghost"
           render={(props) => <Link {...back.linkProps} {...props} />}
         >

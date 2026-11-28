@@ -42,6 +42,7 @@ import {
   shouldClaimPaste,
 } from "@/lib/channels/attachments";
 import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { newId } from "@/lib/new-id";
 import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { cn } from "@/lib/utils";
@@ -1828,7 +1829,8 @@ export function Composer({
     draft.isEmpty && draft.attachments.length === 0 ? voiceCall : undefined;
   const actionClassName = cn(
     "rounded-full p-0",
-    compact ? "size-8 self-end" : "size-7",
+    // The phone app draws Home's at the conversation's 32px, the easier size to hit.
+    compact ? "size-8 self-end" : nativeShell() ? "size-8" : "size-7",
   );
   const primaryAction = canStop ? (
     <Button
@@ -2138,7 +2140,10 @@ export function Composer({
               {attachmentsEnabled ? (
                 <Button
                   aria-label="Attach a file"
-                  className="size-7 rounded-full p-0"
+                  className={cn(
+                    "rounded-full p-0",
+                    nativeShell() ? "size-8" : "size-7",
+                  )}
                   data-slot="composer-attach"
                   disabled={disabled}
                   onClick={() => fileInputRef.current?.click()}
