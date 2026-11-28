@@ -64,7 +64,7 @@ export const GetWindowsComputerResponse = zod
               .string()
               .optional()
               .describe(
-                "Why a person has it: taken (they took over in OpenBot) or interference (the Windows computer saw them use it while the Bot was).",
+                "Why it is with whoever has it. A person: taken (they took over in OpenBot) or interference (the Windows computer saw them use it while the Bot was). The Bot: idle (the Windows computer handed it back because the person who had taken it over had not used it for a while); absent when it was handed back by name.",
               ),
             snapshotRequired: zod
               .boolean()
@@ -175,7 +175,7 @@ export const TakeWindowsComputerControlResponse = zod
       .string()
       .optional()
       .describe(
-        "Why a person has it: taken (they took over in OpenBot) or interference (the Windows computer saw them use it while the Bot was).",
+        "Why it is with whoever has it. A person: taken (they took over in OpenBot) or interference (the Windows computer saw them use it while the Bot was). The Bot: idle (the Windows computer handed it back because the person who had taken it over had not used it for a while); absent when it was handed back by name.",
       ),
     snapshotRequired: zod
       .boolean()
@@ -219,7 +219,7 @@ export const ReleaseWindowsComputerControlResponse = zod
       .string()
       .optional()
       .describe(
-        "Why a person has it: taken (they took over in OpenBot) or interference (the Windows computer saw them use it while the Bot was).",
+        "Why it is with whoever has it. A person: taken (they took over in OpenBot) or interference (the Windows computer saw them use it while the Bot was). The Bot: idle (the Windows computer handed it back because the person who had taken it over had not used it for a while); absent when it was handed back by name.",
       ),
     snapshotRequired: zod
       .boolean()
