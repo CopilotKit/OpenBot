@@ -714,13 +714,6 @@ paths:
                   provider: anthropic
                   login: api-key
                   apiKey: sk-ant-example
-              signedIn:
-                value:
-                  provider: unbiased
-                  login: endpoint
-                  baseUrl: https://api.unbiased.ai/v1
-                  model: pareto
-                  useSavedKey: true
               chatgptPlan:
                 value:
                   provider: openai
@@ -834,8 +827,7 @@ paths:
         Desktop listens on; ChatGPT's browser sign-in always redirects to
         localhost:1455. Approved, what the
         provider handed OpenBot is kept for the person alone, never sent to
-        the browser: an Unbiased AI key as a saved key (connect with
-        useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login
+        the browser: a Claude or ChatGPT plan's sign-in (connect with login
         plan), or an xAI sign-in (connect with login oauth). The
         server renews a sign-in that expires itself. Only the person
         themselves may sign in, and only where available is true. Google
@@ -853,9 +845,9 @@ paths:
             schema:
               $ref: '#/components/schemas/AiSignInInput'
             examples:
-              unbiased:
+              xai:
                 value:
-                  provider: unbiased
+                  provider: xai
               chatgpt:
                 value:
                   provider: openai
@@ -1264,8 +1256,8 @@ paths:
         the organization, for a provider listAiConnections names in signIns.
         It works as startPersonalAiSignIn does, and what the provider hands
         back is kept for the organization: connect it with
-        connectAiConnection and login plan or oauth (or useSavedKey for an
-        Unbiased AI key). The server renews it itself. Offered on OpenBot
+        connectAiConnection and login plan or oauth. The server renews it
+        itself. Offered on OpenBot
         Cloud and a self-hosted OpenBot; OpenBot Desktop running its own
         OpenBot keeps its own plan sign-in and offers none here. Only an
         administrator of the organization may sign in for it.
@@ -1947,7 +1939,7 @@ components:
       properties:
         code:
           type: string
-          x-extensible-enum: [sign-in-ended, key-refused, unreachable, no-key, no-default, sign-in-retired]
+          x-extensible-enum: [sign-in-ended, key-refused, unreachable, no-key, no-default, sign-in-retired, provider-retired]
           description: >-
             sign-in-ended: the provider stopped renewing the sign-in, so it
             has to be signed in to again. key-refused: the provider refuses
@@ -1958,7 +1950,10 @@ components:
             offers this provider's sign-in (a Google sign-in for Gemini), so
             it can't run, and signing in again isn't offered. Saving a key on
             the same connection fixes it: its id stays, so every Bot that used
-            it runs on the key with nothing else to change.
+            it runs on the key with nothing else to change. provider-retired:
+            OpenBot no longer offers the connection's provider at all, so it
+            can't run and nothing on it fixes it. It is removed, and another AI
+            connected in its place.
         detail:
           type: string
           description: One sentence a person reads, saying what to do.
@@ -2023,8 +2018,10 @@ components:
             this list (startAiSignIn for the organization,
             startPersonalAiSignIn for a person). Every provider not listed
             connects with a key or an address.
+          # Keep the released list's values when a key-only provider is added.
           items:
-            $ref: '#/components/schemas/AiConnectionProvider'
+            type: string
+            enum: [openai, anthropic, google, xai, trustedrouter, openai-compatible]
     ModelChoice:
       type: object
       description: >-
@@ -2130,27 +2127,31 @@ components:
       type: string
       description: >-
         The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic:
-        Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI.
-        trustedrouter: TrustedRouter. openai-compatible: any server that
-        speaks OpenAI's API, at an address given.
-      enum: [openai, anthropic, google, xai, unbiased, trustedrouter, openai-compatible]
+        Anthropic. google: Google Gemini. xai: xAI. trustedrouter:
+        TrustedRouter. privatemode: Privatemode. openai-compatible: any server
+        that speaks OpenAI's API, at an address given.
+      enum: [openai, anthropic, google, xai, trustedrouter, privatemode, openai-compatible]
     AiConnectionProviderAnswer:
       type: string
-      x-extensible-enum: [openai, anthropic, google, xai, unbiased, trustedrouter, openai-compatible]
+      x-extensible-enum: [openai, anthropic, google, xai, trustedrouter, privatemode, openai-compatible]
       description: >-
         The AI provider OpenBot's Bots run on, as the server answers it.
         openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai:
-        xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter.
+        xAI. trustedrouter: TrustedRouter. privatemode: Privatemode.
         openai-compatible: any server that speaks OpenAI's API, at an address
         given. The list can grow: a client shows a provider it doesn't know
-        by its id. A request still names one of AiConnectionProvider.
+        by its id. A request still names one of AiConnectionProvider. A
+        connection saved for a provider OpenBot no longer offers is still
+        listed, under the id it was saved with, so it can be removed: it is
+        never ready, its problem is provider-retired, and it is never accepted
+        again.
     AiConnectionLogin:
       type: string
       description: >-
         How OpenBot signs in to the provider. plan: the person's Claude or
         ChatGPT plan (openai, anthropic). api-key: a key from the provider
         (openai, anthropic). endpoint: an address and, where it asks for one,
-        a key (google, xai, unbiased, trustedrouter, openai-compatible).
+        a key (google, xai, trustedrouter, privatemode, openai-compatible).
         oauth: the person's xAI sign-in (xai). A Google sign-in (google,
         oauth) saved before Gemini took an API key only is still listed,
         with the problem sign-in-retired, and is never accepted again.
@@ -2267,8 +2268,8 @@ components:
       additionalProperties: false
       description: >-
         The connection to switch to. openai and anthropic take plan or
-        api-key; xai takes endpoint or oauth; google, unbiased,
-        trustedrouter and openai-compatible take endpoint. Any other pair is
+        api-key; xai takes endpoint or oauth; google, trustedrouter,
+        privatemode and openai-compatible take endpoint. Any other pair is
         refused: google with oauth is refused with the words of the problem
         sign-in-retired.
       required: [provider, login]
@@ -2342,7 +2343,7 @@ components:
           description: >-
             The providers the server can sign the person in to itself
             (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan
-            (anthropic), an xAI sign-in, and Unbiased AI, each where
+            (anthropic), and an xAI sign-in, each where
             this server is set up for it. Each still connects with a key or an
             address too, and every provider not listed connects only that way.
           items:
@@ -2935,7 +2936,7 @@ components:
         uses: personal
         required: true
         available: true
-        signIns: [openai, anthropic, xai, unbiased]
+        signIns: [openai, anthropic, xai]
     PersonalAiConnectionOrganizationExample:
       summary: Nothing of their own, so their runs use the organization's.
       value:
@@ -2956,7 +2957,7 @@ components:
         uses: organization
         required: true
         available: true
-        signIns: [openai, anthropic, xai, unbiased]
+        signIns: [openai, anthropic, xai]
     PersonalAiConnectionNoneExample:
       summary: Neither theirs nor the organization's, so they connect one first.
       value:
@@ -2977,13 +2978,13 @@ components:
         uses: none
         required: true
         available: true
-        signIns: [openai, anthropic, xai, unbiased]
+        signIns: [openai, anthropic, xai]
     AiSignInExample:
-      summary: An Unbiased AI sign-in, waiting for approval.
+      summary: An xAI sign-in, waiting for approval.
       value:
         id: c2lnbi1pbi1leGFtcGxl
-        provider: unbiased
-        url: https://platform.unbiased.ai/activate?user_code=BCDF-GHJK
+        provider: xai
+        url: https://accounts.x.ai/oauth2/device?user_code=BCDF-GHJK
         userCode: BCDF-GHJK
         expiresAt: '2026-11-21T09:10:00.000Z'
         interval: 5
@@ -3030,15 +3031,15 @@ components:
       summary: Not approved yet.
       value:
         id: c2lnbi1pbi1leGFtcGxl
-        provider: unbiased
+        provider: xai
         status: pending
         detail: null
         interval: 5
     AiSignInApprovedExample:
-      summary: Approved, with the key kept for the person.
+      summary: Approved, with the sign-in kept for the person.
       value:
         id: c2lnbi1pbi1leGFtcGxl
-        provider: unbiased
+        provider: xai
         status: approved
         detail: null
         interval: 5

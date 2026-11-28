@@ -112,7 +112,7 @@ export const getGetPersonalAiConnectionResponseMock =
     uses: "personal",
     required: true,
     available: true,
-    signIns: ["openai", "anthropic", "xai", "unbiased"],
+    signIns: ["openai", "anthropic", "xai"],
   });
 
 export const getReplacePersonalAiConnectionResponseMock =
@@ -133,7 +133,7 @@ export const getReplacePersonalAiConnectionResponseMock =
     uses: "personal",
     required: true,
     available: true,
-    signIns: ["openai", "anthropic", "xai", "unbiased"],
+    signIns: ["openai", "anthropic", "xai"],
   });
 
 export const getDeletePersonalAiConnectionResponseMock =
@@ -154,13 +154,13 @@ export const getDeletePersonalAiConnectionResponseMock =
     uses: "organization",
     required: true,
     available: true,
-    signIns: ["openai", "anthropic", "xai", "unbiased"],
+    signIns: ["openai", "anthropic", "xai"],
   });
 
 export const getStartPersonalAiSignInResponseMock = (): AiSignIn => ({
   id: "c2lnbi1pbi1leGFtcGxl",
-  provider: "unbiased",
-  url: "https://platform.unbiased.ai/activate?user_code=BCDF-GHJK",
+  provider: "xai",
+  url: "https://accounts.x.ai/oauth2/device?user_code=BCDF-GHJK",
   userCode: "BCDF-GHJK",
   expiresAt: "2026-11-21T09:10:00.000Z",
   interval: 5,
@@ -169,7 +169,7 @@ export const getStartPersonalAiSignInResponseMock = (): AiSignIn => ({
 
 export const getGetPersonalAiSignInResponseMock = (): AiSignInStatus => ({
   id: "c2lnbi1pbi1leGFtcGxl",
-  provider: "unbiased",
+  provider: "xai",
   status: "pending",
   detail: null,
   interval: 5,
@@ -267,7 +267,7 @@ export const getStartAiSignInResponseMock = (): AiSignIn => ({
 
 export const getGetAiSignInResponseMock = (): AiSignInStatus => ({
   id: "c2lnbi1pbi1leGFtcGxl",
-  provider: "unbiased",
+  provider: "xai",
   status: "pending",
   detail: null,
   interval: 5,

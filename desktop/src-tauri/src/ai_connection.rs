@@ -252,7 +252,6 @@ fn endpoint_provider(base_url: &str) -> &'static str {
     match host.as_deref() {
         Some("generativelanguage.googleapis.com") => "google",
         Some("api.x.ai") => "xai",
-        Some("api.unbiased.ai") => "unbiased",
         Some("api.trustedrouter.com") => "trustedrouter",
         _ => "openai-compatible",
     }
@@ -638,7 +637,7 @@ pub struct AiConnection {
     /// The model named on the setup screen. Only an address or a provider sign-in names one; with a
     /// key or a plan the server picks the provider's own.
     pub model: Option<String>,
-    /// The host of a custom address, for the page to tell Gemini, xAI, Unbiased AI and TrustedRouter
+    /// The host of a custom address, for the page to tell Gemini, xAI and TrustedRouter
     /// apart from a person's own server. Only the host: an address can carry a password or a key.
     pub endpoint_host: Option<String>,
 }
