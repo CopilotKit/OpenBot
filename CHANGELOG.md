@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **A Conversations page.** `/conversations` lists every conversation, pinned first, with
+  search and New conversation, as the sidebar's Conversations panel does. Nothing links to it from
+  the sidebar. It is the page behind the Conversations tab of a phone app that shows the web app in
+  a native shell: inside such a shell (it names itself in its user agent) the web app draws only
+  the page, without its sidebar, and leaves sign-in and notifications to the shell. A browser, and
+  OpenBot Desktop, behave as before.
+
 - **Bots on Gemini 3 no longer stop at their second tool step.** On a Gemini key, through OpenBot
   Cloud's AI connection or a key saved as Google's OpenAI-compatible endpoint, a Bot on the
   TypeScript LangGraph engine stopped partway through a task with Google's "Function call is missing
