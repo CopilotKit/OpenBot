@@ -2,7 +2,13 @@ import { IconMessagePlus, IconSearch } from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { PageEmpty, PageRows } from "@/components/layout/page-shell";
 import { SectionPanel } from "@/components/layout/section-panel";
 import {
@@ -37,8 +43,8 @@ import {
 } from "@/lib/settings/message-list";
 import { delegatingConversationsQueryOptions } from "@/lib/tasks/queries";
 import { Button } from "../ui/button";
-import { Separator } from "../ui/separator";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
+import { Separator } from "../ui/separator";
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
 
@@ -358,7 +364,20 @@ export function SearchResults({
  * a search over the whole history and New conversation at the top. Today's roster, moved beside the
  * strip and otherwise unchanged.
  */
-export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
+export function ConversationsPanel({
+  hidden = false,
+  accessory,
+  saysLoadFailure = false,
+}: {
+  hidden?: boolean;
+  /** At the end of the title's row, after New conversation: the phone app's account button. */
+  accessory?: ReactNode;
+  /**
+   * Whether a first page that could not be read is said, with Try again: on the phone app's Chats
+   * tab, where this panel is the whole page and an empty one would read as no conversations.
+   */
+  saysLoadFailure?: boolean;
+}) {
   const emphasis = useMessageListEmphasis();
   const [view] = useConversationView();
   const channels = useInfiniteQuery(channelListQueryOptions());
@@ -419,6 +438,7 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
           <IconMessagePlus />
         </Button>
       }
+      accessory={accessory}
     >
       <SidebarContent ref={scrollRoot} className="scroll-fade-b">
         <SidebarMenu>
@@ -471,6 +491,29 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
                  * and quotes it back (see SearchResults). Told "you don't have channels yet" while
                  * holding a typo, a person reads their conversations as gone.
                  */}
+                {saysLoadFailure && !channels.data && channels.isError ? (
+                  <div className="px-2 py-3 text-center">
+                    <p
+                      role="alert"
+                      className="mb-2 text-xs text-muted-foreground"
+                    >
+                      {loadFailure(
+                        channels.error,
+                        channels.error?.message ||
+                          "Couldn't load your conversations.",
+                      )}
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full text-xs"
+                      disabled={channels.isFetching}
+                      onClick={() => void channels.refetch()}
+                    >
+                      Try again
+                    </Button>
+                  </div>
+                ) : null}
                 {channels.data?.length === 0 ? (
                   <div className="py-4">
                     {/*

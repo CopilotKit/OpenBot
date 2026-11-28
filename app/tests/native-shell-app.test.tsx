@@ -29,6 +29,8 @@ import userEvent from "@testing-library/user-event";
 import { type ReactNode, useEffect, useState } from "react";
 import { NativeSignedOut } from "@/components/auth/native-signed-out";
 import { ShellAccountMenu } from "@/components/layout/native-shell-account";
+import { ShellBackButton } from "@/components/layout/native-shell-back";
+import { ShellBots } from "@/components/layout/native-shell-panels";
 import { PageShell } from "@/components/layout/page-shell";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import {
@@ -41,6 +43,10 @@ import {
   useNativeShellRouteReports,
 } from "@/lib/native-shell/route-reports";
 import { forgetNativeShellForTests } from "@/lib/native-shell/shell";
+import {
+  forgetTabStacksForTests,
+  useTabNavigation,
+} from "@/lib/native-shell/use-tab-navigation";
 import {
   notificationPermission,
   refreshNotificationPermission,
@@ -97,6 +103,7 @@ function inShell(on: boolean) {
   delete page.webkit;
   forgetNativeShellForTests();
   forgetReadyForTests();
+  forgetTabStacksForTests();
 }
 
 /** What the shell is told, as its iOS handler receives it. */
@@ -181,6 +188,7 @@ function serve(list: ReturnType<typeof channel>[] | number | "never") {
 function Reports({ children }: { children: ReactNode }) {
   useNativeShellRouteReports();
   useDesktopOpenRequests();
+  useTabNavigation();
   return children;
 }
 
@@ -223,7 +231,12 @@ function renderApp(path: string) {
           </PageShell>
         )),
         page("/conversations", Conversations),
-        page("/channel/$channelId", () => <p>A conversation</p>),
+        page("/channel/$channelId", () => (
+          <>
+            <ShellBackButton />
+            <p>A conversation</p>
+          </>
+        )),
         page("/channel/new", () => <p>New conversation</p>),
       ]),
     ]),
@@ -384,19 +397,12 @@ describe("the Conversations page", () => {
     expect(view.queryByRole("alert")).toBeNull();
   });
 
-  test("with none, says how one arrives and offers New conversation", async () => {
+  test("with none, says how one arrives; New conversation is in the title's row", async () => {
     serve([]);
     const { view } = renderApp("/conversations");
     await view.findByText("No conversations yet");
-    // The page's own, and the empty state's.
-    expect(newConversationLinks(view.container)).toEqual([
-      "/channel/new",
-      "/channel/new",
-    ]);
-    // Nothing to search yet.
-    expect(
-      view.queryByRole("textbox", { name: "Search conversations" }),
-    ).toBeNull();
+    // The panel's own, as on Desktop.
+    expect(newConversationLinks(view.container)).toEqual(["/channel/new"]);
   });
 
   test("a failure says so and offers Try again", async () => {
@@ -405,6 +411,19 @@ describe("the Conversations page", () => {
     const alert = await view.findByRole("alert");
     expect(alert.textContent).toContain("Couldn't load your conversations.");
     expect(view.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  test("it is the sidebar's Conversations panel, with the account in its title's row", async () => {
+    serve([channel("c-1", "Quarterly forecast")]);
+    const { view } = renderApp("/conversations");
+    await view.findByText("Quarterly forecast");
+    const panel = view.container.querySelector('[data-slot="section-panel"]');
+    expect(panel).not.toBeNull();
+    const header = panel?.querySelector('[data-slot="section-panel-header"]');
+    expect(header?.textContent).toContain("Conversations");
+    expect(
+      within(header as HTMLElement).getByRole("button", { name: "Account" }),
+    ).toBeTruthy();
   });
 });
 
@@ -429,19 +448,38 @@ describe("what the shell is told", () => {
     await waitFor(() =>
       expect(heard).toEqual([
         { type: "ready" },
-        { type: "route", path: "/", tab: "home", signedIn: false },
-        { type: "route", path: "/bots", tab: "bots", signedIn: false },
+        {
+          type: "route",
+          path: "/",
+          tab: "home",
+          signedIn: false,
+          canGoBack: false,
+        },
+        {
+          type: "route",
+          path: "/bots",
+          tab: "bots",
+          signedIn: false,
+          canGoBack: false,
+        },
         {
           type: "route",
           path: "/conversations",
           tab: "conversations",
           signedIn: false,
+          canGoBack: false,
         },
-        { type: "route", path: "/", tab: "home", signedIn: false },
+        {
+          type: "route",
+          path: "/",
+          tab: "home",
+          signedIn: false,
+          canGoBack: false,
+        },
       ]),
     );
-    // Opening the page already open adds no history entry.
-    expect(router.history.length).toBe(4);
+    // In the shell the tabs' stacks are the history: the web view's own stays one entry long.
+    expect(router.history.length).toBe(1);
   });
 
   test("outside the shell, nothing", async () => {
@@ -451,6 +489,192 @@ describe("what the shell is told", () => {
     const { view } = renderApp("/");
     await view.findByRole("heading", { name: "Home" });
     expect(heard).toEqual([]);
+  });
+});
+
+describe("the tabs' stacks in the shell", () => {
+  /** The shell tapping a tab: `openbot:open` with the tab's root. */
+  function tap(path: string) {
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("openbot:open", { detail: { path }, cancelable: true }),
+      );
+    });
+  }
+  const routes = (heard: unknown[]) =>
+    heard.filter((m) => (m as { type: string }).type === "route") as {
+      path: string;
+      tab: string | null;
+      canGoBack: boolean;
+    }[];
+
+  test("Back in a conversation goes back to where it was opened, and the page keeps its tab", async () => {
+    inShell(true);
+    const heard = listen();
+    serve([channel("c-1", "Quarterly forecast")]);
+    const { view, router } = renderApp("/bots");
+    await view.findByText("The roster");
+    await act(() =>
+      router.navigate({
+        to: "/channel/$channelId",
+        params: { channelId: "c-1" },
+      }),
+    );
+    await view.findByText("A conversation");
+    // Opened from Bots: in Bots' stack, with somewhere to go back to.
+    await waitFor(() =>
+      expect(routes(heard).at(-1)).toMatchObject({
+        path: "/channel/c-1",
+        tab: "bots",
+        canGoBack: true,
+      }),
+    );
+    fireEvent.click(view.getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/bots"));
+    await waitFor(() =>
+      expect(routes(heard).at(-1)).toMatchObject({
+        path: "/bots",
+        tab: "bots",
+        canGoBack: false,
+      }),
+    );
+    // In the shell the stacks are the history: the web view's own stays one entry long.
+    expect(router.history.length).toBe(1);
+  });
+
+  test("opened cold, a conversation's Back goes to the Chats list", async () => {
+    inShell(true);
+    serve([]);
+    const { view, router } = renderApp("/channel/c-9");
+    await view.findByText("A conversation");
+    fireEvent.click(view.getByRole("button", { name: "Back" }));
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/conversations"),
+    );
+  });
+
+  test("switching away and back shows the tab where it was; tapping the current tab pops it to its root", async () => {
+    inShell(true);
+    serve([]);
+    const { view, router } = renderApp("/conversations");
+    await view.findByText("No conversations yet");
+    await act(() =>
+      router.navigate({
+        to: "/channel/$channelId",
+        params: { channelId: "c-2" },
+      }),
+    );
+    await view.findByText("A conversation");
+    tap("/bots");
+    await view.findByText("The roster");
+    tap("/conversations");
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/channel/c-2"),
+    );
+    tap("/conversations");
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/conversations"),
+    );
+  });
+
+  test("openbot:back pops the current tab, and does nothing at its root", async () => {
+    inShell(true);
+    serve([]);
+    const { view, router } = renderApp("/");
+    await view.findByRole("heading", { name: "Home" });
+    await act(() =>
+      router.navigate({
+        to: "/channel/$channelId",
+        params: { channelId: "c-3" },
+      }),
+    );
+    await view.findByText("A conversation");
+    act(() => {
+      window.dispatchEvent(new CustomEvent("openbot:back"));
+    });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    act(() => {
+      window.dispatchEvent(new CustomEvent("openbot:back"));
+    });
+    await settleReactWork();
+    expect(router.state.location.pathname).toBe("/");
+  });
+
+  test("outside the shell, navigation is the browser's history as before, and no Back is drawn", async () => {
+    inShell(false);
+    serve([]);
+    const { view, router } = renderApp("/");
+    await view.findByRole("heading", { name: "Home" });
+    await act(() =>
+      router.navigate({
+        to: "/channel/$channelId",
+        params: { channelId: "c-4" },
+      }),
+    );
+    await view.findByText("A conversation");
+    expect(router.history.length).toBe(2);
+    expect(view.queryByRole("button", { name: "Back" })).toBeNull();
+    act(() => {
+      window.dispatchEvent(new CustomEvent("openbot:back"));
+    });
+    await settleReactWork();
+    expect(router.state.location.pathname).toBe("/channel/c-4");
+  });
+});
+
+describe("the Bots tab in the shell", () => {
+  test("is the sidebar's Bots panel, with New Bot and the account in its title's row", async () => {
+    inShell(true);
+    serve([]);
+    const rootRoute = createRootRoute({
+      component: () => (
+        <ShellBots creating={false} onClose={() => {}} onCreated={() => {}} />
+      ),
+    });
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory({ initialEntries: ["/bots"] }),
+    });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router as never} />
+      </QueryClientProvider>,
+    );
+    const header = await waitFor(() => {
+      const found = view.container.querySelector(
+        '[data-slot="section-panel-header"]',
+      );
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    expect(header.textContent).toContain("Bots");
+    expect(
+      within(header).getByRole("button", { name: "New Bot" }),
+    ).toBeTruthy();
+    expect(
+      within(header).getByRole("button", { name: "Account" }),
+    ).toBeTruthy();
+    expect(view.getByRole("textbox", { name: "Search Bots" })).toBeTruthy();
+  });
+});
+
+describe("the Conversations page outside the shell", () => {
+  test("is the page it was: its own title, beside the sidebar's panel", async () => {
+    inShell(false);
+    serve([channel("c-1", "Quarterly forecast")]);
+    const { view } = renderApp("/conversations");
+    await waitFor(() =>
+      expect(view.getAllByText("Quarterly forecast").length).toBeGreaterThan(0),
+    );
+    // The page's own h1, as before; the panel's title is the sidebar's h2.
+    expect(
+      view
+        .getAllByRole("heading", { name: "Conversations" })
+        .map((heading) => heading.tagName),
+    ).toContain("H1");
   });
 });
 
@@ -525,7 +749,13 @@ describe("when the shell hears ready", () => {
     await waitFor(() =>
       expect(heard).toEqual([
         { type: "ready" },
-        { type: "route", path: "/", tab: "home", signedIn: false },
+        {
+          type: "route",
+          path: "/",
+          tab: "home",
+          signedIn: false,
+          canGoBack: false,
+        },
       ]),
     );
   });
@@ -557,6 +787,7 @@ describe("when the shell hears ready", () => {
       path: "/",
       tab: "home",
       signedIn: false,
+      canGoBack: false,
     });
   });
 
@@ -587,7 +818,13 @@ describe("when the shell hears ready", () => {
       expect(heard).toEqual([
         { type: "ready" },
         { type: "signed-out" },
-        { type: "route", path: "/sign", tab: null, signedIn: false },
+        {
+          type: "route",
+          path: "/sign",
+          tab: null,
+          signedIn: false,
+          canGoBack: false,
+        },
       ]),
     );
   });

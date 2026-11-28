@@ -2,8 +2,10 @@
  * What the page tells the native shell (`shell.ts`), as plain JSON objects:
  *
  * - `{ type: "ready" }` once, when the router has mounted.
- * - `{ type: "route", path, tab, signedIn }` on every change of page: the pathname only, never the
- *   query or the fragment, and which of the shell's tabs the page belongs to (`tabForPath`).
+ * - `{ type: "route", path, tab, signedIn, canGoBack }` on every change of page: the pathname only,
+ *   never the query or the fragment; the tab whose stack the page is in (`use-tab-navigation.ts`;
+ *   by the address, `tabForPath`, where the stacks have not started); and whether Back has somewhere
+ *   to go inside that tab. Native sends `openbot:back` for its Back when it does.
  * - `{ type: "signed-out" }` when the page reaches the signed-out state, where the shell shows its
  *   own sign-in screen.
  *
@@ -24,6 +26,7 @@ export type ShellMessage =
       path: string;
       tab: NativeTab | null;
       signedIn: boolean;
+      canGoBack: boolean;
     }
   | { type: "signed-out" };
 

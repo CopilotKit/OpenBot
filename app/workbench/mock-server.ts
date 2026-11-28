@@ -46,8 +46,10 @@
  *
  * Signed in, the API answers as the workbench's app-home scene does (workbench/session.ts,
  * api/extraHandlers.ts and the spec's generated answers), with a fixed person (Sam Rivera, in Acme),
- * two Bots (General Assistant, Research Bot) and three conversations (Competitor pricing notes,
- * pinned and unread; Quarterly forecast; Trip to Lisbon), each with a short transcript. A
+ * three Bots (General Assistant, Research Bot, Writing Bot) and fifteen conversations, the first three
+ * Competitor pricing notes (pinned and unread), Quarterly forecast and Trip to Lisbon, then one a Bot
+ * is working in (Board update for December), another unread (Launch announcement) and more, eight of
+ * them General Assistant's, each with a short transcript. A
  * conversation made while it runs (sending from Home) is kept in memory until it stops: its own GET
  * answers it, the list shows it, its runs answer it and its messages read back. The live socket the
  * app opens is accepted and kept quiet.
@@ -129,7 +131,24 @@ const RESEARCH_BOT: Bot = {
   mine: true,
 };
 
-export const MOCK_BOTS: readonly Bot[] = [GENERAL_BOT, RESEARCH_BOT];
+const WRITING_BOT: Bot = {
+  ...GENERAL_BOT,
+  id: "writing-bot",
+  name: "Writing Bot",
+  title: "Writing",
+  roleDescription: "Drafts, edits and tightens what you write.",
+  avatarSeed: "writing-bot",
+  visibility: "private",
+  systemOwned: false,
+  canManage: true,
+  mine: true,
+};
+
+export const MOCK_BOTS: readonly Bot[] = [
+  GENERAL_BOT,
+  RESEARCH_BOT,
+  WRITING_BOT,
+];
 
 function conversation(
   fields: Partial<ConversationSummary> &
@@ -184,6 +203,121 @@ export const MOCK_CONVERSATIONS: readonly ConversationSummary[] = [
     lastMessage: "Day one starts in Alfama.",
     lastMessageAt: "2026-11-24T11:05:00.000Z",
     lastReadAt: "2026-11-24T11:06:00.000Z",
+  }),
+  /*
+   * Enough more for the panels' states: a conversation a Bot is working in, another unread, a
+   * third Bot, and more under General Assistant than the Bots panel shows before Show more
+   * (`BOT_CONVERSATIONS_PAGE`, 5), and a list long enough to scroll.
+   */
+  conversation({
+    id: "c-board",
+    botIds: [GENERAL_BOT.id],
+    summary: "Board update for December",
+    opening: "Draft the December board update from last month's numbers.",
+    lastMessage: "Pulling the revenue figures now.",
+    lastMessageAt: "2026-11-24T10:20:00.000Z",
+    lastReadAt: "2026-11-24T10:21:00.000Z",
+    busy: true,
+  }),
+  conversation({
+    id: "c-launch-post",
+    botIds: [WRITING_BOT.id],
+    summary: "Launch announcement",
+    opening: "Tighten the launch post to 200 words.",
+    lastMessage: "Here is a 196-word version.",
+    lastMessageAt: "2026-11-23T15:00:00.000Z",
+    // Unread: the Bot answered after it was last opened.
+    lastReadAt: "2026-11-23T14:00:00.000Z",
+  }),
+  conversation({
+    id: "c-hiring",
+    botIds: [GENERAL_BOT.id],
+    summary: "Hiring plan",
+    opening: "Outline a hiring plan for two engineers.",
+    lastMessage: "Two roles, staggered by a month.",
+    lastMessageAt: "2026-11-22T09:10:00.000Z",
+    lastReadAt: "2026-11-22T09:11:00.000Z",
+  }),
+  conversation({
+    id: "c-churn",
+    botIds: [RESEARCH_BOT.id],
+    summary: "Why customers churn",
+    opening: "What do churned customers say in their exit surveys?",
+    lastMessage: "Price comes up in a third of them.",
+    lastMessageAt: "2026-11-21T13:30:00.000Z",
+    lastReadAt: "2026-11-21T13:31:00.000Z",
+  }),
+  conversation({
+    id: "c-offsite",
+    botIds: [GENERAL_BOT.id],
+    summary: "Team offsite agenda",
+    opening: "Plan a two-day offsite agenda.",
+    lastMessage: "Day two is workshops only.",
+    lastMessageAt: "2026-11-20T16:45:00.000Z",
+    lastReadAt: "2026-11-20T16:46:00.000Z",
+  }),
+  conversation({
+    id: "c-newsletter",
+    botIds: [WRITING_BOT.id],
+    summary: "November newsletter",
+    opening: "Write the November customer newsletter.",
+    lastMessage: "Three stories and a product tip.",
+    lastMessageAt: "2026-11-19T10:00:00.000Z",
+    lastReadAt: "2026-11-19T10:01:00.000Z",
+  }),
+  conversation({
+    id: "c-expenses",
+    botIds: [GENERAL_BOT.id],
+    summary: "Expense policy questions",
+    opening: "Can I expense a co-working day pass?",
+    lastMessage: "Yes, up to twice a month.",
+    lastMessageAt: "2026-11-18T12:20:00.000Z",
+    lastReadAt: "2026-11-18T12:21:00.000Z",
+  }),
+  conversation({
+    id: "c-pitch",
+    botIds: [RESEARCH_BOT.id],
+    summary: "Market size for the pitch",
+    opening: "How big is the market for our pitch deck?",
+    lastMessage: "About 4 billion dollars a year.",
+    lastMessageAt: "2026-11-17T08:40:00.000Z",
+    lastReadAt: "2026-11-17T08:41:00.000Z",
+  }),
+  conversation({
+    id: "c-roadmap",
+    botIds: [GENERAL_BOT.id],
+    summary: "Q1 roadmap",
+    opening: "Turn these notes into a Q1 roadmap.",
+    lastMessage: "Three themes, nine items.",
+    lastMessageAt: "2026-11-15T14:00:00.000Z",
+    lastReadAt: "2026-11-15T14:01:00.000Z",
+  }),
+  conversation({
+    id: "c-style",
+    botIds: [WRITING_BOT.id],
+    summary: "House style guide",
+    opening: "Make a one-page style guide for our blog.",
+    lastMessage: "Short sentences, no jargon, one idea per paragraph.",
+    lastMessageAt: "2026-11-13T11:15:00.000Z",
+    lastReadAt: "2026-11-13T11:16:00.000Z",
+  }),
+  conversation({
+    id: "c-vendors",
+    botIds: [GENERAL_BOT.id],
+    summary: "Compare payroll vendors",
+    opening: "Compare three payroll vendors for a team of 20.",
+    lastMessage: "The middle one is cheapest at our size.",
+    lastMessageAt: "2026-11-11T09:30:00.000Z",
+    lastReadAt: "2026-11-11T09:31:00.000Z",
+  }),
+  conversation({
+    id: "c-retro",
+    botIds: [GENERAL_BOT.id],
+    summary: "Sprint retro notes",
+    opening: "Summarize the sprint retro.",
+    lastMessage: "Two things to keep, one to change.",
+    lastMessageAt: "2026-11-09T17:00:00.000Z",
+    lastReadAt: "2026-11-09T17:01:00.000Z",
   }),
 ];
 
@@ -270,7 +404,7 @@ function mockDataHandlers(): RequestHandler[] {
       const url = new URL(request.url);
       const q = url.searchParams.get("q")?.toLowerCase();
       const botId = url.searchParams.get("botId");
-      const conversations = allConversations().filter(
+      const matching = allConversations().filter(
         (one) =>
           (!botId || one.botIds.includes(botId)) &&
           (!q ||
@@ -278,7 +412,17 @@ function mockDataHandlers(): RequestHandler[] {
               (field) => field?.toLowerCase().includes(q),
             )),
       );
-      return HttpResponse.json({ conversations, nextCursor: null });
+      // Paged only where a page size is asked for (the Bots panel's 5 a Bot): the cursor is an offset.
+      const limit = Number(url.searchParams.get("limit"));
+      if (!Number.isInteger(limit) || limit <= 0)
+        return HttpResponse.json({ conversations: matching, nextCursor: null });
+      const from = Number(url.searchParams.get("cursor") ?? 0) || 0;
+      const conversations = matching.slice(from, from + limit);
+      return HttpResponse.json({
+        conversations,
+        nextCursor:
+          from + limit < matching.length ? String(from + limit) : null,
+      });
     }),
     // A conversation made here, kept until the mock stops: its own GET, the list and its runs know it.
     http.post(`${API}/conversations`, async ({ request }) => {
