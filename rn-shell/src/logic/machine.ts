@@ -76,7 +76,7 @@ export type Effect =
   | { type: "timer"; name: TimerName; ms: number }
   | { type: "cancelTimer"; name: TimerName }
   | { type: "checkSession"; reason: SessionCheckReason }
-  | { type: "clearSiteData"; then?: "continue" }
+  | { type: "clearSiteData"; andThen?: "continue" }
   | { type: "flushCookies" }
   | { type: "dismissKeyboard" }
   | { type: "inject"; script: string }
@@ -608,7 +608,7 @@ function startWebSignIn(config: Config, step: Step, at: number) {
     source: null,
   });
   startCovering(step, at);
-  fx(step, { type: "clearSiteData", then: "continue" });
+  fx(step, { type: "clearSiteData", andThen: "continue" });
 }
 
 function enter(config: Config, step: Step, ticket: string, at: number) {
@@ -639,7 +639,7 @@ function enter(config: Config, step: Step, ticket: string, at: number) {
   // person's live session, and the web app would otherwise carry on as that person.
   set(step, { signIn: "entering", afterClear: source, source: null });
   startCovering(step, at);
-  fx(step, { type: "clearSiteData", then: "continue" });
+  fx(step, { type: "clearSiteData", andThen: "continue" });
 }
 
 function onOffOriginFailure(

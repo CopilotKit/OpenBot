@@ -110,7 +110,10 @@ describe("sign-in through the system sheet", () => {
     expect(state.signIn).toBe("entering");
     // Nothing loads until the site's data (somebody else's session, perhaps) is cleared.
     expect(state.source).toBeNull();
-    expect(effects).toContainEqual({ type: "clearSiteData", then: "continue" });
+    expect(effects).toContainEqual({
+      type: "clearSiteData",
+      andThen: "continue",
+    });
     expect(showsSkeleton(state)).toBe(true);
     ({ state, effects } = run([{ type: "siteDataCleared" }], state));
     expect(state.source).toEqual({
@@ -207,7 +210,7 @@ describe("sign-in through the system sheet", () => {
       { type: "configAnswered", mode: scheme, pair },
       { type: "callbackUrl", url: "openbotshell://signed-in?ticket=" },
       { type: "callbackUrl", url: "openbotshell://signed-in" },
-      { type: "callbackUrl", url: "openbotshell://evil?ticket=" + T },
+      { type: "callbackUrl", url: `openbotshell://evil?ticket=${T}` },
     ] as Event[]) {
       state = reduce(android, state, event, 2_000).state;
     }

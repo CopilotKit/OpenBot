@@ -224,7 +224,7 @@ export function useShell(webRef: RefObject<WebView | null>) {
             .then((count) => diag("site-data-cleared", { cookies: count }))
             .catch(() => diag("site-data-clear-failed"))
             .finally(() => {
-              if (effect.then === "continue")
+              if (effect.andThen === "continue")
                 dispatch({ type: "siteDataCleared" });
             });
           return;

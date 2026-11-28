@@ -12,8 +12,8 @@ const {
   withDangerousMod,
   AndroidConfig,
 } = require("expo/config-plugins");
-const fs = require("fs");
-const path = require("path");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const NETWORK_CONFIG = `<?xml version="1.0" encoding="utf-8"?>
 <!-- TEST BUILD ONLY (rn-shell/plugins/withOpenBotShell.js): cleartext to this machine, for the mocks. -->
