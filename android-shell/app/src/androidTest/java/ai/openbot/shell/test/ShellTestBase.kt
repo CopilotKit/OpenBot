@@ -272,7 +272,7 @@ abstract class ShellTestBase {
         bounds(composer())?.let { return it }
         if (variant != "debug") return null
         val raw = pageString(
-            "(function(){var e=document.querySelector('[contenteditable=\"true\"],textarea');" +
+            "(function(){var e=document.querySelector('[aria-label=\"Message\"],[contenteditable]:not([contenteditable=\"false\"]),textarea');" +
                 "if(!e)return 'null';var r=e.getBoundingClientRect();if(r.width<1||r.height<1)return 'null';" +
                 "return JSON.stringify({l:r.left,t:r.top,r:r.right,b:r.bottom,d:window.devicePixelRatio});})()",
         )
