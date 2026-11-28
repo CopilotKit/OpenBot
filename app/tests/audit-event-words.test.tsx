@@ -337,6 +337,33 @@ test("a row a person started names them, and searching their email finds it", as
 });
 
 /**
+ * A person who deleted their account: their rows stay for 180 days with their id, and any address
+ * the row kept, replaced by a pseudonym (`deleted-user:` and a hash). The row says Deleted user,
+ * never the pseudonym and never "a person", wherever the pseudonym is.
+ */
+test("a row a deleted person started says Deleted user", async () => {
+  const GHOST = "deleted-user:8f14e45fceea167a5a36dedd4bea2543";
+  const byGhost = (id: string, minute: number, more: object) => ({
+    ...row(id, minute, "organization.renamed", "organization", {}, "org_2"),
+    ...more,
+  });
+  const view = await renderAs("team", [
+    byGhost("g1", 30, { actorUserId: GHOST, payload: {} }),
+    byGhost("g2", 29, { actorUserId: null, payload: { by: GHOST } }),
+    byGhost("g3", 28, { actorUserId: null, payload: { actor: GHOST } }),
+  ]);
+  const startedBy = [
+    ...view.container.querySelectorAll("tbody [data-column=bot]"),
+  ].map((cell) => cell.lastElementChild?.textContent);
+  expect(startedBy).toEqual([
+    "Started by Deleted user",
+    "Started by Deleted user",
+    "Started by Deleted user",
+  ]);
+  expect(view.container.textContent).not.toContain("deleted-user:");
+});
+
+/**
  * The person reading the page is "you", not their own email on every row: the personal edition's
  * one person started nearly everything there. Their email still finds the rows.
  */

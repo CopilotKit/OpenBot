@@ -3,6 +3,8 @@ import type {
   App,
   AppDirectoryEntry,
   AppSetup,
+  DirectoryKeyVersion,
+  UpdateAppRequest,
 } from "@/lib/api/generated/model";
 import { appKeys, type CatalogueItem } from "@/lib/apps/queries";
 
@@ -61,6 +63,7 @@ export type TodayServer = {
   sharedOnly?: boolean;
   ownerGrants?: "any" | "admin";
   ownerGrantsChosen?: "any" | "admin" | null;
+  everyBot?: boolean;
   tools?: {
     name: string;
     ref?: string;
@@ -101,6 +104,8 @@ export type TodayDirectoryApp = {
     kind: "consent" | "self-registering" | "fields" | "no-auth" | "unsupported";
   };
   enabled?: boolean;
+  /** The same app connected with a key, for one listed as a sign-in in place of its key. */
+  keyVersion?: DirectoryKeyVersion;
 };
 
 /** A deployment, described as today's routes answered it. */
@@ -202,6 +207,7 @@ export function appBody(server: TodayServer): App {
     sharedOnly: server.sharedOnly ?? false,
     ownerGrants: server.ownerGrants ?? "admin",
     ownerGrantsChosen: server.ownerGrantsChosen ?? null,
+    everyBot: server.everyBot ?? false,
     addedBy: server.addedBy ?? null,
     toolsRefreshedAt: server.toolsRefreshedAt ?? null,
     lastError: server.lastError ?? null,
@@ -216,6 +222,23 @@ export function appBody(server: TodayServer): App {
     })),
     withdrawn: server.withdrawn ?? [],
   };
+}
+
+/**
+ * What the server does with an updateApp (`PATCH apps/{appId}`): it keeps each field the request
+ * names on the app, and answers the changed app. `ownerGrants: null` goes back to the default for
+ * the app's account, which is `admin` here.
+ */
+export function updateAppBody(
+  server: TodayServer,
+  patch: UpdateAppRequest,
+): App {
+  if (patch.ownerGrants !== undefined) {
+    server.ownerGrants = patch.ownerGrants ?? "admin";
+    server.ownerGrantsChosen = patch.ownerGrants;
+  }
+  if (patch.everyBot !== undefined) server.everyBot = patch.everyBot;
+  return appBody(server);
 }
 
 /** How apps are set up here, in the API's shape, from the flags `GET /api/plugins` carried. */
@@ -264,7 +287,7 @@ export function appDirectoryEntries(
       : (fixture.directory ?? [])
           .filter((app) => app.connection.kind !== "unsupported")
           .filter((app) => holds(app.slug, app.name, app.description))
-          .map((app) => {
+          .map((app): AppDirectoryEntry => {
             const added = servers.find((server) => slugOf(server) === app.slug);
             return {
               id: `directory:${app.slug}`,
@@ -288,7 +311,25 @@ export function appDirectoryEntries(
                   : app.connection.kind === "no-auth"
                     ? "nothing"
                     : "sign-in",
+              ...(app.keyVersion ? { keyVersion: app.keyVersion } : {}),
             };
+          })
+          /*
+           * As the server orders the wider directory: apps a person signs in to before apps that
+           * take a key, each by title without regard to case, then by id.
+           */
+          .sort((left, right) => {
+            const key = (entry: AppDirectoryEntry) =>
+              entry.source === "directory" && entry.connectsWith === "key"
+                ? 1
+                : 0;
+            const one = left.title.toLowerCase();
+            const other = right.title.toLowerCase();
+            return (
+              key(left) - key(right) ||
+              (one < other ? -1 : one > other ? 1 : 0) ||
+              (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+            );
           });
   return [...catalogue, ...directory];
 }
@@ -372,18 +413,16 @@ export function answerAppsApi(
       | "catalogue"
       | "directory"
       | null;
-    const page = pageOf(
-      appDirectoryEntries(
-        fixture,
-        source ?? undefined,
-        url.searchParams.get("search") ?? "",
-      ),
-      url,
-      fixture.pageSize,
+    const entries = appDirectoryEntries(
+      fixture,
+      source ?? undefined,
+      url.searchParams.get("search") ?? "",
     );
+    const page = pageOf(entries, url, fixture.pageSize);
     return NativeResponse.json({
       entries: page.items,
       nextCursor: page.nextCursor,
+      total: entries.length,
     });
   }
   if (path === APP_SETUP_PATH)

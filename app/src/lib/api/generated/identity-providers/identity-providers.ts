@@ -22,11 +22,11 @@ import type {
   CreateIdentityProviderHeaders,
   CreateIdentityProviderRequest,
   DeleteIdentityProviderHeaders,
-  IdempotencyConflictResponse,
   IdentityProviderConflictResponse,
   IdentityProviderNotFoundResponse,
   IdentityProviderNotRemovableResponse,
   IdentityProviderPage,
+  IdentityProviderRemovalConflictResponse,
   IdentityProviderResponse,
   InvalidRequestResponse,
   ListIdentityProvidersParams,
@@ -314,7 +314,7 @@ export const getCreateIdentityProviderUrl = (organizationId: string) => {
 };
 
 /**
- * Register a company's identity provider, so everybody it vouches for at its email domain can sign in. SAML takes the metadata the company's identity team supplies; OIDC takes the issuer, which describes itself, and a client. Only an administrator may register one, signed in to OpenBot rather than with a key or an app's sign-in. The audit trail records who registered it.
+ * Register a company's identity provider, so everybody it vouches for at its email domain can sign in. SAML takes the metadata the company's identity team supplies; OIDC takes the issuer, which describes itself, and a client. Only an administrator may register one, signed in to OpenBot rather than with a key or an app's sign-in. The audit trail records who registered it. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), no organization registers a provider of its own: this answers 409 with the code HOSTED_SIGN_IN_ONLY.
  * @summary Register an identity provider
  */
 export const createIdentityProvider = async (
@@ -476,7 +476,7 @@ export const getDeleteIdentityProviderUrl = (
 };
 
 /**
- * Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider registered for the whole OpenBot (deployment) is removed only where it was registered: in any other organization it is refused with 403. A provider already removed is not found.
+ * Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider registered for the whole OpenBot (deployment) is removed only where it was registered: in any other organization it is refused with 403. A provider already removed is not found. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), this answers 409 with the code HOSTED_SIGN_IN_ONLY and removes nothing.
  * @summary Remove an identity provider
  */
 export const deleteIdentityProvider = async (
@@ -525,7 +525,7 @@ export const getDeleteIdentityProviderMutationOptions = <
     | UnauthenticatedResponse
     | IdentityProviderNotRemovableResponse
     | IdentityProviderNotFoundResponse
-    | IdempotencyConflictResponse
+    | IdentityProviderRemovalConflictResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
@@ -578,7 +578,7 @@ export type DeleteIdentityProviderMutationError =
   | UnauthenticatedResponse
   | IdentityProviderNotRemovableResponse
   | IdentityProviderNotFoundResponse
-  | IdempotencyConflictResponse
+  | IdentityProviderRemovalConflictResponse
   | ServerErrorResponse
   | UnexpectedErrorResponse;
 export type DeleteIdentityProviderMutationVariables = {
@@ -596,7 +596,7 @@ export const useDeleteIdentityProvider = <
     | UnauthenticatedResponse
     | IdentityProviderNotRemovableResponse
     | IdentityProviderNotFoundResponse
-    | IdempotencyConflictResponse
+    | IdentityProviderRemovalConflictResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
   TContext = unknown,

@@ -103,7 +103,7 @@ impl Plan {
     pub fn port(self) -> u16 {
         match self {
             Plan::Claude => 4212,
-            Plan::ChatGpt => 4206,
+            Plan::ChatGpt => 4216,
         }
     }
 
@@ -219,7 +219,7 @@ pub fn intent_for(provider: &str, login: &str) -> Option<ModelIntent> {
         ("openai", "plan") => ModelIntent::ChatGptPlan,
         ("google", "oauth") => ModelIntent::GoogleOauth,
         ("xai", "oauth") => ModelIntent::XaiOauth,
-        ("google" | "xai" | "unbiased" | "openai-compatible", "endpoint") => {
+        ("google" | "xai" | "trustedrouter" | "privatemode" | "openai-compatible", "endpoint") => {
             ModelIntent::CompatibleEndpoint
         }
         _ => return None,
@@ -252,7 +252,8 @@ fn endpoint_provider(base_url: &str) -> &'static str {
     match host.as_deref() {
         Some("generativelanguage.googleapis.com") => "google",
         Some("api.x.ai") => "xai",
-        Some("api.unbiased.ai") => "unbiased",
+        Some("api.trustedrouter.com") => "trustedrouter",
+        Some("proxyless-api.privatemode.ai") => "privatemode",
         _ => "openai-compatible",
     }
 }
@@ -331,7 +332,7 @@ The settings Start writes that depend on the installation folder: the plan engin
 release's manifest; when the setup window's AI screen last saved a choice; and the files the server
 reads, at the paths the Compose file mounts.
 
-`OPENBOT_MODEL_OAUTH_FILE` names where a Google or xAI sign-in is kept whether or not one is the
+`OPENBOT_MODEL_OAUTH_FILE` names where an xAI sign-in is kept whether or not one is the
 connection now, so one made in the app reaches the server with no restart.
 */
 pub fn start_settings(root: &Path) -> BTreeMap<String, String> {
@@ -438,6 +439,9 @@ pub fn prepare(engine: &Address, root: &Path, provider: &str, login: &str) -> Re
             }
         }
         Plan::ChatGpt => {
+            if crate::env::chatgpt_sign_in_changed(root) {
+                return Err(Problem::plain(crate::env::CHATGPT_SIGN_IN_CHANGED));
+            }
             if !crate::env::saved_chatgpt_plan_store(root) {
                 return Err(Problem::plain("Sign in to your ChatGPT plan first."));
             }
@@ -521,11 +525,14 @@ pub fn settle(engine: &Address, root: &Path, change: &Change) -> Result<Settleme
         .or_else(|| crate::preparation::installation(root))
         .and_then(|launch| launch.harness);
     let effective = harness_for(plan, requested);
-    let picked = crate::harness::picked(effective.as_ref(), root).map_err(|error| {
-        Problem::with(
+    // An image list that is missing or unreadable is an unfinished install, not a release without
+    // the Bot: Install downloads the list again (`deployment::ReferenceError`).
+    let picked = crate::harness::pick(effective.as_ref(), root).map_err(|error| match error {
+        crate::harness::PickError::ImageList(detail) => crate::preparation::required(detail),
+        crate::harness::PickError::Refused(detail) => Problem::with(
             "This version of OpenBot does not include the Bot that connection needs.",
-            error,
-        )
+            detail,
+        ),
     })?;
     let ports = crate::env::Ports::read(root).map_err(|error| {
         Problem::with("OpenBot could not read its local ports.", error.to_string())
@@ -631,8 +638,8 @@ pub struct AiConnection {
     /// The model named on the setup screen. Only an address or a provider sign-in names one; with a
     /// key or a plan the server picks the provider's own.
     pub model: Option<String>,
-    /// The host of a custom address, for the page to tell Gemini, xAI and Unbiased AI apart from
-    /// a person's own server. Only the host: an address can carry a password or a key.
+    /// The host of a custom address, so the page can distinguish a named endpoint preset from a
+    /// person's own server. Only the host: an address can carry a password or a key.
     pub endpoint_host: Option<String>,
 }
 
@@ -739,6 +746,58 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// Changing the connection reads the picked Bot's image from the release's list. A list that
+    /// is gone is an unfinished install, not a release without the Bot; a list without the Bot
+    /// still says that.
+    #[test]
+    fn a_change_with_the_image_list_gone_is_an_install_problem_not_a_missing_bot() {
+        let root = root("image-list-gone", "", "");
+        std::fs::write(root.join("docker-compose.yml"), "services:\n  server: {}\n").unwrap();
+        let list = serde_json::json!({
+            "version": "v0.0.8",
+            "images": { "server": { "reference": "ghcr.io/copilotkit/openbot-server@sha256:00" } },
+        })
+        .to_string();
+        std::fs::write(crate::deployment::images_path(&root), &list).unwrap();
+        crate::deployment::record(&root, "v0.0.8", false).unwrap();
+        let bot = crate::harness::HarnessChoice {
+            id: crate::harness::DEFAULT_HARNESS.into(),
+            agent_url: None,
+        };
+        crate::preparation::record(&root, Some(&bot), vec!["synthetic-image".into()]).unwrap();
+        let engine = Address::new(crate::engine::Engine::Docker, None);
+        let change = Change {
+            provider: "openai".into(),
+            login: "api-key".into(),
+            model: None,
+            endpoint_host: None,
+        };
+
+        // The list is there and names no such Bot: the release's answer.
+        let refused = settle(&engine, &root, &change).unwrap_err();
+        assert_eq!(
+            refused.said,
+            "This version of OpenBot does not include the Bot that connection needs."
+        );
+
+        std::fs::remove_file(crate::deployment::images_path(&root)).unwrap();
+        let refused = settle(&engine, &root, &change).unwrap_err();
+        assert!(!refused.said.contains("does not include"), "{refused:?}");
+        assert_eq!(refused.said, crate::preparation::REQUIRED, "{refused:?}");
+        assert_eq!(
+            refused.connection,
+            Some(crate::problem::Connection::Installation)
+        );
+        assert!(
+            refused
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("container-images.json")),
+            "{refused:?}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn nothing_chosen_reads_as_nothing() {
         let root = root("none", "", "");
@@ -758,7 +817,8 @@ mod tests {
             ("xai", "oauth", ModelIntent::XaiOauth),
             ("google", "endpoint", ModelIntent::CompatibleEndpoint),
             ("xai", "endpoint", ModelIntent::CompatibleEndpoint),
-            ("unbiased", "endpoint", ModelIntent::CompatibleEndpoint),
+            ("trustedrouter", "endpoint", ModelIntent::CompatibleEndpoint),
+            ("privatemode", "endpoint", ModelIntent::CompatibleEndpoint),
             (
                 "openai-compatible",
                 "endpoint",
@@ -774,12 +834,68 @@ mod tests {
         for (provider, login) in [
             ("openai", "endpoint"),
             ("google", "plan"),
-            ("unbiased", "oauth"),
+            ("trustedrouter", "oauth"),
+            ("privatemode", "oauth"),
             ("anthropic", "oauth"),
             ("", ""),
         ] {
             assert_eq!(intent_for(provider, login), None, "{provider} {login}");
         }
+    }
+
+    /// A connection recorded for a provider OpenBot no longer offers (any id this version doesn't
+    /// name) is still read without a panic, but names no connection here: nothing resumes it as a
+    /// kept one, and settling on it or preparing it is refused in words before anything is written.
+    /// The setup window then sets up another AI, as for any choice it can't resume.
+    #[test]
+    fn a_recorded_connection_for_a_provider_no_longer_offered_resumes_nothing() {
+        let root = root("retired-provider", "", "");
+        for login in ["endpoint", "oauth", "api-key", "plan"] {
+            assert_eq!(intent_for("retired-ai", login), None, "retired-ai {login}");
+        }
+        Settled {
+            provider: "retired-ai".into(),
+            login: "endpoint".into(),
+            model: Some("retired-model".into()),
+            endpoint_host: Some("api.retired-ai.example".into()),
+        }
+        .write(&root)
+        .unwrap();
+        let kept = Settled::read(&root).expect("a recorded connection is still read");
+        for (provider, login) in [
+            ("openai-compatible", "endpoint"),
+            ("retired-ai", "endpoint"),
+            ("openai", "api-key"),
+            ("anthropic", "plan"),
+        ] {
+            assert!(!kept.names(provider, login), "{provider} {login}");
+        }
+        assert_eq!(
+            connection_setting(&ModelCredential::Compatible {
+                base_url: "https://api.retired-ai.example/v1".into(),
+                container_base_url: None,
+                api_key: "sentinel-key".into(),
+                model: "retired-model".into(),
+            })
+            .as_deref(),
+            Some(r#"{"login":"endpoint","provider":"openai-compatible"}"#)
+        );
+
+        let engine = Address::new(crate::engine::Engine::Docker, None);
+        let change = Change {
+            provider: "retired-ai".into(),
+            login: "endpoint".into(),
+            model: Some("retired-model".into()),
+            endpoint_host: Some("api.retired-ai.example".into()),
+        };
+        let refused = settle(&engine, &root, &change).unwrap_err();
+        assert_eq!(refused.said, "OpenBot can't connect that way.");
+        let refused = prepare(&engine, &root, "retired-ai", "endpoint").unwrap_err();
+        assert_eq!(refused.said, "OpenBot can't connect that way.");
+        // Nothing was written over what was recorded.
+        assert_eq!(Settled::read(&root), Some(kept));
+        assert!(!root.join(crate::saved_intent::FILE).exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// The server is told which connection, by provider and way in, and never a key or an address.
@@ -806,6 +922,24 @@ mod tests {
                     model: "gemini-3-pro".into(),
                 },
                 r#"{"login":"endpoint","provider":"google"}"#,
+            ),
+            (
+                ModelCredential::Compatible {
+                    base_url: "https://api.trustedrouter.com/v1".into(),
+                    container_base_url: None,
+                    api_key: "sentinel-key".into(),
+                    model: "anthropic/claude-sonnet-5.5".into(),
+                },
+                r#"{"login":"endpoint","provider":"trustedrouter"}"#,
+            ),
+            (
+                ModelCredential::Compatible {
+                    base_url: "https://proxyless-api.privatemode.ai/v1".into(),
+                    container_base_url: None,
+                    api_key: "sentinel-key".into(),
+                    model: "glm-latest".into(),
+                },
+                r#"{"login":"endpoint","provider":"privatemode"}"#,
             ),
             (
                 ModelCredential::Compatible {
@@ -901,7 +1035,7 @@ mod tests {
         );
         assert_eq!(
             settings["CHATGPT_PLAN_HARNESS_URL"],
-            "http://agent-chatgpt-plan:4206"
+            "http://agent-chatgpt-plan:4216"
         );
         assert!(crate::env::MINTED.contains(&GATEWAY_TOKEN));
         assert!(crate::vault::is_secret(GATEWAY_TOKEN));

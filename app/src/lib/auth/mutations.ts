@@ -1,14 +1,18 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { updatePerson } from "@/lib/api/generated/people/people";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   desktopConnectionQueryOptions,
   invokeDesktop,
 } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import { forgetThisBrowser } from "@/lib/web-push/mutations";
 import { clearSkin } from "@/skins/store";
 import { authClient } from "./client";
+import { hostedSignOutAddress } from "./hosted";
 import { authKeys } from "./queries";
+import { forgetSignedIn } from "./was-signed-in";
 
 const SIGN_OUT_UNFINISHED = "Signing out did not finish. Try again.";
 
@@ -46,28 +50,66 @@ export async function signOutThroughDesktop() {
   }
 }
 
-/** How a sign-out ended: `leaving` when the desktop app is taking the window back to its setup. */
+/**
+ * Whether this is a hosted OpenBot (`hostedSignIn`), asked before the sign-out while the answer is still the
+ * signed-in person's to read. Not known reads as not hosted: the sign-out here still happens.
+ */
+async function hostedHere(queryClient: QueryClient): Promise<boolean> {
+  try {
+    const capabilities = await queryClient.ensureQueryData(
+      deploymentCapabilitiesQueryOptions(),
+    );
+    return capabilities.hostedSignIn === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * How a sign-out ended: `leaving` when the window is going somewhere else to finish it, the desktop app taking it
+ * back to its setup, or a hosted OpenBot's own sign-out.
+ */
 export type SignedOut = { leaving: boolean };
 
 /**
  * Every way out of OpenBot signs out through here, the skins' own menus included.
  *
+ * Push notifications in this browser end with the sign-out (`forgetThisBrowser`), so the next
+ * person to sign in here is not sent the last one's.
+ *
  * The skin is the account's, and this browser only caches it to paint before the preferences load.
  * Clearing it here means the next person on a shared machine starts from the default rather than
  * from the last person's skin.
+ *
+ * On a hosted OpenBot the person is also signed in to OpenBot by CopilotKit in this browser, and that sign-in is
+ * what "Continue with OpenBot by CopilotKit" uses. So once OpenBot has signed them out, the browser goes through
+ * the hosted sign-out, which ends that sign-in too and comes back to the sign-in screen: the next person to sign in
+ * here chooses their own account rather than being signed in as the last one.
  */
 export function signOutMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (): Promise<SignedOut> => {
+      // Forgotten before any branch, so the desktop and hosted paths forget too and the next visit shows no app frame to a visitor.
+      forgetSignedIn();
       if (await connectedThroughDesktop(queryClient)) {
         await signOutThroughDesktop();
         return { leaving: true };
       }
+      const hosted = await hostedHere(queryClient);
+      // While still signed in, so the server can be told. Never holds the sign-out up for long.
+      await forgetThisBrowser();
       await signOut();
-      return { leaving: false };
+      // Forgotten again: a gate that passed while the request was out has remembered them since.
+      forgetSignedIn();
+      if (!hosted) return { leaving: false };
+      window.location.assign(
+        hostedSignOutAddress(`${window.location.origin}/sign`),
+      );
+      return { leaving: true };
     },
     onSuccess: () => {
       clearSkin();
+      forgetSignedIn();
       queryClient.removeQueries({ queryKey: authKeys.all });
     },
   });

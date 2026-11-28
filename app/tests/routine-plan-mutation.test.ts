@@ -1,9 +1,12 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { QueryClient } from "@tanstack/react-query";
+import { viewerTimeZone } from "../src/components/routines/routine-page";
 import { NEW_CONVERSATION } from "../src/lib/routines/form";
 import {
   createFromPlanMutationOptions,
+  type MadeRoutine,
   SavedButRefused,
+  undoMadeMutationOptions,
 } from "../src/lib/routines/mutations";
 import type { RoutinePlan } from "../src/lib/routines/plan";
 import { CONVERSATIONS_PATH, conversationPath } from "./conversations-api";
@@ -13,47 +16,71 @@ const NEW = conversationPath("c9");
 
 const realFetch = globalThis.fetch;
 
+/** The zone the server says a routine it made is read in. It is the reader's own unless a test says so. */
+let answerZone = viewerTimeZone();
+
 afterEach(() => {
   globalThis.fetch = realFetch;
+  answerZone = viewerTimeZone();
 });
+
+/** The Idempotency-Key of every request the stub saw, in order. */
+let keys: (string | null)[] = [];
 
 type Call = [method: string, path: string, body: unknown];
 
 /** Records every request and answers like the server, unless `refuse` names a request to refuse. */
 function stub(refuse: Record<string, { status: number; body: unknown }> = {}) {
   const calls: Call[] = [];
+  keys = [];
   globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     const path = String(url);
     const sent =
       init?.body === undefined ? undefined : JSON.parse(String(init.body));
+    keys.push(new Headers(init?.headers).get("Idempotency-Key"));
     calls.push([method, path, sent]);
     const refusal = refuse[`${method} ${path}`];
     const [status, body] = refusal
       ? [refusal.status, refusal.body]
       : method === "POST" && path === "/api/v2/organizations/default/goals"
         ? [200, { goal: { id: "g1", title: "Ship it" } }]
-        : method === "POST" && path === CONVERSATIONS_PATH
-          ? // Starting a conversation answers 201 with the conversation it made.
-            [
-              201,
+        : method === "POST" && path === "/api/v2/organizations/default/routines"
+          ? [
+              200,
               {
-                conversation: {
-                  id: "c9",
-                  name: "Assistant",
-                  botIds: sent.botIds,
-                  threadId: "t9",
-                  active: true,
-                  lastMessageAt: null,
+                routine: {
+                  id: "r1",
+                  schedule: "Weekdays at 09:00",
+                  timezone: answerZone,
                 },
               },
             ]
-          : method === "PATCH" && path === NEW
-            ? // Naming it answers with the name it now has.
-              [200, { summary: sent.title }]
-            : method === "DELETE" && path === NEW
-              ? [204, undefined]
-              : [200, { ok: true }];
+          : method === "POST" &&
+              path ===
+                "/api/v2/organizations/default/check-ins?refuseExisting=true"
+            ? [200, { checkIn: { id: "ci1", intervalMinutes: 240 } }]
+            : method === "POST" && path === CONVERSATIONS_PATH
+              ? // Starting a conversation answers 201 with the conversation it made.
+                [
+                  201,
+                  {
+                    conversation: {
+                      id: "c9",
+                      name: "Assistant",
+                      botIds: sent.botIds,
+                      threadId: "t9",
+                      active: true,
+                      lastMessageAt: null,
+                    },
+                  },
+                ]
+              : method === "PATCH" && path === NEW
+                ? // Naming it answers with the name it now has.
+                  [200, { summary: sent.title }]
+                : method === "DELETE" && path === NEW
+                  ? [204, undefined]
+                  : [200, { ok: true }];
     return new Response(body === undefined ? null : JSON.stringify(body), {
       status,
       headers: { "content-type": "application/json" },
@@ -82,10 +109,16 @@ async function run(plan: RoutinePlan) {
   const result = await options
     .mutationFn?.(plan, mutationContext(queryClient))
     .then(
-      () => ({ error: undefined as Error | undefined }),
-      (error: Error) => ({ error }),
+      (made) => ({ made, error: undefined as Error | undefined }),
+      (error: Error) => ({ made: undefined, error }),
     );
-  return { options, queryClient, invalidated, error: result?.error };
+  return {
+    options,
+    queryClient,
+    invalidated,
+    made: result?.made,
+    error: result?.error,
+  };
 }
 
 const cron = "0 9 * * 1";
@@ -148,6 +181,97 @@ test("a routine: one POST /api/v2/organizations/default/routines", async () => {
     cron,
     timezone,
   });
+});
+
+test("a routine resolves to the id the server gave it", async () => {
+  stub();
+  const { made, error } = await run({
+    kind: "routine",
+    routine: {
+      botId: "a1",
+      conversationId: "c1",
+      instruction: "Send the digest",
+      cron,
+      timezone,
+    },
+  });
+  expect(error).toBeUndefined();
+  expect(made).toEqual({
+    kind: "routine",
+    id: "r1",
+    when: "Weekdays at 09:00",
+    startedConversationId: null,
+  });
+});
+
+test("a routine in another time zone than the reader's says the zone", async () => {
+  answerZone = "Pacific/Kiritimati";
+  stub();
+  const { made } = await run({
+    kind: "routine",
+    routine: {
+      botId: "a1",
+      conversationId: "c1",
+      instruction: "Send the digest",
+      cron,
+      timezone: answerZone,
+    },
+  });
+  expect(made).toMatchObject({
+    when: "Weekdays at 09:00 · Pacific/Kiritimati",
+  });
+});
+
+test("a goal resolves to its id, schedule and first run included", async () => {
+  stub();
+  const { made, error } = await run(
+    goalPlan("c1", { schedule: true, runNow: true }),
+  );
+  expect(error).toBeUndefined();
+  expect(made).toEqual({
+    kind: "goal",
+    id: "g1",
+    when: "Weekdays at 09:00",
+    routineId: "r1",
+    startedConversationId: null,
+  });
+});
+
+test("a goal with no schedule has no routine and no words for when", async () => {
+  stub();
+  const { made, error } = await run(goalPlan("c1", { runNow: true }));
+  expect(error).toBeUndefined();
+  expect(made).toEqual({
+    kind: "goal",
+    id: "g1",
+    when: "",
+    routineId: null,
+    startedConversationId: null,
+  });
+});
+
+test("a check-in resolves to the id the server gave it", async () => {
+  stub();
+  const { made, error } = await run(checkInPlan("c1"));
+  expect(error).toBeUndefined();
+  expect(made).toEqual({
+    kind: "check-in",
+    id: "ci1",
+    when: "Checks every 4 hours",
+    startedConversationId: null,
+  });
+});
+
+test("what started its own conversation says which, so Undo can take it back", async () => {
+  stub();
+  for (const plan of [
+    goalPlan(NEW_CONVERSATION, { schedule: true }),
+    checkInPlan(NEW_CONVERSATION),
+  ]) {
+    const { made, error } = await run(plan);
+    expect(error).toBeUndefined();
+    expect(made).toMatchObject({ startedConversationId: "c9" });
+  }
 });
 
 test("a goal with a schedule: the goal, then a routine that names it", async () => {
@@ -493,3 +617,161 @@ for (const kind of ["routine", "goal", "check-in"] as const) {
     });
   }
 }
+
+describe("undoing what was made", () => {
+  async function undo(made: MadeRoutine) {
+    const { queryClient, invalidated } = fakeQueryClient();
+    const options = undoMadeMutationOptions(queryClient);
+    await options.mutationFn?.(made, mutationContext(queryClient));
+    return { options, queryClient, invalidated };
+  }
+
+  test("a routine: one DELETE of that routine", async () => {
+    const calls = stub();
+    await undo({
+      kind: "routine",
+      id: "r1",
+      when: "Weekdays at 09:00",
+      startedConversationId: null,
+    });
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/routines/r1",
+    ]);
+  });
+
+  test("a goal with the routine that runs it: the routine first, then the goal", async () => {
+    const calls = stub();
+    await undo({
+      kind: "goal",
+      id: "g1",
+      when: "Weekdays at 09:00",
+      routineId: "r1",
+      startedConversationId: null,
+    });
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/routines/r1",
+      "DELETE /api/v2/organizations/default/goals/g1",
+    ]);
+  });
+
+  test("a goal with no routine: only the goal", async () => {
+    const calls = stub();
+    await undo({
+      kind: "goal",
+      id: "g1",
+      when: "",
+      routineId: null,
+      startedConversationId: null,
+    });
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/goals/g1",
+    ]);
+  });
+
+  test("a check-in: one DELETE of that check-in", async () => {
+    const calls = stub();
+    await undo({
+      kind: "check-in",
+      id: "ci1",
+      when: "Checks every hour",
+      startedConversationId: null,
+    });
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/check-ins/ci1",
+    ]);
+  });
+
+  test("a conversation started for it is deleted last, after what posts in it", async () => {
+    const calls = stub();
+    await undo({
+      kind: "goal",
+      id: "g1",
+      when: "Weekdays at 09:00",
+      routineId: "r1",
+      startedConversationId: "c9",
+    });
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/routines/r1",
+      "DELETE /api/v2/organizations/default/goals/g1",
+      `DELETE ${conversationPath("c9")}`,
+    ]);
+  });
+
+  test("a conversation that couldn't be deleted still leaves the routine undone", async () => {
+    const calls = stub({
+      [`DELETE ${conversationPath("c9")}`]: {
+        status: 500,
+        body: { error: "Down." },
+      },
+    });
+    await undo({
+      kind: "routine",
+      id: "r1",
+      when: "",
+      startedConversationId: "c9",
+    });
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/routines/r1",
+      `DELETE ${conversationPath("c9")}`,
+    ]);
+  });
+
+  test("every delete carries its own Idempotency-Key", async () => {
+    stub();
+    await undo({
+      kind: "goal",
+      id: "g1",
+      when: "Weekdays at 09:00",
+      routineId: "r1",
+      startedConversationId: null,
+    });
+    expect(keys).toHaveLength(2);
+    for (const key of keys) expect(key).toBeTruthy();
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  test("a refused delete of the routine leaves the goal alone and says what the server said", async () => {
+    const calls = stub({
+      "DELETE /api/v2/organizations/default/routines/r1": {
+        status: 400,
+        body: { error: "No." },
+      },
+    });
+    await expect(
+      undo({
+        kind: "goal",
+        id: "g1",
+        when: "",
+        routineId: "r1",
+        startedConversationId: "c9",
+      }),
+    ).rejects.toThrow("No.");
+    expect(methodsAndPaths(calls)).toEqual([
+      "DELETE /api/v2/organizations/default/routines/r1",
+    ]);
+  });
+
+  test("onSettled refreshes the same lists a create does", async () => {
+    stub();
+    const { options, queryClient, invalidated } = await undo({
+      kind: "routine",
+      id: "r1",
+      when: "",
+      startedConversationId: null,
+    });
+    invalidated.length = 0;
+    await options.onSettled?.(
+      undefined,
+      null,
+      { kind: "routine", id: "r1", when: "", startedConversationId: null },
+      undefined,
+      mutationContext(queryClient),
+    );
+    expect(invalidated).toEqual([
+      { queryKey: ["routines"] },
+      { queryKey: ["responsibilities"] },
+      { queryKey: ["proactive", "settings"] },
+      { queryKey: ["channels"] },
+    ]);
+  });
+});

@@ -1,6 +1,6 @@
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
-import { IconLock, IconPlayerStop } from "@tabler/icons-react";
 import { RECORDER_COLLECTS_SHORT } from "@openbot/shared/recorder-disclosure";
+import { IconLock, IconPlayerStop } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useId } from "react";
 import {
@@ -37,7 +37,6 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { useComputerControl } from "@/lib/computers/use-control";
 import {
   botBrowserTabsMutationOptions,
   clearBotBrowserMutationOptions,
@@ -46,6 +45,8 @@ import {
   startBotBrowserRecordingMutationOptions,
   stopBotBrowserRecordingMutationOptions,
 } from "@/lib/bot-browser/mutations";
+import { useComputerControl } from "@/lib/computers/use-control";
+import { failureSaid } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 /*
@@ -148,7 +149,7 @@ export function BotBrowserBar({
             className="border-b border-border px-3 py-2 text-destructive text-sm"
             role="alert"
           >
-            {failure.message}
+            {failureSaid(failure)}
           </p>
         ) : null}
         {children}
@@ -432,7 +433,7 @@ function RecordPanel({
         </PageRows>
         {recording.error ? (
           <p className="mt-2 text-destructive text-sm" role="alert">
-            {recording.error.message}
+            {failureSaid(recording.error)}
           </p>
         ) : null}
       </div>

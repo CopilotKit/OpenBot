@@ -68,6 +68,7 @@ import { relativeTime } from "@/lib/relative-time";
 import type { WaitingWhere } from "@/lib/tasks/groups";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 type WaitingQuestion = ApprovalInboxData["questions"][number];
 type WaitingRequest = ApprovalInboxData["requests"][number];
@@ -134,7 +135,7 @@ function QuestionRow({
         </Button>
         {answer.error ? (
           <p role="alert" className="text-sm text-destructive">
-            {answer.error.message}
+            {failureSaid(answer.error)}
           </p>
         ) : null}
       </ItemFooter>
@@ -297,7 +298,7 @@ function RequestRow({
       )}
       {decision.error ? (
         <p role="alert" className="basis-full pl-11 text-sm text-destructive">
-          {decision.error.message}
+          {failureSaid(decision.error)}
         </p>
       ) : null}
     </Item>
@@ -393,7 +394,7 @@ function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
         meta={[
           dismiss.error ? (
             <span className="text-destructive" key="error" role="alert">
-              {dismiss.error.message}
+              {failureSaid(dismiss.error)}
             </span>
           ) : null,
         ]}
@@ -484,7 +485,7 @@ function AnswerDialog({
           <InputGroupAddon align="block-end">
             {answer.error ? (
               <InputGroupText className="text-destructive text-xs" role="alert">
-                {answer.error.message}
+                {failureSaid(answer.error)}
               </InputGroupText>
             ) : (
               <InputGroupText className="gap-1 font-normal text-xs">
@@ -538,7 +539,7 @@ function RequestAnswers({
     <>
       {decision.error ? (
         <span className="text-destructive text-xs" role="alert">
-          {decision.error.message}
+          {failureSaid(decision.error)}
         </span>
       ) : null}
       {handOff ? (
@@ -683,7 +684,7 @@ function QuestionAnswers({
     <>
       {dismiss.error ? (
         <span className="text-destructive text-xs" role="alert">
-          {dismiss.error.message}
+          {failureSaid(dismiss.error)}
         </span>
       ) : null}
       <Button onClick={() => setAnswering(true)} size="sm">
@@ -818,7 +819,7 @@ export function WaitingForYou({
     <>
       {error ? (
         <p role="alert" className="mt-4 text-sm text-destructive">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
       {rows.length > 0 ? (

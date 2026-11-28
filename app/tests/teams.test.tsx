@@ -21,12 +21,14 @@ import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
+import { AdminSidebar } from "@/components/admin/admin-sidebar";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
+import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { OrganizationBoundary } from "@/components/organizations/organization-boundary";
 import { NewTeamPage } from "@/components/teams/new-team-page";
 import { TeamDetailPage } from "@/components/teams/team-page";
 import { TeamsPage } from "@/components/teams/teams-page";
-import { SidebarProvider } from "@/components/ui/sidebar";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import type {
   OrganizationMember,
   Team,
@@ -48,6 +50,7 @@ import {
   getCreateTeamMockHandler,
   getDeleteTeamMockHandler,
   getGetTeamMockHandler,
+  getGetTeamModelsMockHandler,
   getListTeamMembersMockHandler,
   getListTeamsMockHandler,
   getPutTeamMemberMockHandler,
@@ -55,6 +58,7 @@ import {
   getUpdateTeamMockHandler,
 } from "@/lib/api/generated/teams/teams.msw";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { managementKeys } from "@/lib/management/queries";
 import {
   currentOrganizationId,
   setCurrentOrganization,
@@ -65,6 +69,12 @@ import {
   teamListQueryOptions,
 } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
+import { Route as AppTeamsRoute } from "@/routes/_authed/_app/teams";
+import { Route as AppTeamRoute } from "@/routes/_authed/_app/teams_.$teamId";
+import { Route as AppNewTeamRoute } from "@/routes/_authed/_app/teams_.new";
+import { Route as AdminTeamsRoute } from "@/routes/_authed/admin/teams";
+import { Route as AdminTeamRoute } from "@/routes/_authed/admin/teams_.$teamId";
+import { Route as AdminNewTeamRoute } from "@/routes/_authed/admin/teams_.new";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -305,6 +315,11 @@ const server = setupServer(
       (member) => member.id !== params.memberId,
     );
   }),
+  // No team limits its models here (team-models.test.tsx covers those that do).
+  getGetTeamModelsMockHandler(({ params }) => {
+    teamOf(params.organizationId, params.teamId);
+    return { models: null, updatedBy: null, updatedAt: null };
+  }),
   // The person's own organizations, the one the app works in marked, as the sidebar asks for them.
   getListOrganizationsMockHandler(() => ({
     organizations: Object.entries(organizations)
@@ -501,6 +516,99 @@ function open(start = "/teams", { sidebar = false } = {}) {
       page("/teams", TeamsPage),
       page("/teams/new", NewTeamPage),
       page("/teams/$teamId", Detail),
+    ]),
+  });
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+  return { view, router, person: userEvent.setup({ document }) };
+}
+
+/**
+ * The app's own team routes, in both frames, placed as `routeTree.gen.ts` places them: a pathless
+ * `_authed`, the app's pathless `_app` with its sidebar, and `admin` with Admin's sidebar and inset
+ * panel (`routes/_authed/admin/route.tsx`). The guards in front of them are left out: the test
+ * answers what they read.
+ */
+function openBothFrames(start: string) {
+  const rootRoute = createRootRoute({
+    component: () => (
+      <OrganizationBoundary>
+        <Outlet />
+      </OrganizationBoundary>
+    ),
+  });
+  const authed = createRoute({
+    getParentRoute: () => rootRoute,
+    id: "_authed",
+  });
+  const app = createRoute({
+    getParentRoute: () => authed,
+    id: "_app",
+    component: () => (
+      <SidebarProvider>
+        <AppSidebar />
+        <main>
+          <Outlet />
+        </main>
+      </SidebarProvider>
+    ),
+  });
+  const admin = createRoute({
+    getParentRoute: () => authed,
+    path: "admin",
+    component: () => (
+      <SidebarShell className="h-svh overflow-hidden">
+        <AdminSidebar />
+        <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
+          <Outlet />
+        </SidebarInset>
+      </SidebarShell>
+    ),
+  });
+  const placed = (
+    route: unknown,
+    parent: () => unknown,
+    id: string,
+    path: string,
+  ) =>
+    (route as { update: (options: unknown) => never }).update({
+      id,
+      path,
+      getParentRoute: parent,
+    });
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: [start] }),
+    routeTree: rootRoute.addChildren([
+      authed.addChildren([
+        app.addChildren([
+          createRoute({
+            getParentRoute: () => app,
+            path: "/",
+            component: () => null,
+          }),
+          placed(AppTeamsRoute, () => app, "/teams", "/teams"),
+          placed(AppNewTeamRoute, () => app, "/teams_/new", "/teams/new"),
+          placed(AppTeamRoute, () => app, "/teams_/$teamId", "/teams/$teamId"),
+        ]),
+        admin.addChildren([
+          createRoute({
+            getParentRoute: () => admin,
+            path: "/",
+            component: () => null,
+          }),
+          placed(AdminTeamsRoute, () => admin, "/teams", "/teams"),
+          placed(AdminNewTeamRoute, () => admin, "/teams_/new", "/teams/new"),
+          placed(
+            AdminTeamRoute,
+            () => admin,
+            "/teams_/$teamId",
+            "/teams/$teamId",
+          ),
+        ]),
+      ]),
     ]),
   });
   const view = render(
@@ -896,6 +1004,84 @@ test("an admin has Teams in the same menu, beside Admin, and is offered New team
   expect(view.getByRole("button", { name: "New team" })).toBeTruthy();
 });
 
+test("an admin who opens Teams from Admin's sidebar stays in Admin through the list, a team, New team and back, and the app's Teams stays in the app", async () => {
+  // Admin's sidebar reads whether Managed updates applies; here it does not.
+  queryClient.setQueryData(managementKeys.status(), { applies: false });
+  const { view, router, person } = openBothFrames("/admin");
+  const backToApp = () => view.queryByRole("link", { name: "Back to app" });
+  const adminTeams = () =>
+    view
+      .getAllByRole("link", { name: "Teams" })
+      .find((link) => link.closest('[data-slot="sidebar"]'));
+  const inAdmin = (path: string) => {
+    expect(router.state.location.pathname).toBe(path);
+    expect(backToApp()).toBeTruthy();
+    // Teams is the sidebar's current entry, on the list and on every page under it.
+    expect(adminTeams()?.getAttribute("data-status")).toBe("active");
+  };
+
+  await view.findByRole("link", { name: "Back to app" });
+  const entry = adminTeams();
+  expect(entry?.getAttribute("href")).toBe("/admin/teams");
+  await person.click(entry as HTMLElement);
+  await view.findByRole("heading", { level: 1, name: "Teams" });
+  await view.findByRole("link", { name: /Finance/ });
+  inAdmin("/admin/teams");
+
+  // A team opens under Admin, and its back button returns to Admin's list.
+  const sales = view.getByRole("link", { name: /^Sales\b(?! EMEA)/ });
+  expect(sales.getAttribute("href")).toBe("/admin/teams/team_sales");
+  await person.click(sales);
+  await view.findByRole("heading", { level: 1, name: "Sales" });
+  inAdmin("/admin/teams/team_sales");
+  await person.click(view.getByRole("button", { name: "Teams" }));
+  await view.findByRole("link", { name: /Finance/ });
+  inAdmin("/admin/teams");
+
+  // New team too: Cancel goes back to Admin's list, and a new team opens under Admin.
+  await person.click(view.getByRole("button", { name: "New team" }));
+  await view.findByRole("heading", { level: 1, name: "New team" });
+  inAdmin("/admin/teams/new");
+  await person.click(view.getByRole("button", { name: "Cancel" }));
+  await view.findByRole("link", { name: /Finance/ });
+  inAdmin("/admin/teams");
+  await person.click(view.getByRole("button", { name: "New team" }));
+  await person.type(await view.findByLabelText("Name"), "Support");
+  await person.click(view.getByRole("button", { name: "Create team" }));
+  await view.findByRole("heading", { level: 1, name: "Support" });
+  inAdmin("/admin/teams/team_4");
+
+  // Deleting a team from Admin lands on Admin's list.
+  await person.click(view.getByRole("button", { name: "Delete team" }));
+  const confirm = await view.findByRole("dialog", {
+    name: "Delete “Support”?",
+  });
+  await person.click(
+    within(confirm).getByRole("button", { name: "Delete team" }),
+  );
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe("/admin/teams"),
+  );
+  await view.findByRole("link", { name: /Finance/ });
+  inAdmin("/admin/teams");
+
+  // The app's Teams, from the menu under the person's name, is still the app's page.
+  await person.click(view.getByRole("link", { name: "Back to app" }));
+  await person.click(
+    await view.findByRole("button", { name: /Dana Whitfield/ }),
+  );
+  const menu = await view.findByRole("menu");
+  const appEntry = within(menu).getByRole("menuitem", { name: "Teams" });
+  expect(appEntry.getAttribute("href")).toBe("/teams");
+  await person.click(appEntry);
+  await view.findByRole("link", { name: /Finance/ });
+  expect(router.state.location.pathname).toBe("/teams");
+  expect(backToApp()).toBeNull();
+  expect(view.getByRole("link", { name: /Finance/ }).getAttribute("href")).toBe(
+    "/teams/team_finance",
+  );
+});
+
 test("somebody who may not create a team and opens New team by its address is told an admin does", async () => {
   me = SAM;
   const { view } = open("/teams/new");
@@ -1046,6 +1232,44 @@ test("an admin renames a team, moves it under another, and deletes it only after
     { method: "PATCH", path: team, key: KEY, body: { parentTeamId: null } },
     { method: "DELETE", path: team, key: KEY, body: undefined },
   ]);
+});
+
+test("deleting a team goes to the list without ever saying the team can't be found", async () => {
+  const { view, router, person } = open("/teams/team_emea");
+  await view.findByRole("heading", { level: 1, name: "Sales EMEA" });
+  // Everything the page says from the moment Delete is pressed until the list is there.
+  const said: string[] = [];
+  const watcher = new MutationObserver(() => {
+    said.push(document.body.textContent ?? "");
+  });
+  watcher.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+  try {
+    await person.click(view.getByRole("button", { name: "Delete team" }));
+    const confirm = await view.findByRole("dialog", {
+      name: "Delete “Sales EMEA”?",
+    });
+    await person.click(
+      within(confirm).getByRole("button", { name: "Delete team" }),
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/teams"));
+    await view.findByRole("link", { name: /^Sales\b/ });
+  } finally {
+    watcher.disconnect();
+  }
+  // The person deleted it on purpose: no error for that, not even for a moment.
+  expect(
+    said.filter((text) => text.includes("Couldn't find that team")),
+  ).toEqual([]);
+  // And nothing of the deleted team's page stays read.
+  expect(
+    requests.filter(
+      (request) => request === `GET ${teamsPath(ACME)}/team_emea`,
+    ),
+  ).toHaveLength(1);
 });
 
 test("a team is never offered itself, a team under it, or a directory team as its parent", () => {

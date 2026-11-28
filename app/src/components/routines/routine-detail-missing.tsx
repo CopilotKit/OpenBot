@@ -4,6 +4,7 @@ import { type LinkProps, Navigate } from "@tanstack/react-router";
 import { LoadingRows } from "@/components/layout/loading-rows";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import { loadFailure } from "@/lib/load-failure";
 
 const WORDS = {
   goal: { title: "Goal", noun: "goal" },
@@ -79,7 +80,10 @@ export function RoutineDetailMissing({
       ) : read.error ? (
         <div className="flex flex-wrap items-center gap-3" role="alert">
           <p className="text-destructive text-sm">
-            Couldn't load this {words.noun}. Try again.
+            {loadFailure(
+              read.error,
+              `Couldn't load this ${words.noun}. Try again.`,
+            )}
           </p>
           <Button
             disabled={read.isFetching}

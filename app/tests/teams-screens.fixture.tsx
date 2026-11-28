@@ -23,6 +23,8 @@ import { SidebarInset } from "@/components/ui/sidebar";
 import { setCurrentOrganization } from "@/lib/organizations/current";
 import { Route as AdminOverviewRoute } from "@/routes/_authed/admin/index";
 import { Route as PeopleRoute } from "@/routes/_authed/admin/people";
+import { Route as AdminTeamsRoute } from "@/routes/_authed/admin/teams";
+import { Route as AdminNewTeamRoute } from "@/routes/_authed/admin/teams_.new";
 import { queryClient } from "@/query-client";
 
 /**
@@ -30,8 +32,8 @@ import { queryClient } from "@/query-client";
  * teams-screens-layout.test.tsx to bundle and load in a browser. The team screens are the real
  * ones in the app's real frame (its sidebar and inset panel, as `routes/_authed/_app.tsx` draws
  * them), at their own addresses, beside a page that was there before (Skills) to compare them
- * with. Admin's frame holds the overview, which lists Teams, and People. What the server answers
- * comes from the test's routes.
+ * with. Admin's frame holds the overview, which lists Teams, People, and the same team screens as
+ * Admin draws them at /admin/teams. What the server answers comes from the test's routes.
  *
  * The page has no sign-in in front of it, so it starts in `default`, the organization those routes
  * answer for, as every test does (preload.ts, which a page loaded in a browser does not run).
@@ -44,6 +46,12 @@ const component = (route: { options: { component?: unknown } }) =>
 function TeamDetail() {
   const { teamId } = useParams({ strict: false }) as { teamId: string };
   return <TeamDetailPage key={teamId} teamId={teamId} />;
+}
+
+/** A team's page as Admin draws it, at /admin/teams/$teamId: its links stay in Admin. */
+function AdminTeamDetail() {
+  const { teamId } = useParams({ strict: false }) as { teamId: string };
+  return <TeamDetailPage key={teamId} shell="admin" teamId={teamId} />;
 }
 
 function Sharing() {
@@ -99,6 +107,9 @@ const router = createRouter({
     adminRoute.addChildren([
       admin("/admin", component(AdminOverviewRoute)),
       admin("/admin/people", component(PeopleRoute)),
+      admin("/admin/teams", component(AdminTeamsRoute)),
+      admin("/admin/teams/new", component(AdminNewTeamRoute)),
+      admin("/admin/teams/$teamId", AdminTeamDetail),
     ]),
     appRoute.addChildren([
       app("/teams", TeamsPage),

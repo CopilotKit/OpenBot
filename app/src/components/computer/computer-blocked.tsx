@@ -14,6 +14,7 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import type { ClientError } from "@/lib/client";
 import { COMPUTER_LIMIT_REACHED } from "@/lib/computers/refusal";
+import { failureSaid } from "@/lib/load-failure";
 import { cn } from "@/lib/utils";
 
 /**
@@ -52,7 +53,7 @@ export function ComputerBlocked({
           </EmptyMedia>
         )}
         <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription>{refusal.message}</EmptyDescription>
+        <EmptyDescription>{failureSaid(refusal)}</EmptyDescription>
       </EmptyHeader>
       {makeRoom ? (
         <EmptyContent>

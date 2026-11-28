@@ -11,8 +11,8 @@ import {
 } from "@tabler/icons-react";
 import { structuredPatch } from "diff";
 import { type ReactNode, useState } from "react";
-import { byPosition } from "@/components/gallery/positions";
 import { Badge, GalleryFrame } from "@/components/gallery/frame";
+import { byPosition } from "@/components/gallery/positions";
 import { Button } from "@/components/ui/button";
 import type { Look } from "@/lib/copilot/coding-calls";
 import { asText, cutOffStep, flaggedFailure } from "@/lib/plugins/tool-result";
@@ -148,7 +148,7 @@ function OutcomeStatus({
     );
   if (outcome.state === "failed")
     return (
-      <span className="shrink-0 text-xs text-amber-600 dark:text-amber-500">
+      <span className="shrink-0 text-xs text-warning">
         {outcome.exitCode === undefined
           ? "Didn't work"
           : `Exit code ${outcome.exitCode}`}
@@ -252,18 +252,32 @@ function diffRows(before: string, after: string): DiffRow[] {
 }
 
 const ROW_TONES = {
-  add: "bg-emerald-500/10 dark:bg-emerald-500/15",
+  add: "bg-success/10",
   del: "bg-red-500/10 dark:bg-red-500/15",
   same: "text-muted-foreground",
   gap: "text-muted-foreground",
 } as const;
 
 const MARK_TONES = {
-  add: "text-emerald-700 dark:text-emerald-400",
+  add: "text-success",
   del: "text-red-700 dark:text-red-400",
 } as const;
 
 const DIFF_ROWS = 12;
+
+/** Every replacement as one diff, with the lines it added and removed counted. */
+function diffOf(changes: readonly { before: string; after: string }[]) {
+  const rows: DiffRow[] = [];
+  for (const change of changes) {
+    if (rows.length) rows.push({ kind: "gap", text: "" });
+    rows.push(...diffRows(change.before, change.after));
+  }
+  return {
+    rows,
+    added: rows.filter((row) => row.kind === "add").length,
+    removed: rows.filter((row) => row.kind === "del").length,
+  };
+}
 
 /**
  * A file change as a diff: an edit's replaced lines in red and their replacements in green, a new
@@ -288,13 +302,7 @@ export function DiffCard({
   replaceAll?: boolean;
   outcome: CodingOutcome;
 }) {
-  const rows: DiffRow[] = [];
-  for (const change of changes) {
-    if (rows.length) rows.push({ kind: "gap", text: "" });
-    rows.push(...diffRows(change.before, change.after));
-  }
-  const added = rows.filter((row) => row.kind === "add").length;
-  const removed = rows.filter((row) => row.kind === "del").length;
+  const { rows, added, removed } = diffOf(changes);
   const Icon = kind === "write" ? IconFilePlus : IconPencil;
   return (
     <CodingFrame
@@ -376,6 +384,112 @@ export function DiffCard({
   );
 }
 
+/*
+ * THE CARDS ARE WHAT A STEP OPENS TO. A command, a change to a file and a plan are each the Bot's
+ * own work, so in the conversation each is one line, folded like a search or a page read, and the
+ * card is behind it. Drawn open, a coding turn put every diff and every command's output between the
+ * question and the answer. The line says what was done and to what; opening it shows the card as
+ * it always was.
+ */
+
+/** What a step's line says about a coding call, by how far it got. */
+function stepWords(
+  outcome: CodingOutcome,
+  words: { did: string; doing: string; attempt: string; didNot: string },
+) {
+  if (outcome.state === "running") return { label: words.doing, running: true };
+  if (outcome.state === "stopped")
+    return { label: words.did, attempted: words.attempt, interrupted: true };
+  if (outcome.state === "failed")
+    return {
+      label: words.did,
+      failed: true,
+      failedLabel:
+        outcome.exitCode === undefined
+          ? words.didNot
+          : `${words.did}, exit ${outcome.exitCode}`,
+    };
+  return { label: words.did };
+}
+
+/** A shell command, as one line that opens to its card. */
+export function CommandStep({
+  command,
+  outcome,
+}: {
+  command: string | undefined;
+  outcome: CodingOutcome;
+}) {
+  return (
+    <ToolLine
+      bare
+      detailOnOneLine
+      icon={<IconTerminal2 aria-hidden className="size-4" />}
+      {...stepWords(outcome, {
+        did: "Ran a command",
+        doing: "Running a command",
+        attempt: "Run a command",
+        didNot: "Didn't run a command",
+      })}
+      {...(command ? { detail: command } : {})}
+    >
+      <CommandCard command={command} outcome={outcome} />
+    </ToolLine>
+  );
+}
+
+/** A file change, as one line naming the file and how many lines changed, that opens to its diff. */
+export function DiffStep(props: Parameters<typeof DiffCard>[0]) {
+  const { kind, path, changes, outcome } = props;
+  const { added, removed } = diffOf(changes);
+  const Icon = kind === "write" ? IconFilePlus : IconPencil;
+  const counts = [added ? `+${added}` : "", removed ? `−${removed}` : ""]
+    .filter(Boolean)
+    .join(" ");
+  const detail = [fileName(path), counts].filter(Boolean).join(" ");
+  return (
+    <ToolLine
+      bare
+      detailOnOneLine
+      icon={<Icon aria-hidden className="size-4" />}
+      {...stepWords(
+        outcome,
+        kind === "write"
+          ? {
+              did: "Wrote a file",
+              doing: "Writing a file",
+              attempt: "Write a file",
+              didNot: "Didn't write a file",
+            }
+          : {
+              did: "Edited a file",
+              doing: "Editing a file",
+              attempt: "Edit a file",
+              didNot: "Didn't edit a file",
+            },
+      )}
+      {...(detail ? { detail } : {})}
+    >
+      <DiffCard {...props} />
+    </ToolLine>
+  );
+}
+
+/** A Bot's plan, as one line saying how far through it is, that opens to the checklist. */
+export function PlanStep({ todos }: { todos: readonly Todo[] }) {
+  const done = todos.filter((todo) => todo.status === "completed").length;
+  return (
+    <ToolLine
+      bare
+      detail={`${done} of ${todos.length} done`}
+      icon={<IconListCheck aria-hidden className="size-4" />}
+      label="Updated the to-dos"
+    >
+      <TodoCard todos={todos} />
+    </ToolLine>
+  );
+}
+
 type Todo = {
   content?: string;
   status?: "pending" | "in_progress" | "completed";
@@ -418,7 +532,7 @@ export function TodoCard({ todos }: { todos: readonly Todo[] }) {
                 className={cn(
                   "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[5px] border text-[10px]",
                   status === "completed"
-                    ? "border-transparent bg-emerald-500 text-white"
+                    ? "border-transparent bg-success text-white"
                     : status === "in_progress"
                       ? "border-foreground/60"
                       : "border-border",

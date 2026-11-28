@@ -37,6 +37,7 @@ export async function joinWithin({
   answering = () => false,
   reachable,
   onAnswering = () => {},
+  keptUntil,
 }: {
   /** The join already in progress. Its rejection is an outcome, not a failure of this function. */
   connect: Promise<unknown>;
@@ -53,7 +54,17 @@ export async function joinWithin({
   reachable?: () => Promise<boolean>;
   /** Called once, at the deadline, when the join is left to carry that turn to its end. */
   onAnswering?: () => void;
-}): Promise<"connected" | "deadline"> {
+  /**
+   * Started when the join is kept for a turn, and settled when that turn is found to be over with
+   * nothing more coming down the join (see `watchQuietRun`). The join is then ended as at the
+   * deadline, and this resolves `"gave up"`.
+   *
+   * FOUND ON A PERSON'S 1.1.2 DESKTOP. The server stopped in the middle of a long turn and Docker
+   * started it again. Opened afterwards, the conversation's last run had never ended, so the join was
+   * kept for it and nothing ever came: "Thinking" for good, the next message queued behind it.
+   */
+  keptUntil?: () => Promise<unknown>;
+}): Promise<"connected" | "deadline" | "gave up"> {
   // Settled either way: a connect that failed is a join that is over, and the caller restores
   // history separately. Kept as one promise so it can be awaited twice without a second rejection.
   const finished = connect.then(
@@ -76,10 +87,22 @@ export async function joinWithin({
         reachable().catch(() => false),
         finished.then(() => true),
       ])));
+  let outcomeAfter: "deadline" | "gave up" = "deadline";
   if (kept) {
     onAnswering();
-    await finished;
-    return "connected";
+    if (!keptUntil) {
+      await finished;
+      return "connected";
+    }
+    const over = await Promise.race([
+      finished.then(() => false),
+      keptUntil().then(
+        () => true,
+        () => true,
+      ),
+    ]);
+    if (!over) return "connected";
+    outcomeAfter = "gave up";
   }
 
   try {
@@ -102,7 +125,7 @@ export async function joinWithin({
    * conversation that never answers again. The first is recoverable and visible. The second is not.
    */
   await Promise.race([finished, afterMs(DETACH_GRACE_MS)]);
-  return outcome;
+  return outcomeAfter;
 }
 
 /**

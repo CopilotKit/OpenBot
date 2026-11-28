@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
 import { authKeys } from "@/lib/auth/queries";
+import { CONVERSATION_VIEW_STORAGE_KEY } from "@/lib/settings/conversation-view";
 import {
   saveUserPreferencesMutationOptions,
   userPreferencesQueryOptions,
@@ -24,6 +25,8 @@ let response: () => Promise<Response>;
 let requests: { path: string; method: string; body: unknown }[];
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 beforeEach(() => {
+  // The emphasis is a choice of the Detailed list only; Compact rows have one line.
+  window.localStorage.setItem(CONVERSATION_VIEW_STORAGE_KEY, "detailed");
   requests = [];
   response = async () =>
     preferencesResponse({ preferences: { messageListEmphasis: "agent" } });
@@ -82,7 +85,9 @@ test("shows loading and read errors without enabling a save", async () => {
   const pending = Promise.withResolvers<Response>();
   response = () => pending.promise;
   const { view } = setup();
-  expect(view.getByRole("combobox")).toHaveProperty("disabled", true);
+  expect(
+    view.getByRole("combobox", { name: "Message list emphasis" }),
+  ).toHaveProperty("disabled", true);
   expect(view.queryByText("General Assistant")).toBeNull();
   pending.resolve(
     Response.json({ error: "Storage unavailable" }, { status: 503 }),

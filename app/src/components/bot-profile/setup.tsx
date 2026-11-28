@@ -1,7 +1,5 @@
-import { OPENBOT_HARNESS_NAME } from "@openbot/shared/harnesses";
 import {
   IconChevronRight,
-  IconCpu,
   IconDeviceDesktop,
   IconEye,
   IconId,
@@ -56,18 +54,21 @@ import {
 import {
   ISOLATED_MAKING_PUBLIC,
   ISOLATED_PUBLIC_SHARES_LOGINS,
-  ISOLATION_GONE,
   ISOLATION_NOT_ALLOWED,
-  ISOLATION_UNAVAILABLE,
   ISOLATION_WITHDRAWN,
   isolatedExplained,
+  isolationGone,
+  isolationUnavailable,
 } from "@/lib/agents/isolation";
 import { updateAgentMutationOptions } from "@/lib/agents/mutations";
+import { publicVisibilityWords } from "@/lib/agents/public-words";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { shownSubtitle } from "@/lib/agents/subtitle";
 import { isComposing } from "@/lib/composing";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
+import { useOrganizationAudience } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
 
 type TextField = "name" | "title" | "roleDescription" | "instructions";
@@ -263,7 +264,9 @@ function VisibilityRow({
   onSave: (visibility: AgentProfile["visibility"]) => Promise<unknown>;
 }) {
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Failure | null>(null);
+  // Public is everyone in this organization, by name where the app knows it.
+  const everyone = publicVisibilityWords(useOrganizationAudience());
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
@@ -272,14 +275,14 @@ function VisibilityRow({
       <ItemContent>
         <ItemTitle>Visibility</ItemTitle>
         <ItemDescription>
-          {error ??
+          {failureSaid(error) ??
             (agent.visibility === "private"
               ? agent.isolationActive
                 ? `Only you can see it and start conversations with it. ${ISOLATED_MAKING_PUBLIC}`
                 : "Only you can see it and start conversations with it."
               : agent.isolationActive
-                ? `Everyone on OpenBot can find and use it. ${ISOLATED_PUBLIC_SHARES_LOGINS}`
-                : "Everyone on OpenBot can find and use it.")}
+                ? `${everyone} ${ISOLATED_PUBLIC_SHARES_LOGINS}`
+                : everyone)}
         </ItemDescription>
       </ItemContent>
       <ItemActions>
@@ -295,11 +298,7 @@ function VisibilityRow({
               try {
                 await onSave(next as AgentProfile["visibility"]);
               } catch (failure) {
-                setError(
-                  failure instanceof Error
-                    ? failure.message
-                    : "Couldn't save. Try again.",
-                );
+                setError(failureOf(failure, "Couldn't save. Try again."));
               } finally {
                 setSaving(false);
               }
@@ -346,8 +345,10 @@ function IsolatedRow({
   const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
   const { data: mine } = useQuery(myCapabilitiesQueryOptions());
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Failure | null>(null);
   const available = capabilities?.isolatedBots ?? false;
+  // OpenBot Cloud gives each person one computer; the row says so and where a Bot can have its own.
+  const cloud = capabilities?.hostedSignIn === true;
   const allowed = mine?.capabilities.isolatedComputers !== false;
   const isPublic = agent.visibility === "public";
   // A Bot that comes with OpenBot belongs to nobody, and the switch is a person's.
@@ -356,6 +357,10 @@ function IsolatedRow({
     !agent.systemOwned &&
     (agent.isolated || (available && allowed));
 
+  // Whether the row says this OpenBot can't give a Bot a computer of its own.
+  const deploymentCant = agent.isolated
+    ? !agent.isolationActive && agent.isolationOffReason === "deployment"
+    : !available;
   const summary = agent.systemOwned
     ? "Comes with OpenBot, so it runs on the computer of whoever is using it."
     : agent.isolated
@@ -364,10 +369,10 @@ function IsolatedRow({
         : agent.isolationOffReason === "admin"
           ? ISOLATION_WITHDRAWN
           : agent.isolationOffReason === "deployment"
-            ? ISOLATION_GONE
+            ? isolationGone(cloud)
             : sharedSummary(isPublic)
       : !available
-        ? ISOLATION_UNAVAILABLE
+        ? isolationUnavailable(cloud)
         : !allowed && agent.canManage
           ? ISOLATION_NOT_ALLOWED
           : sharedSummary(isPublic);
@@ -380,8 +385,11 @@ function IsolatedRow({
       <ItemContent>
         <ItemTitle id={`isolated-${agent.id}`}>Isolated</ItemTitle>
         <ItemDescription className="line-clamp-none">
-          {error ?? summary}
+          {failureSaid(error) ?? summary}
         </ItemDescription>
+        {cloud && deploymentCant && !agent.systemOwned && !error ? (
+          <BusinessComputerLink className="text-xs" />
+        ) : null}
       </ItemContent>
       <ItemActions>
         {agent.canManage && !agent.systemOwned ? (
@@ -395,11 +403,7 @@ function IsolatedRow({
               try {
                 await onSave(next);
               } catch (failure) {
-                setError(
-                  failure instanceof Error
-                    ? failure.message
-                    : "Couldn't save. Try again.",
-                );
+                setError(failureOf(failure, "Couldn't save. Try again."));
               } finally {
                 setSaving(false);
               }
@@ -453,21 +457,23 @@ function EditTextDialog({
 }) {
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // A refused save is kept whole, not as its words, so a hold is drawn calmly (`failureSaid`).
+  const [error, setError] = useState<Failure | null>(null);
   const errorId = useId();
   const [field, setField] = useState<
     HTMLInputElement | HTMLTextAreaElement | null
   >(null);
-  const refuse = (message: string) => {
-    setError(message);
+  const refuse = (failure: Failure) => {
+    setError(failure);
     field?.focus();
   };
   const submit = async () => {
     const parsed = schema.safeParse(draft);
     if (!parsed.success) {
-      refuse(
-        parsed.error.issues[0]?.message ?? "Check this field and try again.",
-      );
+      refuse({
+        message:
+          parsed.error.issues[0]?.message ?? "Check this field and try again.",
+      });
       return;
     }
     setSaving(true);
@@ -475,11 +481,7 @@ function EditTextDialog({
       await onSave(parsed.data);
       onClose();
     } catch (failure) {
-      refuse(
-        failure instanceof Error
-          ? failure.message
-          : "Couldn't save. Try again.",
-      );
+      refuse(failureOf(failure, "Couldn't save. Try again."));
     } finally {
       setSaving(false);
     }
@@ -540,7 +542,7 @@ function EditTextDialog({
           )}
           {error ? (
             <p className="text-destructive text-sm" id={errorId} role="alert">
-              {error}
+              {failureSaid(error)}
             </p>
           ) : null}
         </DialogBody>
@@ -563,13 +565,12 @@ function EditTextDialog({
 }
 
 /**
- * Where it runs. A built-in Bot runs on the deployment's own Bot, whose process already holds the
- * deployment's tool credential, so there is nothing to connect. When it runs on an engine other
- * than OpenBot's own agent (a Bot made from New Bot runs on LangGraph (TypeScript)), the Bot API
- * names it as the Bot's framework, and a row under Built in says so.
+ * The address a Bot connected from outside OpenBot answers at, for the developer who connected it.
+ * A Bot that runs inside OpenBot has no such section: what runs it is not the person's concern, and
+ * there is nothing to connect.
  *
- * A Bot that runs at an address of its own can be moved to another by whoever manages it: the row
- * opens a dialog, like the Identity rows above it.
+ * Whoever manages the Bot can move it to another address: the row opens a dialog, like the Identity
+ * rows above it.
  */
 function ConnectionSection({
   agent,
@@ -578,12 +579,8 @@ function ConnectionSection({
   agent: AgentProfile;
   onEditEndpoint: () => void;
 }) {
-  const builtIn = !agent.endpoint || agent.builtIn;
-  const editable = agent.canManage && !builtIn;
-  const engine =
-    builtIn && agent.framework && agent.framework !== OPENBOT_HARNESS_NAME
-      ? agent.framework
-      : undefined;
+  if (!agent.endpoint || agent.builtIn) return null;
+  const editable = agent.canManage;
   return (
     <PageSection title="Connection">
       <PageRows>
@@ -599,15 +596,9 @@ function ConnectionSection({
             <IconPlugConnected />
           </ItemMedia>
           <ItemContent>
-            <ItemTitle>{builtIn ? "Built in" : "Agent URL"}</ItemTitle>
-            <ItemDescription
-              className={
-                builtIn ? undefined : "line-clamp-none break-all font-mono"
-              }
-            >
-              {builtIn
-                ? "Runs inside OpenBot. There's nothing to connect."
-                : agent.endpoint}
+            <ItemTitle>Agent URL</ItemTitle>
+            <ItemDescription className="line-clamp-none break-all font-mono">
+              {agent.endpoint}
             </ItemDescription>
           </ItemContent>
           {editable ? (
@@ -616,22 +607,8 @@ function ConnectionSection({
             </ItemActions>
           ) : null}
         </Item>
-        {engine ? (
-          <>
-            <Separator />
-            <Item size="sm">
-              <ItemMedia variant="icon">
-                <IconCpu />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>Runs on</ItemTitle>
-                <ItemDescription>{engine}</ItemDescription>
-              </ItemContent>
-            </Item>
-          </>
-        ) : null}
       </PageRows>
-      {!builtIn && agent.canManage ? (
+      {agent.canManage ? (
         <CallbackTokenPanel
           agentId={agent.id}
           hasToken={agent.hasCallbackToken}

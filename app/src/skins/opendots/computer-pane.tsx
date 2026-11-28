@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import { deleteAgentMutationKey } from "@/lib/agents/mutations";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { IconAction } from "./sidebar";
 
 /**
@@ -75,7 +76,18 @@ export function ComputerPane({
           <IconX className="size-4" />
         </IconAction>
       </div>
-      {agents.isPending ? null : !bot ? (
+      {agents.isPending ? null : agents.data === undefined ? (
+        // A roster that failed to load is said, never drawn as having no Bot.
+        <p
+          className="px-[18px] py-3.5 text-[13px] text-(--opendots-error-ink)"
+          role="alert"
+        >
+          {loadFailure(
+            agents.error,
+            "Couldn't load your Bots. Try again in a moment.",
+          )}
+        </p>
+      ) : !bot ? (
         <p className="px-[18px] py-3.5 text-[13px] text-(--opendots-muted)">
           Create a Bot to give it a computer.
         </p>

@@ -28,9 +28,9 @@ export interface Deployment {
   authProviders: DeploymentAuthProvidersItem[];
   /** Whether people sign in through OpenBot by CopilotKit's own sign-in, with their account there. The sign-in starts at /api/auth/hosted/sign-in. Absent or false, people sign in only the ways authProviders and ssoConfigured say. */
   hostedSignIn?: boolean;
-  /** Whether a company's own identity provider is registered, so an email address can be sent to it. Never which. */
+  /** Whether a company's own identity provider is registered, so an email address can be sent to it. Never which. Always false where hostedSignIn is true. */
   ssoConfigured: boolean;
-  /** Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false. */
+  /** Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false. Always false where hostedSignIn is true. */
   ssoRequired: boolean;
   /** Whether a Bot can run inside OpenBot, with no address of its own. */
   builtInBots: boolean;

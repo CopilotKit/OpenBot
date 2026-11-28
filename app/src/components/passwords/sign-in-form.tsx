@@ -20,6 +20,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { failureSaid } from "@/lib/load-failure";
 import {
   cancelSignInMutationOptions,
   confirmSavedLoginMutationOptions,
@@ -87,7 +88,7 @@ export function SignInForm({
   if (request.error)
     return (
       <p className="text-destructive text-sm" role="alert">
-        {request.error.message}
+        {failureSaid(request.error)}
       </p>
     );
   const data = request.data;
@@ -154,7 +155,7 @@ export function SignInForm({
           </label>
           {failure || data.outcome ? (
             <p className="text-destructive text-sm" role="alert">
-              {failure?.message ?? data.outcome}
+              {failure ? failureSaid(failure) : data.outcome}
             </p>
           ) : null}
           <div className="flex flex-wrap justify-end gap-2">
@@ -221,7 +222,7 @@ export function SignInForm({
         </div>
         {failure ? (
           <p className="mt-2 text-destructive text-sm" role="alert">
-            {failure.message}
+            {failureSaid(failure)}
           </p>
         ) : null}
       </PageSection>
@@ -279,7 +280,6 @@ export function SignInForm({
       >
         <form
           className="mt-4 flex flex-col gap-3"
-          autoComplete="off"
           onSubmit={(event) => {
             event.preventDefault();
             if (!password) return;
@@ -342,7 +342,7 @@ export function SignInForm({
           ) : null}
           {failure ? (
             <p className="text-destructive text-sm" role="alert">
-              {failure.message}
+              {failureSaid(failure)}
             </p>
           ) : null}
           <div className="flex flex-wrap justify-end gap-2">

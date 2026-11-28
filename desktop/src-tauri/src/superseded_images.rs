@@ -134,6 +134,59 @@ fn needed(root: &Path) -> Option<BTreeSet<String>> {
 }
 
 /**
+Every image OpenBot pulled for the installation at `root` that is OpenBot's own: what its finished
+install recorded that its image list publishes (the rule `record` keeps for an earlier release),
+and what earlier releases left on the list. Never an image the release only named by a tag anybody
+may use, never the back end's, never somebody else's.
+*/
+pub fn own(root: &Path) -> BTreeSet<String> {
+    let mut images = listed(root);
+    if let (Some(pulled), Some(published)) = (preparation::installed_images(root), published(root))
+    {
+        images.extend(pulled.into_iter().filter(|image| published.contains(image)));
+    }
+    images
+}
+
+/**
+Remove every one of OpenBot's own images of the installation at `root` (`own`) from `engine`, when
+the installation itself is going: the move to OpenBot Cloud and the uninstaller's "Delete the
+application data". `image rm`, one reference at a time, never forced, after the containers are gone:
+an image a container still uses, of anything on the computer, is refused and stays. An image the
+engine no longer has counts as removed. The error names what stayed.
+*/
+pub fn remove_own(engine: &Address, root: &Path) -> Result<(), String> {
+    let mut stayed = Vec::new();
+    for image in own(root) {
+        let output = engine
+            .command()
+            .current_dir(root)
+            .args(["image", "rm", &image])
+            .output();
+        match output {
+            Ok(output) if output.status.success() => {
+                log::info!("[uninstall] removed {image}");
+            }
+            failed => {
+                if matches!(preparation::image_present(engine, &image), Ok(false)) {
+                    continue;
+                }
+                let said = match &failed {
+                    Ok(output) => command_said(&output.stderr),
+                    Err(error) => error.to_string(),
+                };
+                stayed.push(format!("{image}: {said}"));
+            }
+        }
+    }
+    if stayed.is_empty() {
+        Ok(())
+    } else {
+        Err(stayed.join("; "))
+    }
+}
+
+/**
 Remove the images on `root`'s list from `engine`, now that the installed release has started and
 answered, and say which went. See the module documentation for which images those are and how each
 is removed.

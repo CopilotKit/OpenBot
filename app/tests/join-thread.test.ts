@@ -182,6 +182,62 @@ describe("a detached connect that never finishes", () => {
   });
 });
 
+/*
+ * FOUND ON A PERSON'S 1.1.2 DESKTOP. The server stopped in the middle of a long turn and Docker
+ * started it again. Opened afterwards, the conversation's last run had never ended, so its join was
+ * kept for that turn, and nothing ever came: "Thinking" for good, the next message queued behind it.
+ */
+describe("a join kept for a turn that is over without a word", () => {
+  test("is ended once the turn is found to be over", async () => {
+    const connect = deferred();
+    const deadline = deferred();
+    const over = deferred();
+    let detached = 0;
+
+    const joined = joinWithin({
+      connect: connect.promise,
+      deadline: deadline.promise,
+      detach: async () => {
+        detached += 1;
+        connect.resolve();
+      },
+      answering: () => true,
+      reachable: async () => true,
+      keptUntil: () => over.promise,
+    });
+
+    deadline.resolve();
+    await settleMicrotasks();
+    expect(detached).toBe(0);
+    over.resolve();
+    expect(await joined).toBe("gave up");
+    expect(detached).toBe(1);
+  });
+
+  test("ends on its own when the turn does", async () => {
+    const connect = deferred();
+    const deadline = deferred();
+    let detached = 0;
+
+    const joined = joinWithin({
+      connect: connect.promise,
+      deadline: deadline.promise,
+      detach: async () => {
+        detached += 1;
+      },
+      answering: () => true,
+      reachable: async () => true,
+      keptUntil: () => new Promise(() => {}),
+    });
+
+    deadline.resolve();
+    await settleMicrotasks();
+    connect.resolve();
+    expect(await joined).toBe("connected");
+    expect(detached).toBe(0);
+  });
+});
+
 describe("a join kept for a turn the roster reports", () => {
   test("is ended when the runtime cannot say the turn is still there", async () => {
     // The connect never ends by itself: nothing is answering it.

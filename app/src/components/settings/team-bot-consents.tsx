@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/item";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { clearTeamBotConsentsMutationOptions } from "@/lib/team-bots";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * A Bot someone shared with you uses its owner's connected apps unless you let it use yours on the
@@ -30,7 +31,7 @@ export function TeamBotConsents() {
     >
       {clear.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {clear.error.message}
+          {failureSaid(clear.error)}
         </p>
       ) : null}
       <PageRows>

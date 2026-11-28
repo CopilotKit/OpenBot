@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 type Call = { command: string; args?: Record<string, unknown> };
 
@@ -85,4 +85,88 @@ test("a new sign-in shows only its own code, never the one before, even when the
   };
   expect((await screen.findByText("NEWC-0002")).tagName).toBe("STRONG");
   expect(screen.queryByText("OLDC-0001")).toBeNull();
+});
+
+test("groups the waiting status, current comparison code and recovery actions as the page opens", async () => {
+  let opened: ((found: unknown) => void) | undefined;
+  invokeHandler = async ({ command, args }) => {
+    expect(command).toBe("copilotkit_sign_in_page");
+    expect(args?.attempt).toBe("opening");
+    return new Promise((resolve) => {
+      opened = resolve;
+    });
+  };
+  const onPage = mock(() => {});
+  const onCancel = mock(() => {});
+  const screen = render(
+    <CopilotKitSignInWait
+      attempt="opening"
+      before="Checking your sign-in…"
+      waiting="Finish signing in in your browser…"
+      onPage={onPage}
+      onCancel={onCancel}
+    />,
+  );
+  const group = screen.container.querySelector<HTMLElement>(".sign-in-wait");
+  expect(group).not.toBeNull();
+  expect(
+    screen.getByText("Checking your sign-in…").closest(".status-line")
+      ?.parentElement,
+  ).toBe(group);
+  expect(
+    screen.getByRole("button", { name: "Cancel" }).parentElement?.parentElement,
+  ).toBe(group);
+  expect(screen.queryByRole("link")).toBeNull();
+  expect(onPage).not.toHaveBeenCalled();
+
+  opened?.(page("TEST-0042"));
+  const code = await screen.findByText("TEST-0042");
+  const row = code.parentElement;
+  expect(row?.classList.contains("sign-in-code-row")).toBe(true);
+  expect(row?.parentElement).toBe(group);
+  expect(row?.firstElementChild?.textContent).toBe(
+    "Check that the page shows this code:",
+  );
+  expect(code.tagName).toBe("STRONG");
+  expect(
+    screen
+      .getByText("Finish signing in in your browser…")
+      .closest(".status-line")?.parentElement,
+  ).toBe(group);
+  const link = screen.getByRole("link", { name: "Open the sign-in page" });
+  expect(link.getAttribute("href")).toBe(page("TEST-0042").url);
+  expect(link.parentElement?.parentElement).toBe(group);
+  expect(
+    screen.getByText(/If your browser shows a dashboard/).parentElement,
+  ).toBe(group);
+  expect(onPage).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("heading")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(onCancel).toHaveBeenCalledTimes(1);
+});
+
+test("the optional instruction heading appears only for the current browser page", async () => {
+  let answer: ((found: unknown) => void) | undefined;
+  invokeHandler = async () =>
+    new Promise((resolve) => {
+      answer = resolve;
+    });
+  const props = {
+    waiting: "Finish signing in to OpenBot in your browser…",
+    waitingStatus: "Waiting for you to finish signing in…",
+    before: "Checking your OpenBot account…",
+    onCancel: () => {},
+  };
+  const screen = render(<CopilotKitSignInWait {...props} attempt="first" />);
+  expect(screen.queryByRole("heading")).toBeNull();
+  expect(screen.getByText(props.before).closest(".status-line")).not.toBeNull();
+  answer?.(page("TEST-0042"));
+  await screen.findByRole("heading", { level: 3, name: props.waiting });
+  expect(
+    screen.getByText(props.waitingStatus).closest(".status-line"),
+  ).not.toBeNull();
+  screen.rerender(<CopilotKitSignInWait {...props} attempt="retry" />);
+  expect(screen.queryByRole("heading")).toBeNull();
+  expect(screen.queryByText(props.waitingStatus)).toBeNull();
+  expect(screen.getByText(props.before).closest(".status-line")).not.toBeNull();
 });
