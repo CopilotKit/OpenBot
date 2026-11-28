@@ -26,6 +26,8 @@ paths:
         '200':
           description: The Windows computer, who is using it, and its recording.
           headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
           content:
@@ -68,6 +70,8 @@ paths:
         '200':
           description: Who is using the Windows computer afterwards.
           headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
           content:
@@ -114,6 +118,8 @@ paths:
         '200':
           description: Who is using the Windows computer afterwards.
           headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
           content:
@@ -175,6 +181,8 @@ paths:
         '200':
           description: The recording, started.
           headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
           content:
@@ -236,6 +244,8 @@ paths:
         '200':
           description: The recording, stopped.
           headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
           content:
@@ -289,6 +299,8 @@ paths:
         '201':
           description: The code, shown this once.
           headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
           content:
@@ -350,6 +362,8 @@ paths:
         '201':
           description: The Windows computer's credential, shown this once.
           headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
           content:
@@ -572,6 +586,9 @@ components:
   responses:
     TooManyWindowsComputerEnrollmentCodes:
       description: Too many enrollment codes are live for this person at once.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -592,6 +609,9 @@ components:
       description: >-
         The request was not complete, the Idempotency-Key is missing, or the
         code is unknown, expired or already used, which all read the same.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -612,6 +632,9 @@ components:
       description: >-
         There is no Windows computer here: Windows computers are not on for this
         OpenBot, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -633,6 +656,9 @@ components:
         The Windows computer can't do this now: a recording is already running, or
         none is, or the Windows computer refused. Or the Idempotency-Key was already
         used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -664,6 +690,9 @@ components:
       description: >-
         The Windows computer didn't answer, or Learning isn't set up or didn't answer:
         nothing was done, and it is worth trying again in a moment.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
