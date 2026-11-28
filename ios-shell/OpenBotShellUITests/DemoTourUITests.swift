@@ -45,7 +45,7 @@ final class DemoTourUITests: ShellTestCase {
         sceneStart = Date()
 
         // Sign in, not ephemeral: the system's consent alert, as a person sees it.
-        var app = launch(base: ShellTestCase.mockA, moment: "tour", ephemeral: false)
+        let app = launch(base: ShellTestCase.mockA, moment: "tour", ephemeral: false)
         let signIn = app.buttons["sign-in-button"]
         XCTAssertTrue(signIn.waitForExistence(timeout: 20))
         pause(1)
@@ -102,38 +102,60 @@ final class DemoTourUITests: ShellTestCase {
         } else {
             XCTFail("demo: no keyboard on Home")
         }
+        // Sent from Home, the conversation belongs to Home's stack: Home stays highlighted, and
+        // Back returns to Home.
+        XCTAssertTrue(tab(app, .home).isSelected, "demo: sending from Home moved the tab")
+        tapWhenThere(webElement(app, label: "Back"), "Back in the conversation sent from Home")
+        _ = composer.waitForExistence(timeout: 10)
+        pause(1)
         scene("send")
 
-        // Conversations: the new one is in the list.
+        // Chats: the sidebar's own list (unread and Working rows); open one, then Back.
         tab(app, .conversations).tap()
-        XCTAssertTrue(webText(app, "Competitor pricing notes").waitForExistence(timeout: 15), "demo: no conversation list")
-        pause(1.5)
-        scene("conversations")
-
-        // Bots, one Bot.
-        tab(app, .bots).tap()
-        tapWhenThere(webText(app, "Research Bot"), "Research Bot")
-        pause(1.5)
+        let chatRow = { (title: String) in app.webViews.links.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch }
+        XCTAssertTrue(chatRow("Competitor pricing notes").waitForExistence(timeout: 15), "demo: no Chats list")
+        pause(2)
+        tapWhenThere(chatRow("Launch announcement"), "an unread conversation")
+        tapWhenThere(webElement(app, label: "Back"), "Back in the conversation", timeout: 15)
+        pause(1.2)
+        // Leave one open in Chats, for later.
+        tapWhenThere(chatRow("Quarterly forecast"), "Quarterly forecast")
+        _ = webElement(app, label: "Back").waitForExistence(timeout: 15)
         dismissKeyboardIfUp(app)
+        pause(1)
+        scene("chats")
+
+        // Bots: each Bot as a group with its conversations; open one, then swipe back from the edge.
+        tab(app, .bots).tap()
+        tapWhenThere(chatRow("Hiring plan"), "a conversation under a Bot", timeout: 15)
+        _ = webElement(app, label: "Back").waitForExistence(timeout: 15)
+        dismissKeyboardIfUp(app)
+        XCTAssertTrue(tab(app, .bots).isSelected, "demo: a conversation from Bots moved the tab")
+        pause(1.2)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.45))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.47)))
+        XCTAssertTrue(app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == 'Search Bots'")).firstMatch
+            .waitForExistence(timeout: 10), "demo: the edge swipe did not return to the Bots list")
+        pause(1.2)
         scene("bots")
 
-        // Home, then Sign out from the web app's own Account menu: the native sign-in screen.
-        tab(app, .home).tap()
-        _ = composer.waitForExistence(timeout: 10)
+        // Back to Chats: the conversation is where it was left. Chats again: its list.
+        tab(app, .conversations).tap()
+        _ = firstExisting([webText(app, "Here is the first draft."), webText(app, "Can you draft the quarterly forecast?")], timeout: 10)
+        dismissKeyboardIfUp(app)
+        pause(1.5)
+        tab(app, .conversations).tap()
+        _ = chatRow("Competitor pricing notes").waitForExistence(timeout: 10)
+        pause(1.2)
+        scene("where-it-was-left")
+
+        // Sign out from the web app's own Account menu: the native sign-in screen.
         tapWhenThere(webElement(app, label: "Account"), "Account button")
         pause(1.2)
         tapWhenThere(webElement(app, label: "Sign out"), "Sign out", timeout: 5)
         XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 20), "demo: Sign out did not return")
         pause(1.5)
-        app.terminate()
         scene("sign-out")
-
-        // The lock screen, then the connection comes back.
-        app = launch(base: ShellTestCase.mockA, moment: "tour-offline", reset: false,
-                     extra: ["OPENBOT_SHELL_FORCE_OFFLINE_SECONDS": "4"])
-        XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 8), "demo: no lock screen")
-        XCTAssertTrue(lockScreen(app).waitForNonExistence(timeout: 15), "demo: the lock did not lift")
-        pause(1.5)
-        scene("lock")
     }
+
 }

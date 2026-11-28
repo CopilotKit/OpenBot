@@ -93,6 +93,8 @@ final class AppModel: ObservableObject {
     @Published var skeletonsShown = 0
     /// Times sign-out cleared the site's data (debug state).
     @Published var siteDataClears = 0
+    /// What the left-edge swipe does now: web (WebKit's history), page (`openbot:back`), none.
+    @Published var backMode = "web"
     /// A main-frame page is loading and has not drawn yet: the native skeleton covers the web view.
     @Published var pageLoading = false {
         didSet { if pageLoading != oldValue { diagnostics.log("skeleton", ["shown": pageLoading]) } }
@@ -136,6 +138,6 @@ final class AppModel: ObservableObject {
 
     /// For UI tests (DEBUG only on screen).
     var debugState: String {
-        "phase=\(phase.rawValue) signIn=\(signIn.rawValue) tab=\(selectedTab.rawValue) nav=\(lastNavigation) commits=\(mainFrameCommits) restarts=\(contentRestarts) skeletons=\(skeletonsShown) cleared=\(siteDataClears) lock=\(lockReason) loading=\(pageLoading ? 1 : 0) keyboard=\(keyboardVisible ? 1 : 0) path=\(webPathRoot) dark=\(pageIsDark.map { $0 ? "1" : "0" } ?? "-")"
+        "phase=\(phase.rawValue) signIn=\(signIn.rawValue) tab=\(selectedTab.rawValue) nav=\(lastNavigation) commits=\(mainFrameCommits) restarts=\(contentRestarts) skeletons=\(skeletonsShown) cleared=\(siteDataClears) back=\(backMode) lock=\(lockReason) loading=\(pageLoading ? 1 : 0) keyboard=\(keyboardVisible ? 1 : 0) path=\(webPathRoot) dark=\(pageIsDark.map { $0 ? "1" : "0" } ?? "-")"
     }
 }

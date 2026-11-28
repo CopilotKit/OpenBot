@@ -659,4 +659,127 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertTrue(renewal.contains { $0.contains("OpenBot-Shell: ios") }, "the renewal's load did not carry OpenBot-Shell: ios")
         XCTAssertTrue(signedOut.contains { $0.contains("OpenBot-Shell: ios") }, "the sign-in's load did not carry OpenBot-Shell: ios")
     }
+
+    // MARK: - Per-tab navigation (the web app keeps one stack per tab; the shell sends openbot:back)
+
+    private func edgeSwipeBack(_ app: XCUIApplication) {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.45))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.47)))
+        sleep(2)
+    }
+
+    private func chatsList(_ app: XCUIApplication) -> XCUIElement {
+        app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == 'Search conversations'")).firstMatch
+    }
+
+    private func botsList(_ app: XCUIApplication) -> XCUIElement {
+        app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == 'Search Bots'")).firstMatch
+    }
+
+    private func openConversation(_ app: XCUIApplication, _ title: String) -> Bool {
+        let row = app.webViews.links.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+        guard row.waitForExistence(timeout: 15) else { return false }
+        row.tap()
+        let back = webElement(app, label: "Back")
+        let opened = back.waitForExistence(timeout: 15)
+        dismissKeyboardIfUp(app)
+        return opened
+    }
+
+    // A conversation opened from Chats, back by the header's Back and by the edge swipe: the Chats
+    // list at the same scroll position, Chats highlighted throughout. At the root the swipe does
+    // nothing.
+    func testChatsStackBackByControlAndSwipe() throws {
+        let app = launchSignedIn()
+        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
+        tab(app, .conversations).tap()
+        XCTAssertTrue(chatsList(app).waitForExistence(timeout: 15), "no Chats list")
+        app.webViews.firstMatch.swipeUp()
+        sleep(1)
+        screenshot("1-chats-list-scrolled")
+        // A row on screen after the scroll, to measure the scroll by.
+        let marker = app.webViews.links.matching(NSPredicate(format: "label CONTAINS 'Trip to Lisbon' OR label CONTAINS 'Launch announcement' OR label CONTAINS 'Board update'")).firstMatch
+        let markerY = marker.exists ? marker.frame.minY : -1
+        let markerLabel = marker.exists ? marker.label : ""
+        note("chats: marker '\(markerLabel.prefix(30))' at \(markerY); \(debugState(app))")
+
+        XCTAssertTrue(openConversation(app, "Quarterly forecast"), "the conversation did not open from Chats")
+        XCTAssertTrue(tab(app, .conversations).isSelected, "opening a conversation moved the tab")
+        XCTAssertTrue(waitForState(app, "back=page", timeout: 5), "the page did not say it can go back: \(debugState(app))")
+        screenshot("2-conversation-from-chats-with-back")
+        webElement(app, label: "Back").tap()
+        XCTAssertTrue(chatsList(app).waitForExistence(timeout: 10), "Back did not return to the Chats list")
+        XCTAssertTrue(tab(app, .conversations).isSelected)
+        sleep(1)
+        screenshot("3-chats-after-back")
+        if markerY >= 0 {
+            let same = app.webViews.links.matching(NSPredicate(format: "label == %@", markerLabel)).firstMatch
+            XCTAssertEqual(same.frame.minY, markerY, accuracy: 8, "the Chats list did not keep its scroll position")
+        }
+
+        XCTAssertTrue(openConversation(app, "Quarterly forecast"))
+        edgeSwipeBack(app)
+        XCTAssertTrue(chatsList(app).waitForExistence(timeout: 10), "the edge swipe did not return to the Chats list: \(debugState(app))")
+        XCTAssertTrue(tab(app, .conversations).isSelected)
+        screenshot("4-chats-after-edge-swipe")
+
+        XCTAssertTrue(waitForState(app, "back=none", timeout: 5), "at the root the page should say it cannot go back: \(debugState(app))")
+        let commits = stateValue(app, "commits")
+        edgeSwipeBack(app)
+        XCTAssertTrue(chatsList(app).exists, "an edge swipe at the root left the Chats list")
+        XCTAssertEqual(stateValue(app, "commits"), commits, "an edge swipe at the root loaded a page")
+        XCTAssertEqual(stateValue(app, "phase"), "signedIn")
+    }
+
+    // A conversation opened from the Bots list keeps Bots highlighted; Back returns to the Bots list.
+    func testBotsStackKeepsBotsHighlighted() throws {
+        let app = launchSignedIn()
+        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
+        tab(app, .bots).tap()
+        XCTAssertTrue(botsList(app).waitForExistence(timeout: 15), "no Bots list")
+        sleep(1)
+        screenshot("1-bots-list")
+        XCTAssertTrue(openConversation(app, "Hiring plan"), "no conversation opened from the Bots list")
+        XCTAssertTrue(tab(app, .bots).isSelected, "a conversation opened from Bots moved the tab")
+        screenshot("2-conversation-from-bots")
+        webElement(app, label: "Back").tap()
+        XCTAssertTrue(botsList(app).waitForExistence(timeout: 10), "Back did not return to the Bots list")
+        XCTAssertTrue(tab(app, .bots).isSelected)
+        screenshot("3-bots-after-back")
+    }
+
+    // Each tab is where it was left: a conversation open in Chats is still open after a visit to
+    // Bots; tapping Chats again pops to the list. Settings from the Account menu has Back.
+    func testTabsRememberWhereTheyWereLeft() throws {
+        let app = launchSignedIn()
+        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
+        tab(app, .conversations).tap()
+        XCTAssertTrue(chatsList(app).waitForExistence(timeout: 15))
+        XCTAssertTrue(openConversation(app, "Quarterly forecast"))
+        tab(app, .bots).tap()
+        XCTAssertTrue(botsList(app).waitForExistence(timeout: 15))
+        tab(app, .conversations).tap()
+        let transcript = firstExisting([webText(app, "Here is the first draft."), webText(app, "Can you draft the quarterly forecast?")], timeout: 15)
+        XCTAssertNotNil(transcript, "the conversation left open in Chats was not there on return")
+        XCTAssertTrue(tab(app, .conversations).isSelected)
+        dismissKeyboardIfUp(app)
+        screenshot("1-chats-where-it-was-left")
+        tab(app, .conversations).tap()
+        XCTAssertTrue(chatsList(app).waitForExistence(timeout: 10), "tapping the current tab did not pop to its list")
+        screenshot("2-chats-popped-to-root")
+
+        let account = webElement(app, label: "Account")
+        XCTAssertTrue(account.waitForExistence(timeout: 10), "no Account button on Chats")
+        account.tap()
+        let settings = app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == 'Settings'")).firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 5), "no Settings in the Account menu")
+        settings.tap()
+        let back = webElement(app, label: "Back")
+        XCTAssertTrue(back.waitForExistence(timeout: 10), "Settings has no Back")
+        XCTAssertTrue(tab(app, .conversations).isSelected, "Settings moved the tab")
+        screenshot("3-settings-with-back")
+        back.tap()
+        XCTAssertTrue(chatsList(app).waitForExistence(timeout: 10), "Back from Settings did not return to Chats")
+        screenshot("4-chats-after-settings")
+    }
 }

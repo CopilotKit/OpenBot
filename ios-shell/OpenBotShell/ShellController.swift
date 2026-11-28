@@ -677,6 +677,11 @@ final class ShellController: NSObject, WebControllerDelegate {
             // `canGoBack` (the web app's per-tab stacks) decides the edge swipe; absent, the web
             // view's own back as before.
             web.updateBack(canGoBack: message["canGoBack"] as? Bool)
+            switch web.backMode {
+            case .webHistory: model.backMode = "web"
+            case .sendToPage: model.backMode = "page"
+            case .nothing: model.backMode = "none"
+            }
             if signedIn {
                 if model.phase != .signedIn || renewing || model.signIn == .entering { finishSignIn() }
             } else if path == "/sign" || path.hasPrefix("/sign/") {
