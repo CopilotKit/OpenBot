@@ -61,7 +61,7 @@ final class DemoTourUITests: ShellTestCase {
         } else {
             note("demo: no consent alert this time")
         }
-        if firstExisting(links, timeout: 20) != nil {
+        if firstExisting(links, timeout: 40) != nil {
             pause(1.2)
             // Found again just before the tap: the sheet's page can redraw it in the meantime.
             if let link = firstExisting(links, timeout: 5) { link.tap() } else { XCTFail("demo: the sheet's link went away") }

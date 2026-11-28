@@ -124,3 +124,24 @@ enum ShellURLs {
         return to
     }
 }
+
+/// What a swipe back from the left edge does, from the page's last `route` message. Pure, so the UI
+/// test target tests it. The web app's per-tab stacks say `canGoBack`; a page that never says it
+/// (production today, a page without the bridge) keeps the web view's own back gesture.
+enum ShellBack: Equatable {
+    /// WebKit's own back-forward gesture over the web view's history (with the shell's guards).
+    case webHistory
+    /// The shell's own edge swipe sends `openbot:back` to the page.
+    case sendToPage
+    /// The shell's own edge swipe does nothing (the current tab is at its root).
+    case nothing
+
+    static func decide(canGoBack: Bool?) -> ShellBack {
+        guard let canGoBack = canGoBack else { return .webHistory }
+        return canGoBack ? .sendToPage : .nothing
+    }
+
+    /// Whether WebKit's own back-forward gesture is on (never while the page keeps its own stacks:
+    /// a mixed history must not be walked).
+    var usesWebKitGesture: Bool { self == .webHistory }
+}

@@ -104,3 +104,21 @@ final class ShellURLsTests: XCTestCase {
                        "https://my.open.bot/api/auth/hosted/sign-in?returnTo=%2Fapi%2Fauth%2Fshell%2Fhandoff%3Fchallenge%3D\(challenge)%26platform%3Dios%26callback%3Dhttps")
     }
 }
+
+/// The edge swipe's decision from the page's `canGoBack`.
+final class ShellBackTests: XCTestCase {
+    func testNoFieldKeepsTheWebViewsOwnBack() {
+        XCTAssertEqual(ShellBack.decide(canGoBack: nil), .webHistory)
+        XCTAssertTrue(ShellBack.decide(canGoBack: nil).usesWebKitGesture)
+    }
+
+    func testDeeperThanTheRootSendsBackToThePage() {
+        XCTAssertEqual(ShellBack.decide(canGoBack: true), .sendToPage)
+        XCTAssertFalse(ShellBack.decide(canGoBack: true).usesWebKitGesture)
+    }
+
+    func testAtTheRootDoesNothing() {
+        XCTAssertEqual(ShellBack.decide(canGoBack: false), .nothing)
+        XCTAssertFalse(ShellBack.decide(canGoBack: false).usesWebKitGesture)
+    }
+}

@@ -100,7 +100,7 @@ SUITES = [
     ("Hardening (mock stack: iPad, Dynamic Type, dark, VoiceOver labels, rotation, a killed web "
      "process, a server that never answers)", lambda suite, name: suite.startswith("Hardening")),
     ("Demo recording", lambda suite, name: suite.startswith("DemoTour")),
-    ("Unit tests (pure sign-in logic)", lambda suite, name: suite.startswith("HandoffConfig") or suite.startswith("ShellURLs")),
+    ("Unit tests (pure sign-in logic)", lambda suite, name: suite.startswith("HandoffConfig") or suite.startswith("ShellURLs") or suite.startswith("ShellBack")),
 ]
 lines.append("## Tests\n")
 if not results:

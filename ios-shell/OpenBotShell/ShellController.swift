@@ -674,6 +674,9 @@ final class ShellController: NSObject, WebControllerDelegate {
             if let raw = message["tab"] as? String, let tab = ShellTab(rawValue: raw) {
                 model.selectedTab = tab
             }
+            // `canGoBack` (the web app's per-tab stacks) decides the edge swipe; absent, the web
+            // view's own back as before.
+            web.updateBack(canGoBack: message["canGoBack"] as? Bool)
             if signedIn {
                 if model.phase != .signedIn || renewing || model.signIn == .entering { finishSignIn() }
             } else if path == "/sign" || path.hasPrefix("/sign/") {

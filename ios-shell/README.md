@@ -23,7 +23,7 @@ What is native:
   sets the session cookie there. While
   signed in, the hosted sign-in's renewal (`/api/auth/hosted/sign-in`) runs in the sheet the same
   way when the server has the hand-off.
-- **The tab bar.** A UIKit `UITabBar` under the web view: Conversations, Home, Bots. A tap asks the
+- **The tab bar.** A UIKit `UITabBar` under the web view: Chats, Home, Bots (the first tab's id stays `conversations`). A tap asks the
   page to navigate with the `openbot:open` event, and loads the page if nobody handled it. The page's
   `route` messages select the tab. The bar hides while the keyboard is up. The web view sits between
   the status bar and the tab bar; the strips around it take the page's background colour and its
@@ -50,6 +50,13 @@ What is native:
   turns overscroll off in the shell) a pan recognizer beside WebKit's ends editing after a mostly
   downward 40 pt drag that did not start in a field. The system sign-in sheet is Safari's view, so
   its bar stays there.
+- **Back.** When the page's `route` messages carry `canGoBack` (the web app keeping one navigation
+  stack per tab), WebKit's own back gesture is off and a swipe from the left edge sends the page
+  `openbot:back`, or does nothing at a tab's root; a tap on a tab always asks for its root path, and
+  the page decides (another tab: back where it was left; the current tab: its root). Without
+  `canGoBack` (production today) the web view's own back gesture works as before, with the guards
+  above. Known difference from a native navigation stack: the page does not follow the finger
+  during the swipe; it changes when the swipe ends.
 - **Orientation.** A phone stays in portrait; an iPad turns every way.
 - **What the web view lets through.** `enter` is loaded with the header `OpenBot-Shell: ios` and
   never kept or loaded again (a retry or a restarted web process loads its `to`). Other schemes go

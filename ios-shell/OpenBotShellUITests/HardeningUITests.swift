@@ -111,7 +111,7 @@ final class HardeningUITests: ShellTestCase {
 
         app = launchSignedIn()
         XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
-        let expected: [(Tab, String)] = [(.conversations, "Conversations"), (.home, "Home"), (.bots, "Bots")]
+        let expected: [(Tab, String)] = [(.conversations, "Chats"), (.home, "Home"), (.bots, "Bots")]
         for (tab, label) in expected {
             XCTAssertEqual(self.tab(app, tab).label, label, "the \(tab) tab's label")
         }

@@ -324,7 +324,7 @@ jobs:
                           -skip-testing:$f/testLoadingSkeleton -skip-testing:$f/testFallbackToWebSignIn
                           -only-testing:$t/DemoTourUITests/testDemoTour) ;;
             edges) only=(-only-testing:$t/HardeningUITests -only-testing:$t/ShellUITests
-                         -only-testing:$t/HandoffConfigTests -only-testing:$t/ShellURLsTests
+                         -only-testing:$t/HandoffConfigTests -only-testing:$t/ShellURLsTests -only-testing:$t/ShellBackTests
                          -skip-testing:$t/ShellUITests/testLoadsHostedWebApp) ;;
           esac
           set -o pipefail

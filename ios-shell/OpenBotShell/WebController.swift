@@ -113,6 +113,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         webView.uiDelegate = self
         hideKeyboardAccessory(when: "init")
         installKeyboardDragDismiss()
+        installBackSwipe()
         // Also sees the page's own route changes, which no navigation delegate call reports.
         urlObservation = webView.observe(\.url, options: [.new]) { [weak self] webView, _ in
             let url = webView.url
@@ -333,6 +334,48 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
             dragHandled = true
             diagnostics.log("keyboard-drag", ["reachedKeyboard": reachesKeyboard, "early": early])
             endEditing()
+    }
+
+    // MARK: - Back
+
+    /// What the left-edge swipe does now (from the page's last `route`: `ShellBack`).
+    private(set) var backMode: ShellBack = .webHistory
+    private var backSwipe: UIScreenEdgePanGestureRecognizer?
+
+    /// The page's last `route` said `canGoBack` (or nothing): WebKit's own back gesture for a page
+    /// that keeps no stacks, the shell's own edge swipe sending `openbot:back` for one that does.
+    func updateBack(canGoBack: Bool?) {
+        let mode = ShellBack.decide(canGoBack: canGoBack)
+        guard mode != backMode else { return }
+        backMode = mode
+        webView.allowsBackForwardNavigationGestures = mode.usesWebKitGesture
+        backSwipe?.isEnabled = !mode.usesWebKitGesture
+        diagnostics.log("back-mode", ["mode": "\(mode)"])
+    }
+
+    private func installBackSwipe() {
+        let edge = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleBackSwipe(_:)))
+        edge.edges = .left
+        edge.delegate = self
+        edge.isEnabled = false
+        webView.addGestureRecognizer(edge)
+        backSwipe = edge
+    }
+
+    @objc private func handleBackSwipe(_ edge: UIScreenEdgePanGestureRecognizer) {
+        guard edge.state == .ended else { return }
+        let move = edge.translation(in: webView)
+        // A mostly horizontal drag of a fair way from the edge; nothing follows the finger.
+        guard move.x > 60, move.x > abs(move.y) * 1.5 else { return }
+        diagnostics.log("back-swipe", ["mode": "\(backMode)"])
+        guard backMode == .sendToPage else { return }
+        sendBack()
+    }
+
+    /// Asks the page to pop the current tab's stack (main frame, own origin only).
+    func sendBack() {
+        guard let url = webView.url, config.isOwnOrigin(url) else { return }
+        webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent(\"openbot:back\"))", completionHandler: nil)
     }
 
     func stop() {

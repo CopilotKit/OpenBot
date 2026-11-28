@@ -34,7 +34,8 @@ enum ShellTab: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .conversations: return "Conversations"
+        // The first tab reads "Chats" (as in OpenBot Desktop); its id stays `conversations`.
+        case .conversations: return "Chats"
         case .home: return "Home"
         case .bots: return "Bots"
         }
