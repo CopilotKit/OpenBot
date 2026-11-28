@@ -69,3 +69,58 @@ enum HandoffConfig {
         return (ticket?.isEmpty ?? true) ? nil : ticket
     }
 }
+
+/// The sign-in hand-off's URLs, built exactly as the server's contract says
+/// (docs/shell-sign-in.md in the backend: "The enter contract", "Renewing the hosted sign-in").
+/// Pure, so the UI test target tests it against the contract's worked example.
+enum ShellURLs {
+    /// Percent-encodes every character outside `A-Z a-z 0-9 - _ . ~` (UTF-8, capital hex), so a path
+    /// with its query goes as one query value: `/`, `?`, `=` and `&` become `%2F`, `%3F`, `%3D`, `%26`.
+    static func encode(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? ""
+    }
+
+    static let unreserved = CharacterSet(charactersIn:
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~")
+
+    /// The callback value the hand-off is told, from what the config said.
+    static func callbackName(_ mode: HandoffMode) -> String? {
+        switch mode {
+        case .scheme: return "scheme"
+        case .https: return "https"
+        default: return nil
+        }
+    }
+
+    /// `/api/auth/shell/handoff?challenge=<C>&platform=ios&callback=<https|scheme>`, in that order.
+    static func handoffPath(challenge: String, platform: String = "ios", callback: String?) -> String {
+        var path = "/api/auth/shell/handoff?challenge=\(encode(challenge))&platform=\(encode(platform))"
+        if let callback = callback { path += "&callback=\(encode(callback))" }
+        return path
+    }
+
+    /// The renewal's sheet: the hosted sign-in, returning to the hand-off.
+    static func renewalSheetURL(base: URL, handoffPath: String) -> URL? {
+        URL(string: base.absoluteString + "/api/auth/hosted/sign-in?returnTo=" + encode(handoffPath))
+    }
+
+    /// `enter`, every value encoded as one query value.
+    static func enterURL(base: URL, ticket: String, verifier: String, to: String) -> URL? {
+        URL(string: base.absoluteString + "/api/auth/shell/enter?ticket=\(encode(ticket))&verifier=\(encode(verifier))&to=\(encode(to))")
+    }
+
+    /// Where a renewal comes back to: the intercepted hosted sign-in's `returnTo`, decoded once,
+    /// when it is an absolute URL on the OpenBot host (its path, query and fragment); `/` otherwise.
+    static func renewalTarget(from intercepted: URL, baseHost: String) -> String {
+        guard let items = URLComponents(url: intercepted, resolvingAgainstBaseURL: false)?.queryItems,
+              let raw = items.first(where: { $0.name == "returnTo" })?.value,
+              let target = URLComponents(string: raw),
+              let scheme = target.scheme?.lowercased(), scheme == "https" || scheme == "http",
+              target.host?.lowercased() == baseHost.lowercased() else { return "/" }
+        var to = target.percentEncodedPath.isEmpty ? "/" : target.percentEncodedPath
+        guard to.hasPrefix("/"), !to.hasPrefix("//") else { return "/" }
+        if let query = target.percentEncodedQuery { to += "?" + query }
+        if let fragment = target.percentEncodedFragment { to += "#" + fragment }
+        return to
+    }
+}

@@ -64,3 +64,39 @@ final class HandoffConfigTests: XCTestCase {
         XCTAssertNil(HandoffConfig.ticket(from: URL(string: "openbotshell://signed-in?ticket=T1"), mode: https))
     }
 }
+
+/// The hand-off URLs against the server contract's worked example (backend docs/shell-sign-in.md).
+final class ShellURLsTests: XCTestCase {
+    let base = URL(string: "https://my.open.bot")!
+
+    func testEncodeKeepsOnlyUnreserved() {
+        XCTAssertEqual(ShellURLs.encode("/bots/b1?tab=chat&openbot-renewed=1"), "%2Fbots%2Fb1%3Ftab%3Dchat%26openbot-renewed%3D1")
+        XCTAssertEqual(ShellURLs.encode("aZ09-_.~"), "aZ09-_.~")
+        XCTAssertEqual(ShellURLs.encode("a b+c/é"), "a%20b%2Bc%2F%C3%A9")
+    }
+
+    func testRenewalTargetFromTheContractsExample() {
+        let intercepted = URL(string: "https://my.open.bot/api/auth/hosted/sign-in?returnTo=https%3A%2F%2Fmy.open.bot%2Fbots%2Fb1%3Ftab%3Dchat%26openbot-renewed%3D1")!
+        let to = ShellURLs.renewalTarget(from: intercepted, baseHost: "my.open.bot")
+        XCTAssertEqual(to, "/bots/b1?tab=chat&openbot-renewed=1")
+        let enter = ShellURLs.enterURL(base: base, ticket: "T", verifier: "V", to: to)!.absoluteString
+        XCTAssertEqual(enter, "https://my.open.bot/api/auth/shell/enter?ticket=T&verifier=V&to=%2Fbots%2Fb1%3Ftab%3Dchat%26openbot-renewed%3D1")
+    }
+
+    func testRenewalTargetFallsBackToRoot() {
+        let other = URL(string: "https://my.open.bot/api/auth/hosted/sign-in?returnTo=https%3A%2F%2Fevil.example%2Fx")!
+        XCTAssertEqual(ShellURLs.renewalTarget(from: other, baseHost: "my.open.bot"), "/")
+        let missing = URL(string: "https://my.open.bot/api/auth/hosted/sign-in")!
+        XCTAssertEqual(ShellURLs.renewalTarget(from: missing, baseHost: "my.open.bot"), "/")
+        let relative = URL(string: "https://my.open.bot/api/auth/hosted/sign-in?returnTo=%2F%2Fevil.example")!
+        XCTAssertEqual(ShellURLs.renewalTarget(from: relative, baseHost: "my.open.bot"), "/")
+    }
+
+    func testRenewalSheetURL() {
+        let challenge = String(repeating: "a", count: 43)
+        let path = ShellURLs.handoffPath(challenge: challenge, callback: "https")
+        XCTAssertEqual(path, "/api/auth/shell/handoff?challenge=\(challenge)&platform=ios&callback=https")
+        XCTAssertEqual(ShellURLs.renewalSheetURL(base: base, handoffPath: path)!.absoluteString,
+                       "https://my.open.bot/api/auth/hosted/sign-in?returnTo=%2Fapi%2Fauth%2Fshell%2Fhandoff%3Fchallenge%3D\(challenge)%26platform%3Dios%26callback%3Dhttps")
+    }
+}

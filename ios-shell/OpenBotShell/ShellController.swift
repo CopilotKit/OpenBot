@@ -324,30 +324,29 @@ final class ShellController: NSObject, WebControllerDelegate {
         model.signIn = .idle
     }
 
-    private func handoffURL(challenge: String) -> URL {
-        var query = "challenge=\(challenge)&platform=ios"
+    /// The hand-off's path: `/api/auth/shell/handoff?challenge=<C>&platform=ios&callback=<what the config said>`.
+    private func handoffPath(challenge: String, mode: HandoffMode) -> String {
+        var path = ShellURLs.handoffPath(challenge: challenge, callback: ShellURLs.callbackName(mode))
         #if DEBUG
-        if config.handoffAuto { query += "&auto=1" }
+        if config.handoffAuto { path += "&auto=1" }
         #endif
-        return config.url("/api/auth/shell/handoff?" + query)
+        return path
     }
 
     private func enterURL(ticket: String, verifier: String, to path: String) -> URL {
-        var components = URLComponents(url: config.url("/api/auth/shell/enter"), resolvingAgainstBaseURL: false)
-        components?.queryItems = [
-            URLQueryItem(name: "ticket", value: ticket),
-            URLQueryItem(name: "verifier", value: verifier),
-            URLQueryItem(name: "to", value: path),
-        ]
-        // URLComponents leaves "+" alone in query values; a server reads it as a space.
-        let encoded = components?.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
-        components?.percentEncodedQuery = encoded
-        return components?.url ?? config.url("/sign?native-sign-in=failed")
+        ShellURLs.enterURL(base: config.baseURL, ticket: ticket, verifier: verifier, to: path)
+            ?? config.url("/sign?native-sign-in=failed")
     }
 
+    /// The sheet: the hand-off itself to sign in; for a renewal, the hosted sign-in returning to the
+    /// hand-off (backend docs/shell-sign-in.md, "Renewing the hosted sign-in"). `returnTo` is where
+    /// `enter` sends the web view afterwards.
     private func presentSheet(pair: PKCEPair, mode: HandoffMode, returnTo: String) {
         if !renewing { model.signIn = .sheet }
-        signInFlow.presentSheet(handoffURL(challenge: pair.challenge), mode: mode, ephemeral: config.ephemeralSignIn) { [weak self] outcome in
+        let path = handoffPath(challenge: pair.challenge, mode: mode)
+        let sheetURL = renewing ? (ShellURLs.renewalSheetURL(base: config.baseURL, handoffPath: path) ?? config.url(path))
+                                : config.url(path)
+        signInFlow.presentSheet(sheetURL, mode: mode, ephemeral: config.ephemeralSignIn) { [weak self] outcome in
             guard let self = self else { return }
             switch outcome {
             case .ticket(let ticket):
@@ -632,7 +631,8 @@ final class ShellController: NSObject, WebControllerDelegate {
         if handoffSupported == false { return false }
         // The hosted sign-in's hourly renewal: do it in the system sheet, then come back here.
         renewing = true
-        let returnTo = web.currentPath
+        // Back to where the web app asked to return (its `returnTo` on this host), else "/".
+        let returnTo = ShellURLs.renewalTarget(from: url, baseHost: config.baseHost)
         let pair = PKCEPair.make()
         diagnostics.log("renewal", ["returnTo": returnTo, "handoffKnown": handoffSupported != nil])
         if let mode = handoffMode, handoffSupported == true {
