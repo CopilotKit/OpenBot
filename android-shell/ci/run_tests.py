@@ -389,7 +389,7 @@ def main():
             plan += PROBE + SUITE2
     results, logs = [], []
     recorders = {}
-    recorded_status = "unknown"
+    recording_statuses = {}
     run_started = time.time()
     for index, test_id in enumerate(plan):
         if time.time() - run_started > BUDGET_S:
@@ -418,12 +418,13 @@ def main():
             for first, last, name, secret in RECORD:
                 if test_id == first:
                     system_dialog_guard()
+                    recording_statuses[name] = []
                     recorders[name] = Recorder(name)
                     recorders[name].start()
         status = run_one(test_id, results, logs)
         for first, last, name, secret in RECORD:
-            if test_id == first:
-                recorded_status = status
+            if name in recorders:
+                recording_statuses[name].append(status)
             if test_id == last and name in recorders:
                 recorder = recorders.pop(name)
                 dest = recorder.stop(os.path.join(private if secret else artifacts, "video"))
@@ -431,11 +432,18 @@ def main():
                     trim_and_copy(dest, recorder.started, os.path.join(private if secret else artifacts, "instrument.log"))
                 length = video_seconds(dest) if dest else 0.0
                 print(f"  video {name}: {length:.1f} s", flush=True)
-                if recorded_status == "skipped":
+                statuses = recording_statuses.pop(name)
+                if all(result == "skipped" for result in statuses):
                     # Nothing to show: the test skipped itself (no secret, gate off, backend down).
                     if dest and os.path.exists(dest):
                         os.remove(dest)
+                        small = dest[:-4] + "-600.mp4"
+                        if os.path.isfile(small):
+                            os.remove(small)
                     video_status, message = "skipped", "the recorded test skipped itself"
+                elif any(result != "passed" for result in statuses):
+                    video_status = "failed"
+                    message = f"incomplete journey ({', '.join(statuses)}), {length:.1f} s recorded"
                 else:
                     video_status = "passed" if length >= 30 else "failed"
                     message = f"{length:.1f} s recorded" + ("" if length >= 30 else " (under 30 s)")

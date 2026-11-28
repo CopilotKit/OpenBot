@@ -35,21 +35,24 @@ class DemoTourTest : ShellTestBase() {
         pause(1_500)
 
         // The software keyboard: the bottom bar hides, the message box sits on the keyboard.
-        waitComposerRect(10_000)?.let { box ->
-            tapComposer(box)
-            if (waitKeyboard(true, 6_000)) {
-                pause(500)
-                typeOnKeyboard("what changed in pricing")
-                val typed = pageString("document.activeElement ? (document.activeElement.innerText || document.activeElement.value || '') : ''")
-                note("demo: the message box holds ${typed.length} characters after typing")
-                pause(1_200)
-                screenshot("home-keyboard-typed")
-                device.pressBack()
-                waitKeyboard(false, 4_000)
-            } else {
-                note("demo: the software keyboard did not show")
-            }
+        val box = waitComposerRect(10_000) ?: run {
+            check(false, "demo: no message box")
+            return
         }
+        tapComposer(box)
+        if (!check(waitKeyboard(true, 6_000), "demo: the software keyboard did not appear")) return
+        val prompt = "what changed in pricing"
+        // Deliver the text through Android's input system while the software keyboard is visible.
+        shell("input text " + prompt.replace(" ", "%s"))
+        val typed = pageString("document.activeElement?.innerText || document.activeElement?.value || ''")
+        if (!check(typed.trim().equals(prompt, ignoreCase = true), "demo: typing did not reach the message box")) return
+        screenshot("home-keyboard-typed")
+        pause(1_200)
+        if (!check(tapWeb("Send message"), "demo: Send is not reachable")) return
+        if (!check(waitPageText("All three competitors now charge per seat.", 20_000), "demo: no reply")) return
+        screenshot("conversation-reply")
+        pause(1_200)
+        dismissKeyboardIfUp()
         pause(800)
 
         // Conversations: open one, system Back.
