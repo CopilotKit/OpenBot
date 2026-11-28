@@ -81,6 +81,7 @@ SUITE2 = [
     "ShellFlowTest#testResumeFromBackground",
     "ShellFlowTest#testLoadingSkeleton",
     "ShellFlowTest#testLockLiftsWhenServerComesBack",
+    "RenderingTest#testBotsPageRendering",
 ]
 DEMO = ["DemoTourTest#testDemoTour"]
 # Recordings (video mode only): (first test, last test, file, private?)

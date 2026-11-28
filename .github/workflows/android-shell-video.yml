@@ -99,7 +99,7 @@ jobs:
           bun install --frozen-lockfile
           cp .env.example .env
           (cd app && bun run build)
-          MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-a.log" 2>&1 &
+          MOCK_REPLY=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-a.log" 2>&1 &
           APP_PORT=3010 SERVER_PORT=3001 nohup bun app/serve.ts > "$ARTIFACTS/app-a.log" 2>&1 &
           for _ in $(seq 1 60); do
             if [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3010/ || true)" = 200 ]; then echo "mock stack A is up"; exit 0; fi
@@ -142,16 +142,16 @@ jobs:
         env:
           RUN_MODE: video
           VIDEO_PLAN: demo
-          PER_TEST_SECONDS: "150"
+          PER_TEST_SECONDS: "220"
         run: python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
 
       - name: Record the real-backend journey (private)
         if: always() && env.WHICH != 'demo'
-        timeout-minutes: 6
+        timeout-minutes: 9
         env:
           RUN_MODE: video
           VIDEO_PLAN: real
-          PER_TEST_SECONDS: "150"
+          PER_TEST_SECONDS: "220"
           OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
           OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}
           OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}

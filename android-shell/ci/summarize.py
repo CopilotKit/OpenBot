@@ -67,6 +67,18 @@ for title, belongs in SUITES + [("Other", lambda r: True)]:
             lines.append(f"  - {r['message'][:400]}")
     lines.append("")
 
+# How often Cloudflare's bot check stood in front of my.open.bot in this run.
+real = [r for r in results if r["class"].startswith("RealBackend")]
+stopped = [r for r in real if "Cloudflare" in r.get("message", "")]
+probe_loads = [n for r in results for n in r.get("notes", []) if "challenge probe," in n]
+shown = [n for n in probe_loads if "bot check shown true" in n]
+lines.append("## Cloudflare's bot check\n")
+lines.append(f"- real-backend tests stopped at it: {len(stopped)} of {len(real)} ({', '.join(r['test'] for r in stopped) or 'none'})")
+lines.append(f"- loads observed by the challenge probe: {len(probe_loads)}, with the check shown: {len(shown)}")
+for n in probe_loads:
+    lines.append(f"  - {n[:300]}")
+lines.append("")
+
 lines.append("## Probe\n")
 probe = [p for r in results for p in r.get("probe", [])]
 summary = [p for p in probe if p.startswith("PROBE_SUMMARY")]

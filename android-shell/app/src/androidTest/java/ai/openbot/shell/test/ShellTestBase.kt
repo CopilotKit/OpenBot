@@ -431,8 +431,8 @@ abstract class ShellTestBase {
                 unplaced.clear()
                 path = "keys + input-text"
             }
-            device.click(p.first, p.second)
-            sleep(150)
+            tapFast(p.first, p.second)
+            sleep(120)
         }
         if (unplaced.isNotEmpty()) {
             shell("input text " + unplaced.toString().replace(" ", "%s"))
@@ -440,6 +440,23 @@ abstract class ShellTestBase {
         }
         note("typed ${text.length} characters on the software keyboard in ${(SystemClock.uptimeMillis() - started) / 1000.0} s ($path)")
         return path
+    }
+
+    /**
+     * A tap injected straight into the input system: no wait for the UI to go idle (UiDevice.click
+     * waits, which on the emulator's software renderer cost about 700 ms a key).
+     */
+    fun tapFast(x: Int, y: Int) {
+        val automation = instrumentation.uiAutomation
+        val now = SystemClock.uptimeMillis()
+        val down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, x.toFloat(), y.toFloat(), 0)
+        down.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+        automation.injectInputEvent(down, true)
+        val up = android.view.MotionEvent.obtain(now, now + 40, android.view.MotionEvent.ACTION_UP, x.toFloat(), y.toFloat(), 0)
+        up.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+        automation.injectInputEvent(up, true)
+        down.recycle()
+        up.recycle()
     }
 
     /** Taps the message box near its top (where the text line is). */

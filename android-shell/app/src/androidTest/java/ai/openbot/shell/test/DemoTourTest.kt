@@ -49,8 +49,11 @@ class DemoTourTest : ShellTestBase() {
                 typeOnKeyboard("what changed in pricing")
                 val typed = pageString("document.activeElement ? (document.activeElement.innerText || document.activeElement.value || '') : ''")
                 note("demo: the message box holds ${typed.length} characters after typing")
-                pause(1_200)
+                pause(1_000)
                 screenshot("home-keyboard-typed")
+                // Send (the video workflow's mock answers with a canned reply, MOCK_REPLY=1).
+                webRect("Send message")?.let { tapFast(it.centerX(), it.centerY()) }
+                pause(3_500)
                 device.pressBack()
                 waitKeyboard(false, 4_000)
             } else {

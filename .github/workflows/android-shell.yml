@@ -27,6 +27,10 @@ on:
         description: Run the Google sign-in in a Custom Tab (sends one sign-in prompt to the account's phone)
         type: boolean
         default: false
+      api_level:
+        description: Emulator API level (35 or 36)
+        type: string
+        default: "35"
       real_backend_only:
         description: Run only the real-backend suite (skip the mock suite, the probe and the demo)
         type: boolean
@@ -47,7 +51,7 @@ jobs:
     permissions:
       contents: read
     env:
-      API_LEVEL: "35"
+      API_LEVEL: ${{ inputs.api_level || '35' }}
       ARTIFACTS: ${{ github.workspace }}/artifacts
       PRIVATE_ARTIFACTS: ${{ github.workspace }}/private-artifacts
     steps:
@@ -146,8 +150,8 @@ jobs:
       - name: Cache the emulator's system image
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: /usr/local/lib/android/sdk/system-images/android-35/google_apis/x86_64
-          key: android-system-image-35-google_apis-x86_64-v1
+          path: /usr/local/lib/android/sdk/system-images/android-${{ env.API_LEVEL }}/google_apis/x86_64
+          key: android-system-image-${{ env.API_LEVEL }}-google_apis-x86_64-v1
 
       - name: Enable KVM
         run: |
