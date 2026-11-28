@@ -276,6 +276,8 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertTrue(app.buttons["sign-in-button"].waitForExistence(timeout: 20),
                       "Sign out did not bring back the native sign-in; state \(debugState(app))")
         XCTAssertTrue(tab(app, .home).waitForNonExistence(timeout: 5), "the tab bar stayed after Sign out")
+        // Review item H: the site's data went with the session, so the next person starts clean.
+        XCTAssertTrue(waitForState(app, "cleared=1", timeout: 10), "sign-out did not clear the site's data: \(debugState(app))")
         sleep(1)
         screenshot("2-after-sign-out")
         sleep(3)
@@ -525,6 +527,9 @@ final class ShellFlowUITests: ShellTestCase {
             app = launch(base: ShellTestCase.mockA, moment: moment, reset: false, extra: extra)
             let skeleton = app.descendants(matching: .any)["loading-skeleton"]
             XCTAssertTrue(skeleton.waitForExistence(timeout: 10), "no loading skeleton (\(moment))")
+            // Review item I: the skeleton takes the taps (a tap at its centre lands on it, not on the
+            // page loading under it).
+            XCTAssertTrue(skeleton.isHittable, "taps go through the skeleton (\(moment))")
             XCTAssertTrue(tab(app, .home).exists, "the tabs are not usable under the skeleton (\(moment))")
             sleep(1)
             screenshot("skeleton-\(moment)")
@@ -572,5 +577,31 @@ final class ShellFlowUITests: ShellTestCase {
             XCTAssertLessThanOrEqual(web.frame.maxY, home.frame.minY + 1, "the web view runs under the tab buttons")
             note("web view frame \(web.frame), tab bar \(bar.frame), home tab \(home.frame), window \(app.windows.firstMatch.frame)")
         }
+    }
+
+    // Review item B: signed in, a swipe back from the left edge never leaves the web app (the history
+    // before the sign-in holds the empty launch page and the hand-off). The mock's web sign-in has no
+    // way to finish, so the walk back through an identity provider to /sign is not tested here.
+    func testBackSwipeStaysOnTheWebApp() throws {
+        let app = launchSignedIn()
+        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
+        tab(app, .bots).tap()
+        XCTAssertTrue(webText(app, "Research Bot").waitForExistence(timeout: 15))
+        let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.5))
+        for step in 1...3 {
+            edge.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
+            sleep(2)
+            note("after back swipe \(step): \(debugState(app))")
+        }
+        screenshot("after-back-swipes")
+        XCTAssertTrue(tab(app, .home).exists, "a swipe back left the signed-in app: \(debugState(app))")
+        XCTAssertEqual(stateValue(app, "phase"), "signedIn", "a swipe back signed the person out")
+        let path = stateValue(app, "path") ?? ""
+        XCTAssertTrue(path.hasPrefix("/") && !path.hasPrefix("/sign") && !path.hasPrefix("/api"), "a swipe back reached \(path)")
+        // Still a page of the web app (an empty launch page would show none of these).
+        let page = firstExisting([webText(app, "Research Bot"), webText(app, "Start a conversation"), webText(app, "Bots")], timeout: 5)
+        XCTAssertNotNil(page, "after the back swipes the web view shows none of the web app's pages")
+        tab(app, .conversations).tap()
+        XCTAssertTrue(webText(app, "Competitor pricing notes").waitForExistence(timeout: 15), "the tabs stopped routing after the back swipes")
     }
 }

@@ -465,6 +465,7 @@ final class ShellController: NSObject, WebControllerDelegate {
             let mine = records.filter { host == $0.displayName || host.hasSuffix("." + $0.displayName) }
             store.removeData(ofTypes: types, for: mine) {
                 self?.diagnostics.log("site-data-cleared", ["records": mine.count])
+                DispatchQueue.main.async { self?.model.siteDataClears += 1 }
             }
         }
     }
