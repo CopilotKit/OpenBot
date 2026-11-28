@@ -402,7 +402,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     private func willNavigate(_ body: [String: Any]) {
         let direction = body["direction"] as? String ?? ""
         let tab = body["tab"] as? String ?? transition.currentTab
-        let ok = { [weak self] in
+        let ok: () -> Void = { [weak self] in
             self?.webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent(\"openbot:navigate-ok\"))", completionHandler: nil)
         }
         switch direction {
