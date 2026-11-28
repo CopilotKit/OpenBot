@@ -5,6 +5,7 @@ import {
   IconShare,
   IconUsers,
   IconUsersGroup,
+  IconX,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useId, useState } from "react";
@@ -14,6 +15,7 @@ import {
   PageSection,
 } from "@/components/layout/page-shell";
 import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
+import { PeopleTypeahead } from "@/components/teams/people-typeahead";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -31,7 +33,6 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import {
   Item,
   ItemActions,
@@ -49,9 +50,11 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { countLabel } from "@/lib/agents/bot-summaries";
+import { publicSharingWords } from "@/lib/agents/public-words";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { useOrganizationAudience } from "@/lib/organizations/queries";
 import {
   assignTeamBotMutationOptions,
   publishTeamBotMutationOptions,
@@ -67,12 +70,7 @@ import {
   teamValue,
 } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
-
-const list = (value: string) =>
-  value
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
+import { failureSaid } from "@/lib/load-failure";
 
 /** Everybody in the organization, as an assignment carries it. */
 const EVERYONE = "*";
@@ -91,26 +89,30 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
   const teams = useQuery(teamListQueryOptions()).data?.teams;
   const me = useQuery(currentUserQueryOptions()).data;
   const unpublish = useMutation(unpublishTeamBotMutationOptions(queryClient));
+  const audience = useOrganizationAudience();
   const [copied, setCopied] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  if (data.isPending) return null;
+  // Who a public Bot reaches waits for whether the person is the organization's only member.
+  if (data.isPending || (agent.visibility === "public" && audience.pending))
+    return null;
   if (data.error) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        {data.error.message}
+        {failureSaid(data.error)}
       </p>
     );
   }
   const published = data.data.find((bot) => bot.botId === agent.id);
   // A Bot is its owner's to publish, and one missing from the published list isn't published yet.
   const publishable = agent.mine && published === undefined;
+  const publicWords = publicSharingWords(audience);
 
   return (
     <>
       <PageSection title="Published">
         {unpublish.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            {unpublish.error.message}
+            {failureSaid(unpublish.error)}
           </p>
         ) : null}
         {published ? (
@@ -173,26 +175,25 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
               </ItemActions>
             </Item>
           </PageRows>
+        ) : agent.visibility === "public" ? (
+          // Public: who can use it, said once. Never "not published" beside "public".
+          <PageEmpty icon={IconShare} title={publicWords.title}>
+            {publicWords.description}
+          </PageEmpty>
         ) : (
-          <PageEmpty
-            icon={IconShare}
-            title={
-              agent.visibility === "public"
-                ? "Not published to the organization"
-                : "Not published"
-            }
-          >
-            {agent.visibility === "public"
-              ? "It's public, so everyone on OpenBot can already use it."
-              : agent.mine
-                ? "Only you can use it."
-                : null}
+          <PageEmpty icon={IconShare} title="Not published">
+            {agent.mine ? "Only you can use it." : null}
           </PageEmpty>
         )}
       </PageSection>
       {agent.mine && (published || publishable) ? (
         <PageSection
-          description="Only the people and teams you publish it to can use it. You can unpublish at any time."
+          description={
+            // A public Bot is everyone's in the organization already: publishing it doesn't narrow that.
+            agent.visibility === "public"
+              ? "It's public already. Publish it to get a link to share."
+              : "Only the people and teams you publish it to can use it. You can unpublish at any time."
+          }
           title={published ? "Who it is published to" : "Publish"}
         >
           {/* More than one value (an audience, then people and teams), so a summary row and a
@@ -209,7 +210,9 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>Audience</ItemTitle>
-                <ItemDescription>{audienceSummary(published)}</ItemDescription>
+                <ItemDescription>
+                  {audienceSummary(published, agent.visibility === "public")}
+                </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <IconChevronRight className="size-4 text-muted-foreground" />
@@ -275,8 +278,13 @@ function publishedTo(
 }
 
 /** The current answer on the Audience row: who it is published to, as a count. */
-function audienceSummary(current: TeamBot | undefined): string {
-  if (!current) return "Not published";
+function audienceSummary(
+  current: TeamBot | undefined,
+  isPublic: boolean,
+): string {
+  // Never "not published" beside a public Bot, which everyone in the organization can use.
+  if (!current)
+    return isPublic ? "Choose who to publish it to" : "Not published";
   if (current.audience === "team") return EVERYONE_WORDS;
   const parts = [
     countLabel(current.people?.length ?? 0, "person", "people", ""),
@@ -310,7 +318,11 @@ function PublishDialog({
   const [audience, setAudience] = useState<"team" | "people">(
     current?.audience ?? "team",
   );
-  const [emails, setEmails] = useState((current?.people ?? []).join(", "));
+  // The people it is published to, by address, each chosen from the organization's members.
+  const [emails, setEmails] = useState<readonly string[]>(
+    () => current?.people ?? [],
+  );
+  const chosenEmails = new Set(emails.map((email) => email.toLowerCase()));
   const [chosen, setChosen] = useState<ReadonlySet<string>>(
     () => new Set(current?.teams ?? []),
   );
@@ -346,7 +358,7 @@ function PublishDialog({
                 {
                   botId,
                   audience,
-                  emails: named ? list(emails) : [],
+                  emails: named ? [...emails] : [],
                   groups: named ? groups : [],
                   teams: named ? [...chosen] : [],
                 },
@@ -401,7 +413,7 @@ function PublishDialog({
                     </p>
                     {teams.isPending ? null : teams.error ? (
                       <p className="text-destructive text-sm" role="alert">
-                        {teams.error.message}
+                        {failureSaid(teams.error)}
                       </p>
                     ) : teams.data.teams.length === 0 ? (
                       <p className="text-muted-foreground text-sm">
@@ -430,17 +442,67 @@ function PublishDialog({
                       </div>
                     )}
                   </fieldset>
-                  <Field>
-                    <FieldLabel htmlFor={`${formId}-people`}>
-                      People, by email
-                    </FieldLabel>
-                    <Input
+                  {/*
+                    People are found among the organization's members as their name or address is
+                    typed, never typed in whole: nobody outside it can be chosen.
+                  */}
+                  <fieldset
+                    aria-labelledby={`${formId}-people`}
+                    className="flex min-w-0 flex-col gap-2"
+                  >
+                    <p
+                      className="font-medium text-xs leading-none"
                       id={`${formId}-people`}
-                      onChange={(event) => setEmails(event.target.value)}
-                      placeholder="Comma separated"
-                      value={emails}
+                    >
+                      People
+                    </p>
+                    {emails.length > 0 ? (
+                      <ul
+                        aria-label="People it is published to"
+                        className="flex flex-wrap gap-1.5"
+                      >
+                        {emails.map((email) => (
+                          <li
+                            // Drawn as the To: field's chips are (ComboboxChip), and cut short
+                            // rather than wider than the dialog.
+                            className="flex h-[calc(--spacing(5.25))] min-w-0 max-w-full items-center gap-1 whitespace-nowrap rounded-sm bg-muted pr-0 pl-1.5 font-medium text-foreground text-xs"
+                            key={email}
+                          >
+                            <span className="truncate">{email}</span>
+                            <Button
+                              aria-label={`Remove ${email}`}
+                              className="-ml-0.5 mr-0.5 size-4 rounded-sm opacity-50 hover:opacity-100"
+                              onClick={() =>
+                                setEmails((now) =>
+                                  now.filter((one) => one !== email),
+                                )
+                              }
+                              size="icon-xs"
+                              type="button"
+                              variant="ghost"
+                            >
+                              <IconX className="pointer-events-none" />
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    <PeopleTypeahead
+                      autoFocus={false}
+                      label="People to publish it to"
+                      name="People"
+                      onChoose={(person) =>
+                        setEmails((now) => [...now, person.email])
+                      }
+                      unavailable={(person) =>
+                        chosenEmails.has(person.email.toLowerCase())
+                          ? "Chosen"
+                          : person.email.trim()
+                            ? null
+                            : "Hasn't signed in yet"
+                      }
                     />
-                  </Field>
+                  </fieldset>
                   {groups.length > 0 ? (
                     <Field>
                       <p
@@ -462,7 +524,7 @@ function PublishDialog({
           </form>
           {publish.error ? (
             <p className="mt-4 text-destructive text-sm" role="alert">
-              {publish.error.message}
+              {failureSaid(publish.error)}
             </p>
           ) : null}
         </DialogBody>
@@ -513,7 +575,7 @@ function Assignments({
     <>
       {remove.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {remove.error.message}
+          {failureSaid(remove.error)}
         </p>
       ) : null}
       {assigned.length === 0 ? (
@@ -642,7 +704,7 @@ function AssignDialog({
           </form>
           {assign.error ? (
             <p className="mt-4 text-destructive text-sm" role="alert">
-              {assign.error.message}
+              {failureSaid(assign.error)}
             </p>
           ) : null}
         </DialogBody>

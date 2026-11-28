@@ -108,7 +108,7 @@ test("refused for not being its app, it says to open OpenBot from the app, with 
   expect(
     view.getByRole("link", { name: "Open OpenBot" }).getAttribute("href"),
   ).toBe("openbot://open");
-  expect(view.queryByText("Something went wrong!")).toBeNull();
+  expect(view.queryByText("Something went wrong")).toBeNull();
   expect(view.queryByText("Home")).toBeNull();
 });
 
@@ -126,7 +126,7 @@ test("any other 403 is the error screen it always was", async () => {
     connectionsProblem(403, "You don't have permission to do that.");
   const view = open();
 
-  expect(await view.findByText("Something went wrong!")).toBeTruthy();
+  expect(await view.findByText("Something went wrong")).toBeTruthy();
   expect(
     view.queryByRole("heading", { name: "Open OpenBot from its app" }),
   ).toBeNull();
@@ -136,7 +136,7 @@ test("the sentence with another status is not the refusal either", async () => {
   refusal = () => connectionsProblem(500, ONLY_ITS_OWN_APP);
   const view = open();
 
-  expect(await view.findByText("Something went wrong!")).toBeTruthy();
+  expect(await view.findByText("Something went wrong")).toBeTruthy();
   expect(
     view.queryByRole("heading", { name: "Open OpenBot from its app" }),
   ).toBeNull();

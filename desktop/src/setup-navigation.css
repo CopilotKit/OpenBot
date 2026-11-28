@@ -1,0 +1,95 @@
+/* Hosting uses the artifact's radio rows; the native inputs retain keyboard navigation. */
+.rail fieldset.picker.hosting .tile-input {
+  appearance: none;
+  position: static;
+  opacity: 1;
+  width: 14px;
+  height: 14px;
+  margin: 3px 0 0;
+  flex: none;
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+}
+
+.rail fieldset.picker.hosting .tile-input:checked {
+  border-color: var(--ring);
+  background: var(--ring);
+  box-shadow: inset 0 0 0 3px var(--active-tint);
+}
+
+.rail fieldset.picker.hosting :is(.mark-tile, .tile-option-icon) {
+  display: none;
+}
+
+.rail fieldset.picker.hosting .tile {
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 12px;
+  padding: 11px 12px;
+}
+
+.rail .tile-group {
+  display: block;
+  margin-top: 14px;
+  padding: 18px 0 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.rail .tile-group > :is(.tile-name, .tile-summary) {
+  display: block;
+  margin-inline: 12px;
+}
+
+.rail .tile-options {
+  margin: 8px 0 0;
+  gap: 2px;
+}
+
+.rail .tile-option {
+  gap: 12px;
+  min-height: 44px;
+  padding: 11px 12px;
+}
+
+.rail .tile-option-summary {
+  display: inline;
+  font-size: var(--text-sm);
+}
+
+/* The first-screen reference gives the choices room and separates the detail with one rule. */
+@media (min-width: 861px) {
+  main:has(> .sheet.welcome):not(:has(.booking-step)) {
+    --rail-width: 464px;
+  }
+
+  main:has(> .sheet.welcome):not(:has(.booking-step)) > .rail {
+    padding: 72px 40px 32px 48px;
+  }
+
+  main:has(> .sheet.welcome):not(:has(.booking-step)) > .rail > .lockup {
+    margin: 0 0 40px;
+  }
+
+  main:has(> .sheet.welcome):not(:has(.booking-step)) > .rail > .rail-title {
+    margin: 0 0 28px;
+    font-size: var(--text-3xl);
+    line-height: 36px;
+  }
+
+  main:has(> .sheet.welcome):not(:has(.booking-step)) .rail .tile-name {
+    font-size: var(--text-base);
+    line-height: 22px;
+  }
+
+  main > .rail + .sheet.welcome:not(:has(.booking-step)) {
+    margin: 72px 0 40px;
+    padding: 72px 56px 0;
+    border: 0;
+    border-left: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+  }
+}

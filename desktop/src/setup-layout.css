@@ -1,0 +1,117 @@
+@import "./setup-navigation.css";
+@import "./setup-account.css";
+@import "./setup-progress.css";
+@import "./setup-provider.css";
+@import "./setup-booking.css";
+@import "./setup-diagnostics.css";
+
+/* Opted-in setup pages keep their heading and actions outside the scrolling work area. */
+main > .rail + .sheet.setup-layout {
+  min-width: 0;
+  overflow: hidden;
+  scrollbar-gutter: auto;
+  padding-right: var(--page-inline);
+}
+
+main > .rail + .sheet.setup-layout > * {
+  min-width: 0;
+  max-width: none;
+}
+
+.booking-step.setup-layout > .setup-header-block,
+main > .rail + .sheet.setup-layout > .setup-header-block {
+  flex: none;
+}
+
+.setup-layout > .setup-header-block > .lede {
+  margin-bottom: 0;
+}
+
+/* Safe centering starts at the top when the content is taller than the available space. */
+.booking-step.setup-layout > .setup-body,
+main > .rail + .sheet.setup-layout > .setup-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+  gap: 20px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-block: 30px;
+}
+
+.setup-layout .setup-content {
+  width: 100%;
+  max-width: 480px;
+  margin-inline: auto;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.setup-layout .setup-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.setup-layout .setup-panel > :is(h2, h3, p, .row) {
+  margin: 0;
+}
+
+.setup-layout .setup-panel > h3 {
+  font-size: var(--text-lg);
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+.setup-layout .setup-panel > p {
+  color: var(--text-secondary);
+}
+
+.booking-step.setup-layout > .setup-footer,
+main > .rail + .sheet.setup-layout > .setup-footer {
+  flex: none;
+  position: static;
+  inset: auto;
+  margin: 0;
+  padding: 20px 0 0;
+}
+
+.booking-step.setup-layout > .setup-footer::before,
+main > .rail + .sheet.setup-layout > .setup-footer::before {
+  content: none;
+}
+
+.booking-step.setup-layout > .setup-footer > .row,
+main > .rail + .sheet.setup-layout > .setup-footer > .row,
+main
+  > .rail
+  + .sheet.setup-layout
+  > .setup-footer
+  > .row:first-child:empty:has(+ .behind-slot) {
+  margin: 0;
+  padding: 0;
+}
+
+@media (max-width: 860px) {
+  main > .rail + .sheet.setup-layout {
+    --sheet-pad: 24px;
+    padding-inline: 24px;
+    padding-bottom: 24px;
+  }
+
+  main > .rail + .sheet.setup-layout > .setup-body,
+  .booking-step.setup-layout > .setup-body {
+    justify-content: flex-start;
+    padding-block: 18px;
+  }
+
+  .setup-layout .setup-panel {
+    padding: 18px;
+  }
+}

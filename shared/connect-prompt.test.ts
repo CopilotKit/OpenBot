@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   addressedTo,
   CONNECT_APP_MARKER,
+  type ConnectPrompt,
   connectAppRefusal,
   readConnectPrompt,
 } from "./connect-prompt";
@@ -121,5 +122,59 @@ describe("the Bot, the reason and the moment it carries", () => {
     expect(addressedTo("That tool is not granted.", "expenses")).toBe(
       "That tool is not granted.",
     );
+  });
+});
+
+describe("a Bot that needs actions of an app it holds", () => {
+  test("the actions and the need survive the round trip, and addressedTo keeps them", () => {
+    const text = connectAppRefusal({
+      serverId: "composio-googlecalendar",
+      title: "Google Calendar",
+      message: "You weren't given an action that changes events.",
+      reason: "tools",
+      blocked: true,
+      actions: ["composio-googlecalendar/GOOGLECALENDAR_PATCH_EVENT"],
+      need: "change an event's colour",
+    });
+    const expected: ConnectPrompt = {
+      serverId: "composio-googlecalendar",
+      title: "Google Calendar",
+      message: "You weren't given an action that changes events.",
+      reason: "tools",
+      blocked: true,
+      actions: ["composio-googlecalendar/GOOGLECALENDAR_PATCH_EVENT"],
+      need: "change an event's colour",
+    };
+    expect(readConnectPrompt(text)).toEqual(expected);
+    expect(readConnectPrompt(addressedTo(text, "calendar-sanity"))).toEqual({
+      ...expected,
+      agentId: "calendar-sanity",
+    });
+  });
+
+  test("a brace in the need can't end the marker early", () => {
+    const text = connectAppRefusal({
+      serverId: "composio-googlecalendar",
+      title: "Google Calendar",
+      message: "m",
+      reason: "tools",
+      actions: ["composio-googlecalendar/GOOGLECALENDAR_PATCH_EVENT"],
+      need: "set {colorId} on an event",
+    });
+    expect(readConnectPrompt(text)?.need).toBe("set (colorId) on an event");
+    expect(readConnectPrompt(text)?.message).toBe("m");
+  });
+
+  test("actions of the wrong shape are dropped, and the prompt still names its app", () => {
+    expect(
+      readConnectPrompt(
+        `${CONNECT_APP_MARKER}{"serverId":"composio-googlecalendar","title":"Google Calendar","reason":"tools","actions":"GOOGLECALENDAR_PATCH_EVENT","need":7} hello`,
+      ),
+    ).toEqual({
+      serverId: "composio-googlecalendar",
+      title: "Google Calendar",
+      reason: "tools",
+      message: "hello",
+    });
   });
 });

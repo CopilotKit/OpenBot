@@ -1,5 +1,6 @@
 import {
   IconBuildingBank,
+  IconCheck,
   IconChevronRight,
   IconPencil,
   IconPlus,
@@ -9,9 +10,14 @@ import {
   IconUser,
   IconUsers,
 } from "@tabler/icons-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+} from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { TeamPage } from "@/components/edition/for-a-team";
 import {
   PageEmpty,
@@ -19,6 +25,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { PersonAvatar } from "@/components/organizations/person-avatar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -54,30 +61,39 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
+import { personName } from "@/lib/organizations/words";
+import { SEARCH_MAX } from "@/lib/people/queries";
 import { NO_PARENT, teamDetailsFrom } from "@/lib/teams/form";
 import {
   deleteTeamMutationOptions,
+  forgetTeam,
   putTeamMemberMutationOptions,
   removeTeamMemberMutationOptions,
   updateTeamMutationOptions,
 } from "@/lib/teams/mutations";
 import {
-  organizationPeopleQueryOptions,
+  isInTeam,
+  type OrganizationPerson,
   possibleParents,
   type TeamPerson,
   type TeamSummary,
   teamListQueryOptions,
-  teamMembersQueryOptions,
+  teamMemberMatchesQueryOptions,
+  teamMemberPagesQueryOptions,
   teamQueryOptions,
 } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
 import { parentLabels } from "./new-team-page";
+import { PeopleTypeahead } from "./people-typeahead";
+import { TeamModelsRow } from "./team-models";
+import {
+  backToTeams,
+  type TeamPaths,
+  type TeamsShell,
+  teamPaths,
+} from "./team-paths";
 import { ROLE_WORDS, TEAMS_DESCRIPTION } from "./team-words";
-
-const BACK = {
-  label: "Teams",
-  linkProps: { to: "/teams" as const },
-};
 
 /**
  * One team: what it is called and for, the team it is under, and its people.
@@ -88,27 +104,31 @@ const BACK = {
  * serves a member, a maintainer and an admin. A team from the company's directory keeps the
  * directory's name and people, and nobody leaves it here.
  */
-function Team({ teamId }: { teamId: string }) {
+function Team({ teamId, paths }: { teamId: string; paths: TeamPaths }) {
   const team = useQuery(teamQueryOptions(teamId));
   const list = useQuery(teamListQueryOptions());
 
   if (team.isPending) return null;
   if (team.error) {
     return (
-      <PageShell backButton={BACK} title="Team">
+      <PageShell backButton={backToTeams(paths)} title="Team">
         <p className="text-destructive text-sm" role="alert">
-          {team.error.message}
+          {failureSaid(team.error)}
         </p>
       </PageShell>
     );
   }
-  return <TeamDetail team={team.data} teams={list.data?.teams ?? []} />;
+  return (
+    <TeamDetail paths={paths} team={team.data} teams={list.data?.teams ?? []} />
+  );
 }
 
 function TeamDetail({
+  paths,
   team,
   teams,
 }: {
+  paths: TeamPaths;
   team: TeamSummary;
   /** The organization's teams, to name this one's parent and to choose another from. */
   teams: readonly TeamSummary[];
@@ -124,7 +144,7 @@ function TeamDetail({
 
   return (
     <PageShell
-      backButton={BACK}
+      backButton={backToTeams(paths)}
       description={team.description ?? undefined}
       title={team.name}
     >
@@ -196,6 +216,8 @@ function TeamDetail({
               </ItemActions>
             ) : null}
           </Item>
+          <Separator />
+          <TeamModelsRow team={team} />
         </PageRows>
       </PageSection>
 
@@ -222,29 +244,38 @@ function TeamDetail({
       {open === "parent" ? (
         <ParentDialog onClose={close} team={team} teams={teams} />
       ) : null}
-      {open === "delete" ? <DeleteDialog onClose={close} team={team} /> : null}
+      {open === "delete" ? (
+        <DeleteDialog onClose={close} paths={paths} team={team} />
+      ) : null}
     </PageShell>
   );
 }
 
 /**
- * The team's people, one row each. Somebody who may manage the team changes a person's role and
- * removes them, and adds a member of the organization. Anybody else reads the list, and may leave.
+ * The team's people, one row each, a page at a time, with a search above them that asks the server
+ * (as Admin's People does). Somebody who may manage the team changes a person's role and removes
+ * them, and adds a member of the organization. Anybody else reads the list, and may leave.
  */
 function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
-  const members = useQuery(teamMembersQueryOptions(team.id));
+  const [search, setSearch] = useState("");
+  // Debounced, so typing a name is one request rather than one per keystroke.
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const members = useInfiniteQuery(teamMemberPagesQueryOptions(team.id, query));
   const putMember = useMutation(putTeamMemberMutationOptions(queryClient));
   const removeMember = useMutation(
     removeTeamMemberMutationOptions(queryClient),
   );
   const [adding, setAdding] = useState(false);
-  const [leaving, setLeaving] = useState(false);
+  // The person reading, from their own row (the server marks it), once they press Leave team.
+  const [leaving, setLeaving] = useState<TeamPerson | null>(null);
   const fromDirectory = team.source === "directory";
   const busy = putMember.isPending || removeMember.isPending;
   const failure = putMember.error ?? removeMember.error;
-  const rows = members.data ?? [];
-  // The person reading, as the server marks them among the team's people.
-  const self = rows.find((person) => person.isCaller);
+  const rows = members.data?.pages.flatMap((page) => page.members) ?? [];
 
   const addPerson = (variant: "ghost" | "outline") => (
     <Button onClick={() => setAdding(true)} size="sm" variant={variant}>
@@ -260,13 +291,31 @@ function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
     >
       {failure ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {failure.message}
+          {failureSaid(failure)}
         </p>
+      ) : null}
+      {/*
+        Server-side search, as on Admin's People: filtering what already arrived would only search
+        the first page. Shown once there is somebody to search, or something typed.
+      */}
+      {search || query || rows.length > 0 ? (
+        <Input
+          aria-label="Search people in this team"
+          className="mt-4"
+          maxLength={SEARCH_MAX}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search by name or address"
+          value={search}
+        />
       ) : null}
       {members.isPending ? null : members.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {members.error.message}
+          {failureSaid(members.error)}
         </p>
+      ) : rows.length === 0 && query ? (
+        <PageEmpty icon={IconSearch} title="No matches">
+          {`Nobody in this team matches "${query}".`}
+        </PageEmpty>
       ) : rows.length === 0 ? (
         <PageEmpty
           action={canEdit ? addPerson("outline") : undefined}
@@ -355,7 +404,7 @@ function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
                     {fromDirectory ? null : isSelf ? (
                       <Button
                         disabled={busy}
-                        onClick={() => setLeaving(true)}
+                        onClick={() => setLeaving(person)}
                         size="sm"
                         variant="outline"
                       >
@@ -385,17 +434,25 @@ function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
           })}
         </PageRows>
       )}
-      {adding ? (
-        <AddPersonDialog
-          inTeam={rows}
-          onClose={() => setAdding(false)}
-          team={team}
-        />
+      {/* Only when the server says there is another page, as on Admin's People. */}
+      {members.hasNextPage ? (
+        <Button
+          className="mt-4"
+          disabled={members.isFetchingNextPage}
+          onClick={() => members.fetchNextPage()}
+          size="sm"
+          variant="outline"
+        >
+          {members.isFetchingNextPage ? "Loading…" : "Show more"}
+        </Button>
       ) : null}
-      {leaving && self ? (
+      {adding ? (
+        <AddPersonDialog onClose={() => setAdding(false)} team={team} />
+      ) : null}
+      {leaving ? (
         <LeaveDialog
-          memberId={self.id}
-          onClose={() => setLeaving(false)}
+          memberId={leaving.id}
+          onClose={() => setLeaving(null)}
           team={team}
         />
       ) : null}
@@ -465,7 +522,7 @@ function DetailsDialog({
           </form>
           {update.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {update.error.message}
+              {failureSaid(update.error)}
             </p>
           ) : null}
         </DialogBody>
@@ -557,7 +614,7 @@ function ParentDialog({
           </form>
           {update.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {update.error.message}
+              {failureSaid(update.error)}
             </p>
           ) : null}
         </DialogBody>
@@ -580,102 +637,131 @@ function ParentDialog({
 }
 
 /**
- * The organization's members who are not in the team yet, each with an Add. Adding is one write a
- * person, done as it is pressed, so the list shortens as people go in and nothing waits on a Save.
+ * Adding people to a team: a type-ahead box over the organization's own members, searched on the
+ * server as the admin types (PeopleTypeahead). Who of those found is in the team already comes from
+ * the team's own search with the same words, never from reading the whole team, and is asked again
+ * just before somebody is added (adding sets their role, which would make a maintainer a member).
+ * Adding is one write a person, done as they are chosen, so several go in one after another and
+ * nothing waits on a Save. Whoever was added here is listed under the box until the dialog closes.
  */
 function AddPersonDialog({
   team,
-  inTeam,
   onClose,
 }: {
   team: TeamSummary;
-  inTeam: readonly TeamPerson[];
   onClose: () => void;
 }) {
-  const people = useQuery(organizationPeopleQueryOptions());
   const add = useMutation(putTeamMemberMutationOptions(queryClient));
   const [search, setSearch] = useState("");
-  const taken = new Set(inTeam.map((person) => person.id));
-  const outside = (people.data ?? []).filter((person) => !taken.has(person.id));
-  const wanted = search.trim().toLowerCase();
-  const shown = wanted
-    ? outside.filter((person) =>
-        `${person.name ?? ""} ${person.email}`.toLowerCase().includes(wanted),
-      )
-    : outside;
+  const matches = useQuery({
+    ...teamMemberMatchesQueryOptions(team.id, search),
+    enabled: search !== "",
+    // Kept while the next search's answer is on its way, as the people found are.
+    placeholderData: keepPreviousData,
+  });
+  const inTeam = matches.data;
+  const [added, setAdded] = useState<OrganizationPerson[]>([]);
+  // Found to be in the team already when they were chosen.
+  const [already, setAlready] = useState<ReadonlySet<string>>(new Set());
+  // The refusal itself, not its words: a hold is drawn calmly (lib/load-failure.tsx).
+  const [failure, setFailure] = useState<Failure | null>(null);
+  // Chosen and not yet answered: offered as in the team, and given back if the server refuses.
+  const [adding, setAdding] = useState<ReadonlySet<string>>(new Set());
+  const taken = new Set([
+    ...(inTeam ?? []),
+    ...already,
+    ...added.map((person) => person.id),
+    ...adding,
+  ]);
+  const settle = (id: string) =>
+    setAdding((now) => new Set([...now].filter((one) => one !== id)));
+  const last = added[0];
+
+  const choose = async (person: OrganizationPerson) => {
+    setAdding((now) => new Set([...now, person.id]));
+    setFailure(null);
+    try {
+      if (await isInTeam(team.id, person)) {
+        setAlready((now) => new Set([...now, person.id]));
+        return;
+      }
+      await add.mutateAsync({
+        teamId: team.id,
+        memberId: person.id,
+        role: "member",
+      });
+      setAdded((now) => [person, ...now.filter((one) => one.id !== person.id)]);
+    } catch (error) {
+      setFailure(failureOf(error, "Couldn't add them. Try again in a moment."));
+    } finally {
+      settle(person.id);
+    }
+  };
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
-      <DialogContent>
+      {/*
+       * Held near the top, not centred: the list under the box grows and shrinks with every
+       * keystroke, and a centred dialog would jump up and down with it.
+       */}
+      <DialogContent className="top-[8svh] translate-y-0 sm:top-[12svh]">
         <DialogHeader>
           <DialogTitle>Add people to {team.name}</DialogTitle>
           <DialogDescription>
-            They can use everything the team is given, from their next message.
+            Type a name or email to find someone in this organization. They can
+            use everything the team is given, from their next message.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4">
-          <Input
-            aria-label="Search people"
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by name or address"
-            value={search}
+          <PeopleTypeahead
+            announcement={
+              last ? `${personName(last)} added to ${team.name}` : undefined
+            }
+            label={`People to add to ${team.name}`}
+            onChoose={(person) => void choose(person)}
+            onSearch={setSearch}
+            unavailable={(person) =>
+              taken.has(person.id) ? "In this team" : null
+            }
+            waiting={search !== "" && matches.isPending}
           />
-          {add.error ? (
+          {failure ? (
             <p className="text-destructive text-sm" role="alert">
-              {add.error.message}
+              {failureSaid(failure)}
             </p>
           ) : null}
-          {people.isPending ? null : people.error ? (
-            <p className="text-destructive text-sm" role="alert">
-              {people.error.message}
-            </p>
-          ) : shown.length === 0 ? (
-            <PageEmpty
-              icon={wanted ? IconSearch : IconUsers}
-              title={wanted ? "No matches" : "Everyone is already in"}
-            >
-              {wanted
-                ? `Nobody matches "${search.trim()}".`
-                : "Everyone in the organization is in this team."}
-            </PageEmpty>
-          ) : (
-            <ul aria-label="People to add" className="flex flex-col gap-2">
-              {shown.map((person) => (
-                <li key={person.id}>
-                  {/* Filled, not card-coloured: a card is the dialog's own colour and would not show. */}
-                  <Item size="sm" variant="muted">
-                    <ItemMedia variant="icon">
-                      <IconUser />
-                    </ItemMedia>
-                    <ItemContent className="min-w-0">
-                      <ItemTitle>{person.name ?? person.email}</ItemTitle>
-                      {person.name ? (
-                        <ItemDescription className="line-clamp-1 break-all">
-                          {person.email}
-                        </ItemDescription>
-                      ) : null}
-                    </ItemContent>
-                    <ItemActions>
-                      <Button
-                        aria-label={`Add ${person.name ?? person.email}`}
-                        disabled={add.isPending}
-                        onClick={() =>
-                          add.mutate({
-                            teamId: team.id,
-                            memberId: person.id,
-                            role: "member",
-                          })
-                        }
-                        size="sm"
-                        variant="outline"
-                      >
-                        Add
-                      </Button>
-                    </ItemActions>
-                  </Item>
-                </li>
-              ))}
-            </ul>
-          )}
+          {added.length > 0 ? (
+            <section aria-label={`Added to ${team.name}`}>
+              <h3 className="mb-2 font-medium text-muted-foreground text-xs">
+                Added
+              </h3>
+              <ul className="flex flex-col gap-2">
+                {added.map((person) => (
+                  <li key={person.id}>
+                    {/* Filled, not card-coloured: a card is the dialog's own colour and would not show. */}
+                    <Item size="sm" variant="muted">
+                      <ItemMedia>
+                        <PersonAvatar person={person} />
+                      </ItemMedia>
+                      <ItemContent className="min-w-0">
+                        <ItemTitle>{personName(person)}</ItemTitle>
+                        {person.name ? (
+                          <ItemDescription className="line-clamp-1 break-all">
+                            {person.email}
+                          </ItemDescription>
+                        ) : null}
+                      </ItemContent>
+                      <ItemActions>
+                        <IconCheck
+                          aria-label="Added"
+                          className="size-4 text-muted-foreground"
+                        />
+                      </ItemActions>
+                    </Item>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </DialogBody>
         <DialogFooter className="mt-4">
           <Button onClick={onClose} size="sm" type="button">
@@ -710,7 +796,7 @@ function LeaveDialog({
         </DialogHeader>
         {leave.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {leave.error.message}
+            {failureSaid(leave.error)}
           </p>
         ) : null}
         <DialogFooter>
@@ -739,9 +825,12 @@ function LeaveDialog({
 function DeleteDialog({
   team,
   onClose,
+  paths,
 }: {
   team: TeamSummary;
   onClose: () => void;
+  /** Where the list is, in the frame the page is in: where a deleted team's page sends you. */
+  paths: TeamPaths;
 }) {
   const navigate = useNavigate();
   const remove = useMutation(deleteTeamMutationOptions(queryClient));
@@ -757,7 +846,7 @@ function DeleteDialog({
         </DialogHeader>
         {remove.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {remove.error.message}
+            {failureSaid(remove.error)}
           </p>
         ) : null}
         <DialogFooter>
@@ -768,7 +857,11 @@ function DeleteDialog({
             disabled={remove.isPending}
             onClick={() =>
               remove.mutate(team.id, {
-                onSuccess: () => void navigate({ to: "/teams" }),
+                // To the list, then drop the team's reads: its page never reads it again.
+                onSuccess: () =>
+                  void navigate(paths.list()).then(() =>
+                    forgetTeam(queryClient, team.id),
+                  ),
               })
             }
             size="sm"
@@ -782,11 +875,25 @@ function DeleteDialog({
   );
 }
 
-/** The personal edition shows that this page applies to a team. */
-export function TeamDetailPage({ teamId }: { teamId: string }) {
+/**
+ * The personal edition shows that this page applies to a team. `shell` is the frame it is drawn in,
+ * so the back button, and the list a deleted team leaves for, stay in it.
+ */
+export function TeamDetailPage({
+  teamId,
+  shell = "app",
+}: {
+  teamId: string;
+  shell?: TeamsShell;
+}) {
+  const paths = teamPaths(shell);
   return (
-    <TeamPage backButton={BACK} description={TEAMS_DESCRIPTION} title="Team">
-      <Team teamId={teamId} />
+    <TeamPage
+      backButton={backToTeams(paths)}
+      description={TEAMS_DESCRIPTION}
+      title="Team"
+    >
+      <Team paths={paths} teamId={teamId} />
     </TeamPage>
   );
 }

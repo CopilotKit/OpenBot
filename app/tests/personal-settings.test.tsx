@@ -221,8 +221,15 @@ describe("the Computer page", () => {
     host: HostAccessStatus = hostAccess,
     computers: ComputerFleet = fleet,
     computerMode?: ComputerMode,
+    /** A hosted OpenBot: people sign in through the hosted sign-in. */
+    hosted = false,
   ) {
     const client = clientFor(edition);
+    if (hosted)
+      client.setQueryData(deploymentKeys.capabilities(), {
+        ...capabilities(edition),
+        hostedSignIn: true,
+      });
     client.setDefaultOptions({
       queries: { retry: false, staleTime: Infinity },
     });
@@ -442,6 +449,28 @@ describe("the Computer page", () => {
       within(folders).queryByRole("button", { name: "Stop folder access" }),
     ).toBeNull();
     expect(folders.textContent).not.toContain("The desktop app is offline");
+  });
+
+  // The hosted end-to-end run: Admin, Computers said "Needs OpenBot Desktop", but only the OpenBot that OpenBot Desktop
+  // runs on the person's own computer can be given a folder. Connected to a hosted one, Desktop never can.
+  test("on a hosted OpenBot there is no folders section at all, since no desktop app can share folders with it", async () => {
+    const view = await renderPage(
+      "team",
+      { ...hostAccess, desktop: false },
+      fleet,
+      undefined,
+      true,
+    );
+    expect(
+      view.queryByRole("heading", { name: "Folders on this computer" }),
+    ).toBeNull();
+    expect(view.queryByText("Needs OpenBot Desktop")).toBeNull();
+  });
+
+  test("self-hosted outside OpenBot Desktop still says the folders need it", async () => {
+    const view = await renderPage("team", { ...hostAccess, desktop: false });
+    const folders = foldersSection(view);
+    expect(within(folders).getByText("Needs OpenBot Desktop")).toBeTruthy();
   });
 
   /** A folder request still open, as the API's `people/me/host-access` lists it. */

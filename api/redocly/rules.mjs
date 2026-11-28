@@ -17,7 +17,9 @@ const ORGANIZATION_PREFIX = "/api/v2/organizations/{organizationId}/";
  * The addresses outside an organization. The organizations the caller is a member of, and
  * creating one: a person has to be able to ask which organizations they are in before they can
  * name one. And the invitations sent to the caller: they answer one before they are a member of
- * the organization it is for, so neither can sit under an organization's address.
+ * the organization it is for, so neither can sit under an organization's address. And deleting
+ * the caller's account: an account is the person's, not any organization's, and it ends every
+ * membership they have.
  */
 const OUTSIDE_AN_ORGANIZATION = [
   "/api/v2/people/me/organizations",
@@ -25,6 +27,8 @@ const OUTSIDE_AN_ORGANIZATION = [
   "/api/v2/people/me/invitations/{invitationId}",
   "/api/v2/people/me/invitations/{invitationId}/accept",
   "/api/v2/people/me/invitations/{invitationId}/decline",
+  "/api/v2/people/me/account-deletion",
+  "/api/v2/people/me/account-deletion/cancel",
 ];
 const WRITE_METHODS = ["post", "put", "patch", "delete"];
 const METHODS = ["get", "head", "options", "trace", ...WRITE_METHODS];

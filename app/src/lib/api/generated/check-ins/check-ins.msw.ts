@@ -7,6 +7,7 @@ import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 import type {
   CheckInItemPage,
   CheckInItemResponse,
+  CheckInItemWork,
   CheckInPage,
   CheckInResponse,
   CheckInRunAnswer,
@@ -149,6 +150,30 @@ export const getStartCheckInItemResponseMock = (): StartedCheckInItem => ({
   task: {
     id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
     conversationId: "8d7c6b5a-4f3e-4d2c-9b1a-0f9e8d7c6b5a",
+  },
+});
+
+export const getWorkOnCheckInItemResponseMock = (): CheckInItemWork => ({
+  checkInItem: {
+    id: "9e8d7c6b-5a4f-4e3d-2c1b-0a9f8e7d6c5b",
+    botId: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
+    checkInId: "c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90",
+    title: "Reply to the vendor about the renewal",
+    detail: "The vendor answered yesterday and asked for a decision by Friday.",
+    sourceApp: "Gmail",
+    sourceRef: null,
+    sourceLink: "https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5",
+    status: "started",
+    pingId: null,
+    deliveredAt: null,
+    resolvedAt: "2026-11-14T10:12:00.000Z",
+    createdAt: "2026-11-14T09:00:36.000Z",
+  },
+  task: null,
+  conversation: {
+    id: "5f0c2a52-3f1e-4a55-9d0a-7f6d2b1c8e90",
+    message:
+      "Reply to the vendor about the renewal\n\nThe vendor answered yesterday and asked for a decision by Friday.\n\nSource: https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5",
   },
 });
 
@@ -412,6 +437,39 @@ export const getStartCheckInItemMockHandler = (
   );
 };
 
+export const getWorkOnCheckInItemMockHandler = (
+  overrideResponse?:
+    | CheckInItemWork
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{
+            organizationId: string;
+            checkInItemId: string;
+          }>
+        >[0],
+      ) => Promise<CheckInItemWork> | CheckInItemWork),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ organizationId: string; checkInItemId: string }>(
+    "*/api/v2/organizations/:organizationId/check-in-items/:checkInItemId/work-on",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; checkInItemId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getWorkOnCheckInItemResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
 export const getDismissCheckInItemMockHandler = (
   overrideResponse?:
     | CheckInItemResponse
@@ -478,6 +536,7 @@ export const getCheckInsMock = () => [
   getRunCheckInMockHandler(),
   getListCheckInItemsMockHandler(),
   getStartCheckInItemMockHandler(),
+  getWorkOnCheckInItemMockHandler(),
   getDismissCheckInItemMockHandler(),
   getGetCheckInUsageMockHandler(),
 ];

@@ -1,7 +1,11 @@
 import { OPENBOT_WAITING_METADATA } from "@openbot/shared/waiting";
 
 /** An AG-UI interrupt as the agent holds it, as much of it as this reads. */
-type HeldInterrupt = { id: string; metadata?: Record<string, unknown> };
+type HeldInterrupt = {
+  id: string;
+  toolCallId?: string;
+  metadata?: Record<string, unknown>;
+};
 
 /**
  * Whether an interrupt is one the server answers itself: an approval, a question or a sign-in its
@@ -11,6 +15,28 @@ type HeldInterrupt = { id: string; metadata?: Record<string, unknown> };
 export function serverOwnedInterrupt(interrupt: HeldInterrupt): boolean {
   const waiting = interrupt.metadata?.[OPENBOT_WAITING_METADATA];
   return !!waiting && typeof waiting === "object";
+}
+
+/**
+ * Whether the server holds this tool call: the run that made it stopped on the server's own wait for
+ * it (a take-over, a secret, a sign-in), and the server carries the conversation on once the person
+ * has done their part, page open or not.
+ *
+ * Such a call has no result yet, so the SDK hands it to this app's handler as well. The handler must
+ * not act on it: asked again, a sign-in opened a second form, and the answer this app would give
+ * went into the conversation beside the server's. It waits as a held step does
+ * (`WAITING_FOR_PERSON`), and its card draws from the server's request.
+ */
+export function heldByServer(
+  agent: { pendingInterrupts?: readonly HeldInterrupt[] } | undefined,
+  toolCallId: string | undefined,
+): boolean {
+  if (!toolCallId) return false;
+  return (agent?.pendingInterrupts ?? []).some(
+    (interrupt) =>
+      (interrupt.toolCallId ?? interrupt.id) === toolCallId &&
+      serverOwnedInterrupt(interrupt),
+  );
 }
 
 /**

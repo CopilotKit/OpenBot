@@ -9,6 +9,7 @@ import {
   createOrganization,
   createOrganizationInvitation,
   declineInvitation,
+  deleteOrganization,
   removeOrganizationMember,
   updateOrganization,
   updateOrganizationMember,
@@ -33,6 +34,7 @@ const CHANGE_ROLE_FALLBACK = "Couldn't change their role. Try again.";
 const LEAVE_FALLBACK = "Couldn't leave the organization. Try again.";
 const ACCEPT_FALLBACK = "Couldn't accept the invitation. Try again.";
 const DECLINE_FALLBACK = "Couldn't decline the invitation. Try again.";
+const DELETE_FALLBACK = "Couldn't delete the organization. Try again.";
 
 /** Everything read about organizations is read again: the list, members and invitations alike. */
 function invalidateOrganizations(queryClient: QueryClient) {
@@ -183,13 +185,8 @@ export function changeMemberRoleMutationOptions(queryClient: QueryClient) {
 }
 
 /**
- * Leave an organization, as the person signed in.
- *
- * Somebody who leaves the one they are working in is moved to another of theirs the way a switch
- * moves them: the session first, then `leave` (the caller takes them home), then the app changes
- * over. Nothing is read again before that, so no screen asks the organization just left for
- * anything. Should the session not move, the list of their organizations moves it when it is read
- * (./queries.ts).
+ * Leave an organization, as the person signed in. Somebody who leaves the one they are working in
+ * is moved to another of theirs (`moveOffGone`).
  */
 export function leaveOrganizationMutationOptions(
   queryClient: QueryClient,
@@ -203,22 +200,56 @@ export function leaveOrganizationMutationOptions(
         { "Idempotency-Key": idempotencyKey() },
         { fallback: LEAVE_FALLBACK },
       ),
-    onSuccess: async (_done, organizationId) => {
-      const next = queryClient
-        .getQueryData<OwnOrganizations | null>(organizationKeys.mine())
-        ?.organizations.find((one) => one.id !== organizationId);
-      if (next && currentOrganizationId() === organizationId) {
-        const moved = await workIn(next.id).then(
-          () => true,
-          () => false,
-        );
-        if (moved) {
-          await leave();
-          setCurrentOrganization(next.id);
-        }
-      }
-      await invalidateOrganizations(queryClient);
-    },
+    onSuccess: (_done, organizationId) =>
+      moveOffGone(queryClient, organizationId, leave),
+  });
+}
+
+/**
+ * After the person is no longer in `organizationId` (they left it, or deleted it): somebody working in it is moved to
+ * another of theirs the way a switch moves them, the session first, then `leave` (the caller takes them home), then the
+ * app changes over. Nothing is read again before that, so no screen asks the organization that is gone for anything.
+ * Should the session not move, the list of their organizations moves it when it is read (./queries.ts).
+ */
+async function moveOffGone(
+  queryClient: QueryClient,
+  organizationId: string,
+  leave: () => Promise<void>,
+): Promise<void> {
+  const next = queryClient
+    .getQueryData<OwnOrganizations | null>(organizationKeys.mine())
+    ?.organizations.find((one) => one.id !== organizationId);
+  if (next && currentOrganizationId() === organizationId) {
+    const moved = await workIn(next.id).then(
+      () => true,
+      () => false,
+    );
+    if (moved) {
+      await leave();
+      setCurrentOrganization(next.id);
+    }
+  }
+  await invalidateOrganizations(queryClient);
+}
+
+/**
+ * Delete an organization and what is in it. Only an owner can, and a person's own organization and `default` stay:
+ * the server refuses those in its own words, which the caller shows. Somebody working in it is moved to another of
+ * their organizations, as after leaving one.
+ */
+export function deleteOrganizationMutationOptions(
+  queryClient: QueryClient,
+  leave: () => Promise<void> = async () => {},
+) {
+  return mutationOptions({
+    mutationFn: (organizationId: string): Promise<void> =>
+      deleteOrganization(
+        organizationId,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: DELETE_FALLBACK },
+      ),
+    onSuccess: (_done, organizationId) =>
+      moveOffGone(queryClient, organizationId, leave),
   });
 }
 

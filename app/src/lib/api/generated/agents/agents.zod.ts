@@ -318,6 +318,7 @@ export const CreateBotAgentBody = zod
         "pydantic-ai",
         "microsoft-agent-framework",
         "claude-agent-sdk",
+        "openai-agents-sdk",
         "strands",
         "ag2",
         "langroid",

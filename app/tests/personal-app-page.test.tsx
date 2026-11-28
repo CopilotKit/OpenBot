@@ -497,7 +497,7 @@ describe("turning an app off from its own page", () => {
     const { view, router } = drawAtConnections([exaServer], "composio-exa");
     const user = userEvent.setup({ document });
     await user.click(
-      await view.findByRole("switch", { name: "Turn Exa on or off" }),
+      await view.findByRole("switch", { name: "Exa on for your Bots" }),
     );
     expect(await view.findByText("The Connections list")).toBeTruthy();
     expect(router.state.location.pathname).toBe("/connections");
@@ -511,7 +511,7 @@ describe("turning an app off from its own page", () => {
     const { view, router } = drawAtConnections([notionServer], "notion");
     const user = userEvent.setup({ document });
     await user.click(
-      await view.findByRole("switch", { name: "Turn Notion on or off" }),
+      await view.findByRole("switch", { name: "Notion on for your Bots" }),
     );
     expect(
       await view.findByRole("button", { name: "Connect Notion" }),
@@ -539,15 +539,15 @@ describe("turning an app off from its own page", () => {
     );
     expect(await view.findByRole("button", { name: "Connect" })).toBeTruthy();
     expect(
-      view.getByRole("switch", { name: "Turn Exa on or off" }),
+      view.getByRole("switch", { name: "Exa on for your Bots" }),
     ).toBeTruthy();
     expect(router.state.location.pathname).toBe("/connections/composio-exa");
   });
 });
 
-test("the team edition's page is unchanged", async () => {
+test("the team edition's page keeps its off switch for everyone", async () => {
   const view = draw("team", [notionServer]);
-  expect(await view.findByText("Enable for this organization")).toBeTruthy();
+  expect(await view.findByText("On for everyone")).toBeTruthy();
   expect(view.getByText("Bot owners can give it to their Bots")).toBeTruthy();
 });
 
@@ -593,7 +593,7 @@ test("Routines is always on in the team edition too, with no switch to turn it o
   } as TodayServer;
   const view = draw("team", [routines], "routines");
   expect(await view.findByText("Always on")).toBeTruthy();
-  expect(view.queryByText("Enable for this organization")).toBeNull();
+  expect(view.queryByText("On for everyone")).toBeNull();
   expect(view.queryByRole("switch", { name: /Routines/ })).toBeNull();
 });
 

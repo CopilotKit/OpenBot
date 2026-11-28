@@ -20,6 +20,18 @@ const valid = {
     helmRelease: "openbot",
     ociRepository: "openbot",
     pinsConfigMap: "openbot-pins",
+    source: {
+      url: "oci://registry.example.test/charts/openbot-bundle",
+      digest: null,
+      insecure: false,
+      pullSecret: null,
+      verify: null,
+    },
+    release: {
+      serviceAccountName: "openbot-deployer",
+      timeout: "20m",
+      valuesFrom: [],
+    },
   },
   backup: { kind: "command", timeoutSeconds: 600 },
   stateConfigMap: "openbot-agent-state",

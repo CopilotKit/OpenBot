@@ -235,14 +235,14 @@ because the server reads no value saved for it here:
 
 | Admin page | In the personal edition |
 | --- | --- |
-| Routines | How check-ins went shows. The check-ins switch and daily limit are for a team. |
+| Routines | How check-ins went shows. The admin's check-ins switch and daily limit are for a team. Your own check-ins switch is in Settings → Notifications and works here. |
 | Automatic learning | For a team. You review what OpenBot learns on **Skills**. |
 | Apps | Works. The MCP server allowlist is for a team. |
 | Computers | Works. Idle computers and Network are for a team. |
 | Approvals, with Describe team rules and Guidance for auto-review | For a team. Your own approvals are in Settings → Approvals. |
 | Activity | Works. Recording and export is for a team. |
 | People, Permissions (with Describe who can do what) and Identity providers | For a team. |
-| Overview, Skills, UI components, Playground, Boundaries, What would happen, Vault, Providers | Work as in the team edition. |
+| Overview, Skills, UI components, Playground, Boundaries, What would happen, Vault, AI providers | Work as in the team edition. |
 
 The server answers `404` for the API behind the team-only screens: people, identity providers,
 enterprise controls (except a person's own permissions, which any page may ask), the admin learning

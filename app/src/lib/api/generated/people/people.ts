@@ -18,13 +18,31 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AcceptServiceTermsHeaders,
+  AcceptServiceTermsRequest,
+  AccountDeletion,
+  AccountDeletionConflictResponse,
+  AccountDeletionForbiddenResponse,
+  AccountDeletionNotConfirmedResponse,
+  AccountDeletionSignInOnlyResponse,
+  AccountDeletionUnderWayResponse,
   AdminOnlyResponse,
   AdvanceOnboardingHeaders,
   AdvanceOnboardingRequest,
+  CancelAccountDeletionHeaders,
+  CancelledAccountDeletion,
+  CompanySignIn,
+  CompanySignInProviderNotFoundResponse,
+  CompanySignInTicket,
+  CompanySignInTicketConflictResponse,
+  CompanySignInTicketForbiddenResponse,
   CompleteOnboardingHeaders,
+  CreateCompanySignInTicketHeaders,
+  CreateCompanySignInTicketRequest,
   ForbiddenResponse,
   GetPersonResponse,
   IdempotencyConflictResponse,
+  InvalidCompanySignInTicketResponse,
   InvalidPersonResponse,
   InvalidRequestResponse,
   ListPeopleParams,
@@ -37,9 +55,15 @@ import type {
   PersonPage,
   PersonResponse,
   Preferences,
+  RequestAccountDeletionHeaders,
+  RequestAccountDeletionRequest,
   RestorePersonAccessHeaders,
   RevokePersonAccessHeaders,
+  ScheduledAccountDeletion,
   ServerErrorResponse,
+  ServiceTerms,
+  ServiceTermsConflictResponse,
+  SignInUnavailableResponse,
   StandingInstructions,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
@@ -507,7 +531,7 @@ export const getUpdatePersonUrl = (
 };
 
 /**
- * Change what is sent and leave the rest. A person changes their own name, and nobody else's. An administrator changes anybody's role, but not their own away from administrator, and not the role of somebody the deployment's configuration names as an administrator. Asking for the role a person already has changes nothing and records nothing.
+ * Change what is sent and leave the rest. A person changes their own name, and nobody else's. An administrator changes anybody's role, but not their own away from administrator, and not the role of somebody the deployment's configuration names as an administrator. Asking for the role a person already has changes nothing and records nothing. role is deprecated: change a member's role with updateOrganizationMember instead.
  * @summary Change a person
  */
 export const updatePerson = async (
@@ -665,7 +689,7 @@ export const getRevokePersonAccessUrl = (
 };
 
 /**
- * Remove a person from the organization. Where everybody has an organization of their own (an OpenBot whose list of organizations answers canCreate true), this ends their membership of this organization alone: they lose its Bots and conversations from their next request, and their account, sessions, API keys, their own organization and any other they belong to are unchanged. Restoring them puts the membership back with its role and teams. Where OpenBot keeps one organization, it stops the person using OpenBot: their address can't sign in again, and the sessions, API keys and app sign-ins they hold end at once; restoring their access lets them sign in again. Either way they keep their record and their history, and the credentials they connected here are retired. Only an administrator may do this, never to themselves, never to somebody the deployment's configuration names as an administrator, and never to the organization's owner. Removing somebody already removed retires anything left and records nothing new.
+ * Remove a person from the organization. Where OpenBot keeps more than one organization (its list of organizations answers canCreate true), this ends their membership of this organization alone: they lose its Bots and conversations from their next request, and their account, sessions, API keys and any other organization they belong to are unchanged. Restoring them puts the membership back with its role and teams. Where OpenBot keeps one organization, it stops the person using OpenBot: their address can't sign in again, and the sessions, API keys and app sign-ins they hold end at once; restoring their access lets them sign in again. Either way they keep their record and their history, and the credentials they connected here are retired. Only an administrator may do this, never to themselves, never to somebody the deployment's configuration names as an administrator, and never to the organization's owner. Removing somebody already removed retires anything left and records nothing new.
  * @summary Remove a person's access
  */
 export const revokePersonAccess = async (
@@ -819,7 +843,7 @@ export const getRestorePersonAccessUrl = (
 };
 
 /**
- * Give a removed person their access back. Where everybody has an organization of their own, this puts back their membership of this organization with the role and teams it had; their sessions and API keys, which were never ended, work here again from their next request. Where OpenBot keeps one organization, it lets them sign in again, and what ended when they were removed stays ended: they sign in afresh and make new API keys. Only an administrator may do this. Restoring somebody who was never removed changes nothing and records nothing.
+ * Give a removed person their access back. Where OpenBot keeps more than one organization, this puts back their membership of this organization with the role and teams it had; their sessions and API keys, which were never ended, work here again from their next request. Where OpenBot keeps one organization, it lets them sign in again, and what ended when they were removed stays ended: they sign in afresh and make new API keys. Only an administrator may do this. Restoring somebody who was never removed changes nothing and records nothing.
  * @summary Give a person their access back
  */
 export const restorePersonAccess = async (
@@ -1275,6 +1299,401 @@ export const useCompleteOnboarding = <
 > => {
   return useMutation(
     getCompleteOnboardingMutationOptions(options),
+    queryClient,
+  );
+};
+export const getGetServiceTermsUrl = (
+  organizationId: string,
+  personId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/terms`;
+};
+
+/**
+ * Return the terms of service this OpenBot asks people to agree to before they use it, the version the person last agreed to and when, and whether they have to agree now. OpenBot Cloud has terms: a Terms of Service and an Acceptable Use Policy, published at the addresses given, under one version. When the version changes, acceptanceNeeded is true again until the person agrees to the new one, and the apps ask them before anything else. An agreement is the person's own, not an organization's: it holds in every organization they are in. A self-hosted OpenBot and OpenBot Desktop on its own have no terms: current is null and acceptanceNeeded is false. Only the person themselves may read it.
+ * @summary Read the terms a person has to agree to
+ */
+export const getServiceTerms = async (
+  organizationId: string,
+  personId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<ServiceTerms> => {
+  return apiRequest<ServiceTerms>(
+    getGetServiceTermsUrl(organizationId, personId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetServiceTermsQueryKey = (
+  organizationId: string,
+  personId: string,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/people/${personId}/terms`,
+  ] as const;
+};
+
+export const getGetServiceTermsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getServiceTerms>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getServiceTerms>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetServiceTermsQueryKey(organizationId, personId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getServiceTerms>>> = ({
+    signal,
+  }) =>
+    getServiceTerms(organizationId, personId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      organizationId !== null &&
+      organizationId !== undefined &&
+      personId !== null &&
+      personId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getServiceTerms>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetServiceTermsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getServiceTerms>>
+>;
+export type GetServiceTermsQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | OwnOnlyResponse
+  | PersonNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useGetServiceTerms<
+  TData = Awaited<ReturnType<typeof getServiceTerms>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getServiceTerms>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getServiceTerms>>,
+          TError,
+          Awaited<ReturnType<typeof getServiceTerms>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetServiceTerms<
+  TData = Awaited<ReturnType<typeof getServiceTerms>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getServiceTerms>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getServiceTerms>>,
+          TError,
+          Awaited<ReturnType<typeof getServiceTerms>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetServiceTerms<
+  TData = Awaited<ReturnType<typeof getServiceTerms>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getServiceTerms>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Read the terms a person has to agree to
+ */
+
+export function useGetServiceTerms<
+  TData = Awaited<ReturnType<typeof getServiceTerms>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getServiceTerms>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetServiceTermsQueryOptions(
+    organizationId,
+    personId,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getAcceptServiceTermsUrl = (
+  organizationId: string,
+  personId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/terms/accept`;
+};
+
+/**
+ * Record that the person agreed to the terms of service, by the version they were shown, and when. The version sent must be the current one (getServiceTerms' current.version): an older one is refused with the code SERVICE_TERMS_CHANGED, so nobody is recorded as agreeing to terms they never saw. Agreeing again to the version already agreed to keeps the first time. Every agreement is kept, each version with its own time, and recorded on the audit trail. Where this OpenBot has no terms it answers 409 with the code SERVICE_TERMS_NONE. Only the person themselves may agree.
+ * @summary Agree to the current terms
+ */
+export const acceptServiceTerms = async (
+  organizationId: string,
+  personId: string,
+  acceptServiceTermsRequest: AcceptServiceTermsRequest,
+  headers: AcceptServiceTermsHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<ServiceTerms> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<ServiceTerms>(
+    getAcceptServiceTermsUrl(organizationId, personId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(acceptServiceTermsRequest),
+    },
+  );
+};
+
+export const getAcceptServiceTermsMutationKey = () =>
+  ["acceptServiceTerms"] as const;
+
+export const getAcceptServiceTermsMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServiceTermsConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof acceptServiceTerms>>,
+    TError,
+    AcceptServiceTermsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof acceptServiceTerms>>,
+  TError,
+  AcceptServiceTermsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getAcceptServiceTermsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof acceptServiceTerms>>,
+    AcceptServiceTermsMutationVariables
+  > = (props) => {
+    const { organizationId, personId, data, headers } = props ?? {};
+
+    return acceptServiceTerms(
+      organizationId,
+      personId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AcceptServiceTermsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof acceptServiceTerms>>
+>;
+export type AcceptServiceTermsMutationBody = AcceptServiceTermsRequest;
+export type AcceptServiceTermsMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | OwnOnlyResponse
+  | PersonNotFoundResponse
+  | ServiceTermsConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type AcceptServiceTermsMutationVariables = {
+  organizationId: string;
+  personId: string;
+  data: AcceptServiceTermsRequest;
+  headers: AcceptServiceTermsHeaders;
+};
+
+/**
+ * @summary Agree to the current terms
+ */
+export const useAcceptServiceTerms = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServiceTermsConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof acceptServiceTerms>>,
+      TError,
+      AcceptServiceTermsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof acceptServiceTerms>>,
+  TError,
+  AcceptServiceTermsMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getAcceptServiceTermsMutationOptions(options),
     queryClient,
   );
 };
@@ -2046,4 +2465,865 @@ export const useUpdatePreferences = <
   TContext
 > => {
   return useMutation(getUpdatePreferencesMutationOptions(options), queryClient);
+};
+export const getGetCompanySignInUrl = (
+  organizationId: string,
+  personId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/company-sign-in`;
+};
+
+/**
+ * Return whether this organization requires its members to sign in through their company's identity provider, whether the person has, and the providers they can use for it. Any member may read their own, as me or by their own id. It answers even while the organization holds them out for not having signed in that way, when every other request they make in it is refused with SSO_REQUIRED. To use a provider, they sign in through it by its id (POST /api/auth/sign-in/sso with providerId) in a browser where they are signed in, or from an app through createCompanySignInTicket. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), no organization requires it: required is false and no providers are listed.
+ * @summary Read whether a person must use their company sign-in here
+ */
+export const getCompanySignIn = async (
+  organizationId: string,
+  personId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<CompanySignIn> => {
+  return apiRequest<CompanySignIn>(
+    getGetCompanySignInUrl(organizationId, personId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetCompanySignInQueryKey = (
+  organizationId: string,
+  personId: string,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/people/${personId}/company-sign-in`,
+  ] as const;
+};
+
+export const getGetCompanySignInQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCompanySignIn>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCompanySignIn>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetCompanySignInQueryKey(organizationId, personId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCompanySignIn>>
+  > = ({ signal }) =>
+    getCompanySignIn(organizationId, personId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      organizationId !== null &&
+      organizationId !== undefined &&
+      personId !== null &&
+      personId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCompanySignIn>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetCompanySignInQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCompanySignIn>>
+>;
+export type GetCompanySignInQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | OwnOnlyResponse
+  | OrganizationNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useGetCompanySignIn<
+  TData = Awaited<ReturnType<typeof getCompanySignIn>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCompanySignIn>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCompanySignIn>>,
+          TError,
+          Awaited<ReturnType<typeof getCompanySignIn>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetCompanySignIn<
+  TData = Awaited<ReturnType<typeof getCompanySignIn>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCompanySignIn>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCompanySignIn>>,
+          TError,
+          Awaited<ReturnType<typeof getCompanySignIn>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetCompanySignIn<
+  TData = Awaited<ReturnType<typeof getCompanySignIn>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCompanySignIn>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Read whether a person must use their company sign-in here
+ */
+
+export function useGetCompanySignIn<
+  TData = Awaited<ReturnType<typeof getCompanySignIn>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCompanySignIn>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetCompanySignInQueryOptions(
+    organizationId,
+    personId,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getCreateCompanySignInTicketUrl = (
+  organizationId: string,
+  personId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/company-sign-in/tickets`;
+};
+
+/**
+ * Return an address for a browser to link the person's company account at one of the organization's identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. Sent with returnTo app, the browser goes back to the phone app once the account is linked. The address carries a ticket, never the app's own sign-in. The ticket is the person's, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser's sign-in does: the provider must give the person's own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), there is no company account to link: this answers 409 with the code HOSTED_SIGN_IN_ONLY.
+ * @summary Get a ticket to link a company account from an app
+ */
+export const createCompanySignInTicket = async (
+  organizationId: string,
+  personId: string,
+  createCompanySignInTicketRequest: CreateCompanySignInTicketRequest,
+  headers: CreateCompanySignInTicketHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<CompanySignInTicket> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<CompanySignInTicket>(
+    getCreateCompanySignInTicketUrl(organizationId, personId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(createCompanySignInTicketRequest),
+    },
+  );
+};
+
+export const getCreateCompanySignInTicketMutationKey = () =>
+  ["createCompanySignInTicket"] as const;
+
+export const getCreateCompanySignInTicketMutationOptions = <
+  TError =
+    | InvalidCompanySignInTicketResponse
+    | UnauthenticatedResponse
+    | CompanySignInTicketForbiddenResponse
+    | CompanySignInProviderNotFoundResponse
+    | CompanySignInTicketConflictResponse
+    | ServerErrorResponse
+    | SignInUnavailableResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createCompanySignInTicket>>,
+    TError,
+    CreateCompanySignInTicketMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createCompanySignInTicket>>,
+  TError,
+  CreateCompanySignInTicketMutationVariables,
+  TContext
+> => {
+  const mutationKey = getCreateCompanySignInTicketMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createCompanySignInTicket>>,
+    CreateCompanySignInTicketMutationVariables
+  > = (props) => {
+    const { organizationId, personId, data, headers } = props ?? {};
+
+    return createCompanySignInTicket(
+      organizationId,
+      personId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateCompanySignInTicketMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createCompanySignInTicket>>
+>;
+export type CreateCompanySignInTicketMutationBody =
+  CreateCompanySignInTicketRequest;
+export type CreateCompanySignInTicketMutationError =
+  | InvalidCompanySignInTicketResponse
+  | UnauthenticatedResponse
+  | CompanySignInTicketForbiddenResponse
+  | CompanySignInProviderNotFoundResponse
+  | CompanySignInTicketConflictResponse
+  | ServerErrorResponse
+  | SignInUnavailableResponse
+  | UnexpectedErrorResponse;
+export type CreateCompanySignInTicketMutationVariables = {
+  organizationId: string;
+  personId: string;
+  data: CreateCompanySignInTicketRequest;
+  headers: CreateCompanySignInTicketHeaders;
+};
+
+/**
+ * @summary Get a ticket to link a company account from an app
+ */
+export const useCreateCompanySignInTicket = <
+  TError =
+    | InvalidCompanySignInTicketResponse
+    | UnauthenticatedResponse
+    | CompanySignInTicketForbiddenResponse
+    | CompanySignInProviderNotFoundResponse
+    | CompanySignInTicketConflictResponse
+    | ServerErrorResponse
+    | SignInUnavailableResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof createCompanySignInTicket>>,
+      TError,
+      CreateCompanySignInTicketMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof createCompanySignInTicket>>,
+  TError,
+  CreateCompanySignInTicketMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getCreateCompanySignInTicketMutationOptions(options),
+    queryClient,
+  );
+};
+export const getGetAccountDeletionUrl = () => {
+  return `/api/v2/people/me/account-deletion`;
+};
+
+/**
+ * Return whether the caller's account is scheduled to be deleted, and when, and what stops it being deleted now. An account belongs to the person, not to an organization, so this sits outside every organization's address. blockers lists each organization the person has to deal with first, as GitHub does: one where they are the only owner (only_owner), which they hand to another owner or delete, and one where they are an owner beside others (owner_must_leave), which they leave, and one with no owner where they are the only admin (only_admin, as a self-hosted OpenBot's one organization is run), where they make another member an admin. Other memberships end with the account and block nothing; so does the person's own organization when they are its only member. Once a deletion is scheduled, every other operation answers 403 with the code ACCOUNT_PENDING_DELETION until it is cancelled or the account is gone; this one, cancelAccountDeletion and requestAccountDeletion still answer, so the apps can say when the account goes and offer to cancel it or to delete it now, and so do listOrganizations and getPerson for the person themselves, so an app opened afresh knows who they are. Only the person themselves may read it, signed in to OpenBot or its app, never with an API key.
+ * @summary Read where deleting the caller's account stands
+ */
+export const getAccountDeletion = async (
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AccountDeletion> => {
+  return apiRequest<AccountDeletion>(getGetAccountDeletionUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAccountDeletionQueryKey = () => {
+  return [`/api/v2/people/me/account-deletion`] as const;
+};
+
+export const getGetAccountDeletionQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAccountDeletion>>,
+  TError =
+    | UnauthenticatedResponse
+    | AccountDeletionSignInOnlyResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<
+      Awaited<ReturnType<typeof getAccountDeletion>>,
+      TError,
+      TData
+    >
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetAccountDeletionQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAccountDeletion>>
+  > = ({ signal }) => getAccountDeletion({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAccountDeletion>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetAccountDeletionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAccountDeletion>>
+>;
+export type GetAccountDeletionQueryError =
+  | UnauthenticatedResponse
+  | AccountDeletionSignInOnlyResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useGetAccountDeletion<
+  TData = Awaited<ReturnType<typeof getAccountDeletion>>,
+  TError =
+    | UnauthenticatedResponse
+    | AccountDeletionSignInOnlyResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAccountDeletion>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAccountDeletion>>,
+          TError,
+          Awaited<ReturnType<typeof getAccountDeletion>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetAccountDeletion<
+  TData = Awaited<ReturnType<typeof getAccountDeletion>>,
+  TError =
+    | UnauthenticatedResponse
+    | AccountDeletionSignInOnlyResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAccountDeletion>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAccountDeletion>>,
+          TError,
+          Awaited<ReturnType<typeof getAccountDeletion>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetAccountDeletion<
+  TData = Awaited<ReturnType<typeof getAccountDeletion>>,
+  TError =
+    | UnauthenticatedResponse
+    | AccountDeletionSignInOnlyResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAccountDeletion>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Read where deleting the caller's account stands
+ */
+
+export function useGetAccountDeletion<
+  TData = Awaited<ReturnType<typeof getAccountDeletion>>,
+  TError =
+    | UnauthenticatedResponse
+    | AccountDeletionSignInOnlyResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAccountDeletion>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetAccountDeletionQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getRequestAccountDeletionUrl = () => {
+  return `/api/v2/people/me/account-deletion`;
+};
+
+/**
+ * Schedule the caller's account to be deleted, 14 days from now, or at once with immediate true. From this moment the person is signed out everywhere, their API keys, app sign-ins and connections end, their Bots, routines and computers stop, and nothing runs for them. Their memberships read as deactivated. Signing in again before the deletion is allowed only to see when it happens, to cancel it (cancelAccountDeletion), or to delete it now: asked again with immediate true, the deletion already scheduled is made due at once; asked again without it, the deletion is answered as it stands. When the wait ends, the account is deleted on its own, with everything the person owns. What they wrote in organizations shared with others stays, shown as from a deleted user, and security log entries are kept for 180 days without their name or email. The person confirms by sending the email address they sign in with and the words delete my account; either one wrong is refused with 422. The session must have signed in within the last 10 minutes: an older one is refused with 403 and the code REAUTHENTICATE, and the apps send the person through sign-in again. An organization that blocks it (getAccountDeletion's blockers) refuses it with 409 and the code ACCOUNT_DELETION_BLOCKED, listing them. Only the person themselves may do this, signed in to OpenBot or its app, never with an API key.
+ * @summary Delete the caller's account
+ */
+export const requestAccountDeletion = async (
+  requestAccountDeletionRequest: RequestAccountDeletionRequest,
+  headers: RequestAccountDeletionHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<ScheduledAccountDeletion> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<ScheduledAccountDeletion>(getRequestAccountDeletionUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(requestAccountDeletionRequest),
+  });
+};
+
+export const getRequestAccountDeletionMutationKey = () =>
+  ["requestAccountDeletion"] as const;
+
+export const getRequestAccountDeletionMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AccountDeletionForbiddenResponse
+    | AccountDeletionConflictResponse
+    | AccountDeletionNotConfirmedResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestAccountDeletion>>,
+    TError,
+    RequestAccountDeletionMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof requestAccountDeletion>>,
+  TError,
+  RequestAccountDeletionMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRequestAccountDeletionMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof requestAccountDeletion>>,
+    RequestAccountDeletionMutationVariables
+  > = (props) => {
+    const { data, headers } = props ?? {};
+
+    return requestAccountDeletion(data, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RequestAccountDeletionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof requestAccountDeletion>>
+>;
+export type RequestAccountDeletionMutationBody = RequestAccountDeletionRequest;
+export type RequestAccountDeletionMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AccountDeletionForbiddenResponse
+  | AccountDeletionConflictResponse
+  | AccountDeletionNotConfirmedResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type RequestAccountDeletionMutationVariables = {
+  data: RequestAccountDeletionRequest;
+  headers: RequestAccountDeletionHeaders;
+};
+
+/**
+ * @summary Delete the caller's account
+ */
+export const useRequestAccountDeletion = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AccountDeletionForbiddenResponse
+    | AccountDeletionConflictResponse
+    | AccountDeletionNotConfirmedResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof requestAccountDeletion>>,
+      TError,
+      RequestAccountDeletionMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof requestAccountDeletion>>,
+  TError,
+  RequestAccountDeletionMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getRequestAccountDeletionMutationOptions(options),
+    queryClient,
+  );
+};
+export const getCancelAccountDeletionUrl = () => {
+  return `/api/v2/people/me/account-deletion/cancel`;
+};
+
+/**
+ * Cancel a scheduled deletion of the caller's account, any time before it starts. The account is the person's again: they use OpenBot as before, their memberships are active again, and they sign in afresh on their other devices, make new API keys and reconnect what was ended when they asked. Cancelling when nothing is scheduled changes nothing. A deletion already under way can't be cancelled: that answers 409 with the code ACCOUNT_DELETION_UNDER_WAY. Only the person themselves may cancel, signed in to OpenBot or its app, never with an API key.
+ * @summary Cancel deleting the caller's account
+ */
+export const cancelAccountDeletion = async (
+  headers: CancelAccountDeletionHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<CancelledAccountDeletion> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<CancelledAccountDeletion>(getCancelAccountDeletionUrl(), {
+    ...options,
+    method: "POST",
+    headers: { ...headers, ...getHeaders(options?.headers) },
+  });
+};
+
+export const getCancelAccountDeletionMutationKey = () =>
+  ["cancelAccountDeletion"] as const;
+
+export const getCancelAccountDeletionMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AccountDeletionSignInOnlyResponse
+    | AccountDeletionUnderWayResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof cancelAccountDeletion>>,
+    TError,
+    CancelAccountDeletionMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof cancelAccountDeletion>>,
+  TError,
+  CancelAccountDeletionMutationVariables,
+  TContext
+> => {
+  const mutationKey = getCancelAccountDeletionMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof cancelAccountDeletion>>,
+    CancelAccountDeletionMutationVariables
+  > = (props) => {
+    const { headers } = props ?? {};
+
+    return cancelAccountDeletion(headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CancelAccountDeletionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof cancelAccountDeletion>>
+>;
+
+export type CancelAccountDeletionMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AccountDeletionSignInOnlyResponse
+  | AccountDeletionUnderWayResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type CancelAccountDeletionMutationVariables = {
+  headers: CancelAccountDeletionHeaders;
+};
+
+/**
+ * @summary Cancel deleting the caller's account
+ */
+export const useCancelAccountDeletion = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AccountDeletionSignInOnlyResponse
+    | AccountDeletionUnderWayResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof cancelAccountDeletion>>,
+      TError,
+      CancelAccountDeletionMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof cancelAccountDeletion>>,
+  TError,
+  CancelAccountDeletionMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getCancelAccountDeletionMutationOptions(options),
+    queryClient,
+  );
 };

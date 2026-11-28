@@ -20,6 +20,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { revokeCredentialMutationOptions } from "@/lib/credentials/mutations";
 import { credentialListQueryOptions } from "@/lib/credentials/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { queryClient } from "@/query-client";
 
@@ -68,7 +69,10 @@ export function CredentialsList() {
   if (credentials.error)
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Couldn't load {noun}s. Try again in a moment.
+        {loadFailure(
+          credentials.error,
+          `Couldn't load ${noun}s. Try again in a moment.`,
+        )}
       </p>
     );
   if (credentials.data.length === 0)

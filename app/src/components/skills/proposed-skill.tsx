@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Badge, GalleryFrame } from "@/components/gallery/frame";
 import { Button } from "@/components/ui/button";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import type { SkillFormValues } from "@/lib/skills/form";
 import {
   checkProposal,
@@ -61,7 +62,7 @@ export function ProposedSkillCard({
    * Create again after connecting the connector the refusal named, or declining. Answering the tool
    * with the error would end the turn and leave the person re-typing their request.
    */
-  const [refusal, setRefusal] = useState<string | null>(null);
+  const [refusal, setRefusal] = useState<Failure | null>(null);
 
   if (result !== undefined) {
     return (
@@ -99,9 +100,7 @@ export function ProposedSkillCard({
     } catch (cause) {
       // Left on the card with the buttons still live. See `refusal` above.
       setSending(null);
-      setRefusal(
-        cause instanceof Error ? cause.message : "Couldn't save the skill.",
-      );
+      setRefusal(failureOf(cause, "Couldn't save the skill."));
       return;
     }
     await answer(respond, skillCardAnswer.saved(values.slug));
@@ -158,7 +157,7 @@ export function ProposedSkillCard({
 
       {refusal ? (
         <p className="mt-3 text-destructive text-sm" role="alert">
-          {refusal}
+          {failureSaid(refusal)}
         </p>
       ) : null}
 

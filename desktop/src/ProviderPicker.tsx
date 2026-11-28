@@ -6,13 +6,8 @@ import { ExternalLink } from "./ExternalLink";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { ButtonMark, Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
-import { Sections } from "./Sections";
-import {
-  type Progress,
-  SetupProgress,
-  StatusLine,
-  StepFooter,
-} from "./SetupProgress";
+import { Sections, SetupRail } from "./Sections";
+import { type Progress, SetupProgress, StatusLine } from "./SetupProgress";
 
 export type Login = "plan" | "api-key" | "endpoint" | "oauth";
 
@@ -60,6 +55,8 @@ export type SavedConfiguration = {
   modelApiKeys?: Partial<
     Record<"openai" | "anthropic" | "compatible", boolean | null>
   >;
+  /** A ChatGPT sign-in an earlier version saved, which has to be done again. */
+  chatgptSignInChanged?: boolean;
   modelSessions?: Partial<
     Record<"openai" | "anthropic" | "google" | "xai", boolean | null>
   >;
@@ -97,24 +94,30 @@ const endpointPresets: Record<
     keyUrl: "https://console.x.ai/",
     keyLink: "Get an xAI API key",
   },
-  // Unbiased AI's gateway speaks the OpenAI API under the `pareto` model. The sign-in on this row
-  // mints the key; the dashboard is where somebody makes one by hand.
-  unbiased: {
-    baseUrl: "https://api.unbiased.ai/v1",
-    model: "pareto",
-    keyUrl: "https://platform.unbiased.ai/dashboard/keys",
-    keyLink: "Get an Unbiased AI API key",
+  trustedrouter: {
+    baseUrl: "https://api.trustedrouter.com/v1",
+    model: "anthropic/claude-sonnet-5.5",
+    keyUrl: "https://trustedrouter.com/console/api-keys",
+    keyLink: "Get a TrustedRouter API key",
   },
 };
 
 /** What approving in the browser does, for each provider that signs in that way. */
 const oauthExplanation: Record<string, string> = {
-  google:
-    "Authorize Gemini API access using the configured Google Cloud project and its API quota.",
   xai: "Authorize OpenBot to use models available to your xAI account.",
-  unbiased:
-    "Sign in or create an Unbiased AI account in your browser and approve the code shown here. OpenBot receives an API key for Pareto and keeps it on this computer.",
 };
+
+/** Stop a plan's sign-in still waiting for the browser: Claude's, or ChatGPT's. */
+function cancelPlanSignIn(provider: string) {
+  const claude = provider === "anthropic";
+  invoke(claude ? "cancel_claude_sign_in" : "cancel_chatgpt_sign_in").catch(
+    () => {
+      console.error(
+        `OpenBot could not stop the ${claude ? "Claude" : "ChatGPT"} sign-in.`,
+      );
+    },
+  );
+}
 
 function endpointIdentity(baseUrl: string | undefined): string {
   if (!baseUrl) return "";
@@ -143,15 +146,22 @@ export function recordedModel(held: HeldConfiguration): ModelChoice | null {
     case "claude-plan":
       return { provider: "anthropic", login: "plan", saved: true };
     case "chat-gpt-plan":
-      return { provider: "openai", login: "plan", saved: true };
-    case "google-oauth":
+      return {
+        provider: "openai",
+        login: "plan",
+        saved: held.saved.chatgptSignInChanged !== true,
+      };
     case "xai-oauth":
       return {
-        provider: held.saved.model === "google-oauth" ? "google" : "xai",
+        provider: "xai",
         login: "oauth",
         saved: true,
         model: held.BOT_MODEL,
       };
+    // A Google sign-in saved before Gemini took an API key only: nothing to resume. The screen
+    // says so and asks for a key instead (`googleSignInEnded`).
+    case "google-oauth":
+      return null;
     case "compatible-endpoint":
       return {
         provider: "openai-compatible",
@@ -182,6 +192,7 @@ export function ProviderPicker({
   returning = false,
   busy: starting = false,
   status,
+  background,
   failure: setupFailure,
   onProviderChange,
 }: {
@@ -206,6 +217,8 @@ export function ProviderPicker({
   busy?: boolean;
   /** One line about work running behind this screen. */
   status?: ReactNode;
+  /** What runs behind this step, at the sidebar's foot: the background install. */
+  background?: ReactNode;
   /** A failure from setup itself (a Start that sent the window back here), shown in this card. */
   failure?: ReactNode;
   /**
@@ -215,6 +228,12 @@ export function ProviderPicker({
   onProviderChange?: () => void;
 }) {
   const initialChoice = chosen ?? recordedModel(held);
+  /*
+   * The connection saved last is a Google sign-in, which Gemini no longer takes: the screen says so
+   * above the list, with one button that opens Google Gemini's API key.
+   */
+  const googleSignInEnded =
+    chosen === null && held.saved?.model === "google-oauth";
   const [reuse, setReuse] = useState(
     initialChoice?.saved
       ? { provider: initialChoice.provider, login: initialChoice.login }
@@ -242,13 +261,11 @@ export function ProviderPicker({
   /*
    * The sign-in, mid-flight.
    *
-   * `url` present means the browser has been sent somewhere and a code is expected back. Kept here
-   * rather than in the Rust side's head because the screen has to show the link: an open that
-   * silently did nothing leaves somebody staring at a code box with no idea where the code comes
-   * from.
+   * `url` present means the browser has been sent somewhere and the sign-in waits for it to come
+   * back. Kept here rather than in the Rust side's head because the screen has to show the link: an
+   * open that silently did nothing leaves somebody waiting with no idea where to approve.
    */
   const [signInUrl, setSignInUrl] = useState<string | null>(null);
-  const [code, setCode] = useState("");
   const [tokens, setTokens] = useState<Record<string, string>>(
     initialChoice?.provider && initialChoice.token
       ? { [initialChoice.provider]: initialChoice.token }
@@ -270,18 +287,40 @@ export function ProviderPicker({
   // A problem, not a string: a sign-in failure carries the container's own output, and
   // stringifying it printed "[object Object]" where the diagnosis should have been.
   const [failure, setFailure] = useState<Problem | null>(null);
+  const providerPickerRef = useRef<HTMLFieldSetElement>(null);
+  const setupBodyRef = useRef<HTMLDivElement>(null);
+  const restoreProviderFocus = useRef<string | null>(null);
+  useEffect(() => {
+    // A new authentication form starts at its beginning, regardless of catalogue scroll.
+    if (open !== null && setupBodyRef.current)
+      setupBodyRef.current.scrollTop = 0;
+    if (!restoreProviderFocus.current) return;
+    const provider = open ?? restoreProviderFocus.current;
+    restoreProviderFocus.current = null;
+    // The fieldset remounts when moving between the catalogue and anchored selection.
+    // Returning clears the selection, so find the previous provider by value, not :checked.
+    const input = Array.from(
+      providerPickerRef.current?.querySelectorAll<HTMLInputElement>(
+        'input[name="provider"]',
+      ) ?? [],
+    ).find((input) => input.value === provider);
+    input?.focus({ preventScroll: open !== null });
+    // The hidden radio is only one pixel tall; reveal its whole visible label as well.
+    if (open === null)
+      input?.closest(".tile")?.scrollIntoView({ block: "nearest" });
+  }, [open]);
   const openRef = useRef(open);
   const signInRunRef = useRef(0);
   // A sign-in that just finished on this screen moves on by itself once the screen is ready.
   const continueAfterSignIn = useRef(false);
   const oauthAttempt = useRef<string | null>(null);
   /*
-   * The run of a ChatGPT sign-in still waiting for the browser, if any.
+   * The plan sign-in still waiting for the browser, if any: its run and which plan.
    *
    * Leaving it stops it. Left running, its tab could still finish: the browser said "You're signed
    * in" while this screen had moved on and dropped the result.
    */
-  const chatGptRun = useRef<number | null>(null);
+  const planRun = useRef<{ run: number; provider: string } | null>(null);
   const [oauthCode, setOauthCode] = useState<string | null>(null);
   const [oauthSignedIn, setOauthSignedIn] = useState<string | null>(
     initialChoice?.login === "oauth" && initialChoice.saved
@@ -289,12 +328,11 @@ export function ProviderPicker({
       : null,
   );
 
-  function stopChatGptSignIn() {
-    if (chatGptRun.current === null) return;
-    chatGptRun.current = null;
-    invoke("cancel_chatgpt_sign_in").catch(() => {
-      console.error("OpenBot could not stop the ChatGPT sign-in.");
-    });
+  function stopPlanSignIn() {
+    const waiting = planRun.current;
+    if (waiting === null) return;
+    planRun.current = null;
+    cancelPlanSignIn(waiting.provider);
   }
 
   async function cancelOAuth() {
@@ -342,15 +380,11 @@ export function ProviderPicker({
       } catch (error) {
         if (current()) setFailure(asProblem(error));
       }
-      // Nothing for a session the native side keeps for itself; the minted API key for a sign-in
-      // that produces one (Unbiased AI), held here the way a plan's token is and never shown.
-      const minted = await invoke<string | null>("finish_model_oauth", {
+      await invoke<void>("finish_model_oauth", {
         attemptId: authorization.attemptId,
       });
       if (current()) {
         continueAfterSignIn.current = true;
-        if (minted)
-          setTokens((previous) => ({ ...previous, [providerId]: minted }));
         setOauthSignedIn(providerId);
         setSignInUrl(null);
         setOauthCode(null);
@@ -373,11 +407,10 @@ export function ProviderPicker({
   useEffect(
     () => () => {
       signInRunRef.current += 1;
-      if (chatGptRun.current !== null) {
-        chatGptRun.current = null;
-        invoke("cancel_chatgpt_sign_in").catch(() => {
-          console.error("OpenBot could not stop the ChatGPT sign-in.");
-        });
+      const waiting = planRun.current;
+      if (waiting !== null) {
+        planRun.current = null;
+        cancelPlanSignIn(waiting.provider);
       }
       const attemptId = oauthAttempt.current;
       if (attemptId) {
@@ -396,11 +429,9 @@ export function ProviderPicker({
   }, [open]);
 
   /*
-   * The two plans sign in differently, and the screen has to know which.
-   *
-   * Anthropic's CLI wants a code typed back, so that half shows a field. ChatGPT's login finishes
-   * itself when the browser redirect reaches its callback, so that half shows only a wait. Offering
-   * a code box for a flow that never produces one is how a person concludes it is broken.
+   * Both plans finish on their own: the browser comes back to this computer once the person
+   * approves, Claude's to Desktop's own listener and ChatGPT's to its login's. So the screen shows
+   * only a wait, with the link in case the browser didn't open. Nothing is typed here.
    */
   async function beginSignIn() {
     if (!row) return;
@@ -415,22 +446,22 @@ export function ProviderPicker({
     setProgress(null);
     setDownload(null);
     try {
-      const start =
-        providerId === "anthropic"
-          ? "begin_claude_sign_in"
-          : "begin_chatgpt_sign_in";
-      if (providerId !== "anthropic") chatGptRun.current = run;
-      const nextSignInUrl = await invoke<string>(start, { root: root.trim() });
+      const claude = providerId === "anthropic";
+      planRun.current = { run, provider: providerId };
+      const nextSignInUrl = await invoke<string>(
+        claude ? "begin_claude_sign_in" : "begin_chatgpt_sign_in",
+        { root: root.trim() },
+      );
       if (!stillCurrent()) return;
       setSignInUrl(nextSignInUrl);
-      // ChatGPT needs no code, so the wait starts straight away.
-      if (providerId !== "anthropic") {
-        const nextToken = await invoke<string>("finish_chatgpt_sign_in");
-        if (stillCurrent()) {
-          continueAfterSignIn.current = true;
-          setTokens((previous) => ({ ...previous, [providerId]: nextToken }));
-          setSignInUrl(null);
-        }
+      // Held, not shown. It goes on to `start_stack` the same way a typed key does.
+      const nextToken = await invoke<string>(
+        claude ? "finish_claude_sign_in" : "finish_chatgpt_sign_in",
+      );
+      if (stillCurrent()) {
+        continueAfterSignIn.current = true;
+        setTokens((previous) => ({ ...previous, [providerId]: nextToken }));
+        setSignInUrl(null);
       }
     } catch (error) {
       if (stillCurrent()) {
@@ -443,41 +474,12 @@ export function ProviderPicker({
         setSignInUrl(null);
       }
     } finally {
-      if (chatGptRun.current === run) chatGptRun.current = null;
+      if (planRun.current?.run === run) planRun.current = null;
       if (stillCurrent()) {
         setBusy(false);
         setProgress(null);
         setDownload(null);
       }
-    }
-  }
-
-  async function finishSignIn() {
-    if (!row) return;
-    const providerId = row.id;
-    const run = signInRunRef.current + 1;
-    signInRunRef.current = run;
-    const stillCurrent = () =>
-      signInRunRef.current === run && openRef.current === providerId;
-    setBusy(true);
-    setFailure(null);
-    try {
-      // Held, not shown. It goes on to `start_stack` the same way a typed key does.
-      const nextToken = await invoke<string>("finish_claude_sign_in", { code });
-      if (stillCurrent()) {
-        continueAfterSignIn.current = true;
-        setTokens((previous) => ({ ...previous, [providerId]: nextToken }));
-        setSignInUrl(null);
-        setCode("");
-      }
-    } catch (error) {
-      if (stillCurrent()) {
-        setFailure(asProblem(error));
-        // The flow is single-use, so a refused code means starting again rather than retyping.
-        setSignInUrl(null);
-      }
-    } finally {
-      if (stillCurrent()) setBusy(false);
     }
   }
 
@@ -503,6 +505,7 @@ export function ProviderPicker({
   }, []);
 
   const row = rows.find((r) => r.id === open) ?? null;
+  const googleRow = rows.find((r) => r.id === "google");
   const preset = row ? endpointPresets[row.id] : undefined;
   const token = row ? (tokens[row.id] ?? "") : "";
   const savedPlan =
@@ -550,21 +553,6 @@ export function ProviderPicker({
     const trimmedBaseUrl = baseUrl.trim();
     const trimmedModel = model.trim();
     const trimmedContainerBaseUrl = containerBaseUrl.trim();
-    /*
-     * A sign-in that minted an API key for a named endpoint (Unbiased AI) is that endpoint's key, and
-     * it goes on exactly as a typed one does: the same address, the same model, the same credential
-     * shape. Nothing after this screen has to know how the key was obtained.
-     */
-    if (login === "oauth" && trimmedToken && preset) {
-      onChoose({
-        provider: "openai-compatible",
-        login: "endpoint",
-        apiKey: trimmedToken,
-        baseUrl: preset.baseUrl,
-        ...(trimmedModel ? { model: trimmedModel } : {}),
-      });
-      return;
-    }
     onChoose({
       provider: login === "endpoint" ? "openai-compatible" : row.id,
       login,
@@ -621,14 +609,14 @@ export function ProviderPicker({
 
   /** Back to every provider: the chosen one's sign-in, if any, stops. */
   function chooseAnother() {
+    restoreProviderFocus.current = open;
     if (oauthAttempt.current) void cancelOAuth();
-    stopChatGptSignIn();
+    stopPlanSignIn();
     signInRunRef.current += 1;
     setOpen(null);
     setFailure(null);
     onProviderChange?.();
     setSignInUrl(null);
-    setCode("");
     setBusy(false);
     setProgress(null);
     setDownload(null);
@@ -650,478 +638,504 @@ export function ProviderPicker({
     return () => window.removeEventListener("keydown", onKey);
   }, [anyChosen]);
 
-  return (
-    <div className="sheet">
-      {!returning && <Sections at="AI" />}
-      <h1>{returning ? "Refresh your AI connection" : "Connect your AI"}</h1>
-      <p className="lede">
-        Choose the AI your Bots use. Sign in with a plan you already have, or
-        use an API key.
-      </p>
+  /** Open one provider's row, as choosing it in the list does. `focused`: its radio had focus. */
+  function openRow(r: Provider, focused = false) {
+    // Selecting a row moves its fieldset outside the scrolling catalogue. Keep the
+    // focused radio focused when React mounts it in that anchored position.
+    restoreProviderFocus.current = focused ? r.id : null;
+    if (oauthAttempt.current) void cancelOAuth();
+    stopPlanSignIn();
+    signInRunRef.current += 1;
+    setOpen(r.id);
+    // A failure belongs to the row that produced it. Left in place, a refused OpenAI
+    // sign-in stayed on screen under the endpoint row's fields, where it read as a
+    // complaint about the address just typed. The same goes for a failure setup sent
+    // back here: a refused OpenAI key stayed under the Anthropic row.
+    setFailure(null);
+    onProviderChange?.();
+    setSignInUrl(null);
+    setBusy(false);
+    setProgress(null);
+    setDownload(null);
+    // The first way in is the default, which is the plan wherever there is one.
+    setLogin(r.logins[0] ?? null);
+    // Fill from what is already on this machine, if anything.
+    const kept =
+      r.id === "openai"
+        ? held.OPENAI_API_KEY
+        : r.id === "anthropic"
+          ? held.ANTHROPIC_API_KEY
+          : undefined;
+    setApiKey(kept ?? "");
+    const nextPreset = endpointPresets[r.id];
+    const restoreEndpoint =
+      r.id === "openai-compatible" ||
+      (nextPreset && endpointProvider(held.OPENAI_BASE_URL) === r.id);
+    setReuseEndpointKey(
+      Boolean(restoreEndpoint) && held.saved?.modelApiKeys?.compatible === true,
+    );
+    if (restoreEndpoint && held.OPENAI_BASE_URL) {
+      setBaseUrl(held.OPENAI_BASE_URL);
+      setContainerBaseUrl(held.OPENAI_CONTAINER_BASE_URL ?? "");
+      setModel(held.BOT_MODEL ?? nextPreset?.model ?? "");
+    } else {
+      setBaseUrl(nextPreset?.baseUrl ?? "");
+      setContainerBaseUrl("");
+      setModel(nextPreset?.model ?? "");
+    }
+  }
 
-      <fieldset className="picker providers">
-        <legend className="sr-only">Model provider</legend>
-        {/* Once one is chosen it stands alone, with Change to see them all again. */}
-        {(row ? [row] : rows).map((r) => (
-          <label
-            key={r.id}
-            className={`tile wide${open === r.id ? " chosen" : ""}${row ? " beside-change" : ""}`}
-          >
-            <input
-              type="radio"
-              name="provider"
-              className="tile-input"
-              value={r.id}
-              checked={open === r.id}
-              onChange={() => {
-                if (oauthAttempt.current) void cancelOAuth();
-                stopChatGptSignIn();
-                signInRunRef.current += 1;
-                setOpen(r.id);
-                // A failure belongs to the row that produced it. Left in place, a refused OpenAI
-                // sign-in stayed on screen under the endpoint row's fields, where it read as a
-                // complaint about the address just typed. The same goes for a failure setup sent
-                // back here: a refused OpenAI key stayed under the Anthropic row.
-                setFailure(null);
-                onProviderChange?.();
-                setSignInUrl(null);
-                setCode("");
-                setBusy(false);
-                setProgress(null);
-                setDownload(null);
-                // The first way in is the default, which is the plan wherever there is one.
-                setLogin(r.logins[0] ?? null);
-                // Fill from what is already on this machine, if anything.
-                const kept =
-                  r.id === "openai"
-                    ? held.OPENAI_API_KEY
-                    : r.id === "anthropic"
-                      ? held.ANTHROPIC_API_KEY
-                      : undefined;
-                setApiKey(kept ?? "");
-                const nextPreset = endpointPresets[r.id];
-                const restoreEndpoint =
-                  r.id === "openai-compatible" ||
-                  (nextPreset &&
-                    endpointProvider(held.OPENAI_BASE_URL) === r.id);
-                setReuseEndpointKey(
-                  Boolean(restoreEndpoint) &&
-                    held.saved?.modelApiKeys?.compatible === true,
-                );
-                if (restoreEndpoint && held.OPENAI_BASE_URL) {
-                  setBaseUrl(held.OPENAI_BASE_URL);
-                  setContainerBaseUrl(held.OPENAI_CONTAINER_BASE_URL ?? "");
-                  setModel(held.BOT_MODEL ?? nextPreset?.model ?? "");
-                } else {
-                  setBaseUrl(nextPreset?.baseUrl ?? "");
-                  setContainerBaseUrl("");
-                  setModel(nextPreset?.model ?? "");
-                }
-              }}
-            />
-            {r.id === "openai-compatible" ? (
-              <EndpointMark />
-            ) : (
-              <Mark id={r.mark} name={r.name} />
-            )}
-            <span className="tile-name">{r.name}</span>
-            <span className="tile-summary">{r.summary}</span>
-          </label>
-        ))}
-        {row && (
-          <button
-            type="button"
-            className="text-link change-provider"
-            aria-label="Choose a different provider"
-            onClick={chooseAnother}
-          >
-            Change
-          </button>
-        )}
-      </fieldset>
-
+  const providerPicker = (
+    <fieldset ref={providerPickerRef} className="picker providers">
+      <legend className="sr-only">Model provider</legend>
+      {/* Once one is chosen it stands alone, with Change to see them all again. */}
+      {(row ? [row] : rows).map((r) => (
+        <label
+          key={r.id}
+          className={`tile wide${open === r.id ? " chosen" : ""}${row ? " beside-change" : ""}`}
+        >
+          <input
+            type="radio"
+            name="provider"
+            className="tile-input"
+            value={r.id}
+            checked={open === r.id}
+            onChange={(event) =>
+              openRow(r, document.activeElement === event.currentTarget)
+            }
+          />
+          {r.id === "openai-compatible" ? (
+            <EndpointMark />
+          ) : (
+            <Mark id={r.mark} name={r.name} />
+          )}
+          <span className="tile-name">{r.name}</span>
+          <span className="tile-summary">{r.summary}</span>
+        </label>
+      ))}
       {row && (
-        <div className="chosen-provider">
-          {row.logins.length > 1 && (
-            <div className="segmented" role="tablist">
-              {row.logins.map((option) => (
+        <button
+          type="button"
+          className="text-link change-provider"
+          aria-label="Choose a different provider"
+          onClick={chooseAnother}
+        >
+          Change
+        </button>
+      )}
+    </fieldset>
+  );
+
+  return (
+    <>
+      {/* What runs behind this step is said at the sidebar's foot (`background`), not under the
+          form: nothing in the step moves as it comes and goes, and it never spins beside it. */}
+      <SetupRail foot={background}>
+        {!returning && <Sections at="AI" />}
+      </SetupRail>
+      <div className="sheet setup-layout page-first provider-layout">
+        <div className="setup-header-block">
+          <h1>
+            {returning ? "Refresh your AI connection" : "Connect your AI"}
+          </h1>
+          <p className="lede">
+            Choose the AI your Bots use. Sign in with a plan you already have,
+            or use an API key.
+          </p>
+        </div>
+
+        {row && <div className="setup-provider-identity">{providerPicker}</div>}
+
+        <div ref={setupBodyRef} className="setup-body">
+          {googleSignInEnded && !row && (
+            <div className="blocker google-sign-in-ended" role="alert">
+              <h2>Google sign-in for Gemini has ended</h2>
+              <p>Add a Gemini API key to keep your Bots running on Gemini.</p>
+              <div className="row">
                 <button
                   type="button"
-                  key={option}
-                  role="tab"
-                  aria-selected={login === option}
-                  className={login === option ? "on" : ""}
-                  onClick={() => {
-                    if (login === "oauth" && option !== login)
-                      void cancelOAuth();
-                    // A refused sign-in says nothing about the API key tab, and the reverse.
-                    if (option !== login) setFailure(null);
-                    setLogin(option);
-                  }}
+                  disabled={!googleRow}
+                  onClick={() => googleRow && openRow(googleRow)}
                 >
-                  {option === "plan"
-                    ? "Sign in with my plan"
-                    : option === "oauth"
-                      ? "Sign in"
-                      : "Use an API key"}
+                  Add a Gemini API key
                 </button>
-              ))}
+              </div>
             </div>
           )}
+          {!row && providerPicker}
 
-          {login === "oauth" && (
-            <>
-              {/* Set as the plan's description is, so its button has the same space above it. */}
-              <p className="lede">{oauthExplanation[row.id]}</p>
-              {oauthSignedIn === row.id ? (
-                <p className="lede">
-                  {confirmed === row.id && <SignedInMark />}
-                  Signed in to {row.name}.
-                </p>
-              ) : signInUrl ? (
-                <>
-                  <StatusLine>
-                    Waiting for you to approve sign-in in your browser.
-                  </StatusLine>
-                  {oauthCode && (
-                    <p>
-                      Verification code: <strong>{oauthCode}</strong>
-                    </p>
-                  )}
-                  <ExternalLink href={signInUrl}>
-                    Open sign-in page
-                  </ExternalLink>
-                  <button type="button" className="quiet" onClick={cancelOAuth}>
-                    Cancel sign-in
-                  </button>
-                </>
-              ) : null}
-              {!busy && (
-                <button
-                  type="button"
-                  className="quiet sign-in-with"
-                  onClick={beginOAuth}
-                >
-                  <ButtonMark id={row.mark} />
-                  {/* Google's guidelines allow only "Sign in with Google" beside its G. The
-                      row above already says Gemini. */}
-                  Sign in {oauthSignedIn === row.id ? "again " : ""}with{" "}
-                  {row.id === "google" ? "Google" : row.name}
-                </button>
-              )}
-              {busy && !signInUrl && (
-                <StatusLine>Preparing sign-in…</StatusLine>
-              )}
-              <div className="field">
-                <label htmlFor="oauth-model">Model name</label>
-                <input
-                  id="oauth-model"
-                  value={model}
-                  onChange={(event) => setModel(event.target.value)}
-                  spellCheck={false}
-                />
-              </div>
-            </>
-          )}
-
-          {login === "plan" &&
-            (token || (savedPlan && !signInUrl && !busy) ? (
-              <>
-                <p className="lede">
-                  {token && confirmed === row.id && <SignedInMark />}
-                  {token
-                    ? `Signed in to ${row.name}.`
-                    : `A saved ${row.name} sign-in will be checked when you start.`}{" "}
-                  Your plan will be used.
-                </p>
-                {!token && (
-                  <button
-                    type="button"
-                    className="quiet sign-in-with"
-                    disabled={busy}
-                    onClick={beginSignIn}
-                  >
-                    <ButtonMark id={row.mark} />
-                    Sign in again with {row.name}
-                  </button>
-                )}
-                {/*
-                 * Said here because it changes an answer the person already gave.
-                 *
-                 * A subscription only works through the one Bot that speaks that vendor's
-                 * sign-in, so choosing a plan re-points the Bot. Doing that silently would leave
-                 * somebody looking at a Bot they did not choose with no idea why; see
-                 * `harness::speaking_for` for the failure that came of not saying it at all.
-                 */}
-                <p className="footnote">
-                  Your Bot will use{" "}
-                  {row.id === "anthropic" ? "Claude Agent SDK" : "LangChain"}.
-                  It’s the one that can use this plan.
-                </p>
-              </>
-            ) : signInUrl ? (
-              <>
-                <p className="lede">
-                  {row.id === "anthropic"
-                    ? "Approve the request in your browser, then paste the code it shows you."
-                    : `Approve the request in your browser. ${row.name} will finish this on its own.`}
-                </p>
-                {/* Shown as well as opened. On a machine with no registered
-                    browser the open does nothing and says nothing, and a code
-                    box with no link is then a dead end. */}
-                <p className="fallback">
-                  Didn't open?{" "}
-                  <a href={signInUrl} target="_blank" rel="noreferrer">
-                    Open the sign-in page
-                  </a>
-                </p>
-                {row.id === "anthropic" ? (
-                  <>
-                    <div className="field">
-                      <label htmlFor="code">Code from your browser</label>
-                      <input
-                        id="code"
-                        value={code}
-                        onChange={(e) => setCode(e.target.value)}
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                    </div>
+          {row && (
+            <div className="setup-content setup-panel chosen-provider">
+              {row.logins.length > 1 && (
+                <div className="segmented" role="tablist">
+                  {row.logins.map((option) => (
                     <button
                       type="button"
-                      disabled={busy || code.trim().length === 0}
-                      onClick={finishSignIn}
+                      key={option}
+                      role="tab"
+                      aria-selected={login === option}
+                      className={login === option ? "on" : ""}
+                      onClick={() => {
+                        if (login === "oauth" && option !== login)
+                          void cancelOAuth();
+                        // A refused sign-in says nothing about the API key tab, and the reverse.
+                        if (option !== login) setFailure(null);
+                        setLogin(option);
+                      }}
                     >
-                      {busy ? "Checking…" : "Finish signing in"}
+                      {option === "plan"
+                        ? "Sign in with my plan"
+                        : option === "oauth"
+                          ? "Sign in"
+                          : "Use an API key"}
                     </button>
-                    {busy && <StatusLine>Checking the code…</StatusLine>}
-                  </>
-                ) : (
-                  <StatusLine>Waiting for you to approve it…</StatusLine>
-                )}
-              </>
-            ) : (
-              <>
-                {/* Says what the flow below asks for: Claude's sign-in hands back a
-                    code to paste here, ChatGPT's finishes in the browser. */}
-                <p className="lede">
-                  {row.id === "anthropic"
-                    ? `${row.name} opens in your browser. Approve the request there, then paste the code it shows you back here. You won't need an API key.`
-                    : `${row.name} opens in your browser. You won't type anything here or need an API key.`}
-                </p>
-                <div className="provider-sign-in-actions">
-                  <button
-                    type="button"
-                    className="quiet sign-in-with"
-                    disabled={busy}
-                    onClick={beginSignIn}
-                  >
-                    <ButtonMark id={row.mark} />
-                    {busy ? "Starting…" : `Sign in with ${row.name}`}
-                  </button>
-                  {!busy &&
-                    (row.id === "openai" || row.id === "anthropic") &&
-                    held.saved?.modelSessions?.[row.id] !== false && (
+                  ))}
+                </div>
+              )}
+
+              {login === "oauth" && (
+                <>
+                  {/* Set as the plan's description is, so its button has the same space above it. */}
+                  <p className="lede">{oauthExplanation[row.id]}</p>
+                  {oauthSignedIn === row.id ? (
+                    <p className="lede">
+                      {confirmed === row.id && <SignedInMark />}
+                      Signed in to {row.name}.
+                    </p>
+                  ) : signInUrl ? (
+                    <>
+                      <StatusLine>
+                        Waiting for you to approve sign-in in your browser.
+                      </StatusLine>
+                      {oauthCode && (
+                        <p>
+                          Verification code: <strong>{oauthCode}</strong>
+                        </p>
+                      )}
+                      <ExternalLink href={signInUrl}>
+                        Open sign-in page
+                      </ExternalLink>
                       <button
                         type="button"
                         className="quiet"
-                        onClick={() =>
-                          setReuse({ provider: row.id, login: "plan" })
-                        }
+                        onClick={cancelOAuth}
                       >
-                        Use a saved{" "}
-                        {row.id === "anthropic" ? "Claude" : "ChatGPT"} sign-in
+                        Cancel sign-in
                       </button>
-                    )}
-                </div>
-                {busy &&
-                  (download ? (
-                    <SetupProgress
-                      label="Sign-in download"
-                      steps={[download]}
-                    />
-                  ) : (
-                    <StatusLine>{progress ?? "Preparing sign-in…"}</StatusLine>
-                  ))}
-              </>
-            ))}
-
-          {login === "api-key" && (
-            <>
-              {savedApiKey && !apiKey ? (
-                <p className="lede">A saved {row.name} API key will be used.</p>
-              ) : null}
-              {!savedApiKey &&
-                (row.id === "openai" || row.id === "anthropic") &&
-                held.saved?.modelApiKeys?.[row.id] !== false && (
-                  <button
-                    type="button"
-                    className="quiet"
-                    onClick={() => {
-                      setApiKey("");
-                      setReuse({ provider: row.id, login: "api-key" });
-                    }}
-                  >
-                    Use a saved {row.name} API key
-                  </button>
-                )}
-              <div className="field">
-                <label htmlFor="key">{row.name} API key</label>
-                <input
-                  id="key"
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </div>
-            </>
-          )}
-
-          {login === "endpoint" && (
-            <>
-              {savedEndpointKey && !apiKey && (
-                <p className="lede">
-                  A saved API key for this endpoint will be used.{" "}
-                  {!preset && (
+                    </>
+                  ) : null}
+                  {!busy && (
                     <button
                       type="button"
-                      className="quiet"
-                      onClick={() => setReuseEndpointKey(false)}
+                      className="quiet sign-in-with"
+                      onClick={beginOAuth}
                     >
-                      Continue without the saved key
+                      <ButtonMark id={row.mark} />
+                      Sign in {oauthSignedIn === row.id ? "again " : ""}with{" "}
+                      {row.name}
                     </button>
                   )}
-                </p>
-              )}
-              {!preset && (
-                <>
+                  {busy && !signInUrl && (
+                    <StatusLine>Preparing sign-in…</StatusLine>
+                  )}
                   <div className="field">
-                    <label htmlFor="base">Base URL</label>
+                    <label htmlFor="oauth-model">Model name</label>
                     <input
-                      id="base"
-                      value={baseUrl}
-                      onChange={(e) => {
-                        const next = e.target.value;
-                        setBaseUrl(next);
-                        if (
-                          held.OPENAI_CONTAINER_BASE_URL &&
-                          containerBaseUrl.trim() ===
-                            held.OPENAI_CONTAINER_BASE_URL.trim() &&
-                          next.trim() !== held.OPENAI_BASE_URL?.trim()
-                        ) {
-                          setContainerBaseUrl("");
-                        }
-                      }}
-                      placeholder="https://…/v1"
+                      id="oauth-model"
+                      value={model}
+                      onChange={(event) => setModel(event.target.value)}
                       spellCheck={false}
                     />
                   </div>
-                  <details className="field">
-                    <summary>Advanced compatible endpoint options</summary>
-                    <label htmlFor="container-base">
-                      Container Base URL, if different
-                    </label>
-                    <input
-                      id="container-base"
-                      value={containerBaseUrl}
-                      onChange={(e) => setContainerBaseUrl(e.target.value)}
-                      placeholder="http://ollama:11434/v1"
-                      spellCheck={false}
-                    />
-                    <p className="footnote">
-                      Leave this empty unless containers need a different
-                      address for a locally hosted model. Remote endpoints
-                      usually use the same Base URL.
-                    </p>
-                  </details>
                 </>
               )}
-              <div className="field">
-                <label htmlFor="model">Model name</label>
-                <input
-                  id="model"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="the name the endpoint knows it by"
-                  spellCheck={false}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="ekey">
-                  {preset
-                    ? `${row.name} API key`
-                    : "API key, if the endpoint needs one"}
-                </label>
-                <input
-                  id="ekey"
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </div>
-              {preset && (
-                <p className="footnote">
-                  <ExternalLink key={preset.keyUrl} href={preset.keyUrl}>
-                    {preset.keyLink}
-                  </ExternalLink>
+
+              {login === "plan" &&
+                (token || (savedPlan && !signInUrl && !busy) ? (
+                  <>
+                    <p className="lede">
+                      {token && confirmed === row.id && <SignedInMark />}
+                      {token
+                        ? `Signed in to ${row.name}.`
+                        : `A saved ${row.name} sign-in will be checked when you start.`}{" "}
+                      Your plan will be used.
+                    </p>
+                    {!token && (
+                      <button
+                        type="button"
+                        className="quiet sign-in-with"
+                        disabled={busy}
+                        onClick={beginSignIn}
+                      >
+                        <ButtonMark id={row.mark} />
+                        Sign in again with {row.name}
+                      </button>
+                    )}
+                    {/*
+                     * Said here because it changes an answer the person already gave.
+                     *
+                     * A subscription only works through the one Bot that speaks that vendor's
+                     * sign-in, so choosing a plan re-points the Bot. Doing that silently would leave
+                     * somebody looking at a Bot they did not choose with no idea why; see
+                     * `harness::speaking_for` for the failure that came of not saying it at all.
+                     */}
+                    <p className="footnote">
+                      Your Bot will use{" "}
+                      {row.id === "anthropic"
+                        ? "Claude Agent SDK"
+                        : "OpenAI Agents SDK"}
+                      . It’s the one that can use this plan.
+                    </p>
+                  </>
+                ) : signInUrl ? (
+                  <>
+                    <p className="lede">
+                      Approve the request in your browser. {row.name} will
+                      finish this on its own.
+                    </p>
+                    <StatusLine>Waiting for you to approve it…</StatusLine>
+                    {/* Shown as well as opened. On a machine with no registered
+                    browser the open does nothing and says nothing, and a wait
+                    with no link is then a dead end. */}
+                    <p className="fallback">
+                      Didn't open?{" "}
+                      <a href={signInUrl} target="_blank" rel="noreferrer">
+                        Open the sign-in page
+                      </a>
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    {row.id === "openai" && held.saved?.chatgptSignInChanged ? (
+                      <p className="sign-in-changed" role="status">
+                        ChatGPT's sign-in has changed. Sign in to ChatGPT again
+                        to keep using your plan.
+                      </p>
+                    ) : (
+                      <p className="lede">
+                        {row.name} opens in your browser. You won't type
+                        anything here or need an API key.
+                      </p>
+                    )}
+                    <div className="provider-sign-in-actions">
+                      <button
+                        type="button"
+                        className="quiet sign-in-with"
+                        disabled={busy}
+                        onClick={beginSignIn}
+                      >
+                        <ButtonMark id={row.mark} />
+                        {busy ? "Starting…" : `Sign in with ${row.name}`}
+                      </button>
+                      {!busy &&
+                        (row.id === "openai" || row.id === "anthropic") &&
+                        held.saved?.modelSessions?.[row.id] !== false && (
+                          <button
+                            type="button"
+                            className="quiet"
+                            onClick={() =>
+                              setReuse({ provider: row.id, login: "plan" })
+                            }
+                          >
+                            Use a saved{" "}
+                            {row.id === "anthropic" ? "Claude" : "ChatGPT"}{" "}
+                            sign-in
+                          </button>
+                        )}
+                    </div>
+                    {busy &&
+                      (download ? (
+                        <SetupProgress
+                          label="Sign-in download"
+                          steps={[download]}
+                        />
+                      ) : (
+                        <StatusLine>
+                          {progress ?? "Preparing sign-in…"}
+                        </StatusLine>
+                      ))}
+                  </>
+                ))}
+
+              {login === "api-key" && (
+                <>
+                  {savedApiKey && !apiKey ? (
+                    <p className="lede">
+                      A saved {row.name} API key will be used.
+                    </p>
+                  ) : null}
+                  {!savedApiKey &&
+                    (row.id === "openai" || row.id === "anthropic") &&
+                    held.saved?.modelApiKeys?.[row.id] !== false && (
+                      <button
+                        type="button"
+                        className="quiet"
+                        onClick={() => {
+                          setApiKey("");
+                          setReuse({ provider: row.id, login: "api-key" });
+                        }}
+                      >
+                        Use a saved {row.name} API key
+                      </button>
+                    )}
+                  <div className="field">
+                    <label htmlFor="key">{row.name} API key</label>
+                    <input
+                      id="key"
+                      type="password"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </div>
+                </>
+              )}
+
+              {login === "endpoint" && (
+                <>
+                  {savedEndpointKey && !apiKey && (
+                    <p className="lede">
+                      A saved API key for this endpoint will be used.{" "}
+                      {!preset && (
+                        <button
+                          type="button"
+                          className="quiet"
+                          onClick={() => setReuseEndpointKey(false)}
+                        >
+                          Continue without the saved key
+                        </button>
+                      )}
+                    </p>
+                  )}
+                  {!preset && (
+                    <>
+                      <div className="field">
+                        <label htmlFor="base">Base URL</label>
+                        <input
+                          id="base"
+                          value={baseUrl}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setBaseUrl(next);
+                            if (
+                              held.OPENAI_CONTAINER_BASE_URL &&
+                              containerBaseUrl.trim() ===
+                                held.OPENAI_CONTAINER_BASE_URL.trim() &&
+                              next.trim() !== held.OPENAI_BASE_URL?.trim()
+                            ) {
+                              setContainerBaseUrl("");
+                            }
+                          }}
+                          placeholder="https://…/v1"
+                          spellCheck={false}
+                        />
+                      </div>
+                      <details className="field">
+                        <summary>Advanced compatible endpoint options</summary>
+                        <label htmlFor="container-base">
+                          Container Base URL, if different
+                        </label>
+                        <input
+                          id="container-base"
+                          value={containerBaseUrl}
+                          onChange={(e) => setContainerBaseUrl(e.target.value)}
+                          placeholder="http://ollama:11434/v1"
+                          spellCheck={false}
+                        />
+                        <p className="footnote">
+                          Leave this empty unless containers need a different
+                          address for a locally hosted model. Remote endpoints
+                          usually use the same Base URL.
+                        </p>
+                      </details>
+                    </>
+                  )}
+                  <div className="field">
+                    <label htmlFor="model">Model name</label>
+                    <input
+                      id="model"
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      placeholder="the name the endpoint knows it by"
+                      spellCheck={false}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="ekey">
+                      {preset
+                        ? `${row.name} API key`
+                        : "API key, if the endpoint needs one"}
+                    </label>
+                    <input
+                      id="ekey"
+                      type="password"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </div>
+                  {preset && (
+                    <p className="footnote">
+                      <ExternalLink key={preset.keyUrl} href={preset.keyUrl}>
+                        {preset.keyLink}
+                      </ExternalLink>
+                    </p>
+                  )}
+                </>
+              )}
+
+              {/* Said before it happens rather than diagnosed after the Bots stop answering. */}
+              {failure && <InlineFailure problem={failure} />}
+
+              {/* About a plan's own pool of use, so said only where the person signs in with one. On
+              Windows G it sat under "Anthropic API key", where it does not apply. */}
+              {row.caution && login === "plan" && (
+                <p className="caution">
+                  {row.caution.says}{" "}
+                  <a
+                    href={row.caution.reads_more_at}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    What this means
+                  </a>
                 </p>
               )}
-            </>
+            </div>
           )}
 
-          {/* Said before it happens rather than diagnosed after the Bots stop answering. */}
-          {failure && <InlineFailure problem={failure} />}
-
-          {/* About a plan's own pool of use, so said only where the person signs in with one. On
-              Windows G it sat under "Anthropic API key", where it does not apply. */}
-          {row.caution && login === "plan" && (
-            <p className="caution">
-              {row.caution.says}{" "}
-              <a
-                href={row.caution.reads_more_at}
-                target="_blank"
-                rel="noreferrer"
-              >
-                What this means
-              </a>
-            </p>
-          )}
+          {setupFailure}
         </div>
-      )}
 
-      {setupFailure}
-
-      {/* The step's actions and what runs behind it, pinned to the bottom of the card's view
-          (`StepFooter`): Continue is always there to press, with the choice scrolling above it. */}
-      <StepFooter>
-        <div className="row">
-          {onBack && (
+        {/* Actions stay outside the scrolling catalogue and authentication body. */}
+        <div className="setup-footer step-footer">
+          <div className="row">
+            {onBack && (
+              <button
+                type="button"
+                className="quiet"
+                onClick={onBack}
+                disabled={starting}
+              >
+                Back
+              </button>
+            )}
             <button
               type="button"
-              className="quiet"
-              onClick={onBack}
-              disabled={starting}
+              disabled={starting || !row || !login || !ready}
+              onClick={continueWithChoice}
             >
-              Back
+              Continue
             </button>
-          )}
-          <button
-            type="button"
-            disabled={starting || !row || !login || !ready}
-            onClick={continueWithChoice}
-          >
-            Continue
-          </button>
-        </div>
-        {/* Under the form, never above it: what runs behind this step comes and goes while the
+          </div>
+          {/* Under the form, never above it: what runs behind this step comes and goes while the
           person types here, and nothing above the fields may move. See `BehindSlot`. */}
-        {status}
-      </StepFooter>
-    </div>
+          {status}
+        </div>
+      </div>
+    </>
   );
 }
 

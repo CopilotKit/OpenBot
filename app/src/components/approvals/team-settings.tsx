@@ -41,6 +41,7 @@ import {
   teamApprovalSettingsMutationOptions,
   updateTeamApprovalRuleMutationOptions,
 } from "@/lib/approvals";
+import { loadFailure, failureSaid } from "@/lib/load-failure";
 import { reviewerGuidanceQueryOptions } from "@/lib/reviewer-guidance/queries";
 import { queryClient } from "@/query-client";
 import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
@@ -108,7 +109,7 @@ export function TeamApprovalSettings() {
     <>
       {error ? (
         <p className="mt-6 text-destructive text-sm" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
       {settings ? (
@@ -145,7 +146,10 @@ export function TeamApprovalSettings() {
                   {guidance.isPending
                     ? null
                     : guidance.error
-                      ? "Couldn't load the guidance."
+                      ? loadFailure(
+                          guidance.error,
+                          "Couldn't load the guidance.",
+                        )
                       : (guidance.data ??
                         "None. Tell the reviewer what your organization needs a person for.")}
                 </ItemDescription>
@@ -238,7 +242,8 @@ export function TeamApprovalSettings() {
         description="These apply to every member's Bots. Members can't change them."
         title="Organization rules"
       >
-        {teamRules.length === 0 ? (
+        {/* "None" only once the inbox has said so: a read that failed is said above instead. */}
+        {inbox.data && teamRules.length === 0 ? (
           <PageEmpty icon={IconChecklist} title="No organization rules" />
         ) : null}
         <PageRows>

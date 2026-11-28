@@ -15,8 +15,10 @@ paths:
         where every address outside /api/v2 reads and writes. A request
         signed in with an API key has no session, so none is active. An
         app's token has no session either: for it, active marks the
-        organization its OpenBot-Organization header names, or the caller's
-        own when it sends none. The header is checked against the caller's
+        organization its OpenBot-Organization header names; when it sends
+        none, the one the token was signed in to, while the caller is a
+        member of it, else the caller's own. The header is checked against
+        the caller's
         membership, as on every address that names no organization, so one
         they are not in answers not found. A session and an API key ignore
         it. To work in another one, set it as the
@@ -51,6 +53,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -77,11 +81,18 @@ paths:
       description: >-
         Create an organization with the caller as its owner. It starts with
         what a fresh install starts with, its starter Bots included, and no
-        conversations. Everybody already has an organization of
-        their own, made when they first signed in; this is for making another,
-        which anybody signed in may do where OpenBot keeps more than one.
-        Without a slug, one is made from the name. The caller's session keeps
-        working where it was. A repeated request with the same
+        conversations. Anybody signed in may make one where OpenBot keeps more
+        than one organization. Where OpenBot gives everybody an organization of
+        their own when they first sign in, as OpenBot Cloud does, this makes
+        another; on a self-hosted install everybody already shares `default`,
+        and this makes a further one beside it.
+        An OpenBot may limit how many organizations one person owns, any of
+        their own included: at the limit the request is refused with 403 and a
+        detail saying so, and nothing is made. Deleting one they created
+        makes room. While another of the caller's requests is creating one,
+        the request is refused with 409; send it again once that one has
+        answered. Without a slug, one is made from the name. The caller's
+        session keeps working where it was. A repeated request with the same
         Idempotency-Key and body returns the first result.
       security:
         - webSession: []
@@ -106,6 +117,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -118,7 +131,7 @@ paths:
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
         '403':
-          $ref: './common.yaml#/components/responses/Forbidden'
+          $ref: '#/components/responses/OrganizationNotAllowed'
         '409':
           $ref: '#/components/responses/OrganizationConflict'
         '500':
@@ -163,6 +176,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -184,6 +199,107 @@ paths:
           $ref: './common.yaml#/components/responses/ServerError'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Organizations]
+      operationId: deleteOrganization
+      summary: Delete an organization
+      description: >-
+        Delete the organization and what is in it. Nobody can work in it
+        again: its Bots stop, its computers are removed, the API keys made
+        in it stop working, and it leaves every member's list of
+        organizations. Its members keep their accounts and their other
+        organizations. Only an owner of this organization can. A person's own
+        organization and `default` stay, and are refused. A repeated request
+        with the same Idempotency-Key returns the first result.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The organization is deleted.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnerOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/OrganizationStays'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/OrganizationNotDeleted'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/plan:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Organizations]
+      operationId: getOrganizationPlan
+      x-openbot-singleton: true
+      summary: Read an organization's plan
+      description: >-
+        Say whether this OpenBot needs an organization to be on a plan before
+        its Bots run, and where this organization stands for the caller: on
+        the free allowance with runs left, on the plan, behind on a payment,
+        or needing a card. The free allowance is a number of runs each person
+        gets, across every organization they are in, so freeRunsUsedPercent is
+        the caller's own. An OpenBot that needs no plan (every self-hosted
+        install and OpenBot Desktop) answers not_required. Any member can read
+        it. addCardUrl is where an owner or an admin goes, in the browser, to
+        add a card and start or keep the plan; it is null for everyone else.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The organization's plan.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationPlan'
+              examples:
+                free:
+                  $ref: '#/components/examples/OrganizationPlanFree'
+                freeRunsUsedUp:
+                  $ref: '#/components/examples/OrganizationPlanFreeRunsUsedUp'
+                copilotKitEmployee:
+                  $ref: '#/components/examples/OrganizationPlanCopilotKitEmployee'
+                active:
+                  $ref: '#/components/examples/OrganizationPlanActive'
+                notRequired:
+                  $ref: '#/components/examples/OrganizationPlanNotRequired'
+                trialing:
+                  $ref: '#/components/examples/OrganizationPlanTrialing'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/members:
     parameters:
       - $ref: './common.yaml#/components/parameters/OrganizationId'
@@ -193,13 +309,32 @@ paths:
       summary: List an organization's members
       description: >-
         Return one page of the organization's members, in the order they
-        joined. Any member can read it. A missing cursor starts at the first
-        page and nextCursor null ends the list.
+        joined. Any member can read it. search narrows the list to the
+        members whose name or address matches it, ignoring case, best matches
+        first: those whose name, a word of their name (a first or a last name)
+        or their address starts with it, then those whose name or address
+        holds it, each group in alphabetical order of name, then address. A
+        search finds only this organization's current members: never somebody
+        it removed, somebody turned away from this OpenBot, or a member of
+        another organization only. A missing cursor starts
+        at the first page and nextCursor null ends the list. A cursor belongs
+        to the search that made it, so changing the search starts again
+        without one.
       security:
         - webSession: []
         - appOAuth: [organizations:read]
         - apiKey: []
       parameters:
+        - name: search
+          in: query
+          description: >-
+            The start of a name, a first or last name, or an address, or a
+            part of one, matched without regard to case. Leading and trailing
+            spaces are ignored; empty lists everybody.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
         - $ref: './common.yaml#/components/parameters/Limit'
         - $ref: './common.yaml#/components/parameters/Cursor'
       responses:
@@ -208,6 +343,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -266,6 +403,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -313,6 +452,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
         '403':
@@ -336,13 +477,25 @@ paths:
         Return one page of the organization's invitations that have not been
         accepted or canceled, the newest first: the ones still waiting, the
         ones that expired and the ones that were declined. Only an owner or an
-        admin of this organization can read it. A missing cursor starts at the
-        first page and nextCursor null ends the list.
+        admin of this organization can read it. search narrows the list to
+        the invitations whose address holds it, ignoring case; it finds only
+        this organization's invitations. A missing cursor starts at the
+        first page and nextCursor null ends the list. A cursor belongs to the
+        search that made it, so changing the search starts again without one.
       security:
         - webSession: []
         - appOAuth: [organizations:read]
         - apiKey: []
       parameters:
+        - name: search
+          in: query
+          description: >-
+            Part of an address, matched without regard to case. Leading and
+            trailing spaces are ignored; empty lists every invitation.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
         - $ref: './common.yaml#/components/parameters/Limit'
         - $ref: './common.yaml#/components/parameters/Cursor'
       responses:
@@ -351,6 +504,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -382,9 +537,11 @@ paths:
         which happened, so the inviter knows whether to pass the link on
         themselves. The invitation lasts seven days. Inviting an address
         again after its invitation expired or was declined starts a new one.
-        Only an owner or an admin of this organization can. A repeated
-        request with the same Idempotency-Key and body returns the first
-        result.
+        Only an owner or an admin of this organization can. An organization
+        that pays for each member needs a free seat for the person: with
+        none, the invitation is refused with SEAT_REQUIRED and addSeatUrl,
+        and nothing is invited. A repeated request with the same
+        Idempotency-Key and body returns the first result.
       security:
         - webSession: []
         - appOAuth: [organizations:write]
@@ -413,6 +570,8 @@ paths:
               schema:
                 type: string
               example: /api/v2/organizations/Jq3xT9mLw2Vb8RnC5sYd0fKe/invitations
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -424,6 +583,8 @@ paths:
           $ref: '#/components/responses/InvalidOrganizationInvitation'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
+        '402':
+          $ref: '#/components/responses/SeatRequired'
         '403':
           $ref: './common.yaml#/components/responses/AdminOnly'
         '404':
@@ -460,6 +621,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
         '403':
@@ -494,6 +657,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -533,6 +698,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -575,6 +742,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -619,6 +788,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -674,8 +845,16 @@ components:
           description: >-
             Whether the caller is working in this one: the organization their
             session works in, or for an app's token the one its
-            OpenBot-Organization header names, else the caller's own. Always
-            false for a request made with an API key.
+            OpenBot-Organization header names, else the one the token was
+            signed in to while the caller is a member of it, else the
+            caller's own. Always false for a request made with an API key.
+        canMoveIn:
+          type: boolean
+          description: >-
+            Whether the caller may move their Bots into this organization
+            (createImport): true where the organization lets them use Bots.
+            The server's verdict, by the organization's own rules. Present
+            only where OpenBot takes moves (OpenBot Cloud).
     OrganizationPage:
       type: object
       required: [organizations, canCreate, nextCursor]
@@ -762,6 +941,25 @@ components:
           type: string
           format: date-time
           description: When they became a member.
+        notOpenedYet:
+          type: boolean
+          description: >-
+            True for somebody who is a member of the organization where it is
+            kept, at OpenBot by CopilotKit on a hosted OpenBot, and hasn't
+            opened OpenBot yet. Until they do, they have no OpenBot account:
+            id is their id there, and email is empty when none is known. An
+            owner or an admin removes them by that id, as any member
+            (removable says whether they can be). They can't be given another
+            role here until they open OpenBot (assignableRoles is empty).
+            Absent for everybody else.
+        deactivated:
+          type: boolean
+          description: >-
+            True while this person's account is scheduled to be deleted
+            (requestAccountDeletion): they can't use OpenBot, nothing runs
+            for them, and the membership ends when the account is deleted,
+            unless they cancel first. The server's verdict. False or absent
+            for everybody else.
     OrganizationMemberPage:
       type: object
       required: [members, nextCursor]
@@ -952,9 +1150,99 @@ components:
       properties:
         invitation:
           $ref: '#/components/schemas/Invitation'
+    OrganizationPlan:
+      type: object
+      description: >-
+        Whether this OpenBot needs the organization to be on a plan, and where
+        the organization stands for the person reading it. When required is
+        true, a run starts only while status is free, trialing or active.
+      required: [required, status, trialEndsAt, renewsAt, addCardUrl]
+      properties:
+        required:
+          type: boolean
+          description: >-
+            True when this OpenBot runs an organization's Bots only while it
+            is on a plan, or while the person the run counts against has free
+            runs left.
+        status:
+          type: string
+          x-extensible-enum: [not_required, free, trialing, active, past_due, none, unknown]
+          description: >-
+            not_required when this OpenBot needs no plan. free when the
+            organization isn't on the plan and the person reading has free
+            runs left, or works for the company that makes OpenBot
+            (copilotKitEmployee) and would otherwise read none. active on the
+            plan. past_due when a payment failed and
+            the card needs updating. none when a card is needed: the person's
+            free runs are used up, or there are none, or the plan ended.
+            trialing during a free trial that ends on a date (trialEndsAt);
+            OpenBot Cloud's free allowance is counted in runs and doesn't use
+            it. unknown when the plan couldn't be read just now; Bots keep
+            running meanwhile.
+        freeRunsUsedPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >-
+            How much of the reading person's free allowance is used, from 0 to
+            100. The allowance is the person's own, across every organization
+            they are in. Rounded down, so it reads 100 only once every free
+            run is used. Present only while required is true and status is
+            neither active nor trialing; absent otherwise. The count of runs
+            is never sent.
+        freeRunsAllowance:
+          type: integer
+          minimum: 1
+          description: >-
+            How many free runs each person gets. Present only once the reading
+            person has used them all (freeRunsUsedPercent is 100, and status is
+            none, or free for copilotKitEmployee), so the number is never
+            shown while runs are left; absent otherwise.
+        copilotKitEmployee:
+          type: boolean
+          description: >-
+            True when the reading person works for the company that makes
+            OpenBot: their verified email address is on the copilotkit.ai
+            domain exactly. An employee's own runs are never refused for want
+            of a plan, in any organization, whatever status says. status is
+            still the organization's own (active, past_due and the rest), with
+            one exception: where it would be none, an employee reads free, so
+            once their free allowance is used they get freeRunsUsedPercent
+            100 and freeRunsAllowance. Their addCardUrl is null, unless they
+            are an owner or an admin and the organization needs a card for
+            members who aren't employees: then it is set, so they can pay for
+            the others. past_due keeps its addCardUrl for an owner or an
+            admin, since the organization's payment still needs updating for
+            everyone else in it. Present only
+            while required is true and the reader is an employee; absent
+            otherwise. It is about the reader alone: other members of the same
+            organization are unaffected, and the organization's plan is
+            unchanged.
+        trialEndsAt:
+          type: [string, 'null']
+          format: date-time
+          description: >-
+            When a free trial that ends on a date ends, while status is
+            trialing. Null otherwise. OpenBot Cloud's free allowance is
+            counted in runs and doesn't use it.
+        renewsAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the plan's current month ends, while status is active. Null otherwise.
+        addCardUrl:
+          type: [string, 'null']
+          format: uri-reference
+          maxLength: 2048
+          description: >-
+            Where an owner or an admin goes in the browser to add a card, or
+            to update it after a failed payment. A page to open, not an API
+            call. Null for a member, and when the organization needs no card.
   responses:
     InvalidOrganization:
       description: The name or the slug is missing or malformed, or the Idempotency-Key is.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -975,6 +1263,9 @@ components:
       description: >-
         Another organization has that slug. Or the Idempotency-Key was used
         for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1002,10 +1293,48 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+            creationUnderWay:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: You're already creating an organization. Wait for it to finish, then try again.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationNotAllowed:
+      description: >-
+        The caller already owns as many organizations as this OpenBot allows
+        one person. Or the request was refused for the caller, as any request
+        can be (SSO_REQUIRED).
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            limitReached:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: You already own 3 organizations, the most anyone can here. Delete one you created to create another.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     OrganizationNotCreated:
       description: >-
         This OpenBot could not finish setting the organization up, so it was
         not created. Nothing of it is left behind.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1022,11 +1351,106 @@ components:
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
+    OwnerOnly:
+      description: >-
+        The caller is not an owner of the organization, or holds no role in
+        it.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notOwner:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an owner can delete this organization.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationStays:
+      description: >-
+        The organization can't be deleted: it is a person's own organization,
+        or it is `default`. Or the Idempotency-Key was used for a different
+        request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            personal:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This is your own organization, so it stays. You can delete organizations you created.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            default:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This organization comes with OpenBot, so it stays.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationNotDeleted:
+      description: >-
+        This OpenBot could not finish deleting the organization, so it was
+        not deleted. Asking again may work.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unfinished:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: A service OpenBot depends on is unavailable.
+                status: 503
+                detail: The organization couldn't be deleted. Try again.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
     OwnerStays:
       description: >-
         The person stays in the organization: they own it, or this OpenBot's
         settings keep them as an admin of it. The members list says who, as
         removable.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1047,6 +1471,9 @@ components:
       description: >-
         The organization does not exist or is not visible to the caller, or
         it has no such invitation.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1077,6 +1504,9 @@ components:
     InvitationNotFound:
       description: >-
         There is no such invitation, or it was sent to another address.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1097,6 +1527,9 @@ components:
       description: >-
         The invitation expired, was canceled or was already answered. Or the
         Idempotency-Key was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1124,8 +1557,37 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    SeatRequired:
+      description: >-
+        The organization pays for each member, and every seat it has paid for
+        is taken (SEAT_REQUIRED). An owner or an admin adds a seat at
+        addSeatUrl, and the invitation can be sent once it is added. Nothing
+        was invited.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            noFreeSeat:
+              value:
+                type: https://open.bot/errors/seat-required
+                title: This organization needs another seat.
+                status: 402
+                detail: Each member is $5 a month. Add a seat to invite someone.
+                code: SEAT_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                addSeatUrl: /api/auth/hosted/add-seat?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
     InvalidOrganizationInvitation:
       description: The address or the role is missing or malformed, or the Idempotency-Key is.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1146,6 +1608,9 @@ components:
       description: >-
         They are already a member, or already have an invitation waiting. Or
         the Idempotency-Key was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1185,13 +1650,67 @@ components:
                 requestId: req_example
                 traceId: trace_example
   examples:
+    OrganizationPlanFree:
+      summary: On the free allowance, 42% of it used, read by an admin.
+      value:
+        required: true
+        status: free
+        freeRunsUsedPercent: 42
+        trialEndsAt: null
+        renewsAt: null
+        addCardUrl: null
+    OrganizationPlanFreeRunsUsedUp:
+      summary: Every free run used and no plan yet, read by an admin.
+      value:
+        required: true
+        status: none
+        freeRunsUsedPercent: 100
+        freeRunsAllowance: 500
+        trialEndsAt: null
+        renewsAt: null
+        addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
+    OrganizationPlanCopilotKitEmployee:
+      summary: An employee of the company that makes OpenBot, past the free allowance, whose runs still go ahead.
+      value:
+        required: true
+        status: free
+        freeRunsUsedPercent: 100
+        freeRunsAllowance: 500
+        copilotKitEmployee: true
+        trialEndsAt: null
+        renewsAt: null
+        addCardUrl: null
+    OrganizationPlanActive:
+      summary: An organization on the plan.
+      value:
+        required: true
+        status: active
+        trialEndsAt: null
+        renewsAt: '2026-12-23T09:30:00Z'
+        addCardUrl: null
+    OrganizationPlanTrialing:
+      summary: A free trial that ends on a date. OpenBot Cloud's free allowance doesn't use it.
+      value:
+        required: true
+        status: trialing
+        trialEndsAt: '2026-12-20T09:30:00Z'
+        renewsAt: null
+        addCardUrl: null
+    OrganizationPlanNotRequired:
+      summary: An OpenBot that needs no plan.
+      value:
+        required: false
+        status: not_required
+        trialEndsAt: null
+        renewsAt: null
+        addCardUrl: null
     OrganizationPageLast:
       summary: Somebody in their own organization and one they created, working in their own.
       value:
         organizations:
           - id: Wm4pZ7tKc1Xb9RnQ2sYd6hLe
             slug: dana
-            name: Dana's organization
+            name: Dana’s organization
             role: owner
             active: true
             personal: true

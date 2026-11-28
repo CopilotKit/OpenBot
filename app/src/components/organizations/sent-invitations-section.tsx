@@ -1,5 +1,5 @@
-import { IconMail, IconMailPlus } from "@tabler/icons-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { IconMail, IconMailPlus, IconSearch } from "@tabler/icons-react";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useId, useState } from "react";
 import {
   PageEmpty,
@@ -7,7 +7,7 @@ import {
   PageSection,
 } from "@/components/layout/page-shell";
 import { copyText } from "@/components/settings/linked-accounts";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogBody,
@@ -44,6 +44,7 @@ import type {
   AssignableRole,
   OrganizationInvitationResponse,
 } from "@/lib/api/generated/model";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   cancelSentInvitationMutationOptions,
   inviteToOrganizationMutationOptions,
@@ -51,14 +52,24 @@ import {
 import {
   type OrganizationSummary,
   type SentInvitation,
-  sentInvitationsQueryOptions,
+  sentInvitationPagesQueryOptions,
 } from "@/lib/organizations/queries";
+import {
+  addSeatAddress,
+  type InviteDraft,
+  keepInviteForSeat,
+  seatRequired,
+  takeInviteAfterSeat,
+} from "@/lib/organizations/seat";
 import {
   invitationLink,
   roleName,
   sentInvitationLine,
 } from "@/lib/organizations/words";
+import { SEARCH_MAX } from "@/lib/people/queries";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** The API's cap on an address, so the field stops where the server does. */
 const MAX_EMAIL_LENGTH = 320;
@@ -107,15 +118,41 @@ function CopyLinkButton({
 
 /**
  * The invitations this organization sent that nobody has accepted: waiting, expired or declined.
- * Drawn only for its owner and admins, who are the ones the server lets read them.
+ * Drawn only for its owner and admins, who are the ones the server lets read them. A page at a
+ * time, with a search by address above them that asks the server, as Admin's People does.
  */
 export function SentInvitationsSection({
   organization,
 }: {
   organization: OrganizationSummary;
 }) {
-  const invitations = useQuery(sentInvitationsQueryOptions(organization.id));
+  const [search, setSearch] = useState("");
+  // Debounced, so typing an address is one request rather than one per keystroke.
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const invitations = useInfiniteQuery(
+    sentInvitationPagesQueryOptions(organization.id, query),
+  );
+  const rows =
+    invitations.data?.pages.flatMap((page) => page.invitations) ?? [];
   const [inviting, setInviting] = useState(false);
+  // What the dialog opens with: an invitation kept while a seat was added, read once on arrival.
+  const [draft, setDraft] = useState<InviteDraft | null>(null);
+  useEffect(() => {
+    const kept = takeInviteAfterSeat(organization.id);
+    if (!kept) return;
+    setDraft(kept);
+    setInviting(true);
+  }, [organization.id]);
+  /*
+   * A hosted OpenBot: an invitation is an email from OpenBot by CopilotKit, accepted from that email.
+   * Its link carries a one-time ticket that only the email has, so there is no link to copy.
+   */
+  const hosted =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
 
   return (
     <PageSection
@@ -128,29 +165,65 @@ export function SentInvitationsSection({
       description="Invite somebody by email. An invitation lasts 7 days."
       title="Invitations"
     >
+      {/*
+        Server-side search, as on Admin's People: filtering what already arrived would only search
+        the first page. Shown once there is an invitation to search, or something typed.
+      */}
+      {search || query || rows.length > 0 ? (
+        <Input
+          aria-label="Search invitations"
+          className="mt-4"
+          maxLength={SEARCH_MAX}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search by address"
+          value={search}
+        />
+      ) : null}
       {invitations.isPending ? null : invitations.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {invitations.error.message}
+          {failureSaid(invitations.error)}
         </p>
-      ) : invitations.data.length === 0 ? (
+      ) : rows.length === 0 && query ? (
+        <PageEmpty icon={IconSearch} title="No matches">
+          {`No invitation matches "${query}".`}
+        </PageEmpty>
+      ) : rows.length === 0 ? (
         <PageEmpty icon={IconMail} title="No invitations">
           An invitation shows here until the person accepts it.
         </PageEmpty>
       ) : (
         <PageRows>
-          {invitations.data.map((invitation, index) => (
+          {rows.map((invitation, index) => (
             <Fragment key={invitation.id}>
               <SentInvitationRow
+                hosted={hosted}
                 invitation={invitation}
                 organizationId={organization.id}
               />
-              {index !== invitations.data.length - 1 && <Separator />}
+              {index !== rows.length - 1 && <Separator />}
             </Fragment>
           ))}
         </PageRows>
       )}
+      {/* Only when the server says there is another page, as on Admin's People. */}
+      {invitations.hasNextPage ? (
+        <Button
+          className="mt-4"
+          disabled={invitations.isFetchingNextPage}
+          onClick={() => invitations.fetchNextPage()}
+          size="sm"
+          variant="outline"
+        >
+          {invitations.isFetchingNextPage ? "Loading…" : "Show more"}
+        </Button>
+      ) : null}
       <InviteDialog
-        onOpenChange={setInviting}
+        draft={draft}
+        hosted={hosted}
+        onOpenChange={(next) => {
+          setInviting(next);
+          if (!next) setDraft(null);
+        }}
         open={inviting}
         organization={organization}
       />
@@ -160,12 +233,14 @@ export function SentInvitationsSection({
 
 /**
  * One invitation with its own Cancel, so a refusal is drawn under the row it is about. Only one
- * still waiting has a link worth passing on.
+ * still waiting has a link worth passing on, and none does on a hosted OpenBot.
  */
 function SentInvitationRow({
+  hosted,
   invitation,
   organizationId,
 }: {
+  hosted: boolean;
   invitation: SentInvitation;
   organizationId: string;
 }) {
@@ -184,8 +259,9 @@ function SentInvitationRow({
           </ItemTitle>
           <ItemDescription>{sentInvitationLine(invitation)}</ItemDescription>
         </ItemContent>
-        <ItemActions>
-          {invitation.status === "pending" ? (
+        {/* On a phone the buttons take a line under the address, as they do on a team's people. */}
+        <ItemActions className="max-sm:basis-full">
+          {invitation.status === "pending" && !hosted ? (
             <CopyLinkButton
               label={`Copy link for ${invitation.email}`}
               link={link}
@@ -213,7 +289,7 @@ function SentInvitationRow({
       ) : null}
       {cancel.error ? (
         <p className="px-4 pb-3 text-destructive text-sm" role="alert">
-          {cancel.error.message}
+          {failureSaid(cancel.error)}
         </p>
       ) : null}
     </>
@@ -224,12 +300,21 @@ function SentInvitationRow({
  * Invites an address with a role, then says what happened in the same dialog: OpenBot emailed the
  * person, or the inviter copies the link and passes it on. A refusal stays in the dialog in the
  * server's own sentence, with the address still typed.
+ *
+ * An organization that pays for each member, with every seat taken, refuses with SEAT_REQUIRED
+ * (`lib/organizations/seat.ts`): the server's sentence, and for an owner or an admin one Add a seat
+ * button in place of Invite. The invitation is kept in the tab as they go, and comes back as
+ * `draft` when they return, so Invite sends it then.
  */
 function InviteDialog({
+  draft,
+  hosted,
   onOpenChange,
   open,
   organization,
 }: {
+  draft: InviteDraft | null;
+  hosted: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   organization: OrganizationSummary;
@@ -240,16 +325,18 @@ function InviteDialog({
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<AssignableRole>("member");
   const [sent, setSent] = useState<OrganizationInvitationResponse | null>(null);
+  const seat = seatRequired(invite.error);
 
-  // Each opening starts empty, and what the last one said is not news about this one.
+  // Each opening starts empty, or as it was left to add a seat, and what the last one said is not
+  // news about this one.
   useEffect(() => {
     if (open) {
-      setEmail("");
-      setRole("member");
+      setEmail(draft?.email ?? "");
+      setRole(draft?.role ?? "member");
       setSent(null);
       reset();
     }
-  }, [open, reset]);
+  }, [open, reset, draft]);
 
   const send = async () => {
     try {
@@ -275,8 +362,9 @@ function InviteDialog({
             <DialogHeader>
               <DialogTitle>Invite to {organization.name}</DialogTitle>
               <DialogDescription>
-                They see the invitation in OpenBot when they sign in with this
-                address. It lasts 7 days.
+                {hosted
+                  ? "They get an email from OpenBot by CopilotKit and accept the invitation from it. It lasts 7 days."
+                  : "They see the invitation in OpenBot when they sign in with this address. It lasts 7 days."}
               </DialogDescription>
             </DialogHeader>
             <DialogBody className="mt-4">
@@ -336,8 +424,15 @@ function InviteDialog({
                 </FieldGroup>
               </form>
               {invite.error ? (
-                <p className="mt-4 text-destructive text-sm" role="alert">
-                  {invite.error.message}
+                <p
+                  className={cn(
+                    "mt-4 text-sm text-pretty",
+                    // Not a failure: what a member costs, and the way on below.
+                    seat ? "text-foreground" : "text-destructive",
+                  )}
+                  role="alert"
+                >
+                  {failureSaid(invite.error)}
                 </p>
               ) : null}
             </DialogBody>
@@ -349,14 +444,30 @@ function InviteDialog({
               >
                 Cancel
               </Button>
-              <Button
-                disabled={invite.isPending || !email.trim()}
-                form={formId}
-                size="sm"
-                type="submit"
-              >
-                {invite.isPending ? "Inviting…" : "Invite"}
-              </Button>
+              {seat?.addSeatUrl ? (
+                <a
+                  className={cn(buttonVariants({ size: "sm" }))}
+                  href={addSeatAddress(seat.addSeatUrl)}
+                  onClick={() =>
+                    keepInviteForSeat({
+                      organizationId: organization.id,
+                      email: email.trim(),
+                      role,
+                    })
+                  }
+                >
+                  Add a seat
+                </a>
+              ) : (
+                <Button
+                  disabled={invite.isPending || !email.trim()}
+                  form={formId}
+                  size="sm"
+                  type="submit"
+                >
+                  {invite.isPending ? "Inviting…" : "Invite"}
+                </Button>
+              )}
             </DialogFooter>
           </>
         )}

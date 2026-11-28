@@ -29,4 +29,9 @@ export interface ApiKey {
    * @nullable
    */
   lastUsedAt: string | null;
+  /**
+   * The organization this key acts in: the one it was made in. Null for a key made before keys were bound to an organization, which acts in `default`. Absent from an older server.
+   * @nullable
+   */
+  organizationId?: string | null;
 }

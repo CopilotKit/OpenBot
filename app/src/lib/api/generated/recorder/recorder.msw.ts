@@ -77,6 +77,8 @@ export const getExchangeRecorderConnectCodeResponseMock =
       name: "Sam Ortiz",
       email: "sam@example.com",
     },
+    organizationId: "Jq3xT9mLw2Vb8RnC5sYd0fKe",
+    organizationName: "Acme Research",
   });
 
 export const getGetRecorderIdentityResponseMock = (): RecorderIdentity => ({
@@ -86,6 +88,7 @@ export const getGetRecorderIdentityResponseMock = (): RecorderIdentity => ({
     email: "sam@example.com",
   },
   connectionId: "4a6f2d1c-9b8e-4c7a-a5d3-1e2f3a4b5c6d",
+  organization: { id: "Jq3xT9mLw2Vb8RnC5sYd0fKe", name: "Acme Research" },
 });
 
 export const getGetRecorderLearningResponseMock = (): RecorderLearning => ({

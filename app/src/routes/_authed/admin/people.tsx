@@ -39,12 +39,13 @@ import { Switch } from "@/components/ui/switch";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { terminateMemberComputersMutationOptions } from "@/lib/enterprise/mutations";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
+import { useCurrentOrganizationId } from "@/lib/organizations/current";
+import { useOrganizationChoices } from "@/lib/organizations/queries";
 import {
   setPersonAccessMutationOptions,
   setPersonRoleMutationOptions,
 } from "@/lib/people/mutations";
-import { useCurrentOrganizationId } from "@/lib/organizations/current";
-import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { type Person, peopleListQueryOptions } from "@/lib/people/queries";
 import { queryClient } from "@/query-client";
 
@@ -116,8 +117,7 @@ function nameOf(person: Person): string {
 
 /**
  * The organization a removal takes somebody out of, where that is all it does: an OpenBot where
- * everybody has an organization of their own and may create others (`canCreate`, the server's
- * verdict). There, Remove ends the person's membership of this organization alone, and their
+ * people may create organizations (`canCreate`, the server's verdict). There, Remove ends the person's membership of this organization alone, and their
  * account, sessions, API keys and other organizations stay theirs. Undefined where OpenBot keeps one
  * organization, where removing somebody still takes them out of OpenBot.
  */
@@ -177,7 +177,7 @@ function PeoplePage() {
       >
         {failure ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            {failure.message}
+            {failureSaid(failure)}
           </p>
         ) : null}
         {terminate.data ? (
@@ -204,7 +204,10 @@ function PeoplePage() {
 
         {people.isPending ? null : people.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load people. Try again in a moment.
+            {loadFailure(
+              people.error,
+              "Couldn't load people. Try again in a moment.",
+            )}
           </p>
         ) : rows.length === 0 ? (
           <PageEmpty
@@ -383,8 +386,8 @@ function RemovePersonDialog({
             <DialogDescription>
               They lose access to {organization}'s Bots and conversations, and
               the apps they connected here are disconnected. They keep their
-              account, their own organization and any other they're in. Restore
-              puts them back with their role and teams.
+              account and any other organization they're in. Restore puts them
+              back with their role and teams.
             </DialogDescription>
           ) : (
             <DialogDescription>
@@ -397,7 +400,7 @@ function RemovePersonDialog({
         </DialogHeader>
         {remove.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {remove.error.message}
+            {failureSaid(remove.error)}
           </p>
         ) : null}
         <DialogFooter>
