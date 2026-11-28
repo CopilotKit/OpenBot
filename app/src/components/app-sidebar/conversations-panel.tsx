@@ -398,7 +398,7 @@ export function ConversationsPanel({
     }
     scrollRoot.current.scrollTop = rosterScroll.current;
     rosterScroll.current = null;
-  }, [searching]);
+  }, [searching, scrollRoot]);
   const visibleChannels = pinnedFirst(channels.data ?? []);
   const animateOrder = (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
 
