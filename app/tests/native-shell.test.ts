@@ -20,6 +20,11 @@ import {
  * here case by case.
  */
 
+/** Where the phone apps' UI tests and the screenshot scripts open the app. */
+const LOCAL = "127.0.0.1";
+/** A real deployment, where the testing override must not count. */
+const PRODUCTION = "my.open.bot";
+
 const IPHONE =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 
@@ -44,7 +49,12 @@ function beforeFirstPaint(environment: NativeShellEnvironment) {
   const dataset: Record<string, string> = {};
   const viewport = { content: "width=device-width, initial-scale=1.0" };
   const window = {
-    location: { search: environment.search, hash: "", pathname: "/" },
+    location: {
+      search: environment.search,
+      hash: "",
+      pathname: "/",
+      hostname: environment.hostname,
+    },
     navigator: { userAgent: environment.userAgent },
     sessionStorage: environment.storage,
     localStorage: { getItem: () => null },
@@ -72,6 +82,7 @@ const CASES: {
       injected: undefined,
       userAgent: IPHONE,
       search: "",
+      hostname: LOCAL,
       storage: memoryStorage(),
     }),
     platform: null,
@@ -82,6 +93,7 @@ const CASES: {
       injected: { platform: "android", version: "0.1", bridge: 1 },
       userAgent: IPHONE,
       search: "",
+      hostname: LOCAL,
       storage: memoryStorage(),
     }),
     platform: "android",
@@ -92,6 +104,7 @@ const CASES: {
       injected: { platform: "windows" },
       userAgent: IPHONE,
       search: "",
+      hostname: LOCAL,
       storage: memoryStorage(),
     }),
     platform: null,
@@ -102,6 +115,7 @@ const CASES: {
       injected: undefined,
       userAgent: `${IPHONE} OpenBotShell-iOS/0.1`,
       search: "",
+      hostname: LOCAL,
       storage: memoryStorage(),
     }),
     platform: "ios",
@@ -112,6 +126,7 @@ const CASES: {
       injected: undefined,
       userAgent: "Mozilla/5.0 (Linux; Android 15) OpenBotShell-Android/0.1",
       search: "",
+      hostname: LOCAL,
       storage: memoryStorage(),
     }),
     platform: "android",
@@ -122,6 +137,7 @@ const CASES: {
       injected: undefined,
       userAgent: IPHONE,
       search: "?native-shell=ios",
+      hostname: LOCAL,
       storage: memoryStorage(),
     }),
     platform: "test",
@@ -132,6 +148,7 @@ const CASES: {
       injected: undefined,
       userAgent: IPHONE,
       search: "",
+      hostname: LOCAL,
       storage: memoryStorage({ [NATIVE_SHELL_STORAGE_KEY]: "test" }),
     }),
     platform: "test",
@@ -142,6 +159,7 @@ const CASES: {
       injected: undefined,
       userAgent: IPHONE,
       search: "?native-shell=off",
+      hostname: LOCAL,
       storage: memoryStorage({ [NATIVE_SHELL_STORAGE_KEY]: "test" }),
     }),
     platform: null,
@@ -152,6 +170,7 @@ const CASES: {
       injected: undefined,
       userAgent: `${IPHONE} OpenBotShell-iOS/0.1`,
       search: "?native-shell=off",
+      hostname: LOCAL,
       storage: memoryStorage(),
     }),
     platform: "ios",
@@ -162,6 +181,7 @@ const CASES: {
       injected: undefined,
       userAgent: IPHONE,
       search: "?native-shell=ios",
+      hostname: LOCAL,
       storage: {
         getItem: () => {
           throw new Error("denied");
@@ -178,6 +198,64 @@ const CASES: {
   },
 ];
 
+CASES.push(
+  {
+    name: "?native-shell=ios on a production host",
+    environment: () => ({
+      injected: undefined,
+      userAgent: IPHONE,
+      search: "?native-shell=ios",
+      hostname: PRODUCTION,
+      storage: memoryStorage(),
+    }),
+    platform: null,
+  },
+  {
+    name: "the override a tab remembered, on a production host",
+    environment: () => ({
+      injected: undefined,
+      userAgent: IPHONE,
+      search: "",
+      hostname: PRODUCTION,
+      storage: memoryStorage({ [NATIVE_SHELL_STORAGE_KEY]: "test" }),
+    }),
+    platform: null,
+  },
+  {
+    name: "the shell's user agent on a production host",
+    environment: () => ({
+      injected: undefined,
+      userAgent: `${IPHONE} OpenBotShell-iOS/0.1`,
+      search: "",
+      hostname: PRODUCTION,
+      storage: memoryStorage(),
+    }),
+    platform: "ios",
+  },
+  {
+    name: "what the shell injects, on a production host",
+    environment: () => ({
+      injected: { platform: "android", version: "0.1", bridge: 1 },
+      userAgent: "Mozilla/5.0 (Linux; Android 15)",
+      search: "?native-shell=off",
+      hostname: PRODUCTION,
+      storage: memoryStorage(),
+    }),
+    platform: "android",
+  },
+  {
+    name: "?native-shell=ios on a .localhost name",
+    environment: () => ({
+      injected: undefined,
+      userAgent: IPHONE,
+      search: "?native-shell=ios",
+      hostname: "openbot.localhost",
+      storage: memoryStorage(),
+    }),
+    platform: "test",
+  },
+);
+
 describe("which shell the page is in", () => {
   for (const { name, environment, platform } of CASES) {
     test(`${name}: ${platform ?? "none"}, the same before the first paint`, () => {
@@ -191,12 +269,47 @@ describe("which shell the page is in", () => {
     });
   }
 
+  test("on a production host the override is not remembered, and off still forgets one kept from before", () => {
+    const storage = memoryStorage();
+    detectNativeShell({
+      injected: undefined,
+      userAgent: IPHONE,
+      search: "?native-shell=ios",
+      hostname: PRODUCTION,
+      storage,
+    });
+    expect(storage.values.has(NATIVE_SHELL_STORAGE_KEY)).toBe(false);
+    storage.values.set(NATIVE_SHELL_STORAGE_KEY, "test");
+    detectNativeShell({
+      injected: undefined,
+      userAgent: IPHONE,
+      search: "?native-shell=off",
+      hostname: PRODUCTION,
+      storage,
+    });
+    expect(storage.values.has(NATIVE_SHELL_STORAGE_KEY)).toBe(false);
+  });
+
+  test("a development build honours the override on any host", () => {
+    expect(
+      detectNativeShell({
+        injected: undefined,
+        userAgent: IPHONE,
+        search: "?native-shell=ios",
+        hostname: PRODUCTION,
+        dev: true,
+        storage: memoryStorage(),
+      })?.platform,
+    ).toBe("test");
+  });
+
   test("the override is remembered for the tab, and forgotten again", () => {
     const storage = memoryStorage();
     detectNativeShell({
       injected: undefined,
       userAgent: IPHONE,
       search: "?native-shell=ios",
+      hostname: LOCAL,
       storage,
     });
     expect(storage.values.get(NATIVE_SHELL_STORAGE_KEY)).toBe("test");
@@ -204,6 +317,7 @@ describe("which shell the page is in", () => {
       injected: undefined,
       userAgent: IPHONE,
       search: "?native-shell=off",
+      hostname: LOCAL,
       storage,
     });
     expect(storage.values.has(NATIVE_SHELL_STORAGE_KEY)).toBe(false);

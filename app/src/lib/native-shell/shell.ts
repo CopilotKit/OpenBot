@@ -9,10 +9,12 @@
  * 1. `window.__OPENBOT_NATIVE_SHELL__`, which the shell injects before the page's first script:
  *    `{ platform: "ios" | "android", version, bridge: 1 }`.
  * 2. The user agent, which the shell ends with `OpenBotShell-iOS/0.1` (or `OpenBotShell-Android/…`).
- * 3. For testing, `?native-shell=ios` on any address, remembered for the tab in sessionStorage, so a
- *    desktop browser or Playwright can open the shell's layout; `?native-shell=off` forgets it. It is
- *    reachable in production on purpose and harmless: all it does is hide the app's own navigation
- *    in that one tab. The platform it reports is "test".
+ * 3. For testing, `?native-shell=ios`, remembered for the tab in sessionStorage, so a desktop browser
+ *    or Playwright can open the shell's layout. The platform it reports is "test". Only in a
+ *    development build or on a development host (`developmentHost`): elsewhere a link carrying it
+ *    would leave a person with the shell's layout and no shell, signed out with no way to sign in or
+ *    signed in with no navigation, until the tab closed. `?native-shell=off` forgets it anywhere, so
+ *    a tab that kept it from before can be freed.
  *
  * index.html's inline script runs the same detection before the first paint and marks
  * `<html data-native-shell="…">` for the styles, and widens the viewport to the whole web view
@@ -47,11 +49,32 @@ export const NATIVE_SHELL_ATTRIBUTE = "data-native-shell";
 /** The user agent's mark: `OpenBotShell-iOS/0.1`. */
 const USER_AGENT_MARK = /OpenBotShell-(\w+)/;
 
+/**
+ * Where the testing override counts: a machine's own addresses and the names kept for development
+ * (`.localhost`, `.test`), where the phone apps' UI tests, the workbench and the screenshot scripts
+ * open the app. index.html asks the same.
+ */
+export function developmentHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "[::1]" ||
+    host === "::1" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".test")
+  );
+}
+
 /** What detection reads, so a test can hand it anything. */
 export type NativeShellEnvironment = {
   injected: unknown;
   userAgent: string;
   search: string;
+  /** The page's host name: the testing override counts only on a development host. */
+  hostname: string;
+  /** A development build, where the override counts on any host. */
+  dev?: boolean;
   /** The tab's sessionStorage, or null where it can't be read. */
   storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
 };
@@ -64,7 +87,11 @@ export function detectNativeShell(
   environment: NativeShellEnvironment,
 ): NativeShell | null {
   const { injected, userAgent, search, storage } = environment;
-  const asked = new URLSearchParams(search).get(NATIVE_SHELL_PARAM);
+  const overridable =
+    environment.dev === true || developmentHost(environment.hostname);
+  const param = new URLSearchParams(search).get(NATIVE_SHELL_PARAM);
+  // "off" is honoured anywhere; turning the override on only where it may count.
+  const asked = param === "off" || overridable ? param : null;
   try {
     if (asked === "off") storage?.removeItem(NATIVE_SHELL_STORAGE_KEY);
     else if (asked === "ios" || asked === "android" || asked === "test")
@@ -86,7 +113,7 @@ export function detectNativeShell(
     };
   if (asked === "ios" || asked === "android" || asked === "test")
     return { platform: "test" };
-  if (asked === "off") return null;
+  if (asked === "off" || !overridable) return null;
   try {
     return storage?.getItem(NATIVE_SHELL_STORAGE_KEY) === "test"
       ? { platform: "test" }
@@ -110,6 +137,9 @@ function pageEnvironment(): NativeShellEnvironment {
     injected: window.__OPENBOT_NATIVE_SHELL__,
     userAgent: navigator.userAgent,
     search: window.location.search,
+    hostname: window.location.hostname,
+    // A boolean under Vite, a string where another build (the Recorder) types the env.
+    dev: String(import.meta.env.DEV) === "true",
     storage: pageStorage(),
   };
 }

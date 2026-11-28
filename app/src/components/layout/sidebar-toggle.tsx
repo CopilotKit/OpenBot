@@ -129,19 +129,15 @@ export function SidebarToggle({ className }: { className?: string }) {
  */
 export function SidebarToggleBar({ children }: { children?: ReactNode }) {
   /*
-   * With no sidebar at all (the phone app's native shell, `components/layout/native-shell-frame.tsx`)
-   * there is no toggle to keep a place for, so no band: only what the screen put at its end, and
-   * nothing when that draws nothing (`empty:hidden`). In the shell its padding is `PageShell`'s
-   * column's, so Home's account button sits where Conversations and Bots put theirs.
+   * In the phone app's native shell (`components/layout/native-shell-frame.tsx`) there is no sidebar
+   * and no toggle to keep a place for, so no band: only what the screen put at its end, with
+   * `PageShell`'s column's padding so Home's account button sits where Conversations and Bots put
+   * theirs, and nothing when that draws nothing (`empty:hidden`). A skin's frame with no sidebar
+   * (OpenDuet, OpenDots) keeps the band, as before the shell.
    */
-  if (!useOptionalSidebar()) {
+  if (nativeShell()) {
     return children ? (
-      <div
-        className={cn(
-          "flex shrink-0 items-center justify-end gap-2 empty:hidden",
-          nativeShell() ? "px-4 pt-6" : "px-3 pt-2",
-        )}
-      >
+      <div className="flex shrink-0 items-center justify-end gap-2 px-4 pt-6 empty:hidden">
         {children}
       </div>
     ) : null;
