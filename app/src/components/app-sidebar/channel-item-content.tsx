@@ -44,12 +44,16 @@ export function ChannelItemContent({
   const unreadDot = unread ? (
     <span
       className="size-2 shrink-0 rounded-full bg-primary"
+      role="img"
+      aria-label="Unread"
       data-slot="unread-dot"
     />
   ) : null;
   const pin = pinned ? (
     <IconPinFilled
       className="size-3 shrink-0 text-muted-foreground/70"
+      role="img"
+      aria-label="Pinned"
       data-slot="pinned"
     />
   ) : null;
