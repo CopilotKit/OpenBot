@@ -28,9 +28,11 @@ on:
 
 permissions: {}
 
+# A newer push waits for the running one instead of cancelling it: a cancelled build saves no cache,
+# and the iOS build takes 15 minutes.
 concurrency:
   group: rn-shell-ios-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
