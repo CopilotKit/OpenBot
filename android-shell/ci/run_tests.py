@@ -28,6 +28,9 @@ artifacts, private, repo = (os.path.abspath(p) for p in sys.argv[1:4])
 RUNNER = "ai.openbot.shell.test/androidx.test.runner.AndroidJUnitRunner"
 PACKAGE = "ai.openbot.shell.test."
 REAL_ONLY = os.environ.get("REAL_BACKEND_ONLY") == "true"
+# "tests" (the test workflow: no recording) or "video" (the video workflow: VIDEO_PLAN demo|real|both).
+MODE = os.environ.get("RUN_MODE", "tests")
+VIDEO_PLAN = os.environ.get("VIDEO_PLAN", "both")
 GOOGLE = os.environ.get("GOOGLE_SIGN_IN") == "true"
 SECRET_ARGS = {
     "openbot_test_session": os.environ.get("OPENBOT_SHELL_TEST_SESSION", ""),
@@ -39,11 +42,13 @@ SECRET_ARGS = {
 PRIVATE_TESTS = (
     "testRealSignedInJourneyWithSessionCookie",
     "testRealGoogleSignInInCustomTab",
+    "testRealGoogleSignInInWebViewAndJourney",
 )
 
 SUITE1_RELEASE = [
     "RealBackendReleaseTest#testRealFirstScreenAndWebSignIn",
     "RealBackendReleaseTest#testRealLockScreenWhenBackendUnreachable",
+    "RealBackendReleaseTest#testRealGoogleSignInInWebViewAndJourney",
 ]
 SUITE1_DEBUG = [
     "RealBackendDebugTest#testLoadsHostedWebApp",
@@ -71,16 +76,28 @@ SUITE2 = [
     "ShellFlowTest#testOfflineLock",
     "ShellFlowTest#testKeyboardHidesTabBar",
     "ShellFlowTest#testResumeFromBackground",
+    "ShellFlowTest#testLoadingSkeleton",
+    "ShellFlowTest#testNativeMoreMenuSignOut",
     "ShellFlowTest#testLockLiftsWhenServerComesBack",
 ]
 DEMO = ["DemoTourTest#testDemoTour"]
-# Recordings: (first test, last test, file, private?)
+# Recordings (video mode only): (first test, last test, file, private?)
 RECORD = [
     ("RealBackendDebugTest#testRealSignedInJourneyWithSessionCookie",
      "RealBackendDebugTest#testRealSignedInJourneyWithSessionCookie_2_relaunch", "real-journey.mp4", True),
+    ("RealBackendReleaseTest#testRealGoogleSignInInWebViewAndJourney",
+     "RealBackendReleaseTest#testRealGoogleSignInInWebViewAndJourney", "real-google-webview.mp4", True),
     ("RealBackendDebugTest#testRealGoogleSignInInCustomTab",
-     "RealBackendDebugTest#testRealGoogleSignInInCustomTab", "google-custom-tab.mp4", True),
+     "RealBackendDebugTest#testRealGoogleSignInInCustomTab", "real-google-custom-tab.mp4", True),
     ("DemoTourTest#testDemoTour", "DemoTourTest#testDemoTour", "demo-tour.mp4", False),
+]
+VIDEO_REAL = [
+    "RealBackendDebugTest#testRealSignedInJourneyWithSessionCookie",
+    "RealBackendDebugTest#testRealSignedInJourneyWithSessionCookie_2_relaunch",
+]
+VIDEO_REAL_GOOGLE = [
+    "RealBackendReleaseTest#testRealGoogleSignInInWebViewAndJourney",
+    "RealBackendDebugTest#testRealGoogleSignInInCustomTab",
 ]
 LOG_TAGS = ("OPENBOT_DIAG", "SHELL_NOTE", "SHELL_PROBE", "TestRunner", "AndroidRuntime", "chromium", "cr_", "WebView")
 STATUS = {"0": "passed", "-1": "failed", "-2": "failed", "-3": "skipped", "-4": "skipped"}
@@ -155,6 +172,31 @@ def video_seconds(path):
         return 0.0
 
 
+def trim_and_copy(path, recording_started, instrument_log):
+    """Trims to the test's own video marks (1 s of margin) and writes a 600-px-wide H.264 copy."""
+    marks = ""
+    for name in (instrument_log, os.path.join(os.path.dirname(instrument_log), "logcat-app.txt")):
+        if os.path.exists(name):
+            marks += open(name, errors="replace").read()
+    starts = [float(x) for x in re.findall(r"video-mark start ([0-9.]+)", marks)]
+    ends = [float(x) for x in re.findall(r"video-mark end ([0-9.]+)", marks)]
+    if starts and ends:
+        start = max(0.0, starts[-1] - recording_started - 1.0)
+        # The last start mark and the last end mark after it.
+        end = max(e for e in ends) - recording_started + 1.0
+        if end > start + 5:
+            trimmed = path[:-4] + ".trimmed.mp4"
+            result = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start:.2f}", "-i", path, "-t",
+                                     f"{end - start:.2f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                                     "-pix_fmt", "yuv420p", "-an", trimmed])
+            if result.returncode == 0 and os.path.exists(trimmed):
+                os.replace(trimmed, path)
+                print(f"  trimmed {os.path.basename(path)} to {end - start:.1f} s", flush=True)
+    small = path[:-4] + "-600.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-vf", "scale=600:-2", "-c:v", "libx264",
+                    "-preset", "veryfast", "-crf", "26", "-pix_fmt", "yuv420p", "-an", small])
+
+
 class LateStack:
     """Starts OpenBot on 3012 about 8 s after testLockLiftsWhenServerComesBack touches its trigger."""
 
@@ -189,6 +231,8 @@ def run_one(test_id, results, logs):
         if value:
             extra += ["-e", key, shlex.quote(value)]
     extra += ["-e", "google_sign_in", "true" if GOOGLE else "false"]
+    if MODE == "video":
+        extra += ["-e", "video", "1"]
     late = None
     if short == "testLockLiftsWhenServerComesBack":
         extra += ["-e", "late_stack", "1"]
@@ -255,11 +299,19 @@ def run_one(test_id, results, logs):
 def main():
     os.makedirs(artifacts, exist_ok=True)
     os.makedirs(private, exist_ok=True)
-    plan = list(SUITE1_RELEASE)
-    after_release = len(plan)
-    plan += SUITE1_DEBUG
-    if not REAL_ONLY:
-        plan += PROBE + SUITE2 + DEMO
+    if MODE == "video":
+        plan = []
+        if VIDEO_PLAN in ("real", "both"):
+            plan += VIDEO_REAL_GOOGLE if GOOGLE else VIDEO_REAL
+        after_release = 1 if (GOOGLE and VIDEO_PLAN in ("real", "both")) else 0
+        if VIDEO_PLAN in ("demo", "both"):
+            plan += DEMO
+    else:
+        plan = list(SUITE1_RELEASE)
+        after_release = len(plan)
+        plan += SUITE1_DEBUG
+        if not REAL_ONLY:
+            plan += PROBE + SUITE2 + DEMO
     results, logs = [], []
     recorders = {}
     recorded_status = "unknown"
@@ -268,10 +320,19 @@ def main():
             # Two apps claiming openbotshell:// would make Chrome ask which one: the release-like
             # build leaves before the hand-off tests.
             adb("uninstall", "ai.openbot.shell.releasetest")
-        for first, last, name, secret in RECORD:
-            if test_id == first:
-                recorders[name] = Recorder(name)
-                recorders[name].start()
+        if test_id == "RealBackendDebugTest#testRealGoogleSignInInCustomTab" and GOOGLE:
+            # One Google attempt per run: the Custom Tab only when the WebView was refused.
+            webview = [r for r in results if r["test"] == "testRealGoogleSignInInWebViewAndJourney"]
+            if webview and not (webview[-1]["status"] == "skipped" and "refused" in webview[-1]["message"]):
+                results.append({"id": test_id, "test": test_id.split("#")[-1], "class": "RealBackendDebugTest",
+                                "status": "skipped", "message": "not run: the WebView attempt was not refused by Google (one attempt per run)",
+                                "variant": "debug", "seconds": 0, "private": True, "notes": [], "probe": []})
+                continue
+        if MODE == "video":
+            for first, last, name, secret in RECORD:
+                if test_id == first:
+                    recorders[name] = Recorder(name)
+                    recorders[name].start()
         status = run_one(test_id, results, logs)
         for first, last, name, secret in RECORD:
             if test_id == first:
@@ -279,6 +340,8 @@ def main():
             if test_id == last and name in recorders:
                 recorder = recorders.pop(name)
                 dest = recorder.stop(os.path.join(private if secret else artifacts, "video"))
+                if dest:
+                    trim_and_copy(dest, recorder.started, os.path.join(private if secret else artifacts, "instrument.log"))
                 length = video_seconds(dest) if dest else 0.0
                 print(f"  video {name}: {length:.1f} s", flush=True)
                 if recorded_status == "skipped":

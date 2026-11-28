@@ -7,7 +7,7 @@ release_test="$2"
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 analyzer="$SDK/cmdline-tools/latest/bin/apkanalyzer"
 
-hooks='openbot\.(plain_webview|reset|test_session_cookie|stale_session|handoff_auto|force_offline|force_offline_seconds|force_dark|debug_tab_url)|debug-state'
+hooks='openbot\.(plain_webview|reset|test_session_cookie|stale_session|handoff_auto|force_offline|force_offline_seconds|force_dark|debug_tab_url|delay_first_load_ms)|debug-state'
 overrides='openbot\.(base_url|diagnostics|test_name)'
 
 dex_strings() { unzip -p "$1" 'classes*.dex' | strings -a; }

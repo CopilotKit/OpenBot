@@ -14,6 +14,7 @@ class HookValues(
     val forceOfflineSeconds: Long? = null,
     val forceDark: Boolean = false,
     val customTabUrl: String? = null,
+    val delayFirstLoadMs: Long = 0L,
 ) {
     override fun toString(): String = "HookValues(redacted)"
 }

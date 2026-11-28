@@ -7,7 +7,7 @@ name: Android shell
 # tests) runs first, so a compile error fails the job before the emulator boots.
 #
 # Artifacts: android-shell-<run id> (SUMMARY.md, diagnostics, logcat, screenshots under shots/,
-# video/demo-tour.mp4, lint reports) and, only when a test used a real account,
+# lint reports; recordings come from android-shell-video.yml) and, only when a test used a real account,
 # android-shell-private-<run id>.
 #
 # Optional repository secrets for the tests against a real account (skipped when empty):
@@ -161,7 +161,6 @@ jobs:
           GOOGLE_SIGN_IN: ${{ inputs.google_sign_in }}
           REAL_BACKEND_ONLY: ${{ inputs.real_backend_only }}
         run: |
-          command -v ffmpeg > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null; }
           python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
 
       - name: Write the summary and collect the screenshots

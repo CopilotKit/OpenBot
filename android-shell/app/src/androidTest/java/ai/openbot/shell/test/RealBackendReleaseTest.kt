@@ -88,4 +88,68 @@ class RealBackendReleaseTest : ShellTestBase() {
         sleep(2_000)
         check(exists("offline_lock"), "the lock went away with nothing to reach")
     }
+
+    /**
+     * The real sign-in a person does on production today, with no hook: fresh install, native
+     * sign-in, Sign in, config 404, the real web sign-in in the WebView, OpenBot by CopilotKit's page,
+     * Google, email, password, 2-Step, "Try another way", the authenticator code, back on
+     * my.open.bot signed in with the bottom bar, the journey, then the native Sign out. Runs only when
+     * started by hand with google_sign_in on (each attempt sends a prompt to the account's phone).
+     * If Google refuses Android's WebView (disallowed_useragent), that is recorded and the test
+     * skips with "refused": the runner then proves the Custom Tab path instead. The user agent is
+     * never changed.
+     */
+    @Test
+    fun testRealGoogleSignInInWebViewAndJourney() {
+        if (args.getString("google_sign_in") != "true") {
+            skip("runs only when started by hand with google sign-in on: each attempt sends a sign-in prompt to the account's phone")
+        }
+        val names = listOf("openbot_google_email", "openbot_google_password", "openbot_google_totp_secret")
+        note("secret-inputs: ${if (names.all { secret(it) != null }) "present" else "absent"}")
+        val email = secret(names[0]) ?: skip("the Google email secret is not set")
+        val password = secret(names[1]) ?: skip("the Google password secret is not set")
+        val totp = secret(names[2])?.let { Totp.base32Decode(it) } ?: skip("the TOTP secret is not set or not base32")
+        requireProduction()
+        note("video-mark start ${System.currentTimeMillis() / 1000.0}")
+        try {
+            launchPlain(null, "google-webview")
+            val button = waitFor("sign_in_button", 15_000) ?: skip("no Sign in button")
+            sleep(1_500)
+            button.click()
+            if (waitFor("web_sign_in_cancel", 25_000) == null) skip("no web sign-in fallback")
+            waitWebObject("Sign in to OpenBot Cloud", 30_000)
+            sleep(1_500)
+            screenshot("1-web-sign-in")
+            waitWebObject("Sign in or create an account", 15_000)?.click() ?: skip("no 'Sign in or create an account'")
+            val google = findInApp(pkg, "Google", 30_000) ?: skip("no Google button on OpenBot by CopilotKit's page")
+            sleep(1_500)
+            screenshot("2-identity-provider")
+            google.click()
+            sleep(10_000)
+            screenshot("3-google-in-webview")
+            val refusal = googleRefusal(pkg)
+            if (refusal != null) {
+                note("Google refused the sign-in inside Android's WebView: the page says '$refusal'")
+                skip("refused: Google shows '$refusal' inside Android's WebView; the Custom Tab path is the design")
+            }
+            googleSteps(pkg, email, password, totp)
+            val home = waitForTab(Tab.HOME, 40_000)
+            sleep(3_000)
+            screenshot("4-after-google")
+            note("Google sign-in in the WebView reached the tabs: ${home != null}")
+            if (home == null) skip("Google's sign-in in the WebView did not end signed in")
+            // A short journey, then the native Sign out.
+            tab(Tab.BOTS)?.click()
+            sleep(4_000)
+            screenshot("5-bots")
+            tab(Tab.HOME)?.click()
+            sleep(3_000)
+            signOutFromMoreMenu(confirm = true, moment = "6")
+            check(waitFor("sign_in_button", 15_000) != null, "the native Sign out did not reach the native sign-in")
+            sleep(2_000)
+            screenshot("7-signed-out")
+        } finally {
+            note("video-mark end ${System.currentTimeMillis() / 1000.0}")
+        }
+    }
 }

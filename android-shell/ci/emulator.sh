@@ -14,14 +14,17 @@ ARTIFACTS="${ARTIFACTS:-artifacts}"
 IMAGE="system-images;android-${API_LEVEL};${IMAGE_TAG};x86_64"
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 export PATH="$SDK/cmdline-tools/latest/bin:$SDK/emulator:$SDK/platform-tools:$PATH"
-mkdir -p "$ARTIFACTS"
+# Where avdmanager writes the AVD and the emulator looks for it (newer tools default elsewhere).
+export ANDROID_AVD_HOME="$HOME/.android/avd"
+mkdir -p "$ARTIFACTS" "$ANDROID_AVD_HOME"
 
 boot() {
   yes | sdkmanager --licenses > /dev/null 2>&1 || true
   sdkmanager --install "platform-tools" "emulator" "$IMAGE" > "$ARTIFACTS/sdkmanager.log" 2>&1 || {
     tail -n 30 "$ARTIFACTS/sdkmanager.log"; exit 1; }
   echo no | avdmanager create avd --force -n shell -k "$IMAGE" -d pixel_7 > /dev/null
-  local config="$HOME/.android/avd/shell.avd/config.ini"
+  local config="$ANDROID_AVD_HOME/shell.avd/config.ini"
+  [ -f "$config" ] || { echo "no AVD config at $config"; avdmanager list avd; exit 1; }
   set_config() {
     if grep -q "^$1=" "$config"; then sed -i "s|^$1=.*|$1=$2|" "$config"; else echo "$1=$2" >> "$config"; fi
   }
@@ -47,7 +50,7 @@ boot() {
 prepare() {
   adb shell settings put global window_animation_scale 0
   adb shell settings put global transition_animation_scale 0
-  adb shell settings put global animator_duration_scale 0
+  adb shell settings put global animator_duration_scale "${ANIMATOR_SCALE:-0}"
   adb shell settings put secure show_ime_with_hard_keyboard 1
   adb shell settings put system screen_off_timeout 1800000
   adb shell svc power stayon true

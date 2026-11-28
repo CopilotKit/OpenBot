@@ -122,8 +122,22 @@ class ShellController(
     var webPathRoot = "-"
         private set
 
+    /** A main-frame page is loading and has not rendered yet: the loading skeleton covers the web area. */
+    var pageLoading = false
+        private set
+    private var loadingSince = 0L
+    private var contentChecks = 0
+
+    /** A native sign-out is waiting for the web app's own sign-out to land on /sign. */
+    var signingOut = false
+        private set
+
+    /** The sign-in screen; while entering, the web area (and its skeleton) shows instead. */
     val showsSignInScreen: Boolean
-        get() = phase == Phase.LAUNCHING || (phase == Phase.SIGNED_OUT && signIn != SignInStep.WEB_FALLBACK)
+        get() = phase == Phase.LAUNCHING ||
+            (phase == Phase.SIGNED_OUT && signIn != SignInStep.WEB_FALLBACK && signIn != SignInStep.ENTERING)
+
+    val showsSkeleton: Boolean get() = pageLoading && webVisible && !showsLock && !showsSignInScreen
 
     val webVisible: Boolean
         get() = when (phase) {
@@ -146,7 +160,8 @@ class ShellController(
     val debugState: String
         get() = "phase=${phase.label} signIn=${signIn.label} tab=${selectedTab.key} nav=$lastNavigation " +
             "commits=$mainFrameCommits lock=$lockReason keyboard=${if (keyboardVisible) 1 else 0} " +
-            "path=$webPathRoot dark=${pageIsDark?.let { if (it) "1" else "0" } ?: "-"}"
+            "path=$webPathRoot dark=${pageIsDark?.let { if (it) "1" else "0" } ?: "-"} " +
+            "skeleton=${if (showsSkeleton) 1 else 0} signingOut=${if (signingOut) 1 else 0}"
 
     private fun changed() = activity.render()
 
@@ -432,6 +447,9 @@ class ShellController(
     private fun sessionEnded(reason: String) {
         diagnostics.log("session-ended", mapOf("reason" to reason))
         main.removeCallbacks(enterTimeout)
+        main.removeCallbacks(signOutTimeout)
+        signingOut = false
+        stopSkeleton()
         renewing = false
         phase = Phase.SIGNED_OUT
         signIn = SignInStep.IDLE
@@ -439,6 +457,110 @@ class ShellController(
         selectedTab = ShellTab.HOME
         val deleted = SessionCookies.delete(config)
         diagnostics.log("session-cookies-deleted", mapOf("count" to deleted))
+    }
+
+    // The loading skeleton. ----------------------------------------------------------------------------
+
+    private val hideSkeleton = Runnable {
+        if (pageLoading) {
+            pageLoading = false
+            diagnostics.log("skeleton", mapOf("shown" to false, "ms" to System.currentTimeMillis() - loadingSince))
+            changed()
+        }
+    }
+    private val checkContent = Runnable { checkPageContent() }
+
+    override fun onFullLoad() {
+        main.removeCallbacks(hideSkeleton)
+        main.removeCallbacks(checkContent)
+        contentChecks = 0
+        if (!pageLoading) {
+            pageLoading = true
+            loadingSince = System.currentTimeMillis()
+            diagnostics.log("skeleton", mapOf("shown" to true))
+            changed()
+        }
+    }
+
+    /** The page has rendered: the skeleton fades out after `after` ms, never before 300 ms on screen. */
+    private fun pageShown(reason: String, after: Long) {
+        if (!pageLoading) return
+        main.removeCallbacks(checkContent)
+        val elapsed = System.currentTimeMillis() - loadingSince
+        val delay = maxOf(after, MIN_SKELETON_MS - elapsed, 0L)
+        diagnostics.log("skeleton-ending", mapOf("reason" to reason, "afterMs" to delay))
+        main.removeCallbacks(hideSkeleton)
+        main.postDelayed(hideSkeleton, delay)
+    }
+
+    /** No bridge (production today): finished and the body has text. Asked every 500 ms for 10 s. */
+    private fun checkPageContent() {
+        if (!pageLoading || web.pageReady) return
+        web.evaluateJson("JSON.stringify({n: (document.body && document.body.innerText.trim().length) || 0})") { answer ->
+            val length = answer?.optInt("n", 0) ?: 0
+            contentChecks += 1
+            if (length > 0 || contentChecks >= 20) {
+                pageShown(if (length > 0) "content" else "content-timeout", 0)
+            } else {
+                main.postDelayed(checkContent, 500)
+            }
+        }
+    }
+
+    private fun stopSkeleton() {
+        main.removeCallbacks(hideSkeleton)
+        main.removeCallbacks(checkContent)
+        if (pageLoading) {
+            pageLoading = false
+            changed()
+        }
+    }
+
+    // The More menu. -------------------------------------------------------------------------------------
+
+    fun reload() {
+        if (phase != Phase.SIGNED_IN) return
+        web.reloadPage()
+    }
+
+    private val signOutTimeout = Runnable {
+        diagnostics.log("native-sign-out", mapOf("result" to "timeout"))
+        sessionEnded("native-sign-out-timeout")
+    }
+
+    /**
+     * Sign out from the native menu, whatever the web app's version: the web app's own sign-out in
+     * the WebView (Better Auth's POST /api/auth/sign-out; on OpenBot Cloud then the hosted sign-out,
+     * which ends the OpenBot by CopilotKit sign-in too and returns to /sign), up to 8 s for /sign or
+     * `signed-out`, then the session cookies go and the native sign-in shows. Offline: at once.
+     */
+    fun nativeSignOut() {
+        if (phase != Phase.SIGNED_IN || signingOut) return
+        if (offline || showsLock) {
+            diagnostics.log("native-sign-out", mapOf("result" to "offline"))
+            sessionEnded("native-sign-out-offline")
+            return
+        }
+        signingOut = true
+        changed()
+        val hosted = config.baseHost == "open.bot" || config.baseHost.endsWith(".open.bot")
+        val then = if (hosted) {
+            "/api/auth/hosted/sign-out?returnTo=" + Uri.encode(config.origin + "/sign")
+        } else {
+            "/sign"
+        }
+        diagnostics.log("native-sign-out", mapOf("result" to "started", "hosted" to hosted))
+        main.postDelayed(signOutTimeout, SIGN_OUT_TIMEOUT_MS)
+        val script = """
+            (function (next) {
+              var go = function () { location.assign(next); };
+              try {
+                fetch("/api/auth/sign-out", { method: "POST", credentials: "include",
+                  headers: { "content-type": "application/json" }, body: "{}" }).then(go, go);
+              } catch (e) { go(); }
+            })(${WebController.jsString(then)})
+        """.trimIndent()
+        web.webView.evaluateJavascript(script, null)
     }
 
     // Tabs, back, chrome. ---------------------------------------------------------------------------
@@ -544,7 +666,10 @@ class ShellController(
 
     override fun onBridgeMessage(message: JSONObject) {
         when (message.optString("type")) {
-            "ready" -> refreshChrome()
+            "ready" -> {
+                pageShown("ready", 200)
+                refreshChrome()
+            }
             "route" -> {
                 val path = message.optString("path")
                 val signedIn = message.optBoolean("signedIn", false)
@@ -602,6 +727,7 @@ class ShellController(
     override fun allowsLeavingOrigin(): Boolean = signIn == SignInStep.WEB_FALLBACK
 
     override fun onLoadFailed(detail: String) {
+        stopSkeleton()
         if (phase == Phase.SIGNED_OUT && signIn == SignInStep.ENTERING) {
             failSignIn(activity.getString(R.string.sign_in_not_finished))
             showLoadFailure(FailureSource.SIGN_IN, "enter-failed")
@@ -633,13 +759,23 @@ class ShellController(
     }
 
     override fun onFinished() {
-        // An older web app says nothing over the bridge: read its colours when it has loaded.
+        // An older web app says nothing over the bridge: read its colours when it has loaded, and
+        // end the skeleton once its body has text.
         refreshChrome()
+        if (pageLoading && !web.pageReady) {
+            main.removeCallbacks(checkContent)
+            checkPageContent()
+        }
     }
 
     override fun onCommit() {
         mainFrameCommits += 1
         if (failureSource == FailureSource.WEB || failureSource == null) clearLoadFailure()
         changed()
+    }
+
+    companion object {
+        const val MIN_SKELETON_MS = 300L
+        const val SIGN_OUT_TIMEOUT_MS = 8_000L
     }
 }

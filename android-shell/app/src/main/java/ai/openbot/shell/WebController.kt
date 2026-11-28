@@ -68,6 +68,9 @@ class WebController(
 
         /** The WebView's URL changed, by a load or by the page's own router (pushState). */
         fun onUrlChanged(url: String?)
+
+        /** A full page load (or reload) starts: the page has not rendered yet. */
+        fun onFullLoad()
     }
 
     var delegate: Delegate? = null
@@ -104,7 +107,7 @@ class WebController(
         view.id = R.id.openbot_webview
         configure(view)
         webView = view
-        container.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        container.addView(view, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -161,13 +164,36 @@ class WebController(
 
     // Loading ---------------------------------------------------------------------------------
 
+    private var firstLoad = true
+
     /** Loads a page of the web app (or any URL) as a full page load. */
     fun load(url: String) {
         lastRequestedUrl = url
         lastLoadFailed = false
         diagnostics.log("load", mapOf("url" to Diagnostics.redact(url)))
+        delegate?.onFullLoad()
+        val delay = if (firstLoad) config.hooks.delayFirstLoadMs else 0L
+        firstLoad = false
+        if (delay > 0) {
+            // Debug hook: a slow first answer, so the tests can see the loading skeleton.
+            diagnostics.log("test-hook", mapOf("hook" to "delay-first-load", "ms" to delay))
+            main.postDelayed({
+                armWatchdog()
+                webView.loadUrl(url)
+            }, delay)
+            return
+        }
         armWatchdog()
         webView.loadUrl(url)
+    }
+
+    /** The More menu's Reload: the page again, from the network. */
+    fun reloadPage() {
+        diagnostics.log("reload", mapOf("url" to Diagnostics.redact(webView.url)))
+        delegate?.onFullLoad()
+        lastLoadFailed = false
+        armWatchdog()
+        webView.reload()
     }
 
     fun loadPath(path: String) = load(config.url(path))
@@ -209,6 +235,7 @@ class WebController(
         if (current == null || lastLoadFailed || current == "about:blank") {
             load(lastRequestedUrl ?: config.origin + "/")
         } else {
+            delegate?.onFullLoad()
             lastLoadFailed = false
             armWatchdog()
             webView.reload()

@@ -100,6 +100,7 @@ class ShellFlowTest : ShellTestBase() {
         check(waitForState("tab=home", 3_000), "Home is not the selected tab: ${debugState()}")
         check(tab(Tab.HOME)?.isSelected == true, "the Home tab is not marked selected for accessibility")
         check(!exists("sign_in_button"), "the sign-in screen is still there")
+        check(exists("more_button"), "no native More button beside the tabs")
         assertNoWebNavigation("home")
         note("after sign-in: ${debugState()}; foreground ${foregroundPackage()}")
         // Let the cookie store reach the disk before the next test kills the process.
@@ -347,6 +348,7 @@ class ShellFlowTest : ShellTestBase() {
             skip("the software keyboard did not show on this emulator; state ${debugState()}")
         }
         check(tabGone(5_000), "the bottom bar stayed up with the keyboard")
+        check(!exists("more_button"), "the More button stayed up with the keyboard")
         sleep(1_000)
         screenshot("keyboard-up")
         val boxNow = bounds(composer())
@@ -364,6 +366,70 @@ class ShellFlowTest : ShellTestBase() {
         check(device.currentPackageName == pkg, "Back with the keyboard up left the app")
         sleep(1_000)
         screenshot("keyboard-dismissed")
+    }
+
+    // The native loading skeleton: seen for real by delaying the first page load (debug hook).
+    @Test
+    fun testLoadingSkeleton() {
+        if (!launchSignedIn()) return
+        check(homeRendered(), "Home did not render")
+        sleep(2_000)
+        for ((moment, dark) in listOf("light" to false, "dark" to true)) {
+            val extras = mutableMapOf("openbot.delay_first_load_ms" to "2500")
+            if (dark) extras["openbot.force_dark"] = "1"
+            launch(MOCK_A, "skeleton-$moment", reset = false, extras = extras)
+            val skeleton = waitFor("loading_skeleton", 3_000)
+            check(skeleton != null, "$moment: no loading skeleton while the first page loads; ${debugState()}")
+            checkEquals("Loading", skeleton?.contentDescription, "$moment: the skeleton's content description")
+            check(waitForTab(Tab.HOME, 2_000) != null, "$moment: the bottom bar is not usable while the skeleton shows")
+            val web = bounds(find("web_container"))
+            val shown = bounds(skeleton)
+            val bar = bounds(find("bottom_bar"))
+            if (shown != null && bar != null) check(shown.bottom <= bar.top + 1, "$moment: the skeleton runs under the bottom bar ($shown, bar $bar)")
+            note("$moment skeleton: $shown, web area $web, bottom bar $bar; ${debugState()}")
+            sleep(600)
+            screenshot("skeleton-$moment")
+            check(waitGone("loading_skeleton", 15_000), "$moment: the skeleton did not go away after the page rendered")
+            check(homeRendered(5_000), "$moment: Home is not there after the skeleton")
+            sleep(800)
+            screenshot("after-skeleton-$moment")
+        }
+    }
+
+    // The native More menu: Reload, then Sign out with the confirmation, ending the server session.
+    @Test
+    fun testNativeMoreMenuSignOut() {
+        if (!launchSignedIn()) return
+        check(homeRendered(), "Home did not render")
+        sleep(1_500)
+        screenshot("1-bottom-bar-with-more")
+        val items = openMoreMenu()
+        screenshot("2-more-menu")
+        checkEquals(listOf("Reload", "Sign out"), items, "the More menu's items")
+        device.findObject(By.text("Reload"))?.click()
+        val skeletonSeen = waitFor("loading_skeleton", 2_000) != null
+        note("Reload showed the skeleton: $skeletonSeen")
+        check(homeRendered(15_000), "Home did not come back after Reload")
+        check(waitGone("loading_skeleton", 10_000), "the skeleton stayed after Reload")
+
+        // Cancel keeps everything as it was.
+        signOutFromMoreMenu(confirm = false, moment = "3-cancel")
+        sleep(1_000)
+        check(waitForTab(Tab.HOME, 3_000) != null && !exists("sign_in_button"), "Cancel signed out anyway")
+
+        // Sign out: the web app's sign-out runs, then the native sign-in.
+        signOutFromMoreMenu(confirm = true, moment = "4-confirm")
+        check(waitFor("sign_in_button", 12_000) != null, "the native Sign out did not reach the native sign-in; ${debugState()}")
+        check(tabGone(3_000), "the bottom bar stayed after the native Sign out")
+        sleep(1_000)
+        screenshot("5-after-native-sign-out")
+        note("after the native sign-out: ${debugState()}")
+
+        // The server session ended and the cookie went: a relaunch stays signed out.
+        launch(MOCK_A, "relaunch", reset = false)
+        check(waitFor("sign_in_button", 10_000) != null, "no sign-in screen after the relaunch")
+        sleep(3_000)
+        check(tab(Tab.HOME) == null, "the relaunch after the native Sign out went to the tabs")
     }
 
     // Back from the background: the page is alive and the tabs still route.

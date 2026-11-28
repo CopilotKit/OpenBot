@@ -9,13 +9,16 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
 import android.webkit.CookieManager
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.LinearLayout
+import androidx.appcompat.widget.PopupMenu
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
@@ -32,6 +35,7 @@ import androidx.core.view.isVisible
 import androidx.webkit.WebViewCompat
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.progressindicator.CircularProgressIndicator
 
 /**
@@ -50,6 +54,10 @@ class ShellActivity : AppCompatActivity() {
     private lateinit var webSignInBar: FrameLayout
     private lateinit var webContainer: FrameLayout
     private lateinit var bottomNav: BottomNavigationView
+    private lateinit var bottomBar: LinearLayout
+    private lateinit var moreButton: ImageButton
+    private lateinit var skeleton: LoadingSkeletonView
+    private var skeletonShown = false
     private lateinit var signInScreen: View
     private lateinit var signInButton: MaterialButton
     private lateinit var signInProgress: CircularProgressIndicator
@@ -87,6 +95,9 @@ class ShellActivity : AppCompatActivity() {
         webSignInBar = findViewById(R.id.web_sign_in_bar)
         webContainer = findViewById(R.id.web_container)
         bottomNav = findViewById(R.id.bottom_nav)
+        bottomBar = findViewById(R.id.bottom_bar)
+        moreButton = findViewById(R.id.more_button)
+        skeleton = findViewById(R.id.loading_skeleton)
         signInScreen = findViewById(R.id.sign_in_screen)
         signInButton = findViewById(R.id.sign_in_button)
         signInProgress = findViewById(R.id.sign_in_progress)
@@ -105,6 +116,7 @@ class ShellActivity : AppCompatActivity() {
         findViewById<View>(R.id.web_sign_in_cancel).setOnClickListener { controller.cancelWebSignIn() }
         findViewById<View>(R.id.retry_button).setOnClickListener { controller.retryNow() }
         findViewById<View>(R.id.support_email).setOnClickListener { openSupportMail() }
+        moreButton.setOnClickListener { showMoreMenu() }
 
         bottomNav.setOnItemSelectedListener { item ->
             ShellTab.fromItem(item.itemId)?.let { controller.selectTab(it) }
@@ -183,7 +195,8 @@ class ShellActivity : AppCompatActivity() {
 
         web.webView.isVisible = c.webVisible
         webSignInBar.isVisible = c.showsWebSignInBar
-        bottomNav.isVisible = c.showsTabBar
+        bottomBar.isVisible = c.showsTabBar
+        renderSkeleton(c.showsSkeleton)
         val item = bottomNav.menu.findItem(c.selectedTab.itemId)
         if (item != null && !item.isChecked) item.isChecked = true
 
@@ -196,6 +209,43 @@ class ShellActivity : AppCompatActivity() {
         backCallback.isEnabled = c.handlesBack
         debugLabel?.invoke(c.debugState)
         applyLayout()
+    }
+
+    /** Shows the skeleton at once; fades it out over 200 ms. */
+    private fun renderSkeleton(show: Boolean) {
+        if (show == skeletonShown) return
+        skeletonShown = show
+        skeleton.animate().cancel()
+        if (show) {
+            skeleton.alpha = 1f
+            skeleton.isVisible = true
+        } else {
+            skeleton.animate().alpha(0f).setDuration(200).withEndAction { skeleton.isVisible = false }.start()
+        }
+    }
+
+    /** The native More menu: Reload and Sign out, whatever the web app's version. */
+    private fun showMoreMenu() {
+        val menu = PopupMenu(this, moreButton, Gravity.END)
+        menu.menu.add(0, MENU_RELOAD, 0, R.string.menu_reload)
+        menu.menu.add(0, MENU_SIGN_OUT, 1, R.string.menu_sign_out)
+        menu.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                MENU_RELOAD -> controller.reload()
+                MENU_SIGN_OUT -> confirmSignOut()
+            }
+            true
+        }
+        diagnostics.log("more-menu")
+        menu.show()
+    }
+
+    private fun confirmSignOut() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.sign_out_question)
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .setPositiveButton(R.string.sign_out_confirm) { _, _ -> controller.nativeSignOut() }
+            .show()
     }
 
     fun onBackStateChanged() {
@@ -216,6 +266,9 @@ class ShellActivity : AppCompatActivity() {
         root.setBackgroundColor(color)
         webSignInBar.setBackgroundColor(color)
         bottomNav.setBackgroundColor(color)
+        bottomBar.setBackgroundColor(color)
+        moreButton.imageTintList = ColorStateList.valueOf(muted)
+        skeleton.setColors(isDark, background)
         val foreground = if (isDark) 0xFFFAFAFA.toInt() else 0xFF0A0A0A.toInt()
         val muted = if (isDark) 0xFFA1A1AA.toInt() else 0xFF6B6B70.toInt()
         val tint = ColorStateList(
@@ -243,10 +296,10 @@ class ShellActivity : AppCompatActivity() {
         val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
         val imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
         content.setPadding(bars.left, bars.top, bars.right, 0)
-        bottomNav.setPadding(0, 0, 0, bars.bottom)
+        bottomBar.setPadding(0, 0, 0, bars.bottom)
         val webBottom = when {
             imeVisible -> maxOf(ime.bottom, bars.bottom)
-            bottomNav.isVisible -> 0
+            bottomBar.isVisible -> 0
             else -> bars.bottom
         }
         webContainer.setPadding(0, 0, 0, webBottom)
@@ -333,5 +386,7 @@ class ShellActivity : AppCompatActivity() {
     companion object {
         const val ACTION_SIGN_IN_CALLBACK = "ai.openbot.shell.SIGN_IN_CALLBACK"
         private const val STATE_PATH = "openbot.path"
+        private const val MENU_RELOAD = 1
+        private const val MENU_SIGN_OUT = 2
     }
 }

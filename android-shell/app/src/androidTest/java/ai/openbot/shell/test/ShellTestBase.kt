@@ -344,11 +344,12 @@ abstract class ShellTestBase {
     fun foregroundPackage(): String = device.currentPackageName ?: ""
 
     /** Signs in on mock stack A through the Custom Tab, tapping the mock page's link like a person. */
-    fun signInThroughCustomTab(moment: String, shots: Boolean = true): Boolean {
+    fun signInThroughCustomTab(moment: String, shots: Boolean = true, paceMs: Long = 0): Boolean {
         val button = waitFor("sign_in_button", 20_000) ?: run {
             check(false, "$moment: no native Sign in button")
             return false
         }
+        sleep(paceMs)
         button.click()
         val link = waitInCustomTab(MOCK_LINK, 40_000)
         if (link == null) {
@@ -358,6 +359,7 @@ abstract class ShellTestBase {
         }
         note("$moment: the Custom Tab is ${link.applicationPackage}")
         if (shots) screenshot("$moment-custom-tab")
+        sleep(paceMs)
         link.click()
         sleep(1_500)
         // Chrome may ask before leaving for an app.
@@ -384,6 +386,39 @@ abstract class ShellTestBase {
         return ok
     }
 
+    /** True when the run is a recording (the video workflow): scenes paced and shortened for watching. */
+    val forVideo: Boolean get() = args.getString("video") == "1"
+
+    // The native More menu. ------------------------------------------------------------------------------
+
+    /** Opens the More menu; answers the labels of its items. */
+    fun openMoreMenu(): List<String> {
+        val more = waitFor("more_button", 5_000) ?: return emptyList()
+        more.click()
+        sleep(800)
+        return listOf("Reload", "Sign out").filter { label -> device.findObject(By.text(label))?.let { it.applicationPackage == pkg } == true }
+    }
+
+    /** More, Sign out, then the confirmation's Sign out (or Cancel). True when the dialog asked. */
+    fun signOutFromMoreMenu(confirm: Boolean, moment: String): Boolean {
+        val items = openMoreMenu()
+        check(items == listOf("Reload", "Sign out"), "$moment: the More menu has $items, not exactly Reload and Sign out")
+        device.findObject(By.text("Sign out"))?.click() ?: return false
+        val question = device.wait(Until.findObject(By.text("Sign out of OpenBot?")), 5_000)
+        check(question != null, "$moment: no native confirmation 'Sign out of OpenBot?'")
+        sleep(600)
+        screenshot("$moment-sign-out-confirmation")
+        val button = if (confirm) {
+            // The dialog's own Sign out (the menu has closed: the only one on screen).
+            device.findObjects(By.text("Sign out")).lastOrNull() ?: device.findObject(By.text("SIGN OUT"))
+        } else {
+            device.findObject(By.text("Cancel")) ?: device.findObject(By.text("CANCEL"))
+        }
+        check(button != null, "$moment: the confirmation has no ${if (confirm) "Sign out" else "Cancel"}")
+        button?.click()
+        return question != null
+    }
+
     // The real backend. --------------------------------------------------------------------------------
 
     fun requireProduction() {
@@ -402,6 +437,132 @@ abstract class ShellTestBase {
     }
 
     fun secret(name: String): String? = args.getString(name)?.takeIf { it.isNotEmpty() }
+
+    /**
+     * Google's email, password and 2-Step Verification pages, wherever they show (`root`: the
+     * package showing them, the Custom Tab's browser or this app's WebView). One attempt. On the
+     * 2-Step page it answers only with the account's own authenticator code, picked under "Try
+     * another way". Stops (skipped with the reason) at any CAPTCHA, bot check or anything else Google
+     * asks for. Values are set through accessibility and never logged.
+     */
+    fun googleSteps(root: String, email: String, password: String, totpSecret: ByteArray) {
+        fun stopIfChallenged(step: String, allowSecondStep: Boolean = false) {
+            val text = appText(root)
+            val signs = mutableListOf("captcha", "unusual activity", "not a robot", "type the text you hear or see",
+                "this browser or app may not be secure", "couldn’t sign you in", "couldn't sign you in",
+                "try again later", "suspicious", "disallowed_useragent")
+            if (!(allowSecondStep && text.contains("2-step verification"))) {
+                signs += listOf("verify it’s you", "verify it's you", "confirm it’s you", "confirm it's you", "check your phone")
+            }
+            val sign = signs.firstOrNull { text.contains(it) }
+            if (sign != null) {
+                screenshot("challenge-at-${step.replace(' ', '-')}")
+                note("challenged by Google at $step (page says '$sign')")
+                skip("challenged by Google at $step")
+            }
+        }
+
+        fun field(timeoutMs: Long): UiObject2? {
+            val deadline = System.currentTimeMillis() + timeoutMs
+            do {
+                val match = device.findObjects(By.pkg(root).clazz("android.widget.EditText")).firstOrNull { it.isEnabled }
+                if (match != null) return match
+                sleep(500)
+            } while (System.currentTimeMillis() < deadline)
+            return null
+        }
+
+        /** Sets the value through accessibility (nothing is typed into a log), then checks its length. */
+        fun fill(target: UiObject2, value: String, step: String, secure: Boolean = false): Boolean {
+            target.click()
+            sleep(800)
+            target.text = value
+            sleep(1_000)
+            val now = target.text ?: ""
+            // A password field reads back masked (or empty): only that it holds something is checked.
+            val ok = if (secure) now.isNotEmpty() else now.length == value.length
+            note("$step: field filled $ok")
+            return ok
+        }
+
+        fun next() {
+            val button = device.findObject(By.pkg(root).text("Next")) ?: device.findObject(By.pkg(root).desc("Next"))
+            if (button != null) button.click() else device.pressEnter()
+        }
+
+        stopIfChallenged("email page")
+        val emailField = field(15_000) ?: skip("no email field reachable on Google's page")
+        if (!fill(emailField, email, "email")) skip("could not enter the email")
+        next()
+        sleep(8_000)
+        screenshot("3-after-email")
+        stopIfChallenged("after email")
+
+        val passwordField = field(15_000) ?: run {
+            screenshot("no-password-field")
+            skip("no password field after the email step")
+        }
+        if (!fill(passwordField, password, "password", secure = true)) skip("could not enter the password")
+        next()
+        sleep(10_000)
+        screenshot("4-after-password")
+        stopIfChallenged("after password", allowSecondStep = true)
+
+        var text = appText(root)
+        val codePage = { t: String -> t.contains("google authenticator") || t.contains("authenticator app") || t.contains("enter code") }
+        if (text.contains("2-step verification") && !codePage(text)) {
+            val another = findInApp(root, "Try another way", 8_000) ?: run {
+                screenshot("no-try-another-way")
+                skip("the 2-Step page offered no 'Try another way'")
+            }
+            another.click()
+            sleep(6_000)
+            screenshot("5-other-ways")
+            val options = appText(root)
+            note("other ways offered: authenticator ${options.contains("authenticator")}, backup codes ${options.contains("backup code")}, text message ${options.contains("text message") || options.contains("sms")}")
+            val option = findInApp(root, "Authenticator", 5_000) ?: skip("the authenticator app is not among Google's other ways")
+            option.click()
+            sleep(6_000)
+            screenshot("6-authenticator-page")
+            stopIfChallenged("authenticator page", allowSecondStep = true)
+            text = appText(root)
+        }
+        if (codePage(text) || text.contains("2-step verification")) {
+            val codeField = field(10_000) ?: skip("2-Step Verification page without a code field reachable")
+            val code = Totp.freshCode(totpSecret)
+            if (!fill(codeField, code, "code")) skip("could not enter the code")
+            next()
+            sleep(12_000)
+            screenshot("7-after-code")
+            stopIfChallenged("after code")
+            val after = appText(root)
+            note("the authenticator code was accepted: ${!after.contains("wrong code") && !after.contains("2-step verification")}")
+        } else {
+            note("no authenticator page after the password")
+        }
+    }
+
+    /** Texts of everything `root` shows, lower-cased. */
+    fun appText(root: String): String =
+        device.findObjects(By.pkg(root)).flatMap { listOfNotNull(it.text, it.contentDescription) }.joinToString("\n").lowercase()
+
+    fun findInApp(root: String, text: String, timeoutMs: Long): UiObject2? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        do {
+            dismissChromeScreens()
+            val found = device.findObject(By.pkg(root).textContains(text)) ?: device.findObject(By.pkg(root).descContains(text))
+            if (found != null) return found
+            sleep(500)
+        } while (System.currentTimeMillis() < deadline)
+        return null
+    }
+
+    /** What Google shows when it refuses an embedded browser, if it shows it in `root`. */
+    fun googleRefusal(root: String): String? {
+        val text = appText(root)
+        return listOf("disallowed_useragent", "this browser or app may not be secure", "access blocked", "error 403", "use secure browsers")
+            .firstOrNull { text.contains(it) }
+    }
 
     // Evidence. ----------------------------------------------------------------------------------------
 

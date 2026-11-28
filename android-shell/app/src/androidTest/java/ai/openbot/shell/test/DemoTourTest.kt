@@ -25,11 +25,12 @@ class DemoTourTest : ShellTestBase() {
     }
 
     private fun tour() {
-        launch(MOCK_A, "tour")
+        // The first page load answers 1.5 s late (debug hook), so the loading skeleton reads on video.
+        launch(MOCK_A, "tour", extras = mapOf("openbot.delay_first_load_ms" to "1500"))
         check(waitFor("sign_in_button", 20_000) != null, "demo: no Sign in button")
-        pause(2_000)
-        // Native sign-in, then the Custom Tab with the mock's page, followed by hand.
-        if (!check(signInThroughCustomTab("tour", shots = false), "demo: signing in did not reach the tabs")) return
+        pause(1_000)
+        // Native sign-in, then the Custom Tab with the mock's page, followed by hand, each step held.
+        if (!check(signInThroughCustomTab("tour", shots = false, paceMs = 2_000), "demo: signing in did not reach the tabs")) return
         check(waitPageText("Start a conversation", 30_000), "demo: Home did not render")
         pause(2_000)
 

@@ -143,100 +143,7 @@ class RealBackendDebugTest : ShellTestBase() {
         sleep(8_000)
         screenshot("2-google")
 
-        fun stopIfChallenged(step: String, allowSecondStep: Boolean = false) {
-            val text = tabText(browser)
-            val signs = mutableListOf("captcha", "unusual activity", "not a robot", "type the text you hear or see",
-                "this browser or app may not be secure", "couldn’t sign you in", "couldn't sign you in",
-                "try again later", "suspicious", "disallowed_useragent")
-            if (!(allowSecondStep && text.contains("2-step verification"))) {
-                signs += listOf("verify it’s you", "verify it's you", "confirm it’s you", "confirm it's you", "check your phone")
-            }
-            val sign = signs.firstOrNull { text.contains(it) }
-            if (sign != null) {
-                screenshot("challenge-at-${step.replace(' ', '-')}")
-                note("challenged by Google at $step (page says '$sign')")
-                skip("challenged by Google at $step")
-            }
-        }
-
-        fun field(timeoutMs: Long): UiObject2? {
-            val deadline = System.currentTimeMillis() + timeoutMs
-            do {
-                val match = device.findObjects(By.pkg(browser).clazz("android.widget.EditText")).firstOrNull { it.isEnabled }
-                if (match != null) return match
-                sleep(500)
-            } while (System.currentTimeMillis() < deadline)
-            return null
-        }
-
-        /** Sets the value through accessibility (nothing is typed into a log), then checks its length. */
-        fun fill(target: UiObject2, value: String, step: String, secure: Boolean = false): Boolean {
-            target.click()
-            sleep(800)
-            target.text = value
-            sleep(1_000)
-            val now = target.text ?: ""
-            // A password field reads back masked (or empty): only that it holds something is checked.
-            val ok = if (secure) now.isNotEmpty() else now.length == value.length
-            note("$step: field filled $ok")
-            return ok
-        }
-
-        fun next() {
-            val button = device.findObject(By.pkg(browser).text("Next")) ?: device.findObject(By.pkg(browser).desc("Next"))
-            if (button != null) button.click() else device.pressEnter()
-        }
-
-        stopIfChallenged("email page")
-        val emailField = field(15_000) ?: skip("no email field reachable on Google's page")
-        if (!fill(emailField, email, "email")) skip("could not enter the email")
-        next()
-        sleep(8_000)
-        screenshot("3-after-email")
-        stopIfChallenged("after email")
-
-        val passwordField = field(15_000) ?: run {
-            screenshot("no-password-field")
-            skip("no password field after the email step")
-        }
-        if (!fill(passwordField, password, "password", secure = true)) skip("could not enter the password")
-        next()
-        sleep(10_000)
-        screenshot("4-after-password")
-        stopIfChallenged("after password", allowSecondStep = true)
-
-        var text = tabText(browser)
-        val codePage = { t: String -> t.contains("google authenticator") || t.contains("authenticator app") || t.contains("enter code") }
-        if (text.contains("2-step verification") && !codePage(text)) {
-            val another = findInTab(browser, "Try another way", 8_000) ?: run {
-                screenshot("no-try-another-way")
-                skip("the 2-Step page offered no 'Try another way'")
-            }
-            another.click()
-            sleep(6_000)
-            screenshot("5-other-ways")
-            val options = tabText(browser)
-            note("other ways offered: authenticator ${options.contains("authenticator")}, backup codes ${options.contains("backup code")}, text message ${options.contains("text message") || options.contains("sms")}")
-            val option = findInTab(browser, "Authenticator", 5_000) ?: skip("the authenticator app is not among Google's other ways")
-            option.click()
-            sleep(6_000)
-            screenshot("6-authenticator-page")
-            stopIfChallenged("authenticator page", allowSecondStep = true)
-            text = tabText(browser)
-        }
-        if (codePage(text) || text.contains("2-step verification")) {
-            val codeField = field(10_000) ?: skip("2-Step Verification page without a code field reachable")
-            val code = Totp.freshCode(totpSecret)
-            if (!fill(codeField, code, "code")) skip("could not enter the code")
-            next()
-            sleep(12_000)
-            screenshot("7-after-code")
-            stopIfChallenged("after code")
-            val after = tabText(browser)
-            note("the authenticator code was accepted: ${!after.contains("wrong code") && !after.contains("2-step verification")}")
-        } else {
-            note("no authenticator page after the password")
-        }
+        googleSteps(browser, email, password, totpSecret)
         sleep(8_000)
         screenshot("8-where-the-tab-ended")
         val ended = tabText(browser)
@@ -260,6 +167,10 @@ class RealBackendDebugTest : ShellTestBase() {
         requireProduction()
         note("video-mark start ${System.currentTimeMillis() / 1000.0}")
         launch(null, "session", extras = mapOf("openbot.test_session_cookie" to session))
+        if (forVideo) {
+            val seen = waitFor("loading_skeleton", 3_000) != null
+            note("the loading skeleton showed at launch: $seen")
+        }
         if (waitForTab(Tab.HOME, 30_000) == null) {
             screenshot("no-tabs")
             check(false, "the session cookie did not reach the tabs; state ${debugState()}")
@@ -328,9 +239,21 @@ class RealBackendDebugTest : ShellTestBase() {
 
         tab(Tab.HOME)?.click()
         sleep(3_000)
-        // Background for 40 s, then back.
+        // The native More menu on today's production web app: Reload, and Sign out up to its
+        // confirmation (Cancel: signing out would end the session the secret holds).
+        val items = openMoreMenu()
+        check(items == listOf("Reload", "Sign out"), "the More menu has $items")
+        screenshot("j7b-more-menu")
+        device.findObject(By.text("Reload"))?.click()
+        note("Reload showed the skeleton: ${waitFor("loading_skeleton", 2_000) != null}")
+        check(waitGone("loading_skeleton", 20_000), "the skeleton stayed after Reload")
+        sleep(2_000)
+        signOutFromMoreMenu(confirm = false, moment = "j7c")
+        sleep(1_000)
+        check(waitForTab(Tab.HOME, 3_000) != null, "Cancel on the sign-out confirmation signed out")
+        // Background (40 s; about 6 s in the recording), then back.
         device.pressHome()
-        sleep(40_000)
+        sleep(if (forVideo) 6_000 else 40_000)
         bringBack()
         sleep(3_000)
         screenshot("j8-back-from-background")
