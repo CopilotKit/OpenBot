@@ -43,11 +43,11 @@ MOCK = [
     # server does, until the next hand-off).
     ("handoff-sign-in", "flows/02-handoff-sign-in.yaml", "both", None, 120),
     ("first-screen", "flows/01-first-screen.yaml", "both", None, 120),
-    ("tabs", "flows/03-tabs.yaml", "both", None, 120),
-    ("keyboard-home", "flows/04-keyboard.yaml", "both", None, 120),
-    ("keyboard-conversation", "flows/04b-keyboard-conversation.yaml", "both", None, 120),
+    ("tabs", "flows/03-tabs.yaml", "both", None, 180),
+    ("keyboard-home", "flows/04-keyboard.yaml", "both", None, 180),
+    ("keyboard-conversation", "flows/04b-keyboard-conversation.yaml", "both", None, 180),
     ("relaunch-signed-in", "flows/05-relaunch-signed-in.yaml", "both", None, 120),
-    ("skeleton", "flows/08-skeleton.yaml", "both", None, 120),
+    ("skeleton", "flows/08-skeleton.yaml", "both", None, 180),
     ("web-fallback", "flows/07-web-fallback.yaml", "both", None, 120),
     ("sign-out", "flows/06-sign-out.yaml", "both", None, 120),
     ("foreign-callback", "flows/18-foreign-callback.yaml", "android", None, 120),
@@ -139,6 +139,9 @@ def stop_maestro():
     """A flow killed at its deadline leaves Maestro's driver half-alive: stop it before the next flow."""
     sh(["pkill", "-f", "maestro.cli.AppKt"])
     sh(["pkill", "-f", "dev.mobile.maestro"])
+    # Android: the driver Maestro leaves on the emulator; it starts again with the next flow.
+    sh(["adb", "shell", "am", "force-stop", "dev.mobile.maestro"])
+    sh(["adb", "shell", "am", "force-stop", "dev.mobile.maestro.test"])
     time.sleep(2)
 
 

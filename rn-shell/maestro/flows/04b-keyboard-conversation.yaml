@@ -16,13 +16,16 @@ androidWebViewHierarchy: devtools
     visible: "Here is the first draft."
     timeout: 20000
 # The conversation may have focused its box already; tap it either way.
-- tapOn: "(Message|Ask anything)"
+- tapOn:
+    text: "(Message|Ask anything)"
+    # Home's orb keeps moving: do not wait for the screen to settle.
+    waitToSettleTimeoutMs: 1000
 - extendedWaitUntil:
     visible:
       id: "debug-state"
       text: ".*keyboard=1.*"
     timeout: 10000
-- inputText: "What changed?"
+- inputText: "Changes?"
 - assertVisible: "Send message"
 - takeScreenshot: conversation-keyboard
 - tapOn: "Send message"
