@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **Privatemode is an AI provider choice.** OpenBot Desktop's setup, Settings and Admin AI
+  providers offer Privatemode. Enter a Privatemode API key and OpenBot fills in
+  `https://proxyless-api.privatemode.ai/v1` and the `glm-latest` model. A model whose listing says
+  it can't chat and call tools isn't offered.
+
 - **The API takes Privatemode as an AI connection.** `replaceAiConnection` and the other AI
   connection writes take `provider: privatemode` with `login: endpoint`, an address and a key.
   `AiConnectionProviderAnswer` can name it. `signIns` keeps the values it had, since Privatemode
