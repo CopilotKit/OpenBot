@@ -32,7 +32,7 @@ PALETTE. OpenBot is neutral by design. Use greys for structure and reserve colou
 
 CHARTS. Series colours are steps of grey, not a rainbow: #d4d4d4, #737373, #525252, #404040, #262626. Distinguish series by ordering, direct labels, and shape rather than by hue. If a series means "bad", the destructive red is allowed for that one series.
 
-TYPE. font-family: Inter, ui-sans-serif, system-ui, sans-serif. Body 14px/1.5. Headings 15-16px, weight 600, no letter-spacing tricks. Numerals in tables and metrics: font-variant-numeric: tabular-nums.
+TYPE. font-family: Sora, ui-sans-serif, system-ui, sans-serif. letter-spacing: -0.025em on all text, as the app sets it; no other letter-spacing. Body 14px/1.5. Headings 15-16px, weight 600. Numerals in tables and metrics: font-variant-numeric: tabular-nums.
 
 SHAPE AND SPACING. border-radius: 0.55rem on cards and controls, 0.375rem on small chips. 1px solid borders, never a drop shadow for elevation. Pad containers 12-16px. Space stacked blocks 8-12px.
 

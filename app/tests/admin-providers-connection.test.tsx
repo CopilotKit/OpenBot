@@ -559,12 +559,12 @@ async function open(
       return route.fulfill({ contentType: "text/html", body: "" });
     },
   );
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   await page.route(`${ORIGIN}/**`, async (route) => {
     const where = new URL(route.request().url()).pathname;
     if (where === "/screens.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
-    const font = join(inter, where.split("/").pop() ?? "");
+    const font = join(sora, where.split("/").pop() ?? "");
     if (where.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     if (where.startsWith("/api/")) {

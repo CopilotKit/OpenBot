@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **Text in Sora, in every app.** The web app, OpenBot Desktop and the browser extension set their
+  text in Sora instead of Inter, at the same sizes, with the letters a little closer together
+  (Tailwind's `tracking-tight`, and headings a step closer). Sora has Latin letters only: Cyrillic, Greek and other scripts are
+  drawn in the computer's own face.
+
 ## 1.2.2
 
 **Before upgrading.**

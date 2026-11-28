@@ -291,10 +291,10 @@ async function open(
         },
       });
     });
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   await page.route(`${ORIGIN}/**`, (route) => {
     const where = new URL(route.request().url()).pathname;
-    const font = join(inter, where.split("/").pop() ?? "");
+    const font = join(sora, where.split("/").pop() ?? "");
     if (where.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     return answer(route, state);

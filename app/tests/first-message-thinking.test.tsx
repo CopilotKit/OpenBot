@@ -503,7 +503,7 @@ async function reply(request: Request): Promise<Response> {
   }
   if (path.startsWith("/files/")) {
     const font = join(
-      packageDir("@fontsource-variable/inter"),
+      packageDir("@fontsource-variable/sora"),
       "files",
       path.split("/").pop() ?? "",
     );

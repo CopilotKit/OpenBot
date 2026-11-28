@@ -468,7 +468,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                 state={busy ? "thinking" : named ? "listening" : "idle"}
               />
             </motion.div>
-            <SheetTitle className="text-2xl font-semibold tracking-tight">
+            <SheetTitle className="text-2xl font-semibold tracking-tighter">
               New Bot
             </SheetTitle>
           </div>
@@ -662,7 +662,7 @@ function CreatedView({ name }: { name: string }) {
         initial={{ opacity: 0, y: 8 }}
         transition={{ delay: 0.3, duration: 0.35, ease: "easeOut" }}
       >
-        <h2 className="break-words font-semibold text-xl tracking-tight">
+        <h2 className="break-words font-semibold text-xl tracking-tighter">
           {name} is ready
         </h2>
         <p className="mt-1 text-muted-foreground text-sm">Taking you to it…</p>
@@ -1017,7 +1017,7 @@ export function RuntimeStep({
   return (
     <div className="flex flex-col gap-2">
       <h2
-        className="mb-2 break-words font-semibold text-lg tracking-tight outline-none"
+        className="mb-2 break-words font-semibold text-lg tracking-tighter outline-none"
         ref={heading}
         tabIndex={-1}
       >
@@ -1144,7 +1144,7 @@ export function EndpointStep({
             {chosen.name}
           </span>
         ) : null}
-        <h2 className="break-words font-semibold text-lg tracking-tight">
+        <h2 className="break-words font-semibold text-lg tracking-tighter">
           Where can it be reached?
         </h2>
       </div>

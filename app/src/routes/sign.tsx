@@ -155,7 +155,7 @@ function SignScreen() {
          * that configured three has three, and none of them is the recommended one.
          */
         <Button
-          className="h-10 w-full justify-start gap-3 px-3 tracking-tight"
+          className="h-10 w-full justify-start gap-3 px-3 tracking-tighter"
           disabled={opening !== null}
           key={provider}
           onClick={() => handleSignIn(provider)}
@@ -205,7 +205,7 @@ function SignScreen() {
           <AgentOrb size="56px" />
         </motion.div>
         <motion.h1
-          className="text-2xl font-medium tracking-tight text-center mt-8"
+          className="text-2xl font-medium tracking-tighter text-center mt-8"
           transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
           variants={{ hidden, shown }}
         >
@@ -264,7 +264,7 @@ function SignScreen() {
                     value={email}
                   />
                   <Button
-                    className="mt-2 h-10 w-full tracking-tight"
+                    className="mt-2 h-10 w-full tracking-tighter"
                     disabled={opening !== null || email.trim().length === 0}
                     size="lg"
                     type="submit"

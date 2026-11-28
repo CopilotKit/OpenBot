@@ -60,7 +60,7 @@ export function CustomAgentCta({
         ))}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block font-semibold text-base tracking-tight">
+        <span className="block font-semibold text-base tracking-tighter">
           Bring your own agent
         </span>
         <span className="mt-1 block text-pretty text-muted-foreground text-sm">

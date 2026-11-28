@@ -947,7 +947,7 @@ async function open(
         desktop === true ? "null" : String(desktop.listens)
       }, ${DESKTOP_PORT})`,
     );
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   // A provider's sign-in page, opened in a new tab: recorded, and never fetched from the provider.
   await page.context().route(
     (url) => url.origin !== ORIGIN,
@@ -960,7 +960,7 @@ async function open(
     const where = new URL(route.request().url()).pathname;
     if (where === "/screens.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
-    const font = join(inter, where.split("/").pop() ?? "");
+    const font = join(sora, where.split("/").pop() ?? "");
     if (where.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     if (where.startsWith("/api/")) {

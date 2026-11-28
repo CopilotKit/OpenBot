@@ -33,7 +33,7 @@ export function LaptopIllustration() {
             transition={{ delay: 1, duration: 0.6 }}
           >
             <AgentOrb size="44px" />
-            <span className="text-xs font-semibold tracking-tight">
+            <span className="text-xs font-semibold tracking-tighter">
               <BrandName>{appConfig.brand.productName}</BrandName>
             </span>
           </motion.div>

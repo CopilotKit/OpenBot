@@ -73,8 +73,7 @@ const radius = (scale: number) => `calc(var(--radius) * ${scale})`;
  * Tailwind inlines into utilities instead of emitting as a variable.
  */
 export const OPENBOT_UI_THEME: GenerativeUITheme = {
-  "--a2ui-font-family":
-    '"Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif',
+  "--a2ui-font-family": '"Sora Variable", ui-sans-serif, system-ui, sans-serif',
   "--a2ui-color-text-default": "var(--foreground)",
   "--a2ui-color-text-prose": "var(--foreground)",
   "--a2ui-color-text-primary": "var(--foreground)",

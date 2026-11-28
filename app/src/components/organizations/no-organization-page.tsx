@@ -72,7 +72,7 @@ export function NoOrganizationPage({
     <div className="flex h-dvh w-full flex-col items-center justify-center">
       <div className="flex w-full max-w-82 flex-col items-center p-4">
         <AgentOrb size="56px" />
-        <h1 className="mt-8 text-center font-medium text-2xl tracking-tight">
+        <h1 className="mt-8 text-center font-medium text-2xl tracking-tighter">
           You're not in an organization
         </h1>
         <p
@@ -86,7 +86,7 @@ export function NoOrganizationPage({
             <a
               className={cn(
                 buttonVariants({ size: "lg", variant: "outline" }),
-                "h-10 w-full justify-start gap-3 px-3 tracking-tight",
+                "h-10 w-full justify-start gap-3 px-3 tracking-tighter",
               )}
               href={hostedSignInAddress(window.location.origin)}
             >
@@ -98,7 +98,7 @@ export function NoOrganizationPage({
             </a>
           ) : null}
           <Button
-            className="h-10 w-full tracking-tight"
+            className="h-10 w-full tracking-tighter"
             disabled={retrying}
             onClick={() => void tryAgain()}
             size="lg"
@@ -107,7 +107,7 @@ export function NoOrganizationPage({
             {retrying ? "Trying again…" : "Try again"}
           </Button>
           <Button
-            className="h-10 w-full tracking-tight"
+            className="h-10 w-full tracking-tighter"
             disabled={signOut.pending}
             onClick={signOut.run}
             size="lg"

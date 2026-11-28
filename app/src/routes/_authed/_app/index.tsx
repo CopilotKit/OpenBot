@@ -101,7 +101,7 @@ function Greeting() {
   // not yet shown.
   if (greeting === undefined && (!channels.isPending || waited))
     setGreeting(choose());
-  const heading = "text-2xl font-semibold tracking-tight text-center";
+  const heading = "text-2xl font-semibold tracking-tighter text-center";
   if (!waits) return <h1 className={heading}>{greeting}</h1>;
   const could = [
     ...new Set([

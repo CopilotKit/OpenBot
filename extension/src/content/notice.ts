@@ -65,7 +65,7 @@ const STYLE = `
   background: var(--card);
   color: var(--card-foreground);
   box-shadow: 0 8px 24px oklch(0 0 0 / 14%), 0 2px 6px oklch(0 0 0 / 8%);
-  font-family: "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: "Sora Variable", Sora, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 14px;
   line-height: 1.45;
 }

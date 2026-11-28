@@ -217,8 +217,10 @@ tokens. A screen draws with them and adds no look of its own. Sizes stay: this l
 things are drawn, not how big they are.
 
 1. **Colors.** Only the scheme's tokens, as above.
-2. **Type.** Inter and the type scale in `theme.css`. Controls, rows and navigation are `text-sm`;
-   labels, times and counts are `text-xs`. No text size written by hand (`text-[13px]`).
+2. **Type.** Sora and the type scale in `theme.css`, all of it at Tailwind's `tracking-tight`, set
+   once on the page, and headings and titles a step tighter, at `tracking-tighter`. Controls, rows
+   and navigation are `text-sm`; labels, times and counts are `text-xs`. No text size written by
+   hand (`text-[13px]`).
 3. **Corners.** All from `--radius`. Controls are `rounded-md`, cards and the page's panel
    `rounded-lg`, menus, dialogs and the message box `rounded-xl`, round things `rounded-full`.
    `rounded-none` squares a part off. No other step and no corner of its own (`rounded-[20px]`).

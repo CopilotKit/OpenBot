@@ -45,7 +45,7 @@ export function LinkCompanyAccount({
     <div className={cn("flex flex-col gap-2", className)}>
       {providers.map((provider) => (
         <Button
-          className={size === "lg" ? "h-10 w-full tracking-tight" : undefined}
+          className={size === "lg" ? "h-10 w-full tracking-tighter" : undefined}
           disabled={linking !== null}
           key={provider.id}
           onClick={() => void link(provider.id)}

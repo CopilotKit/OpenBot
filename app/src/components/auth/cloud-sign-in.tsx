@@ -109,7 +109,7 @@ export function CloudSignIn({ flowId }: { flowId?: string }) {
         aria-disabled={opening || undefined}
         className={cn(
           buttonVariants({ size: "lg" }),
-          "mt-6 h-10 w-full tracking-tight",
+          "mt-6 h-10 w-full tracking-tighter",
           opening && "pointer-events-none opacity-50",
         )}
         href={hostedSignInAddress(resumeUrlFor(window.location.origin, flowId))}
@@ -258,7 +258,7 @@ function GoToCompanyOpenBot() {
         </p>
       ) : null}
       <Button
-        className="mt-2 h-10 w-full tracking-tight"
+        className="mt-2 h-10 w-full tracking-tighter"
         disabled={leaving || address.trim().length === 0}
         size="lg"
         type="submit"

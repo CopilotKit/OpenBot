@@ -216,7 +216,7 @@ function RouteComponent() {
                   ? { opacity: 1 }
                   : { opacity: 1, transform: "translateY(0px)" }
               }
-              className="min-w-0 text-sm tracking-tight truncate"
+              className="min-w-0 text-sm tracking-tighter truncate"
               initial={
                 prefersReducedMotion
                   ? { opacity: 0 }

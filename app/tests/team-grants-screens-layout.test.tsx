@@ -884,7 +884,7 @@ async function open(
     reducedMotion: "reduce",
   });
   page.on("pageerror", (error) => console.error(error));
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   /** Each request to the API these routes had no answer for: a screen that would say it failed. */
   const unanswered: string[] = [];
   await page.route(`${ORIGIN}/**`, async (route) => {
@@ -893,7 +893,7 @@ async function open(
     const path = url.pathname;
     if (path === "/screens.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
-    const font = join(inter, path.split("/").pop() ?? "");
+    const font = join(sora, path.split("/").pop() ?? "");
     if (path.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     if (path.startsWith("/api/")) {

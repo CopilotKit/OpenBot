@@ -3,7 +3,7 @@
 @import "shadcn/tailwind.css";
 /* Composer chips/dropdown. Reads the shadcn tokens declared below, so it themes itself. */
 @import "prompt-area/tailwind.css";
-@import "@fontsource-variable/inter";
+@import "@fontsource-variable/sora";
 @import "./theme.css";
 @import "./skins/skins.css";
 

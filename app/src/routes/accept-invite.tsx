@@ -117,7 +117,7 @@ function AcceptInviteScreen() {
         description={`Couldn't reach ${appConfig.brand.productName}. Try again in a moment.`}
       >
         <Button
-          className="h-10 w-full tracking-tight"
+          className="h-10 w-full tracking-tighter"
           disabled={signIn.isFetching}
           onClick={() => void signIn.refetch()}
           size="lg"
@@ -140,7 +140,7 @@ function AcceptInviteScreen() {
       <Link
         className={cn(
           buttonVariants({ size: "lg", variant: "outline" }),
-          "h-10 w-full tracking-tight",
+          "h-10 w-full tracking-tighter",
         )}
         to="/"
       >
@@ -164,7 +164,7 @@ function AcceptInviteFrame({
     <div className="-mt-12 flex h-dvh w-full flex-col items-center justify-center">
       <div className="flex w-full max-w-82 flex-col items-center p-4">
         <AgentOrb size="56px" />
-        <h1 className="mt-8 text-center font-medium text-2xl tracking-tight">
+        <h1 className="mt-8 text-center font-medium text-2xl tracking-tighter">
           {title}
         </h1>
         <p

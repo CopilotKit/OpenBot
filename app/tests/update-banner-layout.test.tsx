@@ -179,7 +179,7 @@ async function open(
     deviceScaleFactor: 2,
   });
   page.on("pageerror", (error) => console.error(error));
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   await page.route(`${ORIGIN}/**`, (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/")
@@ -189,7 +189,7 @@ async function open(
       });
     if (path === "/banner.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
-    const font = join(inter, path.split("/").pop() ?? "");
+    const font = join(sora, path.split("/").pop() ?? "");
     if (path.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     return route.fulfill({ status: 404 });

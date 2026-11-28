@@ -180,13 +180,13 @@ async function open(
   });
   page.on("pageerror", (error) => console.error(error));
   const sent: Sent[] = [];
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   await page.route(`${ORIGIN}/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname === "/screens.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
-    const font = join(inter, url.pathname.split("/").pop() ?? "");
+    const font = join(sora, url.pathname.split("/").pop() ?? "");
     if (url.pathname.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     if (url.pathname.startsWith("/api/")) {

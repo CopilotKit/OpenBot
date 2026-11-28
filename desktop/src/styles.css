@@ -3,13 +3,13 @@
  *
  * The values are OpenBot's tokens, written here from `tokens/src/scheme.ts` by
  * `bun run tokens:generate` rather than approximated, so the
- * window someone sets up in looks like the product it turns into: Inter, OpenBot's lavender frame
+ * window someone sets up in looks like the product it turns into: Sora, OpenBot's lavender frame
  * with a white card on it, its near-black primary button, its periwinkle focus ring, its 10px radius
  * and its type scale (on a 15px base, as the app sets text). The app's shadcn names are kept as
  * written (`--background`, `--card`, `--muted-foreground`, ...) and the names these screens were
  * first written against are mapped onto them below, so every rule still reads one vocabulary.
  *
- * Inter is bundled (`@fontsource-variable`), not fetched: the window draws before anything
+ * Sora is bundled (`@fontsource-variable`), not fetched: the window draws before anything
  * guarantees a network, and a first-run screen that falls back to the system face is not on brand.
  *
  * Light and dark follow the system through `prefers-color-scheme`, as the window's appearance does.
@@ -105,7 +105,8 @@
   --elevation-sm: var(--shadow-xs);
   --elevation-md: var(--shadow-sm);
 
-  --sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Sora covers Latin only: Cyrillic, Greek and other scripts fall through to the system's face. */
+  --sans: "Sora Variable", ui-sans-serif, system-ui, sans-serif;
   /* Machine output only (technical details, commands): the system's own monospace. */
   --mono:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
@@ -123,6 +124,8 @@
 
   color-scheme: var(--color-scheme);
   font-family: var(--sans);
+  /* Tailwind's tracking-tight, as the app sets all its text: Sora closed up to the width it replaced. */
+  letter-spacing: -0.025em;
   font-size: 16px;
   line-height: 1.5;
   color: var(--text-primary);
@@ -318,7 +321,8 @@ h1 {
   font-size: var(--text-2xl);
   line-height: 1.3;
   font-weight: 600;
-  letter-spacing: -0.025em;
+  /* Tailwind's tracking-tighter: a heading a step tighter than the text, as the app sets its own. */
+  letter-spacing: -0.05em;
   margin: 0 0 8px;
   text-wrap: balance;
 }
@@ -398,7 +402,8 @@ button {
   font-size: var(--text-sm);
   line-height: 1;
   font-weight: 500;
-  letter-spacing: 0;
+  /* The text's own tracking: a browser sets a button's to normal unless told to inherit. */
+  letter-spacing: inherit;
   text-transform: none;
   white-space: nowrap;
   min-height: 40px;
@@ -594,6 +599,7 @@ button.text-link:hover:not(:disabled) {
 
 .field input {
   font: inherit;
+  letter-spacing: inherit;
   font-size: var(--text-sm);
   width: 100%;
   min-height: 36px;
@@ -667,7 +673,7 @@ button.text-link.change-provider {
   color: var(--text-primary);
   font-family: var(--sans);
   font-weight: 400;
-  letter-spacing: 0;
+  letter-spacing: inherit;
   text-transform: none;
   white-space: normal;
   text-align: left;
@@ -1546,6 +1552,7 @@ a:hover {
 
 .blocker-steps li::marker {
   font-family: var(--mono);
+  letter-spacing: normal;
   color: var(--text-secondary);
 }
 
@@ -1574,6 +1581,7 @@ a:hover {
 
 .blocker-steps code {
   font-family: var(--mono);
+  letter-spacing: normal;
   font-size: 13px;
   padding: 1px 4px;
   border-radius: var(--r-item);
@@ -1595,6 +1603,7 @@ a:hover {
   margin: 0;
   padding: 14px 96px 14px 16px;
   font-family: var(--mono);
+  letter-spacing: normal;
   font-size: 13px;
   line-height: 22px;
   color: var(--text-primary);
@@ -2238,6 +2247,7 @@ main > .sheet:has(.journey.handing-off) .self-contained-why {
   color: var(--text-secondary);
   /* Monospace here is for machine output, which is what it is for. */
   font-family: var(--mono);
+  letter-spacing: normal;
 }
 
 /* The tick beside "Signed in", for the moment before the screen moves on by itself. */

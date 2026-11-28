@@ -50,7 +50,7 @@ export function SecurityFloorNotice({
           >
             <IconShieldExclamation />
           </EmptyMedia>
-          <h1 className="text-balance font-semibold text-xl tracking-tight">
+          <h1 className="text-balance font-semibold text-xl tracking-tighter">
             {SECURITY_FLOOR_HEADING}
           </h1>
           <EmptyDescription>{SECURITY_FLOOR_LINE}</EmptyDescription>

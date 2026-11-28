@@ -75,7 +75,7 @@ export function RoutinesHome() {
       ) : null}
       <PageColumn bar={showToggle}>
         <div className="pt-4 pb-6 text-center">
-          <h1 className="font-semibold text-3xl leading-tight tracking-tight">
+          <h1 className="font-semibold text-3xl leading-tight tracking-tighter">
             Give your Bots some work
           </h1>
           <p className="mt-3 text-muted-foreground text-sm">

@@ -223,12 +223,12 @@ async function open(engine: string, theme: Theme): Promise<Page> {
   });
   page.on("pageerror", (error) => console.error(error));
   await page.addInitScript(desktopApp);
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   await page.route(`${ORIGIN}/**`, (route) => {
     const where = new URL(route.request().url()).pathname;
     if (where === "/screens.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
-    const font = join(inter, where.split("/").pop() ?? "");
+    const font = join(sora, where.split("/").pop() ?? "");
     if (where.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     if (where.startsWith("/api/")) {

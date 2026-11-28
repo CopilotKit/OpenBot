@@ -53,7 +53,7 @@ export function ConversationIntro({
         />
       </div>
       <div className="min-w-0">
-        <h1 className="font-bold text-3xl tracking-tight">{agent.name}</h1>
+        <h1 className="font-bold text-3xl tracking-tighter">{agent.name}</h1>
         {/* Two lines at most: a role can run to a paragraph, and the intro introduces, it doesn't brief.
             The whole role is on the Bot's page and in the detail pane. */}
         {about ? (

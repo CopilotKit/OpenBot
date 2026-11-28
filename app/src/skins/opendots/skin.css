@@ -175,7 +175,7 @@
   --opendots-error-ink: #bb9d94;
 }
 
-/* OpenDots sets its type in the system face, not Inter, at a 14px base. */
+/* OpenDots sets its type in the system face, not Sora, at a 14px base. */
 :root[data-skin="opendots"],
 :root[data-skin="opendots"] body {
   font-family: var(--opendots-font);

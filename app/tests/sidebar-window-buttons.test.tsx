@@ -395,7 +395,7 @@ async function open(
     deviceScaleFactor: 2,
   });
   page.on("pageerror", (error) => console.error(error));
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   const mark = macDesktop ? ' data-desktop-titlebar="overlay"' : "";
   const stored = shown.hidden
     ? `<script>localStorage.setItem("openbot-sidebar", "collapsed")</script>`
@@ -410,7 +410,7 @@ async function open(
     if (path === "/shell.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
     // The app's own typeface, so a heading is as wide here as it is in the app.
-    const font = join(inter, path.split("/").pop() ?? "");
+    const font = join(sora, path.split("/").pop() ?? "");
     if (path.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     if (path.startsWith("/api/")) {

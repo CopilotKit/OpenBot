@@ -179,7 +179,7 @@ async function open(
     reducedMotion: "reduce",
   });
   page.on("pageerror", (error) => console.error(error));
-  const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  const sora = join(packageDir("@fontsource-variable/sora"), "files");
   // The live screen's socket connects and sends no frame: the page keeps its shape without one.
   await page.routeWebSocket(/.*/, () => {});
   await page.route(`${ORIGIN}/**`, (route) => {
@@ -191,7 +191,7 @@ async function open(
       });
     if (path === "/view.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
-    const font = join(inter, path.split("/").pop() ?? "");
+    const font = join(sora, path.split("/").pop() ?? "");
     if (path.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     const computer = `/api/v2/organizations/default/computers/${BOT}`;

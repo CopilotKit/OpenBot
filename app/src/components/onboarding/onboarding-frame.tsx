@@ -439,7 +439,7 @@ export function StepIntro({
   const title = given ?? named;
   return (
     <div className="mx-auto flex w-full max-w-md flex-col items-center text-center lg:mx-0 lg:items-start lg:text-left">
-      <h1 className="text-3xl font-semibold tracking-tight text-pretty [overflow-wrap:anywhere] focus:outline-none">
+      <h1 className="text-3xl font-semibold tracking-tighter text-pretty [overflow-wrap:anywhere] focus:outline-none">
         {typeof title === "string" ? <BrandName>{title}</BrandName> : title}
       </h1>
       {children ? (

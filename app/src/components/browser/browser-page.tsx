@@ -50,7 +50,7 @@ function LearnedLink() {
 function TeachHeading() {
   return (
     <header className="flex flex-col gap-1">
-      <h1 className="font-semibold text-2xl tracking-tight">{TITLE}</h1>
+      <h1 className="font-semibold text-2xl tracking-tighter">{TITLE}</h1>
       <p className="text-pretty text-muted-foreground text-sm">{DESCRIPTION}</p>
     </header>
   );
