@@ -13728,12 +13728,16 @@ pub(crate) async fn begin_provider_sign_in_now(
 }
 
 /// Run the plan's engine the connection needs, alone. See `ai_connection::prepare`.
+///
+/// A failure keeps both registers: `said` for the person and `detail` for whoever is debugging.
+/// The page draws them together (`InlineFailure`); collapsing to `said` alone left the setup
+/// sentence promising "details below" with nothing under it.
 pub(crate) async fn prepare_ai_connection_now(
     app: tauri::AppHandle,
     provider: String,
     login: String,
-) -> Result<(), String> {
-    let (root, address) = running_installation(&app)?;
+) -> Result<(), Problem> {
+    let (root, address) = running_installation(&app).map_err(Problem::plain)?;
     tauri::async_runtime::spawn_blocking(move || {
         // Not while a Start or a Stop is under way: they own the whole stack.
         let shell = app.state::<Shell>();
@@ -13747,10 +13751,10 @@ pub(crate) async fn prepare_ai_connection_now(
                 problem.detail.as_deref().unwrap_or(&problem.said)
             );
         }
-        prepared.map_err(|problem| problem.said)
+        prepared
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| Problem::plain(error.to_string()))?
 }
 
 /// Settle on the connection now in use. See `ai_connection::settle`.

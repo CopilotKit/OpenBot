@@ -63,6 +63,7 @@ import {
   beginProviderSignIn,
   cancelPlanSignIn,
   cancelProviderSignIn,
+  desktopDetail,
   finishesInDesktop,
   finishPlanSignIn,
   finishProviderSignIn,
@@ -1189,11 +1190,7 @@ export function ChooseConnection({
           </FieldGroup>
         ) : null}
 
-        {connect.error ? (
-          <p className="text-destructive text-sm" role="alert">
-            {failureSaid(connect.error)}
-          </p>
-        ) : null}
+        {connect.error ? <ConnectFailure error={connect.error} /> : null}
       </ChooserBody>
       {back || provider ? (
         <ChooserFooter>
@@ -1223,6 +1220,27 @@ export function ChooseConnection({
         </ChooserFooter>
       ) : null}
     </form>
+  );
+}
+
+/**
+ * Connect refused: the sentence for the person, and Desktop's technical output behind a disclosure
+ * when prepare kept it (`Problem.detail`). Same two registers as Desktop's `InlineFailure`.
+ */
+function ConnectFailure({ error }: { error: { readonly message: string } }) {
+  const detail = desktopDetail(error);
+  return (
+    <div className="flex flex-col gap-1 text-sm" role="alert">
+      <p className="text-destructive">{failureSaid(error)}</p>
+      {detail ? (
+        <details className="text-muted-foreground">
+          <summary className="cursor-pointer">Technical details</summary>
+          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
+            {detail}
+          </pre>
+        </details>
+      ) : null}
+    </div>
   );
 }
 

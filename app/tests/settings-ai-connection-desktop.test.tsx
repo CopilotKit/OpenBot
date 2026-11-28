@@ -91,6 +91,11 @@ const MANUAL = claudeAuthorize(
 
 let connection: AiConnection;
 let refuse: boolean;
+/**
+ * What `prepare_ai_connection` rejects with when set: Desktop's Problem (`said` + `detail`), so the
+ * dialog can show the technical details the setup sentence points at.
+ */
+let prepareRefusal: { said: string; detail?: string } | null;
 /** What this Desktop answers `begin_plan_sign_in` for Claude with. */
 let claudeUrl: string;
 /** Everything Desktop and the server were asked, in order. */
@@ -122,6 +127,7 @@ async function shellInvoke(command: string, args?: Record<string, unknown>) {
     case "settle_ai_connection":
       return null;
     case "prepare_ai_connection":
+      if (prepareRefusal) throw prepareRefusal;
       return { ready: true };
   }
   throw `command ${command} not found`;
@@ -133,6 +139,7 @@ beforeAll(() => GlobalRegistrator.register({ url: "http://127.0.0.1:3010/" }));
 beforeEach(() => {
   calls = [];
   refuse = false;
+  prepareRefusal = null;
   connection = OPENAI_KEY;
   claudeUrl = LOOPBACK;
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
@@ -301,6 +308,37 @@ test("a refused switch says why in one sentence, and Desktop settles back to the
     }),
   );
   expect(calls.map((call) => call.what)).not.toContain("change_ai_connection");
+});
+
+/**
+ * Prepare keeps Problem.detail for the page (#2258): the setup sentence promises details below, and
+ * the dialog shows them behind Technical details instead of dropping them at the IPC boundary.
+ */
+test("a prepare failure shows Desktop's sentence and its technical details", async () => {
+  prepareRefusal = {
+    said: "Something went wrong while setting OpenBot up. The details below are worth sending to whoever set this up.",
+    detail: "compose up: engine refused: port 4202 is already allocated",
+  };
+  const view = renderProviders();
+  const dialog = await signInWithClaude(view);
+  await userEvent.click(
+    within(dialog).getByRole("button", { name: "Connect" }),
+  );
+  const alert = await within(dialog).findByRole("alert");
+  expect(alert.textContent).toContain(prepareRefusal.said);
+  expect(
+    within(alert).getByText("Technical details").closest("details"),
+  ).toBeDefined();
+  expect(alert.textContent).toContain(prepareRefusal.detail);
+  // Prepare refused before the server switch; settle restores the connection still in use.
+  expect(aiCalls().map((call) => call.what)).toContain("prepare_ai_connection");
+  expect(aiCalls().map((call) => call.what)).not.toContain(
+    "replaceAiConnection",
+  );
+  expect(aiCalls().at(-1)).toEqual({
+    what: "settle_ai_connection",
+    args: { provider: "openai", login: "api-key" },
+  });
 });
 
 test("after a switch, the models a person may pick and each conversation's pick are read again", async () => {
