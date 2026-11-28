@@ -68,7 +68,7 @@ REAL = [
     ("real-signed-in-journey", "real/03-signed-in.yaml", "both", "launch-with-session", 150),
 ]
 DEMO = [
-    ("demo-tour", "demo/tour.yaml", "both", None, 300),
+    ("demo-tour", "demo/tour.yaml", "both", None, 240),
 ]
 PRIVATE = {"real-signed-in-journey"}
 # The mock suite in two shards that can run on two machines (each with its own mock stacks): the

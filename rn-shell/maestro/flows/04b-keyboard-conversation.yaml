@@ -1,9 +1,6 @@
 # The keyboard in a conversation: the message box and Send above it, sending keeps it up, a drag down
 # puts it away and the tab bar comes back.
 appId: ai.openbot.rnshell
-# Android: read the web view's content through DevTools (test builds enable web view debugging);
-# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
-androidWebViewHierarchy: devtools
 ---
 - runFlow: ../subflows/launch-signed-in.yaml
 - tapOn:

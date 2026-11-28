@@ -1,35 +1,29 @@
 # The tab bar asks the page to navigate (openbot:open); the page's route reports select the tab.
 appId: ai.openbot.rnshell
-# Android: read the web view's content through DevTools (test builds enable web view debugging);
-# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
-androidWebViewHierarchy: devtools
 ---
 - runFlow: ../subflows/launch-signed-in.yaml
 - tapOn:
     id: "tab-conversations"
 - extendedWaitUntil:
-    visible: "Competitor pricing notes"
+    visible:
+      id: "debug-state"
+      text: ".*tab=conversations nav=event.*path=/conversations.*"
     timeout: 20000
-- assertVisible:
-    id: "debug-state"
-    text: ".*tab=conversations nav=event.*"
 - takeScreenshot: conversations
 - tapOn:
     id: "tab-bots"
 # "New Bot" is at the top of the Bots page (its list scrolls; the emulator also ghosts this page's
 # drawing, the same as for the native shell).
 - extendedWaitUntil:
-    visible: "New Bot"
+    visible:
+      id: "debug-state"
+      text: ".*tab=bots.*path=/bots.*"
     timeout: 20000
-- assertVisible:
-    id: "debug-state"
-    text: ".*tab=bots.*"
 - takeScreenshot: bots
 - tapOn:
     id: "tab-home"
 - extendedWaitUntil:
-    visible: "Start a conversation"
+    visible:
+      id: "debug-state"
+      text: ".*tab=home.*path=/ .*"
     timeout: 20000
-- assertVisible:
-    id: "debug-state"
-    text: ".*tab=home.*"

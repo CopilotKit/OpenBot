@@ -1,9 +1,6 @@
 # A server that never answers: the skeleton covers the wait, the lock screen replaces it at the 20 s
 # watchdog, never a blank frame between.
 appId: ai.openbot.rnshell
-# Android: read the web view's content through DevTools (test builds enable web view debugging);
-# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
-androidWebViewHierarchy: devtools
 ---
 - launchApp:
     clearState: true

@@ -2,7 +2,6 @@
 # the mock's session cookie (a test build's hook), straight to Home. The hand-off itself is tested on
 # its own (flow 02), so its flakiness never fails the flows after it.
 appId: ai.openbot.rnshell
-androidWebViewHierarchy: devtools
 ---
 - launchApp:
     clearState: true
@@ -11,6 +10,10 @@ androidWebViewHierarchy: devtools
       openbot.reset: "1"
       openbot.plain_session_cookie: "mock"
 - runFlow: wait-signed-in.yaml
+# Native state, not the page's text: Chromium's accessibility tree is sometimes not populated when
+# UiAutomator asks, so the flows check the web content only where they act on it.
 - extendedWaitUntil:
-    visible: "Start a conversation"
+    visible:
+      id: "debug-state"
+      text: ".*path=/ .*ready=1.*"
     timeout: 20000

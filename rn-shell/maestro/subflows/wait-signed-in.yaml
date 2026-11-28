@@ -1,8 +1,5 @@
 # Waits until the app is signed in with the page drawn: the tab bar is there and the skeleton gone.
 appId: ai.openbot.rnshell
-# Android: read the web view's content through DevTools (test builds enable web view debugging);
-# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
-androidWebViewHierarchy: devtools
 ---
 - extendedWaitUntil:
     visible:

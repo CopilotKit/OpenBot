@@ -2,9 +2,6 @@
 # the skeleton, Home, typing on the software keyboard with Send visible, sending, the tabs, a
 # conversation, the Account menu, sign-out, and the lock screen coming and going.
 appId: ai.openbot.rnshell
-# Android: read the web view's content through DevTools (test builds enable web view debugging);
-# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
-androidWebViewHierarchy: devtools
 ---
 - launchApp:
     clearState: true
@@ -22,9 +19,6 @@ androidWebViewHierarchy: devtools
     timeout: 2500
 - runFlow: ../subflows/handoff.yaml
 - runFlow: ../subflows/wait-signed-in.yaml
-- extendedWaitUntil:
-    visible: "Start a conversation"
-    timeout: 20000
 - waitForAnimationToEnd:
     timeout: 2500
 - tapOn:

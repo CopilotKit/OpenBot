@@ -1,8 +1,5 @@
 # The native first screen, drawn without the network: the mark, OpenBot, one line and Sign in.
 appId: ai.openbot.rnshell
-# Android: read the web view's content through DevTools (test builds enable web view debugging);
-# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
-androidWebViewHierarchy: devtools
 ---
 - launchApp:
     clearState: true

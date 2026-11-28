@@ -1,8 +1,5 @@
 # A session cookie the server no longer knows: the web app says signed-out, back to the first screen.
 appId: ai.openbot.rnshell
-# Android: read the web view's content through DevTools (test builds enable web view debugging);
-# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
-androidWebViewHierarchy: devtools
 ---
 - launchApp:
     clearState: true

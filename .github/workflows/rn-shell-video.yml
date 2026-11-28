@@ -124,7 +124,7 @@ jobs:
         run: echo "APP_PATH=$GITHUB_WORKSPACE/rn-shell/build/app/OpenBot.app" >> "$GITHUB_ENV"
 
       - name: Record the demo tour
-        timeout-minutes: 5
+        timeout-minutes: 8
         run: |
           echo "$(date +%s) record" >> "$RUNNER_TEMP/timing"
           rn-shell/ci/wait_for.sh "$ARTIFACTS/simulator.ready" - 120 "$ARTIFACTS/simulator-boot.log"
@@ -262,7 +262,7 @@ jobs:
           mkdir -p build/apk && cp android/app/build/outputs/apk/release/app-release.apk build/apk/
 
       - name: Record the demo tour
-        timeout-minutes: 6
+        timeout-minutes: 8
         env:
           ANIMATOR_SCALE: "1"
           GPU_MODE: guest

@@ -1,9 +1,6 @@
 # REAL BACKEND, signed in with the session cookie (CI starts the app with it; never printed). Home,
 # the three tabs, back to Home. No sign-out: that would end the secret's session.
 appId: ai.openbot.rnshell
-# Android: read the web view's content through DevTools (test builds enable web view debugging);
-# Chromium's accessibility tree is sometimes not populated when UiAutomator asks.
-androidWebViewHierarchy: devtools
 ---
 - extendedWaitUntil:
     visible:
