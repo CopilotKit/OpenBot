@@ -60,7 +60,7 @@ jobs:
       - name: Generate the Xcode project and boot a simulator
         run: |
           echo "$(date +%s) project-and-simulator" >> "$RUNNER_TEMP/timing"
-          brew install xcodegen
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
           (cd ios-shell && xcodegen generate)
           picked="$(python3 ios-shell/ci/pick_simulator.py)"
           udid="$(printf '%s' "$picked" | cut -f1)"
@@ -193,7 +193,7 @@ jobs:
       - name: Generate the Xcode project and boot a simulator
         run: |
           echo "$(date +%s) project-and-simulator" >> "$RUNNER_TEMP/timing"
-          brew install xcodegen
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
           (cd ios-shell && xcodegen generate)
           picked="$(python3 ios-shell/ci/pick_simulator.py)"
           udid="$(printf '%s' "$picked" | cut -f1)"
