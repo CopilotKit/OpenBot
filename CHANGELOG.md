@@ -10,9 +10,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 **Before upgrading.**
 
-- **Migrations run at start: three, and none removes a table or a column.** The database moves from
-  `0188_audit_events_redacted_index`, where 1.2.1 left it, to `0191_sign_in_one_request_per_call`.
-  Two are expands and `0190` is a backfill that changes no schema: a 1.2.1 server works against the
+- **Migrations run at start: five, and none removes a table or a column.** The database moves from
+  `0188_audit_events_redacted_index`, where 1.2.1 left it, to `0193_ai_connections_privatemode`.
+  Four are expands and `0190` is a backfill that changes no schema: a 1.2.1 server works against the
   new schema, so the upgrade rolls its servers one by one, with no downtime.
   - `0189_web_push` adds two tables, the deployment's web push key pair and the browsers each person
     turned notifications on in, and a column on the delivery outbox naming the browser a delivery
@@ -25,6 +25,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     index. It is built concurrently, outside a transaction, so writes carry on while it builds.
     While the upgrade rolls, a second sign-in request for the same step made through a 1.2.1 server
     fails instead of opening a second form; the form already open for it still works.
+  - `0192_computer_holds_mining_command` lets a hold on a Bot's computer name one more source. The
+    allowed sources grow by one and none is taken away, so every row a 1.2.1 server wrote still
+    passes. Re-adding the check locks the table while its few rows are read; it waits at most 5
+    seconds for the lock, and gives up rather than hold computer starts behind a long transaction.
+  - `0193_ai_connections_privatemode` lets an organization's and a person's AI connections, the
+    additional ones included, be Privatemode (below). Every provider allowed before still passes,
+    also from a 1.2.1 server. Its checks are re-added the same way, waiting at most 5 seconds for
+    their locks.
 - **Every member gets their own General Assistant, and an organization's shared one changes once.**
   On by default, also for a release upgraded with `--reuse-values`. The first time somebody in an
   organization opens their Bots after the upgrade, its shared General Assistant is settled, once.
@@ -237,11 +245,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   granted tools guidance`, once each on every request, continuations and a resumed interrupt
   included, and no system message for either. Every other endpoint is sent what it was before.
   OpenBot asks with the Bot's own headers and keeps the answer five minutes (thirty seconds when
-  nothing answers). A built-in Bot on the engine is asked and sent the same way. The published
-  `@ag-ui/mastra` 2.1.0 and `ag-ui-langgraph` 0.1.0 receivers take it, and give it full weight only
-  to a caller they trust: one presenting a key, or one on a listener only it can reach. New Bot's
-  address step says so for LangChain, Mastra and "An agent you already run", and links that
-  framework's setup; `docs/agent-frameworks.md` gains "Give OpenBot a trusted path".
+  nothing answers). A built-in Bot on the engine is asked and sent the same way, and the bundled
+  Mastra Bot now declares it, reading its role and tool guidance from each request and keeping
+  them out of its memory. The published `@ag-ui/mastra` 2.1.0 and `ag-ui-langgraph` 0.1.0
+  receivers take it, and give it full weight only to a caller they trust: one presenting a key, or
+  one on a listener only it can reach. New Bot's address step says so for LangChain, Mastra and "An
+  agent you already run", and links that framework's setup; `docs/agent-frameworks.md` gains "Give
+  OpenBot a trusted path" and the setups for those two releases.
 
 - **Bots on Gemini 3 no longer stop at their second tool step.** Google refused the second step of
   a task with "Function call is missing a thought_signature in functionCall parts". On the LangGraph
@@ -304,16 +314,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `AI_CONNECTION_MODEL_UNAVAILABLE`, where they used to save and fail at the first message. A 402
   from any provider is now read as the account's credit.
 
-- **The API takes Privatemode as an AI connection.** `replaceAiConnection` and the other AI
-  connection writes take `provider: privatemode` with `login: endpoint`, an address and a key, and
-  `AiConnectionProviderAnswer` can name it. `signIns` keeps the values it had, since Privatemode has
-  no sign-in.
+- **Privatemode is an AI provider choice.** OpenBot Desktop's setup, Settings and Admin AI
+  providers offer Privatemode, for models run in confidential computing. Enter a Privatemode API
+  key and OpenBot fills in `https://proxyless-api.privatemode.ai/v1` and the `glm-latest` model,
+  with a link to get a key. A model whose provider listing says it can't both chat and call tools is
+  no longer offered, from any provider, though a model the person running OpenBot named stays the
+  default. API: the AI connection writes take `provider: privatemode` with `login: endpoint`, and
+  `AiConnectionProviderAnswer` can name it; `signIns` keeps the values it had, since Privatemode
+  has no sign-in.
 
-- **Unbiased AI is no longer an AI provider choice.** OpenBot Desktop's setup, Settings and Admin
-  AI providers, Connect another AI, and the conversation and Bot model pickers no longer offer it,
-  and OpenBot Desktop's Sign in with Unbiased AI is gone. Settings saved for it and the model shown
-  on an existing conversation stay readable, but it can't be picked again. The API still names
-  `unbiased` as a provider, so a released client keeps working; only its examples changed.
+- **Unbiased AI is no longer an AI provider.** OpenBot Desktop's setup, Settings and Admin AI
+  providers, Connect another AI, and the conversation and Bot model pickers no longer offer it,
+  OpenBot Desktop's Sign in with Unbiased AI is gone, and the server no longer runs its sign-in.
+  The API no longer takes `unbiased` as a provider. A connection saved for it before is still
+  listed, so it can be removed, but it never runs: it reads as stopped with the new problem
+  `provider-retired`, which says to connect another AI. The model shown on an existing conversation
+  stays readable.
 
 **Notifications.**
 

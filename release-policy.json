@@ -22,7 +22,7 @@
         "0082_routine_goal",
         "0077_channel_opening"
       ],
-      "to": "0191_sign_in_one_request_per_call",
+      "to": "0193_ai_connections_privatemode",
       "rollbackCompatible": false
     },
     "intelligenceCapabilities": []
