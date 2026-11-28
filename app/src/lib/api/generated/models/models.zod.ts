@@ -111,14 +111,14 @@ export const GetModelCatalogueResponse = zod
             provider: zod
               .string()
               .describe(
-                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
               ),
             login: zod
               .union([
                 zod
                   .enum(["plan", "api-key", "endpoint", "oauth"])
                   .describe(
-                    "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+                    "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
                   ),
                 zod.null(),
               ])
@@ -141,7 +141,7 @@ export const GetModelCatalogueResponse = zod
                     code: zod
                       .string()
                       .describe(
-                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change.",
+                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change. provider-retired: OpenBot no longer offers the connection's provider at all, so it can't run and nothing on it fixes it. It is removed, and another AI connected in its place.",
                       ),
                     detail: zod
                       .string()
@@ -280,7 +280,7 @@ export const GetModelChoiceResponse = zod
                 code: zod
                   .string()
                   .describe(
-                    "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change.",
+                    "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change. provider-retired: OpenBot no longer offers the connection's provider at all, so it can't run and nothing on it fixes it. It is removed, and another AI connected in its place.",
                   ),
                 detail: zod
                   .string()
@@ -441,7 +441,7 @@ export const ReplaceModelChoiceResponse = zod
                 code: zod
                   .string()
                   .describe(
-                    "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change.",
+                    "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change. provider-retired: OpenBot no longer offers the connection's provider at all, so it can't run and nothing on it fixes it. It is removed, and another AI connected in its place.",
                   ),
                 detail: zod
                   .string()
@@ -486,7 +486,7 @@ export const GetAiConnectionResponse = zod
         zod
           .string()
           .describe(
-            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
           ),
         zod.null(),
       ])
@@ -496,7 +496,7 @@ export const GetAiConnectionResponse = zod
         zod
           .enum(["plan", "api-key", "endpoint", "oauth"])
           .describe(
-            "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+            "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
           ),
         zod.null(),
       ])
@@ -538,12 +538,12 @@ export const GetAiConnectionResponse = zod
             provider: zod
               .string()
               .describe(
-                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
               ),
             login: zod
               .enum(["plan", "api-key", "endpoint", "oauth"])
               .describe(
-                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
               ),
             endpointHost: zod
               .string()
@@ -638,18 +638,17 @@ export const ReplaceAiConnectionBody = zod
         "anthropic",
         "google",
         "xai",
-        "unbiased",
         "trustedrouter",
         "privatemode",
         "openai-compatible",
       ])
       .describe(
-        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given.",
       ),
     login: zod
       .enum(["plan", "api-key", "endpoint", "oauth"])
       .describe(
-        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
       ),
     apiKey: zod
       .string()
@@ -684,7 +683,7 @@ export const ReplaceAiConnectionBody = zod
       ),
   })
   .describe(
-    "The connection to switch to. openai and anthropic take plan or api-key; xai takes endpoint or oauth; google, unbiased, trustedrouter, privatemode and openai-compatible take endpoint. Any other pair is refused: google with oauth is refused with the words of the problem sign-in-retired.",
+    "The connection to switch to. openai and anthropic take plan or api-key; xai takes endpoint or oauth; google, trustedrouter, privatemode and openai-compatible take endpoint. Any other pair is refused: google with oauth is refused with the words of the problem sign-in-retired.",
   );
 
 export const ReplaceAiConnectionResponse = zod
@@ -694,7 +693,7 @@ export const ReplaceAiConnectionResponse = zod
         zod
           .string()
           .describe(
-            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
           ),
         zod.null(),
       ])
@@ -704,7 +703,7 @@ export const ReplaceAiConnectionResponse = zod
         zod
           .enum(["plan", "api-key", "endpoint", "oauth"])
           .describe(
-            "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+            "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
           ),
         zod.null(),
       ])
@@ -746,12 +745,12 @@ export const ReplaceAiConnectionResponse = zod
             provider: zod
               .string()
               .describe(
-                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
               ),
             login: zod
               .enum(["plan", "api-key", "endpoint", "oauth"])
               .describe(
-                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
               ),
             endpointHost: zod
               .string()
@@ -834,7 +833,7 @@ export const DeleteAiConnectionResponse = zod
         zod
           .string()
           .describe(
-            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
           ),
         zod.null(),
       ])
@@ -844,7 +843,7 @@ export const DeleteAiConnectionResponse = zod
         zod
           .enum(["plan", "api-key", "endpoint", "oauth"])
           .describe(
-            "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+            "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
           ),
         zod.null(),
       ])
@@ -886,12 +885,12 @@ export const DeleteAiConnectionResponse = zod
             provider: zod
               .string()
               .describe(
-                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
               ),
             login: zod
               .enum(["plan", "api-key", "endpoint", "oauth"])
               .describe(
-                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
               ),
             endpointHost: zod
               .string()
@@ -976,7 +975,7 @@ export const GetPersonalAiConnectionResponse = zod
             zod
               .string()
               .describe(
-                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
               ),
             zod.null(),
           ])
@@ -986,7 +985,7 @@ export const GetPersonalAiConnectionResponse = zod
             zod
               .enum(["plan", "api-key", "endpoint", "oauth"])
               .describe(
-                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
               ),
             zod.null(),
           ])
@@ -1032,12 +1031,12 @@ export const GetPersonalAiConnectionResponse = zod
                 provider: zod
                   .string()
                   .describe(
-                    "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                    "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
                   ),
                 login: zod
                   .enum(["plan", "api-key", "endpoint", "oauth"])
                   .describe(
-                    "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+                    "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
                   ),
                 endpointHost: zod
                   .string()
@@ -1096,7 +1095,7 @@ export const GetPersonalAiConnectionResponse = zod
             zod
               .string()
               .describe(
-                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
               ),
             zod.null(),
           ])
@@ -1125,7 +1124,7 @@ export const GetPersonalAiConnectionResponse = zod
         zod
           .string()
           .describe(
-            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
           ),
       )
       .describe(
@@ -1193,18 +1192,17 @@ export const ReplacePersonalAiConnectionBody = zod
         "anthropic",
         "google",
         "xai",
-        "unbiased",
         "trustedrouter",
         "privatemode",
         "openai-compatible",
       ])
       .describe(
-        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given.",
       ),
     login: zod
       .enum(["plan", "api-key", "endpoint", "oauth"])
       .describe(
-        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
       ),
     apiKey: zod
       .string()
@@ -1239,7 +1237,7 @@ export const ReplacePersonalAiConnectionBody = zod
       ),
   })
   .describe(
-    "The connection to switch to. openai and anthropic take plan or api-key; xai takes endpoint or oauth; google, unbiased, trustedrouter, privatemode and openai-compatible take endpoint. Any other pair is refused: google with oauth is refused with the words of the problem sign-in-retired.",
+    "The connection to switch to. openai and anthropic take plan or api-key; xai takes endpoint or oauth; google, trustedrouter, privatemode and openai-compatible take endpoint. Any other pair is refused: google with oauth is refused with the words of the problem sign-in-retired.",
   );
 
 export const ReplacePersonalAiConnectionResponse = zod
@@ -1251,7 +1249,7 @@ export const ReplacePersonalAiConnectionResponse = zod
             zod
               .string()
               .describe(
-                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
               ),
             zod.null(),
           ])
@@ -1261,7 +1259,7 @@ export const ReplacePersonalAiConnectionResponse = zod
             zod
               .enum(["plan", "api-key", "endpoint", "oauth"])
               .describe(
-                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
               ),
             zod.null(),
           ])
@@ -1307,12 +1305,12 @@ export const ReplacePersonalAiConnectionResponse = zod
                 provider: zod
                   .string()
                   .describe(
-                    "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                    "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
                   ),
                 login: zod
                   .enum(["plan", "api-key", "endpoint", "oauth"])
                   .describe(
-                    "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+                    "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
                   ),
                 endpointHost: zod
                   .string()
@@ -1371,7 +1369,7 @@ export const ReplacePersonalAiConnectionResponse = zod
             zod
               .string()
               .describe(
-                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
               ),
             zod.null(),
           ])
@@ -1400,7 +1398,7 @@ export const ReplacePersonalAiConnectionResponse = zod
         zod
           .string()
           .describe(
-            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
           ),
       )
       .describe(
@@ -1458,7 +1456,7 @@ export const DeletePersonalAiConnectionResponse = zod
             zod
               .string()
               .describe(
-                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
               ),
             zod.null(),
           ])
@@ -1468,7 +1466,7 @@ export const DeletePersonalAiConnectionResponse = zod
             zod
               .enum(["plan", "api-key", "endpoint", "oauth"])
               .describe(
-                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
               ),
             zod.null(),
           ])
@@ -1514,12 +1512,12 @@ export const DeletePersonalAiConnectionResponse = zod
                 provider: zod
                   .string()
                   .describe(
-                    "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                    "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
                   ),
                 login: zod
                   .enum(["plan", "api-key", "endpoint", "oauth"])
                   .describe(
-                    "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+                    "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
                   ),
                 endpointHost: zod
                   .string()
@@ -1578,7 +1576,7 @@ export const DeletePersonalAiConnectionResponse = zod
             zod
               .string()
               .describe(
-                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
               ),
             zod.null(),
           ])
@@ -1607,7 +1605,7 @@ export const DeletePersonalAiConnectionResponse = zod
         zod
           .string()
           .describe(
-            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
           ),
       )
       .describe(
@@ -1666,13 +1664,12 @@ export const StartPersonalAiSignInBody = zod.object({
       "anthropic",
       "google",
       "xai",
-      "unbiased",
       "trustedrouter",
       "privatemode",
       "openai-compatible",
     ])
     .describe(
-      "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+      "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given.",
     ),
   method: zod
     .enum(["browser", "device"])
@@ -1707,7 +1704,7 @@ export const StartPersonalAiSignInResponse = zod
     provider: zod
       .string()
       .describe(
-        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
       ),
     url: zod
       .url()
@@ -1789,7 +1786,7 @@ export const GetPersonalAiSignInResponse = zod
     provider: zod
       .string()
       .describe(
-        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
       ),
     status: zod
       .string()
@@ -1892,7 +1889,7 @@ export const FinishPersonalAiSignInResponse = zod
     provider: zod
       .string()
       .describe(
-        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
       ),
     status: zod
       .string()
@@ -1970,12 +1967,12 @@ export const ListAiConnectionsResponse = zod
             provider: zod
               .string()
               .describe(
-                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
               ),
             login: zod
               .enum(["plan", "api-key", "endpoint", "oauth"])
               .describe(
-                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
               ),
             model: zod
               .string()
@@ -2000,7 +1997,7 @@ export const ListAiConnectionsResponse = zod
                     code: zod
                       .string()
                       .describe(
-                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change.",
+                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change. provider-retired: OpenBot no longer offers the connection's provider at all, so it can't run and nothing on it fixes it. It is removed, and another AI connected in its place.",
                       ),
                     detail: zod
                       .string()
@@ -2057,7 +2054,6 @@ export const ListAiConnectionsResponse = zod
           "anthropic",
           "google",
           "xai",
-          "unbiased",
           "trustedrouter",
           "openai-compatible",
         ]),
@@ -2115,18 +2111,17 @@ export const ConnectAiConnectionBody = zod
         "anthropic",
         "google",
         "xai",
-        "unbiased",
         "trustedrouter",
         "privatemode",
         "openai-compatible",
       ])
       .describe(
-        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given.",
       ),
     login: zod
       .enum(["plan", "api-key", "endpoint", "oauth"])
       .describe(
-        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
       ),
     apiKey: zod
       .string()
@@ -2161,7 +2156,7 @@ export const ConnectAiConnectionBody = zod
       ),
   })
   .describe(
-    "The connection to switch to. openai and anthropic take plan or api-key; xai takes endpoint or oauth; google, unbiased, trustedrouter, privatemode and openai-compatible take endpoint. Any other pair is refused: google with oauth is refused with the words of the problem sign-in-retired.",
+    "The connection to switch to. openai and anthropic take plan or api-key; xai takes endpoint or oauth; google, trustedrouter, privatemode and openai-compatible take endpoint. Any other pair is refused: google with oauth is refused with the words of the problem sign-in-retired.",
   );
 
 export const ConnectAiConnectionResponse = zod
@@ -2174,12 +2169,12 @@ export const ConnectAiConnectionResponse = zod
     provider: zod
       .string()
       .describe(
-        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
       ),
     login: zod
       .enum(["plan", "api-key", "endpoint", "oauth"])
       .describe(
-        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
       ),
     model: zod
       .string()
@@ -2202,7 +2197,7 @@ export const ConnectAiConnectionResponse = zod
             code: zod
               .string()
               .describe(
-                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change.",
+                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change. provider-retired: OpenBot no longer offers the connection's provider at all, so it can't run and nothing on it fixes it. It is removed, and another AI connected in its place.",
               ),
             detail: zod
               .string()
@@ -2337,12 +2332,12 @@ export const MakeAiConnectionDefaultResponse = zod
     provider: zod
       .string()
       .describe(
-        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
       ),
     login: zod
       .enum(["plan", "api-key", "endpoint", "oauth"])
       .describe(
-        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
       ),
     model: zod
       .string()
@@ -2365,7 +2360,7 @@ export const MakeAiConnectionDefaultResponse = zod
             code: zod
               .string()
               .describe(
-                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change.",
+                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change. provider-retired: OpenBot no longer offers the connection's provider at all, so it can't run and nothing on it fixes it. It is removed, and another AI connected in its place.",
               ),
             detail: zod
               .string()
@@ -2444,13 +2439,12 @@ export const StartAiSignInBody = zod.object({
       "anthropic",
       "google",
       "xai",
-      "unbiased",
       "trustedrouter",
       "privatemode",
       "openai-compatible",
     ])
     .describe(
-      "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+      "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given.",
     ),
   method: zod
     .enum(["browser", "device"])
@@ -2483,7 +2477,7 @@ export const StartAiSignInResponse = zod
     provider: zod
       .string()
       .describe(
-        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
       ),
     url: zod
       .url()
@@ -2550,7 +2544,7 @@ export const GetAiSignInResponse = zod
     provider: zod
       .string()
       .describe(
-        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
       ),
     status: zod
       .string()
@@ -2638,7 +2632,7 @@ export const FinishAiSignInResponse = zod
     provider: zod
       .string()
       .describe(
-        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
       ),
     status: zod
       .string()
@@ -2728,12 +2722,12 @@ export const ListPersonalAiConnectionsResponse = zod
             provider: zod
               .string()
               .describe(
-                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
               ),
             login: zod
               .enum(["plan", "api-key", "endpoint", "oauth"])
               .describe(
-                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
               ),
             model: zod
               .string()
@@ -2758,7 +2752,7 @@ export const ListPersonalAiConnectionsResponse = zod
                     code: zod
                       .string()
                       .describe(
-                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change.",
+                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change. provider-retired: OpenBot no longer offers the connection's provider at all, so it can't run and nothing on it fixes it. It is removed, and another AI connected in its place.",
                       ),
                     detail: zod
                       .string()
@@ -2815,7 +2809,6 @@ export const ListPersonalAiConnectionsResponse = zod
           "anthropic",
           "google",
           "xai",
-          "unbiased",
           "trustedrouter",
           "openai-compatible",
         ]),
@@ -2885,18 +2878,17 @@ export const ConnectPersonalAiConnectionBody = zod
         "anthropic",
         "google",
         "xai",
-        "unbiased",
         "trustedrouter",
         "privatemode",
         "openai-compatible",
       ])
       .describe(
-        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given.",
       ),
     login: zod
       .enum(["plan", "api-key", "endpoint", "oauth"])
       .describe(
-        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
       ),
     apiKey: zod
       .string()
@@ -2931,7 +2923,7 @@ export const ConnectPersonalAiConnectionBody = zod
       ),
   })
   .describe(
-    "The connection to switch to. openai and anthropic take plan or api-key; xai takes endpoint or oauth; google, unbiased, trustedrouter, privatemode and openai-compatible take endpoint. Any other pair is refused: google with oauth is refused with the words of the problem sign-in-retired.",
+    "The connection to switch to. openai and anthropic take plan or api-key; xai takes endpoint or oauth; google, trustedrouter, privatemode and openai-compatible take endpoint. Any other pair is refused: google with oauth is refused with the words of the problem sign-in-retired.",
   );
 
 export const ConnectPersonalAiConnectionResponse = zod
@@ -2944,12 +2936,12 @@ export const ConnectPersonalAiConnectionResponse = zod
     provider: zod
       .string()
       .describe(
-        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
       ),
     login: zod
       .enum(["plan", "api-key", "endpoint", "oauth"])
       .describe(
-        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
       ),
     model: zod
       .string()
@@ -2972,7 +2964,7 @@ export const ConnectPersonalAiConnectionResponse = zod
             code: zod
               .string()
               .describe(
-                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change.",
+                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change. provider-retired: OpenBot no longer offers the connection's provider at all, so it can't run and nothing on it fixes it. It is removed, and another AI connected in its place.",
               ),
             detail: zod
               .string()
@@ -3131,12 +3123,12 @@ export const MakePersonalAiConnectionDefaultResponse = zod
     provider: zod
       .string()
       .describe(
-        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. trustedrouter: TrustedRouter. privatemode: Privatemode. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider. A connection saved for a provider OpenBot no longer offers is still listed, under the id it was saved with, so it can be removed: it is never ready, its problem is provider-retired, and it is never accepted again.",
       ),
     login: zod
       .enum(["plan", "api-key", "endpoint", "oauth"])
       .describe(
-        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, trustedrouter, privatemode, openai-compatible). oauth: the person's xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.",
       ),
     model: zod
       .string()
@@ -3159,7 +3151,7 @@ export const MakePersonalAiConnectionDefaultResponse = zod
             code: zod
               .string()
               .describe(
-                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change.",
+                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. sign-in-retired: OpenBot no longer offers this provider's sign-in (a Google sign-in for Gemini), so it can't run, and signing in again isn't offered. Saving a key on the same connection fixes it: its id stays, so every Bot that used it runs on the key with nothing else to change. provider-retired: OpenBot no longer offers the connection's provider at all, so it can't run and nothing on it fixes it. It is removed, and another AI connected in its place.",
               ),
             detail: zod
               .string()

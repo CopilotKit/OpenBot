@@ -10,7 +10,6 @@ export const AiConnectionPageSignInsItem = {
   anthropic: "anthropic",
   google: "google",
   xai: "xai",
-  unbiased: "unbiased",
   trustedrouter: "trustedrouter",
   "openai-compatible": "openai-compatible",
 } as const;
