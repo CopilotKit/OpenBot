@@ -41,6 +41,36 @@ export function verifierPathFor(flowId: string | undefined): string | null {
     : null;
 }
 
+export type ShellSignInSearch = {
+  shell_challenge?: string;
+  shell_platform?: string;
+  shell_callback?: string;
+};
+
+/** Resume the native confirmation in the browser that opened it. */
+export function signInResumePath(
+  flowId?: string,
+  shell: ShellSignInSearch = {},
+): string | null {
+  const {
+    shell_challenge: challenge,
+    shell_platform: platform,
+    shell_callback: callback,
+  } = shell;
+  if (
+    !challenge ||
+    !/^[A-Za-z0-9_-]{43}$/.test(challenge) ||
+    (platform !== undefined && platform !== "ios" && platform !== "android") ||
+    (callback !== undefined && callback !== "https")
+  )
+    return verifierPathFor(flowId);
+
+  const query = new URLSearchParams({ challenge });
+  if (platform) query.set("platform", platform);
+  if (callback) query.set("callback", callback);
+  return `/api/auth/shell/handoff?${query}`;
+}
+
 /**
  * Where sign-in should send the browser back to: the verifier carrying the handle, or the origin
  * itself when there is none. Pure, so the resume is pinned without a DOM, a router or Better Auth.
@@ -48,7 +78,8 @@ export function verifierPathFor(flowId: string | undefined): string | null {
 export function resumeUrlFor(
   origin: string,
   flowId: string | undefined,
+  shell?: ShellSignInSearch,
 ): string {
-  const path = verifierPathFor(flowId);
+  const path = signInResumePath(flowId, shell);
   return path === null ? origin : `${origin}${path}`;
 }

@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { ConnectionBanner } from "@/components/layout/connection-banner";
+import { NativeShellFrame } from "@/components/layout/native-shell-frame";
 import { PageArrival } from "@/components/layout/page-arrival";
 import { PlanBanner } from "@/components/layout/plan-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
@@ -16,6 +17,7 @@ import {
   sectionHasPanel,
   useOpenSection,
 } from "@/lib/sections";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { useActiveSkin } from "@/skins/registry";
 
 export const Route = createFileRoute("/_authed/_app")({
@@ -24,6 +26,20 @@ export const Route = createFileRoute("/_authed/_app")({
 
 function RouteComponent() {
   const { Frame } = useActiveSkin();
+
+  /*
+   * Inside the phone app's native shell, which draws the navigation itself: the page alone. Before
+   * the skin's frame, since the shell is this device's, the skin the account's.
+   */
+  if (nativeShell()) {
+    return (
+      <NativeShellFrame>
+        <PageArrival>
+          <Outlet />
+        </PageArrival>
+      </NativeShellFrame>
+    );
+  }
 
   if (Frame) {
     return (

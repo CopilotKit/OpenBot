@@ -45,6 +45,7 @@ export const Channel = memo(function Channel({
   emphasis,
   view = "detailed",
   avatar = true,
+  layout = "sidebar",
   "data-slot": slot,
 }: {
   channelId: string;
@@ -65,6 +66,11 @@ export const Channel = memo(function Channel({
   view?: ConversationView;
   /** False under its Bot in the Bots panel: see `ChannelItemContent`. */
   avatar?: boolean;
+  /**
+   * `sidebar`: a rounded row in a panel. `page`: a full-width row of a card of rows (`PageRows`), as
+   * on the Conversations page, which squares it off and divides it from the next.
+   */
+  layout?: "sidebar" | "page" | "mobile";
   /** Names the row's link for tests, as under its Bot in the Bots panel. Draws nothing. */
   "data-slot"?: string;
 }) {
@@ -105,13 +111,15 @@ export const Channel = memo(function Channel({
                 : "/channel/$channelId"
             }
             params={{ channelId }}
-            data-slot={slot}
+            data-slot={layout === "mobile" ? "mobile-chat-row" : slot}
             type="button"
             className={cn(
-              "flex flex-row px-2.5 gap-2 items-center w-full hover:bg-foreground/5 rounded-lg [content-visibility:auto]",
-              view === "compact"
-                ? "py-1.5 [contain-intrinsic-size:auto_2rem]"
-                : "py-2 [contain-intrinsic-size:auto_3.25rem]",
+              "flex flex-row gap-2 items-center w-full hover:bg-foreground/5 [content-visibility:auto]",
+              layout === "page"
+                ? "min-h-14 px-4 py-3 [contain-intrinsic-size:auto_3.5rem]"
+                : view === "compact"
+                  ? "px-2.5 rounded-lg py-1.5 [contain-intrinsic-size:auto_2rem]"
+                  : "px-2.5 rounded-lg py-2 [contain-intrinsic-size:auto_3.25rem]",
             )}
             activeProps={{
               className: "bg-foreground/5",
@@ -129,6 +137,7 @@ export const Channel = memo(function Channel({
               pinned={pinned}
               revealing={revealed.typing}
               view={view}
+              mobile={layout === "mobile"}
               avatar={avatar}
             />
           </Link>

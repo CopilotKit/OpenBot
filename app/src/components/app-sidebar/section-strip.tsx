@@ -12,7 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { useSidebar } from "@/components/ui/sidebar";
+import { useOptionalSidebar, useSidebar } from "@/components/ui/sidebar";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { appConfig } from "@/lib/generated/application-config";
 import {
@@ -38,6 +38,7 @@ import {
   AccountRow,
   accountMenuClassName,
   accountMenuItemClassName,
+  largeAccountMenuItemClassName,
   StripVersion,
 } from "./account-label";
 import { DesktopAppMenuItem } from "./desktop-app-item";
@@ -140,8 +141,22 @@ function PageItem({ item }: { item: NavigationLink }) {
 /**
  * The account at the strip's foot, and the menu it opens: organizations, the account's pages, Get
  * the desktop app on OpenBot Cloud, Get troubleshooting logs, Sign out.
+ *
+ * Also at the top right of the phone app's tab pages, where there is no sidebar
+ * (`layout/native-shell-account.tsx`): opening below the avatar there, and named "Account".
  */
-function StripAccount() {
+export function StripAccount({
+  label,
+  large = false,
+  side = "right",
+}: {
+  /** The button's name, in place of the person's (see `AccountMenu`). */
+  label?: string;
+  /** The button and the menu's rows at a thumb's size, for the phone app (see `AccountMenu`). */
+  large?: boolean;
+  /** Beside the strip, or below a page's header. */
+  side?: "right" | "bottom";
+} = {}) {
   const navigation = useNavigationItems();
   const signOut = useSignOut();
   const signOutOffered = useSignOutOffered();
@@ -149,13 +164,17 @@ function StripAccount() {
   const organizationChoices = useOrganizationChoices();
   const invitationsWaiting = useWaitingInvitationCount();
   const switchOrganization = useSwitchOrganization();
-  const { setOpenMobile } = useSidebar();
+  // No sidebar in the native shell, so no sheet to close.
+  const setOpenMobile = useOptionalSidebar()?.setOpenMobile ?? (() => {});
+  const itemClassName = large
+    ? largeAccountMenuItemClassName
+    : accountMenuItemClassName;
   return (
-    <AccountMenu>
+    <AccountMenu label={label} large={large} side={side}>
       <DropdownMenuContent
         align="end"
         className={accountMenuClassName}
-        side="right"
+        side={side}
         sideOffset={8}
       >
         <AccountRow />
@@ -164,7 +183,7 @@ function StripAccount() {
           <OrganizationMenuItems
             choices={organizationChoices}
             invitationsWaiting={invitationsWaiting}
-            itemClassName={accountMenuItemClassName}
+            itemClassName={itemClassName}
             onNew={() => {
               // A narrow window's sheet would wait behind the dialog.
               setOpenMobile(false);
@@ -177,7 +196,7 @@ function StripAccount() {
           .filter((item) => item.section === "account")
           .map((item) => (
             <DropdownMenuItem
-              className={accountMenuItemClassName}
+              className={itemClassName}
               key={item.id}
               nativeButton={item.kind === "dialog"}
               // A link closes a narrow window's sheet as it is followed; a dialog has to close it
@@ -193,11 +212,11 @@ function StripAccount() {
               <BrandName>{item.label}</BrandName>
             </DropdownMenuItem>
           ))}
-        <DesktopAppMenuItem className={accountMenuItemClassName} />
-        <TroubleshootingLogsMenuItem className={accountMenuItemClassName} />
+        <DesktopAppMenuItem className={itemClassName} />
+        <TroubleshootingLogsMenuItem className={itemClassName} />
         {signOutOffered ? (
           <DropdownMenuItem
-            className={accountMenuItemClassName}
+            className={itemClassName}
             disabled={signOut.pending}
             onClick={signOut.run}
             variant="destructive"

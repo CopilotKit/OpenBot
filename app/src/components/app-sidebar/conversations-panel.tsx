@@ -3,12 +3,9 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { PageEmpty, PageRows } from "@/components/layout/page-shell";
 import { SectionPanel } from "@/components/layout/section-panel";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group";
+import { PanelSearch } from "./panel-search";
 import {
   SidebarContent,
   SidebarGroup,
@@ -36,8 +33,10 @@ import {
 } from "@/lib/settings/message-list";
 import { delegatingConversationsQueryOptions } from "@/lib/tasks/queries";
 import { Button } from "../ui/button";
+import { Separator } from "../ui/separator";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
+import { usePanelPosition } from "./use-panel-position";
 import { ChannelPagination } from "./channel-pagination";
 
 /**
@@ -88,7 +87,7 @@ export const SEARCH_HINT = "Type at least 2 characters to search history";
  * `value`, once it has stopped changing for `delay`. Each search is a request, so one per pause in
  * typing rather than one per keystroke.
  */
-function useDebounced(value: string, delay: number): string {
+export function useDebounced(value: string, delay: number): string {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(value), delay);
@@ -161,18 +160,24 @@ export function isUnread(
  * moves to the top. Nothing else animates, a roster that reacts to being read is a roster that
  * moves under the cursor.
  */
-function ChannelRow({
+export function ChannelRow({
   channel,
   animateOrder,
   emphasis,
   view,
   delegating,
+  layout = "sidebar",
+  divided = false,
 }: {
   channel: ChannelSummary;
   animateOrder: boolean;
   emphasis: MessageListEmphasis;
   view: ConversationView;
   delegating: readonly string[];
+  /** In the sidebar, or a row of the Conversations page's card (see `Channel`). */
+  layout?: "sidebar" | "page" | "mobile";
+  /** On the page, a divider above every row but the first, inside the row so it moves with it. */
+  divided?: boolean;
 }) {
   const shouldReduceMotion = useReducedMotion();
   // Whether this row is unread, as a boolean, for the same reason `Channel` computes `isOpen`
@@ -193,7 +198,9 @@ function ChannelRow({
       layout={animateOrder && !shouldReduceMotion ? "position" : false}
       transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
     >
+      {divided ? <Separator /> : null}
       <Channel
+        layout={layout}
         view={view}
         emphasis={emphasis}
         channelId={channel.id}
@@ -228,12 +235,13 @@ function ChannelRow({
  * replace each other as somebody types, and a list that moves under them is the very thing they
  * are trying to read.
  */
-function SearchResults({
+export function SearchResults({
   term,
   settled,
   emphasis,
   view,
   delegating,
+  layout = "sidebar",
 }: {
   /** The search as it was when typing last paused, normalised. This is what is asked for. */
   term: string;
@@ -242,8 +250,11 @@ function SearchResults({
   emphasis: MessageListEmphasis;
   view: ConversationView;
   delegating: readonly string[];
+  /** In the sidebar, or the Conversations page's card of rows. */
+  layout?: "sidebar" | "page" | "mobile";
 }) {
   const results = useInfiniteQuery(channelSearchInfiniteQueryOptions(term));
+  const page = layout === "page";
 
   if (!settled || results.isPending) {
     return (
@@ -274,6 +285,12 @@ function SearchResults({
     );
   }
   if (results.data.length === 0) {
+    if (page)
+      return (
+        <PageEmpty icon={IconSearch} title="No matches">
+          {`No conversation has “${term}” in its name or recent messages.`}
+        </PageEmpty>
+      );
     return (
       <div className="py-4">
         <Empty className="border border-dashed min-h-[40dvh] px-2">
@@ -287,21 +304,26 @@ function SearchResults({
       </div>
     );
   }
+  const rows = (
+    /* Mounted with its first rows, so they appear without the entrance a new channel gets. */
+    <AnimatePresence initial={false}>
+      {results.data.map((channel, index) => (
+        <ChannelRow
+          view={view}
+          emphasis={emphasis}
+          key={channel.id}
+          animateOrder={false}
+          channel={channel}
+          delegating={delegating}
+          layout={layout}
+          divided={page && index > 0}
+        />
+      ))}
+    </AnimatePresence>
+  );
   return (
     <>
-      {/* Mounted with its first rows, so they appear without the entrance a new channel gets. */}
-      <AnimatePresence initial={false}>
-        {results.data.map((channel) => (
-          <ChannelRow
-            view={view}
-            emphasis={emphasis}
-            key={channel.id}
-            animateOrder={false}
-            channel={channel}
-            delegating={delegating}
-          />
-        ))}
-      </AnimatePresence>
+      {page ? <PageRows>{rows}</PageRows> : rows}
       {results.hasNextPage ? (
         <div className="px-2 py-3 text-center">
           {results.isFetchNextPageError ? (
@@ -333,15 +355,23 @@ function SearchResults({
  * a search over the whole history and New conversation at the top. Today's roster, moved beside the
  * strip and otherwise unchanged.
  */
-export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
+export function ConversationsPanel({
+  hidden = false,
+  standalone = false,
+}: {
+  hidden?: boolean;
+  standalone?: boolean;
+}) {
   const emphasis = useMessageListEmphasis();
   const [view] = useConversationView();
   const channels = useInfiniteQuery(channelListQueryOptions());
   const delegating =
     useQuery(delegatingConversationsQueryOptions()).data ?? NONE_DELEGATING;
-  const [search, setSearch] = useState("");
+  const { search, setSearch, scrollRoot } = usePanelPosition(
+    standalone,
+    channels.data?.length ?? 0,
+  );
   const debouncedSearch = useDebounced(search, SEARCH_DEBOUNCE_MS);
-  const scrollRoot = useRef<HTMLDivElement>(null);
   const term = normalizeChannelSearch(search);
   const debouncedTerm = normalizeChannelSearch(debouncedSearch);
   const searching = term.length > 0;
@@ -364,15 +394,27 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
     }
     scrollRoot.current.scrollTop = rosterScroll.current;
     rosterScroll.current = null;
-  }, [searching]);
+  }, [searching, scrollRoot]);
   const visibleChannels = pinnedFirst(channels.data ?? []);
   const animateOrder = (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
+  const searchField = (
+    <PanelSearch
+      label="Search conversations"
+      placeholder={standalone ? "Search conversations…" : "Search…"}
+      describedBy={searching ? "conversation-search-scope" : undefined}
+      onChange={changeSearch}
+      value={search}
+      mobile={standalone}
+    />
+  );
 
   return (
     <SectionPanel
       // Folded away with the panel, so a keyboard never tabs into rows nobody can see.
       className="group-data-[collapsible=icon]:hidden"
       hidden={hidden}
+      standalone={standalone}
+      search={searchField}
       title="Conversations"
       actions={
         // The sidebar's hover rather than `muted`, which is nearly the sidebar's own colour.
@@ -398,22 +440,7 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
       <SidebarContent ref={scrollRoot} className="scroll-fade-b">
         <SidebarMenu>
           <SidebarGroup className="gap-px pt-0">
-            <SidebarMenuItem>
-              <InputGroup className="bg-background text-sm rounded-lg h-9">
-                <InputGroupInput
-                  aria-label="Search conversations"
-                  aria-describedby={
-                    searching ? "conversation-search-scope" : undefined
-                  }
-                  onChange={(event) => changeSearch(event.target.value)}
-                  placeholder="Search…"
-                  value={search}
-                />
-                <InputGroupAddon>
-                  <IconSearch />
-                </InputGroupAddon>
-              </InputGroup>
-            </SidebarMenuItem>
+            {!standalone && <SidebarMenuItem>{searchField}</SidebarMenuItem>}
             {/*
              * What is searched, said while somebody types: names and the recent lines the rows
              * show, not every message of every conversation. One character is not searched at
@@ -427,10 +454,11 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
                 {searchable ? SEARCH_SCOPE : SEARCH_HINT}
               </p>
             ) : null}
-            <div className="w-full h-2" />
+            {!standalone && <div className="w-full h-2" />}
             {searching ? (
               searchable ? (
                 <SearchResults
+                  layout={standalone ? "mobile" : "sidebar"}
                   view={view}
                   emphasis={emphasis}
                   delegating={delegating}
@@ -446,6 +474,24 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
                  * and quotes it back (see SearchResults). Told "you don't have channels yet" while
                  * holding a typo, a person reads their conversations as gone.
                  */}
+                {channels.isError && !channels.data ? (
+                  <div className="px-2 py-3">
+                    <p role="alert" className="text-destructive text-sm">
+                      {loadFailure(
+                        channels.error,
+                        "Couldn't load your conversations.",
+                      )}
+                    </p>
+                    <Button
+                      disabled={channels.isFetching}
+                      onClick={() => void channels.refetch()}
+                      size="sm"
+                      variant="outline"
+                    >
+                      Try again
+                    </Button>
+                  </div>
+                ) : null}
                 {channels.data?.length === 0 ? (
                   <div className="py-4">
                     {/*
@@ -465,6 +511,7 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
                 <AnimatePresence initial={false}>
                   {visibleChannels.map((channel) => (
                     <ChannelRow
+                      layout={standalone ? "mobile" : "sidebar"}
                       view={view}
                       emphasis={emphasis}
                       key={channel.id}

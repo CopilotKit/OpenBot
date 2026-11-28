@@ -9,6 +9,7 @@ import { CompanySignInSection } from "@/components/settings/company-sign-in";
 import { DeleteAccountSection } from "@/components/settings/delete-account";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
 import { NameRow } from "@/components/settings/profile";
+import { SettingsPageRows } from "@/components/settings/settings-pages";
 import { StandingInstructionsRow } from "@/components/settings/standing-instructions";
 import { StarOnGitHubSection } from "@/components/settings/star-on-github";
 import { ThemeRow } from "@/components/settings/theme-row";
@@ -68,6 +69,8 @@ function RouteComponent() {
       description="Set your name, how OpenBot looks, and the instructions every Bot follows."
       title="General"
     >
+      {/* Only inside the phone app's native shell, which has no sidebar: Settings' other pages. */}
+      <SettingsPageRows />
       {/*
        * What OpenBot and every Bot know of the person, first: their name and how they want things done. Both are free
        * text, so both are a summary that opens a dialog.

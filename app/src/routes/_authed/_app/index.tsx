@@ -20,6 +20,7 @@ import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { WorkingNow } from "@/components/channels/working-now";
 import { BusinessLink } from "@/components/edition/business-link";
 import { HomeField, useHomeIntro } from "@/components/home/home-field";
+import { ShellAccountMenu } from "@/components/layout/native-shell-account";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -342,6 +343,8 @@ function RouteComponent() {
     <>
       <SidebarToggleBar>
         <BusinessLink />
+        {/* Only inside the phone app's native shell, which has no sidebar. */}
+        <ShellAccountMenu />
       </SidebarToggleBar>
       {/*
        * Home scrolls inside the pane, so a long Explore list can be reached. The gutter is kept on

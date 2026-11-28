@@ -18,7 +18,7 @@ import {
   DetailPanel,
   detailFitsBeside,
 } from "@/components/layout/detail-panel";
-import { SidebarToggle } from "@/components/layout/sidebar-toggle";
+import { ConversationNavigation } from "@/components/layout/conversation-navigation";
 import { TaskDetails } from "@/components/tasks/task-details";
 import { Button } from "@/components/ui/button";
 import { conversationLoadFailure } from "@/lib/channels/load-failure";
@@ -32,9 +32,11 @@ import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
 import { useNoBotComputers } from "@/lib/deployment/queries";
 import { useConnectionLost } from "@/lib/desktop/connection-lost";
 import { loadFailure } from "@/lib/load-failure";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { loadFirstScreen } from "@/lib/route-data";
 import { taskListQueryOptions } from "@/lib/tasks/queries";
+import { cn } from "@/lib/utils";
 
 const chatSearchSchema = z.object({
   settings: z.boolean().optional(),
@@ -192,12 +194,16 @@ function RouteComponent() {
     >
       <div className="flex flex-col">
         <div
-          className="min-h-12 border-b border-border sticky top-0 flex flex-row flex-wrap items-center justify-between px-3 py-2 gap-2"
+          className={cn(
+            "min-h-12 border-b border-border sticky top-0 flex flex-row flex-wrap items-center justify-between px-3 py-2 gap-2",
+            // In the phone app the buttons are 44px, as Back and Account are, and the bar keeps its 48px.
+            nativeShell() && "py-0.5 [&_[data-slot=button]]:size-11",
+          )}
           data-slot="conversation-header"
         >
           {/* Keyed on the displayed name so cold channel loads animate the resolved name, not the id. */}
           <div className="flex min-w-0 items-center gap-1.5">
-            <SidebarToggle />
+            <ConversationNavigation />
             <motion.div
               animate={{ opacity: 1 }}
               className="shrink-0"

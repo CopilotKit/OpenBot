@@ -2,7 +2,6 @@ import {
   IconChevronDown,
   IconMessagePlus,
   IconPlus,
-  IconSearch,
 } from "@tabler/icons-react";
 import {
   useInfiniteQuery,
@@ -28,11 +27,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group";
+import { PanelSearch } from "./panel-search";
 import { SidebarContent } from "@/components/ui/sidebar";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
@@ -53,6 +48,7 @@ import { useMessageListEmphasis } from "@/lib/settings/message-list";
 import { delegatingConversationsQueryOptions } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { Channel } from "./channel";
+import { usePanelPosition } from "./use-panel-position";
 import {
   isUnread,
   isWorking,
@@ -158,6 +154,7 @@ function BotConversations({
     <>
       {/* A link drawn as Show more is, so it opens in a new tab like the rows under it. */}
       <Link
+        data-slot="start-bot-chat"
         aria-label={`New conversation with ${botName}`}
         className={cn(
           buttonVariants({ size: "sm", variant: "ghost" }),
@@ -166,6 +163,7 @@ function BotConversations({
         search={{ agent: botId }}
         to="/channel/new"
       >
+        <IconMessagePlus className="mobile-compose-icon" aria-hidden="true" />
         New conversation
       </Link>
       {/* Pinned first, as the Conversations panel draws them: a live patch reorders by time alone. */}
@@ -213,11 +211,13 @@ function BotConversations({
  * Bot offers a new conversation with it, as a conversation's row offers its own actions.
  */
 function BotRow({
+  mobile,
   bot,
   waiting,
   expanded,
   onToggle,
 }: {
+  mobile: boolean;
   bot: AgentProfile;
   /** What waits on the person from this Bot, in words; empty when nothing does. */
   waiting: string;
@@ -235,11 +235,18 @@ function BotRow({
         <ContextMenu>
           <ContextMenuTrigger className="min-w-0 flex-1">
             <Link
-              className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg pr-2.5 pl-2.5 text-sm outline-hidden ring-sidebar-ring transition-colors hover:bg-foreground/5 focus-visible:ring-2"
+              className={cn(
+                "flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg pr-2.5 pl-2.5 outline-hidden ring-sidebar-ring transition-colors hover:bg-foreground/5 focus-visible:ring-2",
+                !mobile && "text-sm",
+              )}
               params={{ agentId: bot.id }}
               to="/bots/$agentId"
             >
-              <BotOrb name={bot.name} seed={bot.avatarSeed} size={24} />
+              <BotOrb
+                name={bot.name}
+                seed={bot.avatarSeed}
+                size={mobile ? 32 : 24}
+              />
               <span className="min-w-0 flex-1 truncate">{bot.name}</span>
               {waiting ? (
                 <span
@@ -278,7 +285,10 @@ function BotRow({
         </button>
       </div>
       {expanded ? (
-        <div className="ml-[21px] border-sidebar-border border-l pl-1.5">
+        <div
+          data-slot="bot-threads"
+          className="ml-[21px] border-sidebar-border border-l pl-1.5"
+        >
           <BotConversations botId={bot.id} botName={bot.name} />
         </div>
       ) : null}
@@ -290,11 +300,20 @@ function BotRow({
  * The Bots section's panel: every Bot, newest conversation first (`orderBots`), the top three open
  * with their latest conversations. The search narrows the Bots by name; New Bot is in the header.
  */
-export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
+export function BotsPanel({
+  hidden = false,
+  standalone = false,
+}: {
+  hidden?: boolean;
+  standalone?: boolean;
+}) {
   const bots = useQuery(agentListQueryOptions());
   const roster = useInfiniteQuery(channelListQueryOptions());
   const attention = useQuery(botAttentionQueryOptions());
-  const [search, setSearch] = useState("");
+  const { search, setSearch, scrollRoot } = usePanelPosition(
+    standalone,
+    bots.data?.length ?? 0,
+  );
 
   const ordered = useMemo(
     () => orderBots(bots.data ?? [], roster.data ?? []),
@@ -327,6 +346,15 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
     });
   }, []);
   const held = heldReads.values().next().value;
+  const searchField = (
+    <PanelSearch
+      label="Search Bots"
+      placeholder="Search Bots…"
+      onChange={setSearch}
+      value={search}
+      mobile={standalone}
+    />
+  );
 
   return (
     <SectionPanel
@@ -345,21 +373,13 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
       }
       className="group-data-[collapsible=icon]:hidden"
       hidden={hidden}
+      standalone={standalone}
+      search={searchField}
       title="Bots"
     >
-      <SidebarContent className="scroll-fade-b px-2 pb-2">
-        <InputGroup className="h-9 rounded-lg bg-background text-sm">
-          <InputGroupInput
-            aria-label="Search Bots"
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search Bots…"
-            value={search}
-          />
-          <InputGroupAddon>
-            <IconSearch />
-          </InputGroupAddon>
-        </InputGroup>
-        <div className="h-2 shrink-0" />
+      <SidebarContent ref={scrollRoot} className="scroll-fade-b px-2 pb-2">
+        {!standalone && searchField}
+        {!standalone && <div className="h-2 shrink-0" />}
         {bots.isPending ? (
           <p
             role="status"
@@ -416,6 +436,7 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
             <ul className="flex flex-col gap-px">
               {shown.map((bot) => (
                 <BotRow
+                  mobile={standalone}
                   bot={bot}
                   expanded={isExpanded(bot.id)}
                   key={bot.id}

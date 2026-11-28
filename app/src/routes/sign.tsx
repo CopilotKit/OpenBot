@@ -7,6 +7,7 @@ import {
   CLOUD_SIGN_IN_TITLE,
   CloudSignIn,
 } from "@/components/auth/cloud-sign-in";
+import { NativeSignedOut } from "@/components/auth/native-signed-out";
 import { ProviderLogo } from "@/components/auth/provider-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,9 +17,10 @@ import {
   signInWith,
   signInWithEmailDomain,
 } from "@/lib/auth/client";
-import { resumeUrlFor, verifierPathFor } from "@/lib/auth/resume";
+import { resumeUrlFor, signInResumePath } from "@/lib/auth/resume";
 import { appConfig } from "@/lib/generated/application-config";
 import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { inNoOrganization } from "@/lib/organizations/in-no-organization";
 import { searchTextEntry } from "@/lib/search-text";
 import { cn } from "@/lib/utils";
@@ -48,8 +50,21 @@ export const Route = createFileRoute("/sign")({
    * gives for `?connected=`: present-but-undefined makes `search` a required prop on every Link to
    * this route, which is a lot of ripple for a parameter only the verifier sets.
    */
-  validateSearch: (search: Record<string, unknown>): { flow_id?: string } =>
-    searchTextEntry("flow_id", search.flow_id),
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): {
+    flow_id?: string;
+    shell_challenge?: string;
+    shell_platform?: string;
+    shell_callback?: string;
+    "native-sign-in"?: string;
+  } => ({
+    ...searchTextEntry("flow_id", search.flow_id),
+    ...searchTextEntry("shell_challenge", search.shell_challenge),
+    ...searchTextEntry("shell_platform", search.shell_platform),
+    ...searchTextEntry("shell_callback", search.shell_callback),
+    ...searchTextEntry("native-sign-in", search["native-sign-in"]),
+  }),
   beforeLoad: async ({ context, search }) => {
     // Somebody signed in to no organization signs in like anybody: signing in again is how they come back once added.
     const user = await signedInUser(context.queryClient).catch((error) => {
@@ -70,20 +85,39 @@ export const Route = createFileRoute("/sign")({
        * the verifier was ever made. `reloadDocument` makes this a document navigation, which is
        * the only kind that leaves the app and therefore the only kind that arrives.
        */
-      const verifier = verifierPathFor(search.flow_id);
-      throw verifier
-        ? redirect({ href: verifier, reloadDocument: true })
+      const resume = signInResumePath(search.flow_id, search);
+      throw resume
+        ? redirect({ href: resume, reloadDocument: true })
         : redirect({ to: "/" });
     }
+    // The phone app's native shell signs in on its own screen: nothing of this one is drawn.
+    if (signsInNatively(search)) return;
     // Loaded here so the screen paints with its buttons rather than painting empty and then
     // growing them, which reads as "no providers" for exactly as long as the request takes.
     await context.queryClient.ensureQueryData(authProvidersQueryOptions());
   },
-  component: SignScreen,
+  component: SignRoute,
 });
 
+/**
+ * Whether the phone app's native shell shows the sign-in, on its own screen, in place of this one
+ * (`components/auth/native-signed-out.tsx`). `?native-sign-in=web` asks for this screen anyway: the
+ * shell's way back to the web sign-in when its own can't be used.
+ */
+export function signsInNatively(search: {
+  "native-sign-in"?: string;
+}): boolean {
+  return nativeShell() !== null && search["native-sign-in"] !== "web";
+}
+
+function SignRoute() {
+  const search = Route.useSearch();
+  return signsInNatively(search) ? <NativeSignedOut /> : <SignScreen />;
+}
+
 function SignScreen() {
-  const { flow_id: flowId } = Route.useSearch();
+  const search = Route.useSearch();
+  const flowId = search.flow_id;
   // Which provider is being opened, rather than whether one is: with three buttons, a single
   // boolean would put "Opening…" on all of them.
   const [opening, setOpening] = useState<AuthProviderId | "sso" | null>(null);
@@ -109,7 +143,7 @@ function SignScreen() {
       await signInWithEmailDomain(
         email,
         undefined,
-        resumeUrlFor(window.location.origin, flowId),
+        resumeUrlFor(window.location.origin, flowId, search),
       );
     } catch (caughtError) {
       setError(
@@ -130,7 +164,7 @@ function SignScreen() {
       await signInWith(
         provider,
         undefined,
-        resumeUrlFor(window.location.origin, flowId),
+        resumeUrlFor(window.location.origin, flowId, search),
       );
     } catch (caughtError) {
       setError(

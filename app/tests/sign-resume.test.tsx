@@ -113,18 +113,59 @@ test("a numeric or JSON-shaped handle survives the round trip to the verifier", 
   );
 });
 
+test("a shell sign-in resumes the same challenge in its system browser", async () => {
+  const challenge = "A".repeat(43);
+  const query = `challenge=${challenge}&platform=android&callback=https`;
+  const path = `/api/auth/shell/handoff?${query}`;
+  const fields = {
+    shell_challenge: challenge,
+    shell_platform: "android",
+    shell_callback: "https",
+  };
+  const result = await redirectFrom(fields);
+  expect(result.options.href).toBe(path);
+  expect(result.options.reloadDocument).toBe(true);
+  expect(resumeUrlFor("https://app.example", undefined, fields)).toBe(
+    `https://app.example${path}`,
+  );
+  expect(
+    resumeUrlFor("https://app.example", undefined, {
+      shell_challenge: "short",
+    }),
+  ).toBe("https://app.example");
+  expect(resumeUrlFor("https://app.example", "h1", fields)).toBe(
+    `https://app.example${path}`,
+  );
+  for (const invalid of [
+    { shell_platform: "web" },
+    { shell_callback: "arbitrary" },
+    { shell_callback: "" },
+  ]) {
+    expect(
+      resumeUrlFor("https://app.example", "h1", { ...fields, ...invalid }),
+    ).toBe("https://app.example/api/plugins/arcade/verify?flow_id=h1");
+  }
+});
+
 function signedInContext() {
   const queryClient = new QueryClient();
   queryClient.setQueryData(authKeys.currentUser(), { id: "u1" });
   return { queryClient };
 }
 
-async function redirectFrom(search: { flow_id?: string }) {
+async function redirectFrom(search: {
+  flow_id?: string;
+  shell_challenge?: string;
+  shell_platform?: string;
+  shell_callback?: string;
+}) {
   const beforeLoad = Route.options.beforeLoad as (a: unknown) => Promise<void>;
   try {
     await beforeLoad({ context: signedInContext(), search });
   } catch (thrown) {
-    return thrown as { options: { to?: string; href?: string } };
+    return thrown as {
+      options: { to?: string; href?: string; reloadDocument?: boolean };
+    };
   }
   throw new Error("expected a redirect");
 }
@@ -140,11 +181,14 @@ test("a signed-in arrival with a handle goes to the verifier, without one to /",
 });
 
 /** The sign screen on `/sign?flow_id=h1`, with whichever ways in the deployment offers. */
-function renderSignScreen(options: {
-  providers: string[];
-  sso: boolean;
-  ssoRequired: boolean;
-}) {
+function renderSignScreen(
+  options: {
+    providers: string[];
+    sso: boolean;
+    ssoRequired: boolean;
+  },
+  initialEntry = "/sign?flow_id=h1",
+) {
   const queryClient = new QueryClient();
   queryClient.setQueryData(authKeys.providers(), options);
 
@@ -159,7 +203,7 @@ function renderSignScreen(options: {
   const router = createRouter({
     routeTree: root.addChildren([sign]),
     context: { queryClient },
-    history: createMemoryHistory({ initialEntries: ["/sign?flow_id=h1"] }),
+    history: createMemoryHistory({ initialEntries: [initialEntry] }),
   } as never) as never;
   const view = render(
     <QueryClientProvider client={queryClient}>
@@ -189,6 +233,28 @@ test("the sign-in starter gets the resume URL as its callbackURL", async () => {
   await user.click(await view.findByText(/Continue with Google/));
   await waitFor(() => expect(asked).toHaveLength(1));
   expect(asked[0]).toBe(`${window.location.origin}${RESUME_URL}`);
+});
+
+test("the first provider sign-in returns to the pending native confirmation", async () => {
+  const challenge = "B".repeat(43);
+  const shellHandoff = new URLSearchParams({
+    challenge,
+    platform: "ios",
+  }).toString();
+  const asked: string[] = [];
+  signInSpy = async (_provider, _start, callbackURL) => {
+    asked.push(callbackURL ?? "");
+  };
+  const { view, user } = renderSignScreen(
+    { providers: ["google"], sso: false, ssoRequired: false },
+    `/sign?${new URLSearchParams({ shell_challenge: challenge, shell_platform: "ios" })}`,
+  );
+  await user.click(await view.findByText(/Continue with Google/));
+  await waitFor(() =>
+    expect(asked).toEqual([
+      `${window.location.origin}/api/auth/shell/handoff?${shellHandoff}`,
+    ]),
+  );
 });
 
 /**

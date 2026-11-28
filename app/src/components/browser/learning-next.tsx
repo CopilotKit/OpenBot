@@ -22,6 +22,7 @@ import {
   type RecordingSkill,
   recordingSkillsQueryOptions,
 } from "@/lib/learning/queries";
+import { notificationPermission } from "@/lib/notifications/permission";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import type { Stopped } from "./recording";
@@ -203,16 +204,12 @@ export function useLearningNext(stopped: Stopped) {
   };
 }
 
-/** Whether this browser lets OpenBot interrupt. Some browsers throw on the mere question. */
+/**
+ * Whether this browser lets OpenBot interrupt: the browser's answer, read safely, and never inside
+ * the phone app's native shell, where the phone app notifies (`notificationPermission`).
+ */
 function notificationsAllowed() {
-  try {
-    return (
-      typeof Notification !== "undefined" &&
-      Notification.permission === "granted"
-    );
-  } catch {
-    return false;
-  }
+  return notificationPermission() === "granted";
 }
 
 /**

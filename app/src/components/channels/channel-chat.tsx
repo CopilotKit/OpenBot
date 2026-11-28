@@ -6,6 +6,7 @@ import {
   useAgent,
   useCopilotKit,
 } from "@copilotkit/react-core/v2";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useCallback,
@@ -2705,8 +2706,8 @@ export function ChannelChat({
             taskRunning={agent.isRunning || runsInFlight > 0}
           />
           <ConversationView
-            // Remounted per conversation, so opening one puts the caret in its composer once.
-            autoFocus
+            // Opening a saved conversation on a phone leaves the transcript and tab bar visible.
+            autoFocus={!nativeShell()}
             threadId={channel.threadId}
             // The clock beside `+`: a routine for the Bot this conversation talks to, posting here.
             routine={
