@@ -1,0 +1,202 @@
+name: Android shell video
+
+# Screen recordings of the experimental Android shell, apart from the test run so they come back
+# fast: the demo tour against mock stack A of this branch's web build (public artifact) and the
+# real-backend journey on https://my.open.bot (private artifact). Each recording is trimmed to the
+# test's own start and end marks, with a 600-px-wide H.264 copy beside it.
+#
+# The real journey uses the session-cookie debug hook (secret OPENBOT_SHELL_TEST_SESSION). With
+# real_google_sign_in on (started by hand only: it sends a sign-in prompt to the account's phone)
+# it records the real sign-in instead: release-like build, fresh install, the web sign-in in the
+# WebView and Google there, or, if Google refuses Android's WebView, the Custom Tab path.
+on:
+  push:
+    branches:
+      - android-webview-shell
+    paths:
+      - android-shell/**
+      - .github/workflows/android-shell-video.yml
+  workflow_dispatch:
+    inputs:
+      which:
+        description: Which recording
+        type: choice
+        options:
+          - both
+          - demo
+          - real
+          - self-hosted
+        default: both
+      real_google_sign_in:
+        description: Record the real Google sign-in instead of the session cookie (sends one sign-in prompt to the account's phone)
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: android-shell-video-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  record:
+    name: Record the Android shell
+    if: github.repository == 'CopilotKit/OpenBot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 13
+    permissions:
+      contents: read
+    env:
+      API_LEVEL: "35"
+      ARTIFACTS: ${{ github.workspace }}/artifacts
+      PRIVATE_ARTIFACTS: ${{ github.workspace }}/private-artifacts
+      WHICH: ${{ inputs.which || 'both' }}
+      GOOGLE_SIGN_IN: ${{ inputs.real_google_sign_in || 'false' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            android-shell/**/*.gradle.kts
+            android-shell/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Build the debug app and its tests
+        timeout-minutes: 5
+        working-directory: android-shell
+        run: |
+          mkdir -p "$ARTIFACTS" "$PRIVATE_ARTIFACTS"
+          tasks="assembleDebug assembleDebugAndroidTest"
+          if [ "$GOOGLE_SIGN_IN" = "true" ]; then tasks="$tasks assembleReleaseTest"; fi
+          # Maven Central answers 429 now and then: up to three tries.
+          for attempt in 1 2 3; do
+            # shellcheck disable=SC2086
+            if ./gradlew --no-daemon $tasks; then exit 0; fi
+            echo "build failed (attempt $attempt); retrying in 30 s"
+            sleep 30
+          done
+          exit 1
+
+      - name: Free the build's memory for the emulator
+        run: |
+          (cd android-shell && ./gradlew --stop > /dev/null 2>&1) || true
+          pkill -f KotlinCompileDaemon || true
+          free -m
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: env.WHICH != 'real'
+        with:
+          bun-version: 1.4.3
+
+      - name: Build the web app and start mock stack A
+        if: env.WHICH != 'real'
+        timeout-minutes: 3
+        run: |
+          bun install --frozen-lockfile
+          cp .env.example .env
+          (cd app && bun run build)
+          MOCK_REPLY=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-a.log" 2>&1 &
+          APP_PORT=3010 SERVER_PORT=3001 nohup bun app/serve.ts > "$ARTIFACTS/app-a.log" 2>&1 &
+          if [ "$WHICH" = self-hosted ]; then
+            # C: the self-hosted OpenBot, its own person and organization.
+            MOCK_PERSON_NAME="Priya Shah" MOCK_ORG_NAME="Northwind" MOCK_REPLY=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3003 nohup bun app/workbench/mock-server.ts > "$ARTIFACTS/mock-c.log" 2>&1 &
+            APP_PORT=3013 SERVER_PORT=3003 nohup bun app/serve.ts > "$ARTIFACTS/app-c.log" 2>&1 &
+          fi
+          for _ in $(seq 1 60); do
+            if [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3010/ || true)" = 200 ]; then echo "mock stack A is up"; exit 0; fi
+            sleep 1
+          done
+          echo "mock stack A did not start"; tail -n 40 "$ARTIFACTS/mock-a.log" "$ARTIFACTS/app-a.log"; exit 1
+
+      - name: Cache the emulator's system image
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /usr/local/lib/android/sdk/system-images/android-35/google_apis/x86_64
+          key: android-system-image-35-google_apis-x86_64-v1
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Boot the emulator (software keyboard on, animations off)
+        timeout-minutes: 4
+        env:
+          # Off: with animations on, the web app's running-Bot animations drawn in software (the
+          # guest renderer) slowed every scene of the demo to 2-3 times its length (runs 46159324951,
+          # 46161277370, 46162581646). The skeleton then shows without its shimmer.
+          ANIMATOR_SCALE: "0"
+          # The guest renderer: the host-side one (swiftshader_indirect) froze the emulator in the
+          # middle of a recording (run 46119389519) as it did in test runs.
+          GPU_MODE: guest
+        run: android-shell/ci/emulator.sh all
+
+      - name: Install the apps
+        run: |
+          command -v ffmpeg > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null; }
+          adb install -r -g android-shell/app/build/outputs/apk/debug/app-debug.apk
+          adb install -r -g android-shell/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          # The releaseTest build (Google run only) is installed by the runner right before its test:
+          # two apps claiming openbotshell:// would make Chrome ask which one during the demo.
+
+      - name: Record the demo tour
+        if: env.WHICH == 'demo' || env.WHICH == 'both'
+        timeout-minutes: 4
+        env:
+          RUN_MODE: video
+          VIDEO_PLAN: demo
+          PER_TEST_SECONDS: "220"
+        run: python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
+
+      - name: Record the self-hosted clip
+        if: env.WHICH == 'self-hosted'
+        timeout-minutes: 3
+        env:
+          RUN_MODE: video
+          VIDEO_PLAN: self-hosted
+          PER_TEST_SECONDS: "150"
+        run: python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
+
+      - name: Record the real-backend journey (private)
+        if: always() && (env.WHICH == 'real' || env.WHICH == 'both')
+        timeout-minutes: 9
+        env:
+          RUN_MODE: video
+          VIDEO_PLAN: real
+          PER_TEST_SECONDS: "220"
+          OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
+          OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}
+          OPENBOT_SHELL_GOOGLE_PASSWORD: ${{ secrets.OPENBOT_SHELL_GOOGLE_PASSWORD }}
+          OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
+        run: python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
+
+      - name: Collect
+        if: always()
+        run: |
+          free -m; sudo dmesg 2>/dev/null | grep -i -E "killed process|out of memory" | tail -5 || true
+          python3 android-shell/ci/summarize.py "$ARTIFACTS" > /dev/null || true
+          python3 android-shell/ci/collect.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" || true
+          ls -la "$ARTIFACTS/video" "$PRIVATE_ARTIFACTS/video" 2>/dev/null || true
+          if [ -n "$(ls -A "$PRIVATE_ARTIFACTS/video" "$PRIVATE_ARTIFACTS/shots" 2>/dev/null)" ]; then echo "HAS_PRIVATE=1" >> "$GITHUB_ENV"; fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: android-shell-video-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && env.HAS_PRIVATE == '1'
+        with:
+          name: android-shell-video-private-${{ github.run_id }}
+          path: private-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Probe popup</title>
+  <style>body { font: 14px -apple-system, system-ui, sans-serif; padding: calc(env(safe-area-inset-top) + 8px) 12px; }</style>
+</head>
+<body>
+  <p id="popup">popup page loaded</p>
+  <p id="opener"></p>
+  <p><a href="/">Back to the probe</a></p>
+  <script>
+    document.getElementById('opener').textContent = `window.opener: ${window.opener ? 'present' : 'none'}`;
+  </script>
+</body>
+</html>
