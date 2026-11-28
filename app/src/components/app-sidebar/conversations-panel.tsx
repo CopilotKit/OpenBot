@@ -398,7 +398,14 @@ export function ConversationsPanel({
   const visibleChannels = pinnedFirst(channels.data ?? []);
   const animateOrder = (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
   const searchField = (
-    <PanelSearch label="Search conversations" placeholder={standalone ? "Search conversations…" : "Search…"} describedBy={searching ? "conversation-search-scope" : undefined} onChange={changeSearch} value={search} mobile={standalone} />
+    <PanelSearch
+      label="Search conversations"
+      placeholder={standalone ? "Search conversations…" : "Search…"}
+      describedBy={searching ? "conversation-search-scope" : undefined}
+      onChange={changeSearch}
+      value={search}
+      mobile={standalone}
+    />
   );
 
   return (

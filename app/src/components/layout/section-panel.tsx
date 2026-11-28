@@ -44,7 +44,12 @@ export function SectionPanel({
         )}
         data-desktop-drag="deep"
       >
-        <Heading className={cn("min-w-0 flex-1 truncate font-semibold tracking-tight", !standalone && "text-base")}>
+        <Heading
+          className={cn(
+            "min-w-0 flex-1 truncate font-semibold tracking-tight",
+            !standalone && "text-base",
+          )}
+        >
           {title}
         </Heading>
         {actions}
