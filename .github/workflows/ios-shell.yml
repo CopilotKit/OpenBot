@@ -240,6 +240,10 @@ jobs:
             fi
           fi
 
+      - name: Report the mock loading-screen milestones after a Debug failure
+        if: failure()
+        run: python3 ios-shell/ci/demo_handoff.py artifacts/diagnostics.jsonl skeleton
+
       - name: Run the real-backend suite on the Release build (a fresh install per test)
         if: always() && steps.build-release.outcome == 'success'
         timeout-minutes: 30
