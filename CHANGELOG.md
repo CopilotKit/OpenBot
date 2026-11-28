@@ -375,6 +375,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 **OpenBot Desktop.**
 
+- **Desktop setup says where a pasted AI key is kept.** On Connect your AI, every API key field
+  (OpenAI, Anthropic, Gemini, xAI, TrustedRouter, Privatemode, and any OpenAI-compatible endpoint)
+  now has the footnote "OpenBot keeps this key on this computer." Pasting a paid key no longer
+  means trusting the dialog blind about where it goes.
+
 - **A command the local sandbox stopped for memory says so.** On Docker with cgroup v2, some
   commands the memory limit killed were told they had run out of time, after half a second. A
   command killed before the time limit is up is now always told it used too much memory.
