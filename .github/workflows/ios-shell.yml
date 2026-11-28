@@ -1,16 +1,22 @@
 name: iOS shell
 
-# Builds the experimental iOS shell in ios-shell/ for the simulator and runs its UI tests: against
-# the local probe site (ios-shell/Probe), against two mock stacks of the real built web app
-# (app/workbench/mock-server.ts), and against the hosted web app at my.open.bot.
+# Builds the experimental iOS shell in ios-shell/ for the simulator and runs its UI tests in 3
+# parallel jobs, each on its own simulator:
+# - real: suite 1, against the hosted web app at my.open.bot (a Release build, a fresh install per
+#   test, and the Debug-only session-cookie journey), plus the Release and store build checks;
+# - flow: suite 2, ShellFlowUITests against two mock stacks of the real built web app
+#   (app/workbench/mock-server.ts);
+# - edges: the hardening tests, the probe site (ios-shell/Probe), the demo tour and the unit tests.
 #
-# Artifacts: ios-shell-<run id> (everything that is not a real account's), ios-shell-shots-<run id>
-# (downscaled screenshots, SUMMARY.md, diagnostics.jsonl) and, only when a test used a real account,
-# ios-shell-private-<run id>. Recordings are made by ios-shell-video.yml. Simulator only: no signing.
+# Artifacts per job: ios-shell-shots-<run id>-<job> (downscaled screenshots, SUMMARY.md,
+# diagnostics.jsonl), ios-shell-<run id>-<job> (everything else that is not a real account's) and,
+# only when a test used a real account, ios-shell-private-<run id>-<job>. Recordings are made by
+# ios-shell-video.yml. Simulator only: no signing.
 #
 # Optional repository secrets for the tests against a real account (skipped when empty):
 # OPENBOT_SHELL_TEST_SESSION, OPENBOT_SHELL_GOOGLE_EMAIL, OPENBOT_SHELL_GOOGLE_PASSWORD,
 # OPENBOT_SHELL_GOOGLE_TOTP_SECRET.
+
 on:
   push:
     branches:
@@ -49,38 +55,115 @@ concurrency:
 
 jobs:
   simulator:
-    name: Build and test on the iOS simulator
+    name: Test on the iOS simulator (${{ matrix.shard }})
     if: github.repository == 'CopilotKit/OpenBot'
     runs-on: macos-latest
-    timeout-minutes: 90
+    timeout-minutes: 40
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # real_backend_only: suite 1 alone. An iPad: everything but the real-backend suites.
+        shard: ${{ fromJSON(inputs.real_backend_only && '["real"]' || (inputs.device == 'ipad' && '["flow","edges"]' || '["real","flow","edges"]')) }}
+    env:
+      SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Show Xcode and simulators
+      - name: Pick a simulator and boot it in the background
+        env:
+          DEVICE: ${{ inputs.device || 'iphone' }}
         run: |
-          ls -d /Applications/Xcode*.app || true
-          xcodebuild -version
-          xcrun simctl list runtimes available
-          xcrun simctl list devices available
           mkdir -p artifacts
           echo "XCODE_VERSION=$(xcodebuild -version | tr '\n' ' ')" >> "$GITHUB_ENV"
+          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          picked="$(python3 ios-shell/ci/pick_simulator.py "$DEVICE")"
+          udid="$(printf '%s' "$picked" | cut -f1)"
+          name="$(printf '%s' "$picked" | cut -f2)"
+          runtime="$(printf '%s' "$picked" | cut -f3)"
+          echo "Using $name ($runtime) $udid"
+          {
+            echo "SIM_UDID=$udid"
+            echo "SIM_NAME=$name"
+            echo "SIM_RUNTIME=$runtime"
+          } >> "$GITHUB_ENV"
+          # The software keyboard, as on a phone, for the keyboard tests.
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          # Booting takes minutes on a fresh runner: it runs while the rest of the job does. No
+          # one-time "slide to type" tip over the keyboard.
+          nohup bash -c 'xcrun simctl boot "$1" || true; xcrun simctl bootstatus "$1" -b \
+            && xcrun simctl spawn "$1" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true; \
+            xcrun simctl spawn "$1" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true; \
+            sleep 15; touch "$2"' boot "$udid" "$RUNNER_TEMP/simulator.ready" > "$RUNNER_TEMP/boot.log" 2>&1 &
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/xcodegen-dist
+          key: ios-shell-video-xcodegen-v1
+
+      - name: Generate the Xcode project
+        run: |
+          if [ ! -x ~/xcodegen-dist/xcodegen/bin/xcodegen ]; then
+            mkdir -p ~/xcodegen-dist
+            curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" https://github.com/yonaskolb/XcodeGen/releases/latest/download/xcodegen.zip \
+              && unzip -q -o "$RUNNER_TEMP/xcodegen.zip" -d ~/xcodegen-dist || true
+          fi
+          if [ -x ~/xcodegen-dist/xcodegen/bin/xcodegen ]; then
+            (cd ios-shell && ~/xcodegen-dist/xcodegen/bin/xcodegen generate)
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
+            (cd ios-shell && xcodegen generate)
+          fi
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData
+          key: ios-shell-dd-Debug-${{ hashFiles('ios-shell/**') }}
+          restore-keys: ios-shell-dd-Debug-
+
+      # The app builds while the web app does.
+      - name: Start the Debug build in the background
+        run: |
+          nohup bash -c 'xcodebuild build-for-testing -project ios-shell/OpenBotShell.xcodeproj -scheme OpenBotShell \
+            -configuration Debug -destination "platform=iOS Simulator,id=$1" -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO > xcodebuild-build.log 2>&1; echo $? > "$2"' build "$SIM_UDID" \
+            "$RUNNER_TEMP/build.status" > /dev/null 2>&1 &
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: matrix.shard != 'real'
         with:
           bun-version: 1.4.3
 
-      - name: Install dependencies and build the web app
+      - name: Look for the built web app in the cache
+        if: matrix.shard != 'real'
+        id: web-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/dist
+          key: ios-shell-video-web-${{ hashFiles('app/src/**', 'app/public/**', 'app/index.html', 'app/package.json', 'app/vite.config.*', 'app/tsconfig*.json', 'shared/**', 'tokens/**', 'bun.lock', 'package.json', '.env.example') }}
+
+      - name: Install dependencies and build the web app if needed
+        if: matrix.shard != 'real'
         timeout-minutes: 15
+        env:
+          WEB_CACHED: ${{ steps.web-cache.outputs.cache-hit }}
         run: |
           bun install --frozen-lockfile
           cp .env.example .env
-          cd app && bun run build
+          if [ "$WEB_CACHED" != "true" ]; then (cd app && bun run build); else echo "web app from the cache"; fi
+
+      - name: Keep the built web app for the next run
+        if: matrix.shard != 'real' && steps.web-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/dist
+          key: ${{ steps.web-cache.outputs.cache-primary-key }}
 
       - name: Start the mock stacks
+        if: matrix.shard != 'real'
         run: |
           # A: signed out unless the mock's cookie is sent, with the sign-in hand-off.
           MOCK_SIGNED_OUT=1 SERVER_PORT=3001 nohup bun app/workbench/mock-server.ts > artifacts/mock-a.log 2>&1 &
@@ -108,6 +191,7 @@ jobs:
           exit 1
 
       - name: Arm the late stack
+        if: matrix.shard == 'flow'
         run: |
           # testLockLiftsWhenServerComesBack writes the trigger file, then expects OpenBot to come up
           # on 3012 (over mock A's server) about 8 s later.
@@ -117,6 +201,7 @@ jobs:
             late-stack "$trigger" > artifacts/app-late.log 2>&1 &
 
       - name: Start the probe server
+        if: matrix.shard != 'real'
         run: |
           nohup python3 ios-shell/Probe/serve.py > artifacts/probe-server.log 2>&1 &
           for _ in $(seq 1 30); do
@@ -131,6 +216,7 @@ jobs:
           exit 1
 
       - name: Start the server that never answers
+        if: matrix.shard == 'edges'
         run: |
           # testSlowServerShowsSkeletonThenLock: accepts connections on 3013 and never answers.
           nohup python3 -c '
@@ -141,53 +227,17 @@ jobs:
               c, _ = s.accept(); held.append(c)
           ' > artifacts/silent-server.log 2>&1 &
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
-
-      - name: Generate the Xcode project
-        working-directory: ios-shell
-        run: xcodegen generate
-
-      - name: Pick and boot a simulator
-        env:
-          DEVICE: ${{ inputs.device || 'iphone' }}
-        run: |
-          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
-          picked="$(python3 ios-shell/ci/pick_simulator.py "$DEVICE")"
-          udid="$(printf '%s' "$picked" | cut -f1)"
-          name="$(printf '%s' "$picked" | cut -f2)"
-          runtime="$(printf '%s' "$picked" | cut -f3)"
-          echo "Using $name ($runtime) $udid"
-          # The software keyboard, as on a phone, for the keyboard test and the demo recording.
-          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
-          {
-            echo "SIM_UDID=$udid"
-            echo "SIM_NAME=$name"
-            echo "SIM_RUNTIME=$runtime"
-          } >> "$GITHUB_ENV"
-          xcrun simctl boot "$udid" || true
-          xcrun simctl bootstatus "$udid" -b
-          # No one-time "slide to type" tip over the keyboard in recordings and tests.
-          xcrun simctl spawn "$udid" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true || true
-          xcrun simctl spawn "$udid" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true || true
-
-      - name: Build for testing (Debug)
+      - name: Wait for the Debug build
         id: build
-        timeout-minutes: 20
+        timeout-minutes: 15
         run: |
-          set -o pipefail
-          xcodebuild build-for-testing \
-            -project ios-shell/OpenBotShell.xcodeproj \
-            -scheme OpenBotShell \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIM_UDID" \
-            -derivedDataPath DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee xcodebuild-build.log | grep -E "error:|warning: .*(OpenBotShell|ios-shell)|BUILD (SUCCEEDED|FAILED)" || true
-          grep -q "TEST BUILD SUCCEEDED\|BUILD SUCCEEDED" xcodebuild-build.log
+          while [ ! -f "$RUNNER_TEMP/build.status" ]; do sleep 2; done
+          grep -E "error:|warning: .*(OpenBotShell|ios-shell)|BUILD (SUCCEEDED|FAILED)" xcodebuild-build.log || true
+          [ "$(cat "$RUNNER_TEMP/build.status")" = 0 ]
 
       - name: Build for testing (Release) and check what ships
         id: build-release
+        if: matrix.shard == 'real'
         timeout-minutes: 20
         run: |
           set -o pipefail
@@ -228,13 +278,17 @@ jobs:
             exit 1
           fi
           echo "no App Transport Security exception in the Release Info.plist"
-          debug_app="DerivedData/Build/Products/Debug-iphonesimulator/OpenBotShell.app"
-          /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "$debug_app/Info.plist" || echo "(no exception in Debug either)"
           echo "RELEASE_XCTESTRUN=$(ls DerivedDataRelease/Build/Products/*.xctestrun | head -1)" >> "$GITHUB_ENV"
+
+      - name: Wait for the simulator
+        run: |
+          for _ in $(seq 1 300); do [ -f "$RUNNER_TEMP/simulator.ready" ] && exit 0; sleep 1; done
+          cat "$RUNNER_TEMP/boot.log"
+          exit 1
 
       - name: Run the UI tests (Debug)
         if: always() && steps.build.outcome == 'success'
-        timeout-minutes: 55
+        timeout-minutes: 30
         env:
           # xcodebuild hands TEST_RUNNER_* to the test runner without the prefix. Empty: those tests skip.
           TEST_RUNNER_OPENBOT_SHELL_TEST_SESSION: ${{ secrets.OPENBOT_SHELL_TEST_SESSION }}
@@ -243,12 +297,16 @@ jobs:
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_TOTP_SECRET: ${{ secrets.OPENBOT_SHELL_GOOGLE_TOTP_SECRET }}
           TEST_RUNNER_OPENBOT_SHELL_RUN_GOOGLE: ${{ inputs.google_sign_in }}
           TEST_RUNNER_OPENBOT_SHELL_RUN_GOOGLE_WEBVIEW: ${{ inputs.google_sign_in_webview }}
-          REAL_BACKEND_ONLY: ${{ inputs.real_backend_only }}
         run: |
-          export TEST_RUNNER_OPENBOT_SHELL_LATE_STACK_TRIGGER="$LATE_STACK_TRIGGER"
-          only=()
-          if [ "$REAL_BACKEND_ONLY" = "true" ]; then only=(-only-testing:OpenBotShellUITests/RealBackendDebugUITests); fi
-          if [ "$DEVICE" = "ipad" ]; then only=(-skip-testing:OpenBotShellUITests/RealBackendDebugUITests); fi
+          export TEST_RUNNER_OPENBOT_SHELL_LATE_STACK_TRIGGER="${LATE_STACK_TRIGGER:-}"
+          t=OpenBotShellUITests
+          case "$SHARD" in
+            real) only=(-only-testing:$t/RealBackendDebugUITests -only-testing:$t/ShellUITests/testLoadsHostedWebApp) ;;
+            flow) only=(-only-testing:$t/ShellFlowUITests) ;;
+            edges) only=(-only-testing:$t/HardeningUITests -only-testing:$t/ShellUITests -only-testing:$t/DemoTourUITests/testDemoTour
+                         -only-testing:$t/HandoffConfigTests -only-testing:$t/ShellURLsTests
+                         -skip-testing:$t/ShellUITests/testLoadsHostedWebApp) ;;
+          esac
           set -o pipefail
           xcodebuild test-without-building "${only[@]}" \
             -project ios-shell/OpenBotShell.xcodeproj \
@@ -258,7 +316,6 @@ jobs:
             -derivedDataPath DerivedData \
             -resultBundlePath TestResults.xcresult \
             -parallel-testing-enabled NO \
-            -skip-testing:OpenBotShellUITests/RealBackendUITests \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee xcodebuild.log
 
@@ -275,7 +332,7 @@ jobs:
           fi
 
       - name: Run the real-backend suite on the Release build (a fresh install per test)
-        if: always() && steps.build-release.outcome == 'success' && env.DEVICE != 'ipad'
+        if: always() && matrix.shard == 'real' && steps.build-release.outcome == 'success'
         timeout-minutes: 30
         env:
           TEST_RUNNER_OPENBOT_SHELL_GOOGLE_EMAIL: ${{ secrets.OPENBOT_SHELL_GOOGLE_EMAIL }}
@@ -339,7 +396,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: ios-shell-shots-${{ github.run_id }}
+          name: ios-shell-shots-${{ github.run_id }}-${{ matrix.shard }}
           path: artifacts/shots/
           retention-days: 14
           if-no-files-found: warn
@@ -347,7 +404,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: ios-shell-${{ github.run_id }}
+          name: ios-shell-${{ github.run_id }}-${{ matrix.shard }}
           path: |
             artifacts/
             !artifacts/shots/
@@ -358,7 +415,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && env.HAS_PRIVATE == '1'
         with:
-          name: ios-shell-private-${{ github.run_id }}
+          name: ios-shell-private-${{ github.run_id }}-${{ matrix.shard }}
           path: private-artifacts/
           retention-days: 7
           if-no-files-found: ignore

@@ -203,12 +203,13 @@ APP_PORT=3011 SERVER_PORT=3002 bun app/serve.ts &                      # B: with
 
 `.github/workflows/ios-shell.yml` runs on pushes to `ios-webview-shell` that touch this folder,
 and by hand (inputs: the two Google sign-ins, `real_backend_only`, and `device: ipad`, which runs
-everything but the real-backend suites on an iPad simulator). It builds the web app, starts both mock stacks and the probe, boots an iPhone
-simulator, builds once (`build-for-testing`) and runs the UI tests (`test-without-building`). It
-uploads `ios-shell-shots-<run id>` (every screenshot as a small JPEG named `<test>--<moment>.jpg`,
-the text attachments, `SUMMARY.md`, `diagnostics.jsonl`), `ios-shell-<run id>` (everything else)
-and `ios-shell-video-<run id>`: a screen recording of `DemoTourUITests/testDemoTour`, a paced tour
-of the app against mock stack A, run on its own after the main suite.
+everything but the real-backend suites on an iPad simulator). It runs 3 jobs side by side, each
+building the app (cached DerivedData) and booting its own simulator: `real` (suite 1 and the
+Release and store build checks), `flow` (suite 2, against both mock stacks) and `edges` (the
+hardening tests, the probe, the demo tour and the unit tests). Each uploads
+`ios-shell-shots-<run id>-<job>` (every screenshot as a small JPEG named `<test>--<moment>.jpg`, the
+text attachments, `SUMMARY.md`, `diagnostics.jsonl`) and `ios-shell-<run id>-<job>` (everything
+else); a real account's screenshots go only to `ios-shell-private-<run id>-<job>`.
 
 Recordings come from `.github/workflows/ios-shell-video.yml` ("iOS shell video", about 10
 minutes): on every push it records the demo tour (public artifact `ios-shell-video-<run id>`) and
