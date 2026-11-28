@@ -260,6 +260,14 @@ function mockDataHandlers(): RequestHandler[] {
         },
       });
     }),
+    // Push is set up here, as on a server that offers it: the phone app's tests check that the
+    // page still offers no browser notifications inside the native shell.
+    http.get(`${API}/notification-transports`, () =>
+      HttpResponse.json({
+        notificationTransports: [{ id: "push", title: "Push notifications" }],
+        nextCursor: null,
+      }),
+    ),
     http.get(`${API}/conversations/:conversationId/refused-turns`, () =>
       HttpResponse.json({ refusedTurns: [], nextCursor: null }),
     ),

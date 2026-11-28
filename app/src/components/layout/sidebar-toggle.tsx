@@ -8,6 +8,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { sidebarToggleShown } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
 import { useSidebarPanelAvailable } from "./sidebar-shell";
@@ -130,11 +131,17 @@ export function SidebarToggleBar({ children }: { children?: ReactNode }) {
   /*
    * With no sidebar at all (the phone app's native shell, `components/layout/native-shell-frame.tsx`)
    * there is no toggle to keep a place for, so no band: only what the screen put at its end, and
-   * nothing when that draws nothing (`empty:hidden`).
+   * nothing when that draws nothing (`empty:hidden`). In the shell its padding is `PageShell`'s
+   * column's, so Home's account button sits where Conversations and Bots put theirs.
    */
   if (!useOptionalSidebar()) {
     return children ? (
-      <div className="flex shrink-0 items-center justify-end gap-2 px-3 pt-2 empty:hidden">
+      <div
+        className={cn(
+          "flex shrink-0 items-center justify-end gap-2 empty:hidden",
+          nativeShell() ? "px-4 pt-6" : "px-3 pt-2",
+        )}
+      >
         {children}
       </div>
     ) : null;

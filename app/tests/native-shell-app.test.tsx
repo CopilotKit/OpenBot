@@ -17,31 +17,46 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act, cleanup, render, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { NativeSignedOut } from "@/components/auth/native-signed-out";
 import { ShellAccountMenu } from "@/components/layout/native-shell-account";
 import { PageShell } from "@/components/layout/page-shell";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
+import {
+  NOTIFY_PROMPT_KEY,
+  NotifyPrompt,
+} from "@/components/notifications/notify-prompt";
 import { useDesktopOpenRequests } from "@/lib/desktop/open-requests";
 import {
   forgetReadyForTests,
   useNativeShellRouteReports,
 } from "@/lib/native-shell/route-reports";
 import { forgetNativeShellForTests } from "@/lib/native-shell/shell";
-import { notificationPermission } from "@/lib/notifications/permission";
+import {
+  notificationPermission,
+  refreshNotificationPermission,
+} from "@/lib/notifications/permission";
 import { webPushSupport } from "@/lib/web-push/browser";
+import { queryClient } from "@/query-client";
 import { Route as AppRoute } from "@/routes/_authed/_app";
 import { Route as ConversationsRoute } from "@/routes/_authed/_app/conversations";
 import { signsInNatively } from "@/routes/sign";
+import { ME_PATH, meBody } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import {
   CONVERSATIONS_PATH,
   conversationPage,
   TASKS_PATH,
 } from "./conversations-api";
-import { ME_PATH, meBody } from "./accounts-api";
-import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -267,6 +282,24 @@ describe("the frame", () => {
     ).toBeTruthy();
   });
 
+  test("in the shell, the account button and its menu's rows are a thumb's size", async () => {
+    inShell(true);
+    serve([]);
+    const { view } = renderApp("/");
+    await view.findByRole("heading", { name: "Home" });
+    const account = view.getByRole("button", { name: "Account" });
+    // 44px square, the whole tap target iOS asks for, round a 36px avatar.
+    expect(account.className).toContain("size-11");
+    expect(account.querySelector(".size-9")).not.toBeNull();
+    await userEvent
+      .setup({ document: view.container.ownerDocument })
+      .click(account);
+    const settings = await within(document.body).findByRole("menuitem", {
+      name: "Settings",
+    });
+    expect(settings.className).toContain("py-3");
+  });
+
   test("in a browser, the sidebar is there as before", async () => {
     inShell(false);
     serve([]);
@@ -422,10 +455,145 @@ describe("signed out in the shell", () => {
   });
 });
 
+describe("the keyboard in the shell", () => {
+  /** A field outside the pages, so it is still there after a move and only the shell can blur it. */
+  function focusedField() {
+    const field = document.createElement("input");
+    field.type = "text";
+    document.body.append(field);
+    field.focus();
+    expect(document.activeElement).toBe(field);
+    return field;
+  }
+
+  test("moving to another page puts the keyboard away; a change of search alone does not", async () => {
+    inShell(true);
+    serve([]);
+    const { view, router } = renderApp("/");
+    await view.findByRole("heading", { name: "Home" });
+    const field = focusedField();
+    try {
+      await act(() =>
+        router.navigate({ to: "/", search: { q: "x" } as never }),
+      );
+      expect(document.activeElement).toBe(field);
+      await act(() => router.navigate({ to: "/bots" }));
+      await view.findByRole("heading", { name: "Bots" });
+      expect(document.activeElement).not.toBe(field);
+    } finally {
+      field.remove();
+    }
+  });
+
+  test("opening the Account menu takes the focus off a field", async () => {
+    inShell(true);
+    serve([]);
+    const { view } = renderApp("/");
+    await view.findByRole("heading", { name: "Home" });
+    const field = focusedField();
+    try {
+      // A click alone, which moves no focus itself: what moves it is the menu opening.
+      fireEvent.click(view.getByRole("button", { name: "Account" }));
+      await within(document.body).findByRole("menuitem", { name: "Settings" });
+      await waitFor(() => expect(document.activeElement).not.toBe(field));
+    } finally {
+      field.remove();
+    }
+  });
+
+  test("a tap on a part of the page that does nothing puts the keyboard away; a tap on a button keeps it", async () => {
+    inShell(true);
+    serve([]);
+    const { view } = renderApp("/");
+    const heading = await view.findByRole("heading", { name: "Home" });
+    const field = focusedField();
+    const tap = (target: Element) => {
+      fireEvent.pointerDown(target, { clientX: 20, clientY: 20 });
+      fireEvent.pointerUp(target, { clientX: 22, clientY: 21 });
+    };
+    try {
+      tap(view.getByRole("button", { name: "Account" }));
+      expect(document.activeElement).toBe(field);
+      // A drag that scrolls is cancelled by the browser, not a tap.
+      fireEvent.pointerDown(heading, { clientX: 20, clientY: 20 });
+      fireEvent.pointerCancel(heading);
+      fireEvent.pointerUp(heading, { clientX: 20, clientY: 200 });
+      expect(document.activeElement).toBe(field);
+      tap(heading);
+      expect(document.activeElement).not.toBe(field);
+    } finally {
+      field.remove();
+    }
+  });
+
+  test("outside the shell the page leaves the keyboard alone", async () => {
+    serve([]);
+    const { view } = renderApp("/");
+    const heading = await view.findByRole("heading", { name: "Home" });
+    const field = focusedField();
+    try {
+      fireEvent.pointerDown(heading, { clientX: 20, clientY: 20 });
+      fireEvent.pointerUp(heading, { clientX: 20, clientY: 20 });
+      expect(document.activeElement).toBe(field);
+    } finally {
+      field.remove();
+    }
+  });
+});
+
 describe("what makes no sense in the shell", () => {
   test("no Home Screen push and no notifications of the page's own", () => {
     inShell(true);
     expect(webPushSupport()).toBe("unsupported");
     expect(notificationPermission()).toBe("unsupported");
+  });
+
+  /*
+   * A browser with push, as Chrome is: a service worker, the Push API and notifications not yet
+   * asked. The conversation's offer shows there, so the shell's half proves something.
+   */
+  function pushAvailable() {
+    const page = window as unknown as Record<string, unknown>;
+    page.PushManager = class {};
+    page.Notification = { permission: "default" };
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: { getRegistration: async () => undefined },
+    });
+    return () => {
+      delete page.PushManager;
+      delete page.Notification;
+      delete (navigator as unknown as Record<string, unknown>).serviceWorker;
+    };
+  }
+
+  test("a conversation offers notifications in a browser with push, and never in the shell", async () => {
+    const restore = pushAvailable();
+    try {
+      localStorage.removeItem(NOTIFY_PROMPT_KEY);
+      for (const shell of [false, true]) {
+        inShell(shell);
+        refreshNotificationPermission();
+        const view = render(
+          <QueryClientProvider client={queryClient}>
+            <NotifyPrompt />
+          </QueryClientProvider>,
+        );
+        if (shell) {
+          await settleReactWork();
+          expect(view.queryByText("Enable notifications")).toBeNull();
+          expect(
+            view.container.querySelector("[data-notify-prompt]"),
+          ).toBeNull();
+        } else {
+          expect(await view.findByText("Enable notifications")).toBeTruthy();
+        }
+        cleanup();
+        queryClient.clear();
+      }
+    } finally {
+      restore();
+      refreshNotificationPermission();
+    }
   });
 });

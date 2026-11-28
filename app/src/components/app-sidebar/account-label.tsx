@@ -19,7 +19,7 @@ import { OpenBotVersion } from "../layout/openbot-version";
 /** The version's type beside the account, in the menu's row and on the strip: tiny and quiet. */
 const versionClassName = "text-[10px] leading-3 text-muted-foreground";
 
-function UserAvatar() {
+function UserAvatar({ large = false }: { large?: boolean }) {
   const { data: currentUser } = useQuery(currentUserQueryOptions());
   const initials =
     currentUser?.name
@@ -32,7 +32,10 @@ function UserAvatar() {
   return (
     <div
       aria-hidden="true"
-      className="size-[28px] shrink-0 bg-muted-foreground/10 text-foreground/70 rounded-full flex items-center justify-center text-xs overflow-hidden"
+      className={cn(
+        "size-[28px] shrink-0 bg-muted-foreground/10 text-foreground/70 rounded-full flex items-center justify-center text-xs overflow-hidden",
+        large && "size-9 text-sm",
+      )}
     >
       {initials}
     </div>
@@ -104,6 +107,8 @@ export const accountMenuClassName =
   "w-max min-w-(--anchor-width) max-w-[min(24rem,var(--available-width))] p-1.5";
 /** The spacing of each of the account menu's rows. */
 export const accountMenuItemClassName = "gap-2 px-2 py-1.5";
+/** The same rows at a thumb's height, 44px, for the phone app's native shell. */
+export const largeAccountMenuItemClassName = "gap-2 px-2 py-3";
 
 /**
  * The account, as the strip draws it: the person's avatar at the strip's foot, a button that opens
@@ -114,6 +119,7 @@ export const accountMenuItemClassName = "gap-2 px-2 py-1.5";
 export function AccountMenu({
   children,
   label,
+  large = false,
   side = "right",
 }: {
   children: ReactNode;
@@ -122,6 +128,11 @@ export function AccountMenu({
    * so its tests find it whoever is signed in.
    */
   label?: string;
+  /**
+   * A thumb's size: the phone app's native shell draws the button 44px square, a whole tap target,
+   * round a 36px avatar.
+   */
+  large?: boolean;
   /** Where the tooltip opens: beside the strip, or below a page's header. */
   side?: "right" | "bottom";
 }) {
@@ -134,11 +145,15 @@ export function AccountMenu({
           render={
             <DropdownMenuTrigger
               aria-label={label}
-              className={cn(stripItemClassName, "rounded-full")}
+              className={cn(
+                stripItemClassName,
+                "rounded-full",
+                large && "size-11",
+              )}
             />
           }
         >
-          <UserAvatar />
+          <UserAvatar large={large} />
           {/* Read out as the button's name: whose account, and the organization being worked in. */}
           <span className="sr-only">
             {organization ? `${person}, ${organization}` : person}
