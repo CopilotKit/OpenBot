@@ -374,6 +374,12 @@ abstract class ShellTestBase {
                             target.scrollIntoView({block: 'nearest', behavior: 'instant'});
                             return 'moving';
                           }
+                          // The menu is positioned and animated after it is mounted. A point from
+                          // its first frame can belong to a different row when Android taps it.
+                          for (let ancestor = target; ancestor && ancestor !== document.body; ancestor = ancestor.parentElement) {
+                            if (ancestor.getAnimations().some(a => a.playState === 'running' &&
+                                a.effect?.getComputedTiming().endTime < Infinity)) return 'moving';
+                          }
                           if (!target.contains(document.elementFromPoint(x, y))) return 'moving';
                           return JSON.stringify({x: x * devicePixelRatio, y: y * devicePixelRatio});
                         })(${org.json.JSONObject.quote(text)}, ${org.json.JSONObject.quote(cssSelector)})

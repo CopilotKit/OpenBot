@@ -123,10 +123,11 @@ jobs:
         timeout-minutes: 4
         env:
           ANIMATOR_SCALE: "1"
-          # The host-side software renderer for the recordings: smooth enough to type and scroll
-          # on camera. The test workflow keeps the guest renderer, which never froze.
-          GPU_MODE: swiftshader_indirect
-        run: android-shell/ci/emulator.sh all
+        run: |
+          android-shell/ci/emulator.sh all
+          # Preserve the handset layout at 411 dp while reducing the guest's video encoding load.
+          adb shell wm size 720x1600
+          adb shell wm density 280
 
       - name: Install the apps
         run: |
@@ -138,11 +139,11 @@ jobs:
 
       - name: Record the demo tour
         if: env.WHICH != 'real'
-        timeout-minutes: 4
+        timeout-minutes: 6
         env:
           RUN_MODE: video
           VIDEO_PLAN: demo
-          PER_TEST_SECONDS: "170"
+          PER_TEST_SECONDS: "210"
         run: python3 android-shell/ci/run_tests.py "$ARTIFACTS" "$PRIVATE_ARTIFACTS" "$GITHUB_WORKSPACE"
 
       - name: Record the real-backend journey (private)

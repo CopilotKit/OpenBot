@@ -130,14 +130,16 @@ class Recorder:
         self.stop_flag = threading.Event()
         self.segments = []
         self.thread = threading.Thread(target=self.run, daemon=True)
-        self.started = time.time()
+        self.started = 0.0
 
     def start(self):
+        print(f"  preparing Android screen recording {self.name}", flush=True)
         adb("shell", "rm -f /data/local/tmp/rec-*.mp4")
         # A clean home screen in the first frame: no launcher menu, no shade.
         adb("shell", "input keyevent KEYCODE_HOME")
         adb("shell", "am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS")
         time.sleep(2)
+        self.started = time.time()
         self.thread.start()
         time.sleep(2)
 
@@ -146,21 +148,25 @@ class Recorder:
         while not self.stop_flag.is_set():
             path = f"/data/local/tmp/rec-{index:02d}.mp4"
             self.segments.append(path)
-            subprocess.run(["adb", "shell", "screenrecord", "--bit-rate", "6000000", "--time-limit", "170", path],
-                           capture_output=True, text=True)
+            result = subprocess.run(["adb", "shell", "screenrecord", "--bit-rate", "4000000", "--time-limit", "170", path],
+                                    capture_output=True)
+            if result.returncode and not self.stop_flag.is_set():
+                print(f"  screenrecord exited with status {result.returncode}", flush=True)
+                return
             index += 1
 
     def stop(self, dest_dir):
         self.stop_flag.set()
         time.sleep(1)
-        adb("shell", "pkill -INT screenrecord")
-        self.thread.join(timeout=30)
+        adb("shell", "pkill -INT screenrecord", timeout=10)
+        self.thread.join(timeout=10)
         time.sleep(2)
         os.makedirs(dest_dir, exist_ok=True)
         local = []
+        print(f"  retrieving {len(self.segments)} screen recording segment(s)", flush=True)
         for segment in self.segments:
             target = os.path.join(dest_dir, os.path.basename(segment))
-            if adb("pull", segment, target, timeout=300).returncode == 0 and os.path.getsize(target) > 0:
+            if adb("pull", segment, target, timeout=25).returncode == 0 and os.path.getsize(target) > 0:
                 local.append(target)
         dest = os.path.join(dest_dir, self.name)
         if len(local) == 1:
@@ -312,8 +318,9 @@ def run_one(test_id, results, logs):
         extra += ["-e", "late_stack", "1"]
         late = LateStack()
         late.thread.start()
-    adb("logcat", "-c")
-    adb("shell", "rm -rf /data/local/tmp/openbot-shots")
+    print(f"  starting {test_id}", flush=True)
+    adb("logcat", "-c", timeout=10)
+    adb("shell", "rm -rf /data/local/tmp/openbot-shots", timeout=10)
     started = time.time()
     command = "am instrument -w -r -e class " + PACKAGE + test_id + " " + " ".join(extra) + " " + RUNNER
     try:
@@ -343,11 +350,7 @@ def run_one(test_id, results, logs):
         message = re.sub(r"^org\.junit\.AssumptionViolatedException: ", "", stack.splitlines()[0])
     # Evidence: logcat and screenshots, private tests apart.
     target = private if is_private(test_id) else artifacts
-    try:
-        log = adb("logcat", "-d", "-v", "threadtime", timeout=300).stdout
-    except subprocess.TimeoutExpired:
-        log = ""
-        print("    logcat did not answer in 5 minutes", flush=True)
+    log = adb("logcat", "-d", "-v", "threadtime", timeout=25).stdout
     for value in SECRET_ARGS.values():
         if value:
             log = log.replace(value, "***")
@@ -363,7 +366,7 @@ def run_one(test_id, results, logs):
     probe = [re.sub(r"^.*?SHELL_PROBE\s*:\s*", "", line) for line in kept if "SHELL_PROBE" in line]
     raw = os.path.join(target, "raw-shots")
     os.makedirs(raw, exist_ok=True)
-    adb("pull", "/data/local/tmp/openbot-shots/.", raw, timeout=300)
+    adb("pull", "/data/local/tmp/openbot-shots/.", raw, timeout=25)
     with open(os.path.join(target, "instrument.log"), "a") as f:
         f.write(f"===== {test_id} ({seconds} s) =====\n{out}\n")
     variant = "releaseTest" if test_id.startswith("RealBackendReleaseTest") else "debug"
@@ -387,6 +390,7 @@ def main():
     os.makedirs(artifacts, exist_ok=True)
     os.makedirs(private, exist_ok=True)
     if MODE == "video":
+        print("  checking the Android emulator for recording", flush=True)
         ensure_emulator()
         plan = []
         # The demo (mock, deterministic) first, then the real journey.
