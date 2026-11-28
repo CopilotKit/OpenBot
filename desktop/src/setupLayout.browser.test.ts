@@ -1943,7 +1943,6 @@ const PROVIDERS = [
   "Anthropic",
   "Google Gemini",
   "xAI",
-  "Unbiased AI",
   "TrustedRouter",
   "Any OpenAI-compatible endpoint",
 ];

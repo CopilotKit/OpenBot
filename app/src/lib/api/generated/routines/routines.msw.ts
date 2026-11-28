@@ -7,9 +7,11 @@ import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 import type {
   CreateRoutineRequest,
   RoutinePage,
+  RoutineReading,
   RoutineResponse,
   RoutineRunAccepted,
   RoutineRunPage,
+  RoutineSentence,
   RoutineSwitch,
   UpdateRoutineRequest,
 } from "../model";
@@ -60,6 +62,21 @@ export const getCreateRoutineResponseMock = (): RoutineResponse => ({
     lastRun: { status: "succeeded", at: "2026-11-13T14:00:41.000Z" },
     goalId: null,
     createdAt: "2026-11-02T16:21:09.000Z",
+  },
+});
+
+export const getReadRoutineSentenceResponseMock = (): RoutineReading => ({
+  outcome: "ready",
+  draft: {
+    does: "act",
+    instruction: "Summarize my unread mail.",
+    title: "Morning mail summary",
+    starts: "schedule",
+    cron: "0 9 * * 1-5",
+    timezone: "America/New_York",
+    doneWhen: "",
+    conversationId: null,
+    intervalMinutes: null,
   },
 });
 
@@ -163,6 +180,36 @@ export const getCreateRoutineMockHandler = (
             : overrideResponse
           : getCreateRoutineResponseMock(),
         { status: 201 },
+      );
+    },
+    options,
+  );
+};
+
+export const getReadRoutineSentenceMockHandler = (
+  overrideResponse?:
+    | RoutineReading
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string }, RoutineSentence>
+        >[0],
+      ) => Promise<RoutineReading> | RoutineReading),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ organizationId: string }, RoutineSentence>(
+    "*/api/v2/organizations/:organizationId/routines/read",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string }, RoutineSentence>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReadRoutineSentenceResponseMock(),
+        { status: 200 },
       );
     },
     options,
@@ -357,6 +404,7 @@ export const getListRoutineRunsMockHandler = (
 export const getRoutinesMock = () => [
   getListRoutinesMockHandler(),
   getCreateRoutineMockHandler(),
+  getReadRoutineSentenceMockHandler(),
   getUpdateRoutineMockHandler(),
   getDeleteRoutineMockHandler(),
   getPauseRoutineMockHandler(),

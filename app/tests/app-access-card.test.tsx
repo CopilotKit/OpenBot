@@ -299,8 +299,8 @@ test.each([
 
 /*
  * APPS OPEN. Nobody asks an admin for an app nobody has added, or for one open to Bot owners: the
- * Bot's owner connects it and gives it to their Bot in one press, and anybody else connects it for
- * themselves and is told the owner gives it.
+ * Bot's owner connects it and gives it to their Bot in one press. Anybody else is told only the
+ * owner or an admin can give it, and asks with Request access.
  */
 describe("apps open", () => {
   // The tab a press claims for a sign-in, which goes nowhere here.
@@ -394,17 +394,26 @@ describe("apps open", () => {
     );
   });
 
-  test("anybody else: Connect adds it and connects their own account, and the owner gives it", async () => {
+  /*
+   * FOUND IN DOGFOODING: "Connect it, and this Bot's owner can give it to the Bot". A member did, on
+   * a shared Bot he could only view, and the Bot still didn't have it. The card says first who can
+   * give it, and Request access asks; his own Connect is beside it, said to be his.
+   */
+  test("anybody else: told only the owner or an admin can give it, Request access asks, and Connect is only their own account", async () => {
     const sent = servingOpen(notAdded, false);
     const view = mount(
       <AppAccessCard prompt={prompt({ reason: "access", message: "" })} />,
     );
     const press = await view.findByRole("button", { name: "Connect Gmail" });
-    expect((await card(view)).textContent).toContain(
-      "Gmail isn't connected yet. Connect it, and this Bot's owner can give it to the Bot.",
+    expect(
+      await view.findByRole("button", { name: "Request access to Gmail" }),
+    ).toBeTruthy();
+    await waitFor(async () =>
+      expect((await card(view)).textContent).toContain(
+        "Only Expenses's owner or an admin can give it Gmail. Request access to ask for it. You can connect your own account now too.",
+      ),
     );
-    expect(view.container.textContent).not.toMatch(/admin/i);
-    expect(view.queryByRole("button", { name: /Request access/ })).toBeNull();
+    expect(view.container.textContent).not.toMatch(/owner can give it to/);
     fireEvent.click(press);
     await waitFor(() =>
       expect(
@@ -419,8 +428,12 @@ describe("apps open", () => {
     );
   });
 
-  test("an app open to owners on somebody else's Bot: its owner can give it, with nothing to request", async () => {
-    servingOpen(
+  /*
+   * FOUND IN DOGFOODING: connected, and still "This Bot hasn't been given Gmail. Its owner can give
+   * it." with nothing to press, on a shared Bot whose owner the member couldn't reach from here.
+   */
+  test("an app open to owners on somebody else's Bot: only its owner or an admin can give it, and Request access asks for it", async () => {
+    const sent = servingOpen(
       appAccess({
         state: "not_granted",
         granted: false,
@@ -434,10 +447,23 @@ describe("apps open", () => {
     );
     await waitFor(async () =>
       expect((await card(view)).textContent).toContain(
-        "This Bot hasn't been given Gmail. Its owner can give it.",
+        "Only Expenses's owner or an admin can give it Gmail. Request access to ask for it.",
       ),
     );
-    expect(view.queryByRole("button")).toBeNull();
+    const ask = await view.findByRole("button", {
+      name: "Request access to Gmail",
+    });
+    // His account is connected: nothing of his own to connect.
+    expect(view.queryByRole("button", { name: "Connect Gmail" })).toBeNull();
+    fireEvent.click(ask);
+    await waitFor(() =>
+      expect(
+        sent.find(
+          (call) =>
+            call.method === "POST" && call.url === APP_ACCESS_REQUESTS_PATH,
+        )?.body,
+      ).toEqual({ botId: "expenses", appId: "composio-gmail" }),
+    );
   });
 
   test("an app an admin kept to admins still asks an admin, open or not", async () => {

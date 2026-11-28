@@ -402,6 +402,7 @@ function GroupLine({
               <BubbleContent className="w-full">
                 <BotMarkdown
                   components={markdownComponents}
+                  files={message.files}
                   plugins={markdownPlugins}
                   remarkPlugins={replyRemarkPlugins}
                 >

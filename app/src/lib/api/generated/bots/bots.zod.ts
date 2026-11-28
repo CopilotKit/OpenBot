@@ -89,6 +89,12 @@ export const ListBotsResponse = zod.object({
           .describe(
             "Whether it comes with OpenBot rather than belonging to a person.",
           ),
+        ownerless: zod
+          .boolean()
+          .optional()
+          .describe(
+            "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
+          ),
         packageBotId: zod
           .string()
           .nullish()
@@ -363,6 +369,12 @@ export const CreateBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
+        ),
       packageBotId: zod
         .string()
         .nullish()
@@ -517,6 +529,12 @@ export const GetBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
         ),
       packageBotId: zod
         .string()
@@ -801,6 +819,12 @@ export const UpdateBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
         ),
       packageBotId: zod
         .string()
@@ -1099,6 +1123,12 @@ export const DuplicateBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
+        ),
       packageBotId: zod
         .string()
         .nullish()
@@ -1265,6 +1295,12 @@ export const HideBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
         ),
       packageBotId: zod
         .string()
@@ -1433,6 +1469,12 @@ export const UnhideBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
+        ),
       packageBotId: zod
         .string()
         .nullish()
@@ -1600,6 +1642,12 @@ export const PinBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
+        ),
       packageBotId: zod
         .string()
         .nullish()
@@ -1766,6 +1814,12 @@ export const UnpinBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
         ),
       packageBotId: zod
         .string()
@@ -1975,6 +2029,12 @@ export const RevokeBotCallbackTokenResponse = zod.object({
         .boolean()
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      ownerless: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether nobody owns it, as with a Bot OpenBot made for everyone in the organization. Only an admin can give such a Bot apps. Absent or false for a Bot a person owns. Never accepted when a Bot is created or changed.",
         ),
       packageBotId: zod
         .string()

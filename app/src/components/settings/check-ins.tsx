@@ -10,7 +10,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
-import { unavailableSaid, failureSaid } from "@/lib/load-failure";
+import { failureSaid, unavailableSaid } from "@/lib/load-failure";
 import { proactiveAllowedQueryOptions } from "@/lib/proactive";
 import {
   saveUserPreferencesMutationOptions,
@@ -19,14 +19,14 @@ import {
 import { queryClient } from "@/query-client";
 
 /**
- * The person's own switch for every one of their Bots' check-ins at once, under the Routines list
- * in Settings. Off stops every Bot's background checks for them before any model call; each Bot's
- * own check-in is kept, so turning this back on restores them as they were.
+ * The person's own switch for every one of their Bots' check-ins at once, the first section of
+ * Settings → Notifications. Off stops every Bot's background checks for them before any model
+ * call; each Bot's own check-in is kept, so turning this back on restores them as they were.
  *
  * When an admin turned check-ins off for this person, the switch is off and cannot be changed, and
  * says who turned it off. Their own choice is kept underneath for when the admin turns it back on.
  *
- * No section heading: the page is Routines, and a check-in is one kind of routine on it.
+ * Drawn as a row of its own under a "Check-ins" heading, like the page's other sections.
  */
 export function CheckInsSection() {
   const preferences = useUserPreferences();
@@ -40,8 +40,13 @@ export function CheckInsSection() {
     preferences.data?.proactive;
   const byAdmin = allowed.data === false;
   const on = chosen === "on" && !byAdmin;
+  const failed = save.error ? (
+    <p className="mt-4 text-destructive text-sm" role="alert">
+      {failureSaid(save.error)}
+    </p>
+  ) : null;
   return (
-    <PageSection>
+    <PageSection title="Check-ins">
       {preferences.isPending ? null : preferences.error ? (
         // OpenBot saying why it isn't answering is said once, by the list above, for the whole page.
         unavailableSaid(preferences.error) ? null : (
@@ -78,11 +83,7 @@ export function CheckInsSection() {
           </Item>
         </PageRows>
       )}
-      {save.error ? (
-        <p className="mt-4 text-destructive text-sm" role="alert">
-          {failureSaid(save.error)}
-        </p>
-      ) : null}
+      {failed}
     </PageSection>
   );
 }

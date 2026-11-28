@@ -68,11 +68,12 @@ export function checkInSubject(
 
 /**
  * What the form's answers make. TanStack Form hands `onSubmit` the raw values, not zod's trimmed
- * output, so the text answers are trimmed here.
+ * output, so the text answers are trimmed here. A `cron` given is used in place of the form's own.
  */
 export function planRoutine(
   values: RoutineFormValues,
   timezone: string,
+  cron?: string,
 ): RoutinePlan {
   const { agentId, channelId } = values;
   const instruction = values.instruction.trim();
@@ -100,7 +101,7 @@ export function planRoutine(
         conversationId: channelId,
         instruction,
         ...(title ? { title } : {}),
-        cron: cronFrom(values),
+        cron: cron ?? cronFrom(values),
         timezone,
       },
     };
@@ -122,7 +123,7 @@ export function planRoutine(
     return {
       kind: "goal",
       goal: { ...goal, subscriptions: [], recurring: false, endsWhenMet: true },
-      schedule: { cron: cronFrom(values), timezone },
+      schedule: { cron: cron ?? cronFrom(values), timezone },
       runNow: false,
     };
   }

@@ -421,7 +421,7 @@ pub fn keep_moved_choice<R: tauri::Runtime>(
     address: &str,
     organization: &str,
 ) -> Result<(), Problem> {
-    let mut moved = choice::signed_in_at(&chosen(app), address);
+    let mut moved = choice::signed_in_at(address);
     moved.organization_id =
         Some(organization.to_owned()).filter(|id| choice::valid_organization(id));
     keep(app, &moved)?;
@@ -614,8 +614,9 @@ fn connect_now<R: tauri::Runtime>(
         let _ = session.sign_out(keep_browser);
         return Err(problem);
     }
-    // The organisation picked at this address before, through a sign-out; none at a new address.
-    let chosen = choice::signed_in_at(&chosen(app), &address);
+    // No organisation named: the app works in the one the person picked as they signed in, which
+    // the token keeps, until they pick another in the switcher.
+    let chosen = choice::signed_in_at(&address);
     let shown = show(app, session.clone(), chosen.organization_id.as_deref(), "/")
         .and_then(|()| keep(app, &chosen));
     if shown.is_err() {
@@ -802,9 +803,8 @@ fn forget_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, origin: &str) {
 }
 
 /// Sign out of the OpenBot on record: revoked there as far as it answers, forgotten here, and the
-/// relay stopped. The address stays, and so does the organisation picked there: a token remembers
-/// nothing, so this is what lets the next sign-in at that address go on where the person left off.
-/// It goes only with a new address (`choice::signed_in_at`) and back on this computer.
+/// relay stopped. The address stays. The next sign-in names no organisation: it works in the one
+/// the person picks as they sign in (`choice::signed_in_at`).
 ///
 /// Then, when the OpenBot publishes where a browser ends its session there, the person's browser
 /// is sent there, the same browser the sign-in went through (`open_in_browser`): it stays signed in

@@ -1128,7 +1128,7 @@ export const GetPersonalAiConnectionResponse = zod
           ),
       )
       .describe(
-        "The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), an xAI sign-in, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.",
+        "The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), and an xAI sign-in, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.",
       ),
   })
   .describe(
@@ -1402,7 +1402,7 @@ export const ReplacePersonalAiConnectionResponse = zod
           ),
       )
       .describe(
-        "The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), an xAI sign-in, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.",
+        "The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), and an xAI sign-in, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.",
       ),
   })
   .describe(
@@ -1609,7 +1609,7 @@ export const DeletePersonalAiConnectionResponse = zod
           ),
       )
       .describe(
-        "The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), an xAI sign-in, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.",
+        "The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), and an xAI sign-in, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.",
       ),
   })
   .describe(
@@ -1617,7 +1617,7 @@ export const DeletePersonalAiConnectionResponse = zod
   );
 
 /**
- * Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the person approves, copies the code Claude's page shows them or the address ChatGPT sends their browser to, and sends it back with finishPersonalAiSignIn. Inside OpenBot Desktop nobody copies anything: Desktop listens on the person's own computer for the provider's redirect and the app sends what arrives with finishPersonalAiSignIn. For Claude, loopbackPort names the port Desktop listens on; ChatGPT's browser sign-in always redirects to localhost:1455. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login plan), or an xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true. Google is refused: Gemini connects with an API key only.
+ * Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the person approves, copies the code Claude's page shows them or the address ChatGPT sends their browser to, and sends it back with finishPersonalAiSignIn. Inside OpenBot Desktop nobody copies anything: Desktop listens on the person's own computer for the provider's redirect and the app sends what arrives with finishPersonalAiSignIn. For Claude, loopbackPort names the port Desktop listens on; ChatGPT's browser sign-in always redirects to localhost:1455. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: a Claude or ChatGPT plan's sign-in (connect with login plan), or an xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true. Google is refused: Gemini connects with an API key only.
  * @summary Start signing in to an AI provider
  */
 
@@ -2409,7 +2409,7 @@ export const MakeAiConnectionDefaultResponse = zod
   .describe("One AI connection in a list. Never a key.");
 
 /**
- * Start a sign-in to an AI provider that the server runs itself, for the organization, for a provider listAiConnections names in signIns. It works as startPersonalAiSignIn does, and what the provider hands back is kept for the organization: connect it with connectAiConnection and login plan or oauth (or useSavedKey for an Unbiased AI key). The server renews it itself. Offered on OpenBot Cloud and a self-hosted OpenBot; OpenBot Desktop running its own OpenBot keeps its own plan sign-in and offers none here. Only an administrator of the organization may sign in for it.
+ * Start a sign-in to an AI provider that the server runs itself, for the organization, for a provider listAiConnections names in signIns. It works as startPersonalAiSignIn does, and what the provider hands back is kept for the organization: connect it with connectAiConnection and login plan or oauth. The server renews it itself. Offered on OpenBot Cloud and a self-hosted OpenBot; OpenBot Desktop running its own OpenBot keeps its own plan sign-in and offers none here. Only an administrator of the organization may sign in for it.
  * @summary Start signing in to an AI provider for the organization
  */
 

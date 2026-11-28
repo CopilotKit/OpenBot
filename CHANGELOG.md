@@ -11,6 +11,40 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Confirming a character with an input method editor no longer submits a free-text answer to a
   Bot question.
 
+- **Unbiased AI is no longer an AI provider choice.** OpenBot Desktop's setup, Settings and Admin
+  AI providers, Connect another AI, and the conversation and Bot model pickers no longer offer it,
+  and OpenBot Desktop's Sign in with Unbiased AI is gone. Settings saved for it and the model shown
+  on an existing conversation stay readable, but it can't be picked again. The API still names
+  `unbiased` as a provider, so a released client keeps working; only its examples changed.
+
+- **The app opens and changes page faster, and holds still.** The checks before every page are
+  asked together and the page's code downloads while they run, so Home is ready about a third
+  sooner on a real network; somebody signed in last time sees the app's frame at once instead of a
+  blank page. Resting the pointer on a link loads its page, so the click shows it finished, and a
+  page change keeps the old page up for a moment instead of cutting to a skeleton, with a short
+  fade (none when less motion is asked for). Home's heading and box no longer move as the page
+  fills in, and Home scrolls to every Explore card. A conversation shows its history at once while
+  it reconnects, instead of after, and reads it once instead of up to four times. "Back in a moment"
+  tries again at most once a second and stays up until the app is ready. No API or database change.
+
+- **Routines is one box.** Routines in the main menu opens on a box: say what a Bot should do and
+  when ("Every weekday at 9, send me yesterday's new leads"), naming the Bot with @, or leaving
+  OpenBot to pick it as Home does, and the Bot makes the routine, a goal on a schedule when you give
+  it an outcome, or a check-in when it should only tell you. The line under the box says when it
+  starts and offers Open and Undo, which takes back what was just made. If the sentence leaves out
+  when, which event, or says it is something to do once, the line says so and Finish opens New
+  routine with what it read. If it asks for what a routine can't do, such as more often than every
+  15 minutes, the line says why and keeps your sentence. Under the box your routines, goals and
+  check-ins are grouped by Bot, one line each with the one thing worth knowing: running now, what
+  went wrong, paused, or when it starts next. The New routine button on that page is gone, and so is
+  the check-ins switch: it is now Check-ins at the top of Settings → Notifications. Behind it,
+  `POST /api/v2/organizations/{organizationId}/routines/read` (`readRoutineSentence`) reads a
+  sentence as a routine's answers and writes nothing.
+
+- **A Bot's page shows its routines under For you.** What is running now and what starts next, up
+  to five, in the Routines page's words, with See all to the Bot's Routines. The Activity section
+  that listed them is gone; Activity is a row in For you.
+
 - **Bots on Gemini 3 no longer stop at their second tool step.** On a Gemini key, through OpenBot
   Cloud's AI connection or a key saved as Google's OpenAI-compatible endpoint, a Bot on the
   TypeScript LangGraph engine stopped partway through a task with Google's "Function call is missing
@@ -4746,7 +4780,7 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
   Unbiased AI's approval page in the browser, where a person signs in or creates an account, and
   OpenBot receives an API key for the `pareto` model on Unbiased AI's OpenAI-compatible gateway. The
   key is stored on this computer the way a typed endpoint key is, and an Unbiased AI API key can be
-  pasted instead. See [Model provider OAuth](desktop/PROVIDER_OAUTH.md#unbiased-ai).
+  pasted instead.
 
 ## 0.3.2
 
