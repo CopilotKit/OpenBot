@@ -186,7 +186,7 @@ jobs:
           MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3002 nohup bun app/workbench/mock-server.ts > artifacts/mock-b.log 2>&1 &
           APP_PORT=3011 SERVER_PORT=3002 nohup bun app/serve.ts > artifacts/app-b.log 2>&1 &
           # C: a "self-hosted" OpenBot on another port, with the hand-off (the self-hosted tests).
-          MOCK_SIGNED_OUT=1 SERVER_PORT=3003 nohup bun app/workbench/mock-server.ts > artifacts/mock-c.log 2>&1 &
+          MOCK_PERSON_NAME="Dana Okafor" MOCK_ORG_NAME="Okafor Labs" MOCK_SIGNED_OUT=1 SERVER_PORT=3003 nohup bun app/workbench/mock-server.ts > artifacts/mock-c.log 2>&1 &
           APP_PORT=3014 SERVER_PORT=3003 nohup bun app/serve.ts > artifacts/app-c.log 2>&1 &
           challenge="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
           for _ in $(seq 1 60); do
