@@ -78,8 +78,10 @@ final class DemoTourUITests: ShellTestCase {
         pause(1.2)
         link.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 30), "demo: no tabs after signing in")
-        let composer = app.webViews.textViews.firstMatch
+        let composer = app.webViews.textViews["Message"].firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
+        let skeleton = app.descendants(matching: .any)["loading-skeleton"]
+        XCTAssertTrue(skeleton.waitForNonExistence(timeout: 20), "demo: the Home loading screen stayed visible")
         pause(1.2)
         scene("sign-in")
 

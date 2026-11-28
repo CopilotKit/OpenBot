@@ -63,8 +63,17 @@ class ShellTestCase: XCTestCase {
 
     /// A first-use typing lesson can occupy the keyboard's frame without showing any keys.
     func focusComposerForTyping(_ composer: XCUIElement, in app: XCUIApplication) {
-        composer.tap()
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            composer.exists && composer.isEnabled && composer.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed, "the text field did not become available")
+        // Hit the writing line. The middle of an empty multiline contenteditable can be padding.
+        let writingLine = composer.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.25))
+        writingLine.tap()
         let keyboard = app.keyboards.firstMatch
+        if !keyboard.waitForExistence(timeout: 5), composer.isHittable {
+            writingLine.tap()
+        }
         XCTAssertTrue(keyboard.waitForExistence(timeout: 8), "the software keyboard did not appear")
         let lesson = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "speed up your typing")).firstMatch
         let keyboardContinue = app.keyboards.buttons["Continue"].firstMatch
