@@ -113,4 +113,39 @@ class HardeningTest : ShellTestBase() {
         note("commits before $commitsBefore, after ${stateValue("commits")}")
         screenshot("2-recovered")
     }
+
+    /**
+     * The status bar: visible, and drawn with dark icons on the light first screen and on Home
+     * (light-bars appearance). Notes what the window and SystemUI report, for runs where the
+     * screenshots show no clock.
+     */
+    @Test
+    fun testStatusBarIconsOnLightScreens() {
+        launch(MOCK_A, "status-bar")
+        check(waitFor("sign_in_button", 20_000) != null, "no first screen")
+        sleep(1_500)
+        checkStatusBar("first-screen")
+        if (!launchSignedIn("status-bar-home")) return
+        sleep(3_000)
+        checkStatusBar("home")
+    }
+
+    private fun checkStatusBar(moment: String) {
+        var light: Boolean? = null
+        var visible: Boolean? = null
+        instrumentation.runOnMainSync {
+            val activity = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
+                .firstOrNull { it.javaClass.name == ACTIVITY } ?: return@runOnMainSync
+            val decor = activity.window.decorView
+            light = androidx.core.view.WindowCompat.getInsetsController(activity.window, decor).isAppearanceLightStatusBars
+            visible = androidx.core.view.ViewCompat.getRootWindowInsets(decor)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+        }
+        val window = shell("dumpsys window windows").lines().map { it.trim() }
+            .filter { it.contains("StatusBar") && (it.contains("isVisible") || it.contains("mHasSurface") || it.startsWith("Window #")) }
+            .take(4).joinToString(" / ")
+        note("$moment: status bar visible $visible, light-bars appearance $light; window: ${window.take(400)}")
+        screenshot("$moment-status-bar")
+        check(visible == true, "$moment: the status bar is not visible to the app")
+        check(light == true, "$moment: the status bar's icons are not dark on a light screen")
+    }
 }

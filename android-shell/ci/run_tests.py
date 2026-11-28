@@ -96,6 +96,7 @@ SUITE2 = [
     "HardeningTest#testAccessibilityLabels",
     "HardeningTest#testTabletSizeAndRotation",
     "HardeningTest#testRendererKilledRecovers",
+    "HardeningTest#testStatusBarIconsOnLightScreens",
 ]
 DEMO = ["DemoTourTest#testDemoTour"]
 # Recordings (video mode only): (first test, last test, file, private?)
@@ -112,9 +113,10 @@ VIDEO_REAL = [
     "RealBackendDebugTest#testRealSignedInJourneyWithSessionCookie",
     "RealBackendDebugTest#testRealSignedInJourneyWithSessionCookie_2_relaunch",
 ]
+# Exactly 1 Google attempt per run: the app's own path on production (the web sign-in in the
+# WebView, as production has no hand-off). The Custom Tab attempt is not part of a recording run.
 VIDEO_REAL_GOOGLE = [
     "RealBackendReleaseTest#testRealGoogleSignInInWebViewAndJourney",
-    "RealBackendDebugTest#testRealGoogleSignInInCustomTab",
 ]
 LOG_TAGS = ("OPENBOT_DIAG", "SHELL_NOTE", "SHELL_PROBE", "TestRunner", "AndroidRuntime", "chromium", "cr_", "WebView")
 PER_TEST_S = int(os.environ.get("PER_TEST_SECONDS", "300"))

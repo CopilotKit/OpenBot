@@ -113,41 +113,92 @@ class RealBackendReleaseTest : ShellTestBase() {
         requireProduction()
         mark("start")
         try {
-            launchPlain(null, "google-webview")
-            val button = waitFor("sign_in_button", 15_000) ?: skip("no Sign in button")
-            sleep(1_500)
-            button.click()
-            if (waitFor("web_sign_in_cancel", 25_000) == null) skip("no web sign-in fallback")
-            waitWebObject("Sign in to OpenBot Cloud", 30_000)
-            sleep(1_500)
-            screenshot("1-web-sign-in")
-            waitWebObject("Sign in or create an account", 15_000)?.click() ?: skip("no 'Sign in or create an account'")
-            val google = findInApp(pkg, "Google", 30_000) ?: skip("no Google button on OpenBot by CopilotKit's page")
-            sleep(1_500)
-            screenshot("2-identity-provider")
-            google.click()
-            sleep(10_000)
-            screenshot("3-google-in-webview")
-            val refusal = googleRefusal(pkg)
-            if (refusal != null) {
-                note("Google refused the sign-in inside Android's WebView: the page says '$refusal'")
-                skip("refused: Google shows '$refusal' inside Android's WebView; the Custom Tab path is the design")
-            }
-            googleSteps(pkg, email, password, totp)
-            val home = waitForTab(Tab.HOME, 40_000)
-            sleep(3_000)
-            screenshot("4-after-google")
-            note("Google sign-in in the WebView reached the tabs: ${home != null}")
-            if (home == null) skip("Google's sign-in in the WebView did not end signed in")
-            // A short journey.
-            tab(Tab.BOTS)?.click()
-            sleep(4_000)
-            screenshot("5-bots")
-            tab(Tab.HOME)?.click()
-            sleep(3_000)
-            screenshot("6-home")
+            googleWebViewJourney(email, password, totp)
+        } catch (stop: org.junit.AssumptionViolatedException) {
+            // Any stop (Cloudflare, Google's refusal or challenge, an unexpected screen) ends here
+            // with a picture and the screen's visible words; the recording keeps running to the end mark.
+            screenshot("stopped")
+            note("stopped: ${stop.message}; visible text: ${visibleText()}")
+            throw stop
         } finally {
             mark("end")
         }
+    }
+
+    /** The app's visible words (accessibility tree), addresses masked, at most 600 characters. */
+    private fun visibleText(): String =
+        device.findObjects(By.pkg(pkg)).flatMap { listOfNotNull(it.text, it.contentDescription) }
+            .filter { it.isNotBlank() }.distinct().joinToString(" | ")
+            .replace(Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+"), "<email>").take(600)
+
+    private fun googleWebViewJourney(email: String, password: String, totp: ByteArray) {
+        launchPlain(null, "google-webview")
+        val button = waitFor("sign_in_button", 15_000) ?: skip("no Sign in button")
+        sleep(1_500)
+        screenshot("0-first-screen")
+        button.click()
+        if (waitFor("web_sign_in_cancel", 25_000) == null) skip("no web sign-in fallback")
+        sleep(4_000)
+        stopAtBotCheck("web-sign-in")
+        waitWebObject("Sign in to OpenBot Cloud", 30_000)
+        stopAtBotCheck("web-sign-in-page")
+        sleep(1_500)
+        screenshot("1-web-sign-in")
+        waitWebObject("Sign in or create an account", 15_000)?.click() ?: skip("no 'Sign in or create an account'")
+        sleep(3_000)
+        stopAtBotCheck("identity-provider")
+        val google = findInApp(pkg, "Google", 30_000) ?: skip("no Google button on the identity provider's page")
+        sleep(1_500)
+        screenshot("2-identity-provider")
+        google.click()
+        sleep(10_000)
+        screenshot("3-google-in-webview")
+        stopAtBotCheck("google")
+        val refusal = googleRefusal(pkg)
+        if (refusal != null) {
+            note("Google refused the sign-in inside Android's WebView: the page says '$refusal'")
+            skip("refused: Google shows '$refusal' inside Android's WebView")
+        }
+        googleSteps(pkg, email, password, totp)
+        val home = waitForTab(Tab.HOME, 40_000)
+        sleep(3_000)
+        screenshot("8-after-google")
+        stopAtBotCheck("after-google")
+        note("Google sign-in in the WebView reached the tabs: ${home != null}")
+        if (home == null) skip("Google's sign-in in the WebView did not end signed in")
+
+        // The journey, as the session-cookie test: a message and its streamed reply, the tabs,
+        // the background and back. No sign-out.
+        val box = waitComposerRect(30_000)
+        screenshot("9-home")
+        if (box != null) {
+            tapComposer(box)
+            if (!waitKeyboard(true, 5_000)) composerRect()?.let { tapComposer(it) }
+            note("software keyboard shown for the message: ${waitKeyboard(true, 5_000)}")
+            shell("input text Say%shello%sin%sthree%swords.")
+            sleep(1_000)
+            screenshot("10-message-typed")
+            val before = visibleText()
+            (device.findObject(By.desc("Send message")) ?: device.findObject(By.text("Send message")))?.click() ?: device.pressEnter()
+            sleep(15_000)
+            screenshot("11-reply")
+            note("the screen changed after sending: ${visibleText() != before}")
+        } else {
+            note("no message box found on Home")
+        }
+        tab(Tab.CONVERSATIONS)?.click()
+        sleep(4_000)
+        screenshot("12-chats")
+        tab(Tab.BOTS)?.click()
+        sleep(4_000)
+        screenshot("13-bots")
+        tab(Tab.HOME)?.click()
+        sleep(2_000)
+        device.pressHome()
+        sleep(20_000)
+        bringBack()
+        sleep(4_000)
+        screenshot("14-back-from-background")
+        note("after the background: home tab ${tab(Tab.HOME) != null}")
     }
 }
