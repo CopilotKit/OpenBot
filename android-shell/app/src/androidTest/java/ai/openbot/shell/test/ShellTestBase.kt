@@ -703,9 +703,31 @@ abstract class ShellTestBase {
             return ok
         }
 
+        // The provider can expose a button with zero visible height behind the IME.
+        // Query it again after dismissing the keyboard or scrolling into the form.
+        fun clickFormControl(find: () -> UiObject2?): Boolean {
+            repeat(4) {
+                val control = find() ?: return false
+                val rect = bounds(control)
+                if (rect != null && rect.width() > 0 && rect.height() > 0) {
+                    control.click()
+                    return true
+                }
+                if (keyboardShown()) {
+                    dismissKeyboardIfUp()
+                } else {
+                    val x = device.displayWidth / 2
+                    device.swipe(x, device.displayHeight * 2 / 3, x, device.displayHeight / 3, 18)
+                }
+            }
+            return false
+        }
+
         fun next() {
-            val button = device.findObject(By.pkg(root).text("Next")) ?: device.findObject(By.pkg(root).desc("Next"))
-            if (button != null) button.click() else device.pressEnter()
+            val clicked = clickFormControl {
+                device.findObject(By.pkg(root).text("Next")) ?: device.findObject(By.pkg(root).desc("Next"))
+            }
+            if (!clicked) skip("Google's Next button was not reachable")
         }
 
         stopIfChallenged("email page")
@@ -729,17 +751,17 @@ abstract class ShellTestBase {
         var text = appText(root)
         val codePage = { t: String -> t.contains("google authenticator") || t.contains("authenticator app") || t.contains("enter code") }
         if (text.contains("2-step verification") && !codePage(text)) {
-            val another = findInApp(root, "Try another way", 8_000) ?: run {
+            if (!clickFormControl { findInApp(root, "Try another way", 8_000) }) {
                 screenshot("no-try-another-way")
-                skip("the 2-Step page offered no 'Try another way'")
+                skip("the 2-Step page offered no reachable 'Try another way'")
             }
-            another.click()
             sleep(6_000)
             screenshot("5-other-ways")
             val options = appText(root)
             note("other ways offered: authenticator ${options.contains("authenticator")}, backup codes ${options.contains("backup code")}, text message ${options.contains("text message") || options.contains("sms")}")
-            val option = findInApp(root, "Authenticator", 5_000) ?: skip("the authenticator app is not among Google's other ways")
-            option.click()
+            if (!clickFormControl { findInApp(root, "Authenticator", 5_000) }) {
+                skip("the authenticator app was not reachable among Google's other ways")
+            }
             sleep(6_000)
             screenshot("6-authenticator-page")
             stopIfChallenged("authenticator page", allowSecondStep = true)

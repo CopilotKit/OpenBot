@@ -404,7 +404,8 @@ class ShellFlowTest : ShellTestBase() {
         check(homeRendered(), "Home did not render")
         sleep(2_000)
         for ((moment, dark) in listOf("light" to false, "dark" to true)) {
-            val extras = mutableMapOf("openbot.delay_first_load_ms" to "2500")
+            // Keep the artificial slow load visible through activity recreation and UIAutomator's idle wait.
+            val extras = mutableMapOf("openbot.delay_first_load_ms" to "6000")
             if (dark) extras["openbot.force_dark"] = "1"
             launch(MOCK_A, "skeleton-$moment", reset = false, extras = extras)
             val skeleton = waitFor("loading_skeleton", 3_000)
