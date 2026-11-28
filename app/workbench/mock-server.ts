@@ -47,8 +47,10 @@
  * Signed in, the API answers as the workbench's app-home scene does (workbench/session.ts,
  * api/extraHandlers.ts and the spec's generated answers), with a fixed person (Sam Rivera, in Acme),
  * two Bots (General Assistant, Research Bot) and three conversations (Competitor pricing notes,
- * pinned and unread; Quarterly forecast; Trip to Lisbon), each with a short transcript. The live
- * socket the app opens is accepted and kept quiet.
+ * pinned and unread; Quarterly forecast; Trip to Lisbon), each with a short transcript. A
+ * conversation made while it runs (sending from Home) is kept in memory until it stops: its own GET
+ * answers it, the list shows it, its runs answer it and its messages read back. The live socket the
+ * app opens is accepted and kept quiet.
  */
 
 import { createHash, randomBytes } from "node:crypto";
@@ -185,10 +187,31 @@ export const MOCK_CONVERSATIONS: readonly ConversationSummary[] = [
   }),
 ];
 
+/**
+ * The conversations made while the mock runs (`POST /conversations`, as sending from Home does),
+ * newest first. Kept in memory for the life of the process and answered like the fixed ones above:
+ * by their own GET, in the list, and with their messages read back.
+ */
+const created: ConversationSummary[] = [];
+
+/** What a made conversation's runs said, by thread: the person's messages and the replies. */
+const said = new Map<string, { id: string; role: string; content: string }[]>();
+
+/** Every conversation the mock knows, newest first: the ones made here, then the fixed ones. */
+function allConversations(): ConversationSummary[] {
+  return [...created, ...MOCK_CONVERSATIONS];
+}
+
+function findConversation(id: string): ConversationSummary | undefined {
+  return allConversations().find((one) => one.id === id);
+}
+
 /** Each conversation's transcript: what the person asked, and the Bot's answer. */
 function transcript(id: string) {
-  const found = MOCK_CONVERSATIONS.find((one) => one.id === id);
+  const found = findConversation(id);
   if (!found) return [];
+  const kept = said.get(found.threadId);
+  if (kept) return kept;
   return [
     { id: `${id}-1`, role: "user", content: found.opening ?? "Hello" },
     {
@@ -200,7 +223,7 @@ function transcript(id: string) {
 }
 
 function byThread(threadId: string): ConversationSummary | undefined {
-  return MOCK_CONVERSATIONS.find((one) => one.threadId === threadId);
+  return allConversations().find((one) => one.threadId === threadId);
 }
 
 /** One AG-UI stream that replays a transcript and ends. */
@@ -247,7 +270,7 @@ function mockDataHandlers(): RequestHandler[] {
       const url = new URL(request.url);
       const q = url.searchParams.get("q")?.toLowerCase();
       const botId = url.searchParams.get("botId");
-      const conversations = MOCK_CONVERSATIONS.filter(
+      const conversations = allConversations().filter(
         (one) =>
           (!botId || one.botIds.includes(botId)) &&
           (!q ||
@@ -257,10 +280,42 @@ function mockDataHandlers(): RequestHandler[] {
       );
       return HttpResponse.json({ conversations, nextCursor: null });
     }),
-    http.get(`${API}/conversations/:conversationId`, ({ params }) => {
-      const found = MOCK_CONVERSATIONS.find(
-        (one) => one.id === params.conversationId,
+    // A conversation made here, kept until the mock stops: its own GET, the list and its runs know it.
+    http.post(`${API}/conversations`, async ({ request }) => {
+      const body = (await request.json().catch(() => ({}))) as {
+        botIds?: unknown;
+      };
+      const botIds = Array.isArray(body.botIds)
+        ? body.botIds.filter((one): one is string => typeof one === "string")
+        : [];
+      const now = new Date().toISOString();
+      const made = conversation({
+        id: crypto.randomUUID(),
+        botIds: botIds.length ? botIds : [GENERAL_BOT.id],
+        summary: null,
+        lastMessageAt: now,
+        createdAt: now,
+        lastReadAt: now,
+      });
+      created.unshift(made);
+      const { id, name, threadId, active, lastMessageAt, work } = made;
+      return HttpResponse.json(
+        {
+          conversation: {
+            id,
+            name,
+            botIds: made.botIds,
+            threadId,
+            active,
+            lastMessageAt,
+            work,
+          },
+        },
+        { status: 201 },
       );
+    }),
+    http.get(`${API}/conversations/:conversationId`, ({ params }) => {
+      const found = findConversation(String(params.conversationId));
       if (!found)
         return HttpResponse.json(
           { detail: "There is no such conversation." },
@@ -294,9 +349,29 @@ function mockDataHandlers(): RequestHandler[] {
       `${API}/conversations/:conversationId/read`,
       () => new HttpResponse(null, { status: 204 }),
     ),
+    // The last thing said, as the page reports it: a made conversation's row shows it, and its
+    // first message names it. The fixed ones keep the preview they were drawn with.
     http.post(
       `${API}/conversations/:conversationId/activity`,
-      () => new HttpResponse(null, { status: 204 }),
+      async ({ params, request }) => {
+        const found = created.find((one) => one.id === params.conversationId);
+        const body = (await request.json().catch(() => ({}))) as {
+          text?: unknown;
+          botId?: unknown;
+          at?: unknown;
+        };
+        if (found && typeof body.text === "string" && body.text.trim()) {
+          found.opening ??= body.text;
+          found.summary ??= body.text;
+          found.lastMessage = body.text;
+          found.lastMessageBotId =
+            typeof body.botId === "string" ? body.botId : null;
+          found.lastMessageAt =
+            typeof body.at === "string" ? body.at : new Date().toISOString();
+          found.lastReadAt = found.lastMessageAt;
+        }
+        return new HttpResponse(null, { status: 204 });
+      },
     ),
     http.post(
       `${API}/conversations/:conversationId/signal-busy`,
@@ -324,9 +399,33 @@ function mockDataHandlers(): RequestHandler[] {
       const body = (await request.json().catch(() => ({}))) as {
         threadId?: string;
         runId?: string;
+        messages?: { id?: unknown; role?: unknown; content?: unknown }[];
       };
       const threadId = body.threadId ?? "";
       const runId = body.runId ?? "mock-run";
+      const reply =
+        "Two of the three cut their entry price; one added a free tier.";
+      // A made conversation keeps what its runs said, so its messages read back after a reload.
+      if (created.some((one) => one.threadId === threadId)) {
+        const messages = (Array.isArray(body.messages) ? body.messages : [])
+          .filter(
+            (one) =>
+              (one.role === "user" || one.role === "assistant") &&
+              typeof one.content === "string",
+          )
+          .map((one, index) => ({
+            id: typeof one.id === "string" ? one.id : `${threadId}-${index}`,
+            role: String(one.role),
+            content: String(one.content),
+          }));
+        if (REPLY)
+          messages.push({
+            id: `${runId}-reply`,
+            role: "assistant",
+            content: reply,
+          });
+        said.set(threadId, messages);
+      }
       return new Response(
         [
           { type: "RUN_STARTED", threadId, runId },
@@ -340,8 +439,7 @@ function mockDataHandlers(): RequestHandler[] {
                 {
                   type: "TEXT_MESSAGE_CONTENT",
                   messageId: `${runId}-reply`,
-                  delta:
-                    "Two of the three cut their entry price; one added a free tier.",
+                  delta: reply,
                 },
                 { type: "TEXT_MESSAGE_END", messageId: `${runId}-reply` },
               ]
