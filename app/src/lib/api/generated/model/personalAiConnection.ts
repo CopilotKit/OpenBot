@@ -17,6 +17,6 @@ export interface PersonalAiConnection {
   required: boolean;
   /** Whether the person can set an AI connection of their own here. False where the organization's AI is the only one. */
   available: boolean;
-  /** The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), an xAI sign-in, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way. */
+  /** The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), and an xAI sign-in, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way. */
   signIns: AiConnectionProviderAnswer[];
 }

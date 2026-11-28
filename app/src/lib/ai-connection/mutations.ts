@@ -174,7 +174,7 @@ const PERSONAL_FALLBACK = "Couldn't connect your AI. Try again.";
 
 /**
  * Connect the person's own AI: a key, an address, or a sign-in through OpenBot the server kept for
- * them (a plan, a provider's sign-in, or Unbiased AI's key with `useSavedKey`). The server checks it with the provider before it saves anything; a refusal
+ * them (a plan or a provider's sign-in). The server checks it with the provider before it saves anything; a refusal
  * throws its one sentence and nothing changes. Never Desktop's engines: the server runs this
  * person's Bots, so `desktop` and its phases have nothing to do here.
  */
@@ -215,8 +215,7 @@ export function removePersonalAiMutationOptions(queryClient: QueryClient) {
  * A sign-in to an AI provider that the server runs itself, for the person's own AI. Not a cached
  * read nor a write somebody asked to keep: a step on the way to connecting, so plain functions.
  * What the provider hands back never comes to the browser. Once approved, connecting uses it: a
- * plan with `login: plan`, an xAI sign-in with `login: oauth`, and Unbiased AI's key with
- * `useSavedKey`.
+ * plan with `login: plan` or an xAI sign-in with `login: oauth`.
  *
  * `method` only for a provider with more than one way in: ChatGPT signs in in the browser unless
  * asked for `device`, its code sign-in. Left out, the server's default.

@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **The API takes Privatemode as an AI connection.** `replaceAiConnection` and the other AI
+  connection writes take `provider: privatemode` with `login: endpoint`, an address and a key.
+  `AiConnectionProviderAnswer` can name it. `signIns` keeps the values it had, since Privatemode
+  has no sign-in.
+
+- **Unbiased AI is no longer an AI provider choice.** OpenBot Desktop's setup, Settings and Admin
+  AI providers, Connect another AI, and the conversation and Bot model pickers no longer offer it,
+  and OpenBot Desktop's Sign in with Unbiased AI is gone. The API no longer takes it as a provider.
+  A connection saved for it before is still listed, so it can be removed, but it never runs: it
+  reads as stopped with the new problem `provider-retired`, which says to connect another AI.
+
 - **The app opens and changes page faster, and holds still.** The checks before every page are
   asked together and the page's code downloads while they run, so Home is ready about a third
   sooner on a real network; somebody signed in last time sees the app's frame at once instead of a
@@ -4771,7 +4782,7 @@ Activity (Settings → Activity in the personal edition) and Audit (Admin → Au
   Unbiased AI's approval page in the browser, where a person signs in or creates an account, and
   OpenBot receives an API key for the `pareto` model on Unbiased AI's OpenAI-compatible gateway. The
   key is stored on this computer the way a typed endpoint key is, and an Unbiased AI API key can be
-  pasted instead. See [Model provider OAuth](desktop/PROVIDER_OAUTH.md#unbiased-ai).
+  pasted instead.
 
 ## 0.3.2
 
