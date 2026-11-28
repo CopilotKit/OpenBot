@@ -119,6 +119,14 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "computer.help_cancelled": "Cancel a request for help",
   "computer.control_taken": "Take control of the computer",
   "computer.control_released": "Hand the computer back",
+  // A person's Windows computer, which they and their Bot take turns on.
+  "computer.desktop_interference": "Use the Windows computer while the Bot was",
+  "computer.desktop_unavailable": "Reach the Windows computer",
+  "computer.desktop_recording_started":
+    "Start recording on the Windows computer",
+  "computer.desktop_recording_stopped":
+    "Stop recording on the Windows computer",
+  "computer.desktop_recording_gap": "Record on the Windows computer",
   "computer.secret_requested": "Ask a person to fill in a field",
   "computer.secret_supplied": "Fill in a field for a Bot",
   "computer.sign_in_requested": "Ask a person to sign in",

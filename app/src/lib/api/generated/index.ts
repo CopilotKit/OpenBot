@@ -50,3 +50,4 @@ export * from "./teams/teams";
 export * from "./voice/voice";
 export * from "./web-push/web-push";
 export * from "./what-if/what-if";
+export * from "./windows-computer/windows-computer";

@@ -50,3 +50,4 @@ export * from "./teams/teams.zod";
 export * from "./voice/voice.zod";
 export * from "./web-push/web-push.zod";
 export * from "./what-if/what-if.zod";
+export * from "./windows-computer/windows-computer.zod";

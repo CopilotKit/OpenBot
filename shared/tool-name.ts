@@ -829,6 +829,24 @@ const OWN_TOOLS: Record<string, OwnTool> = {
     done: "Took a screenshot",
   },
 
+  // A person's Windows computer, which they and their Bot take turns on. Its programs are "programs":
+  // an app is a service a Bot uses, like Gmail.
+  desktop_list_windows: { running: "Listing windows", done: "Listed windows" },
+  desktop_snapshot: { running: "Inspecting window", done: "Inspected window" },
+  desktop_screenshot: {
+    running: "Taking a screenshot",
+    done: "Took a screenshot",
+  },
+  desktop_launch_app: { running: "Opening program", done: "Opened program" },
+  desktop_focus_window: {
+    running: "Switching window",
+    done: "Switched window",
+  },
+  desktop_click: { running: "Clicking in window", done: "Clicked in window" },
+  desktop_type: { running: "Filling in field", done: "Filled in field" },
+  desktop_key: { running: "Pressing key", done: "Pressed key" },
+  desktop_scroll: { running: "Scrolling window", done: "Scrolled window" },
+
   // The Bot's computer, and folders on yours. The same action reads the same on either.
   computer_list_files: {
     running: "Listing files",
