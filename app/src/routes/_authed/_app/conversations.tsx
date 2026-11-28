@@ -78,6 +78,8 @@ function ConversationsPage() {
           {shell ? (
             <Button
               aria-label="New conversation"
+              // A whole tap target, as tall as the account beside it; the icon keeps its size.
+              className="size-11"
               render={(props) => <Link {...props} to="/channel/new" />}
               size="icon"
               variant="ghost"
