@@ -64,6 +64,9 @@ class ShellTestCase: XCTestCase {
     /// Puts the software keyboard away if it is up (a conversation focuses its message box when it
     /// opens): taps `neutral`, then swipes the page down.
     func dismissKeyboardIfUp(_ app: XCUIApplication, tapping neutral: XCUIElement? = nil) {
+        // iOS's one-time "slide to type" tip sits on the keyboard: close it first.
+        let tip = app.keyboards.buttons.matching(NSPredicate(format: "label == 'Continue'")).firstMatch
+        if tip.exists { tip.tap() }
         guard app.keyboards.firstMatch.exists else { return }
         note("the keyboard was up; putting it away")
         if let neutral = neutral, neutral.exists, neutral.isHittable { neutral.tap() }

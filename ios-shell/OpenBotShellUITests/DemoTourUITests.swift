@@ -110,8 +110,8 @@ final class DemoTourUITests: ShellTestCase {
 
         // The lock screen, then the connection comes back.
         app = launch(base: ShellTestCase.mockA, moment: "tour-offline", reset: false,
-                     extra: ["OPENBOT_SHELL_FORCE_OFFLINE_SECONDS": "4"])
-        XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 5))
+                     extra: ["OPENBOT_SHELL_FORCE_OFFLINE_SECONDS": "8"])
+        XCTAssertTrue(lockScreen(app).waitForExistence(timeout: 8), "demo: no lock screen")
         XCTAssertTrue(lockScreen(app).waitForNonExistence(timeout: 15), "demo: the lock did not lift")
         pause(2)
     }
