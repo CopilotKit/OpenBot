@@ -54,6 +54,7 @@ import {
 } from "@/lib/load-failure";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { usePickedBotModel } from "@/lib/models/run-model";
+import { nativeShell } from "@/lib/native-shell/shell";
 import { newId } from "@/lib/new-id";
 import { takeInvitationLink } from "@/lib/organizations/invitation-link";
 import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
@@ -428,7 +429,8 @@ function RouteComponent() {
                     ...(restored.files ? { initialFiles: restored.files } : {}),
                   }
                 : asked
-                  ? { initialValue: asked, autoFocus: true }
+                  ? // Not in the phone app: a keyboard over the first screen, unasked for.
+                    { initialValue: asked, autoFocus: nativeShell() === null }
                   : {})}
               onSubmit={(draft) => send(draft)}
             />
