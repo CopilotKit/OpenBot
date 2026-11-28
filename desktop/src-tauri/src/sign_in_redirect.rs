@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::loopback_redirect::{BindError, Ended, Listener, Outcome};
+use crate::loopback_redirect::{said_for, BindError, Listener, Outcome, COULDNT_LISTEN};
 
 /// ChatGPT's registered loopback port and path.
 pub const OPENAI_PORT: u16 = 1455;
@@ -40,12 +40,8 @@ const UNCLAIMED_FOR: Duration = Duration::from_secs(20 * 60);
 
 const BUSY: &str =
     "Another ChatGPT sign-in is already waiting on this computer. Finish or close it, then try again.";
-const COULDNT_LISTEN: &str = "OpenBot couldn't wait for the sign-in on this computer. Try again.";
 const UNKNOWN_PROVIDER: &str = "OpenBot can't wait for that provider's sign-in on this computer.";
 const NOT_WAITING: &str = "That sign-in is no longer waiting. Start it again.";
-const STOPPED: &str = "The sign-in was stopped. Start it again.";
-const TOOK_TOO_LONG: &str = "The sign-in took too long. Start it again.";
-const PORT_WANTED: &str = "Another app on this computer took over the sign-in. Start it again.";
 
 /// What `begin` answers: the attempt to wait on, and the port the provider sends the browser to.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -158,13 +154,8 @@ pub fn wait(attempt_id: &str, state: &str, arrived: impl FnOnce()) -> Result<Red
         }
     });
     let (outcome, reply) = waited.map_err(|ended| {
-        match ended {
-            Ended::Cancelled => STOPPED,
-            Ended::TimedOut => TOOK_TOO_LONG,
-            Ended::PortWanted => PORT_WANTED,
-            Ended::Failed(_) => COULDNT_LISTEN,
-        }
-        .to_string()
+        log::warn!("[sign-in-redirect] the sign-in ended before it finished ({ended:?})");
+        said_for(&ended).to_string()
     })?;
     let redirected = match outcome {
         Outcome::Code { code, state } => {
@@ -233,6 +224,7 @@ pub fn release_port(port: u16) {
 mod tests {
     use super::*;
     use crate::loopback_redirect::tests::browser_get;
+    use crate::loopback_redirect::{PORT_WANTED, STOPPED};
 
     /// Port 1455 is one port on the whole machine: the tests that use it take turns, with every
     /// other test that binds ports.

@@ -27,7 +27,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::loopback_redirect::{Ended, Listener, Outcome};
+use crate::loopback_redirect::{Listener, Outcome};
 
 /// Claude Code's public client, as `claude setup-token` uses it.
 pub const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
@@ -69,7 +69,6 @@ const UNREADABLE: &str = "Claude returned an unreadable sign-in response. Sign i
 const NOT_APPROVED: &str = "The Claude sign-in was not approved. Sign in again.";
 const DIDNT_FINISH: &str =
     "That sign-in did not finish. Start it again and approve the request in your browser.";
-const STOPPED: &str = "The sign-in was stopped. Start it again.";
 const NO_LONGER_RUNNING: &str = "That sign-in is no longer running. Start it again.";
 
 /// Which redirect the browser is sent to.
@@ -199,9 +198,9 @@ impl SignIn {
             .wait(&self.state, PATIENCE_FOR_THE_PERSON, &|| {
                 self.cancelled.load(Ordering::SeqCst)
             })
-            .map_err(|ended| match ended {
-                Ended::Cancelled => STOPPED.to_string(),
-                Ended::TimedOut | Ended::PortWanted | Ended::Failed(_) => DIDNT_FINISH.to_string(),
+            .map_err(|ended| {
+                log::warn!("[claude-sign-in] the sign-in ended before it finished ({ended:?})");
+                crate::loopback_redirect::said_for(&ended).to_string()
             })?;
         match outcome {
             Outcome::Error { error, .. } => {
@@ -209,6 +208,7 @@ impl SignIn {
                 Err(if error == "access_denied" {
                     NOT_APPROVED.into()
                 } else {
+                    log::warn!("[claude-sign-in] Claude's page ended the sign-in ({error})");
                     DIDNT_FINISH.into()
                 })
             }
@@ -715,7 +715,10 @@ mod tests {
         let waiting = std::thread::spawn(|| finish(None));
         std::thread::sleep(Duration::from_millis(200));
         cancel();
-        assert_eq!(waiting.join().unwrap(), Err(STOPPED.to_string()));
+        assert_eq!(
+            waiting.join().unwrap(),
+            Err(crate::loopback_redirect::STOPPED.to_string())
+        );
         let port: u16 = redirect
             .trim_start_matches("http://localhost:")
             .trim_end_matches("/callback")
