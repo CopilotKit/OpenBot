@@ -15,7 +15,7 @@ import sys
 artifacts, xcresult, log_path = sys.argv[1:4]
 # Tests that use a real account: their diagnostics never reach the summary (collect_shots.py moves
 # them out of the general artifact).
-PRIVATE_TESTS = ("testProductionSignedIn", "testProductionGoogleSignIn")
+PRIVATE_TESTS = ("testProductionSignedIn", "testProductionGoogleSignIn", "testProductionGoogleSignInInWebView")
 
 
 def private_entry(entry):
@@ -30,16 +30,18 @@ def safe(name):
     return re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-") or "attachment"
 
 
-# 1. Readable attachment names, from the manifest that `xcresulttool export attachments` writes.
-manifest_path = os.path.join(attachments, "manifest.json")
-if os.path.exists(manifest_path):
+# 1. Readable attachment names, from the manifest that `xcresulttool export attachments` writes
+#    (one folder per result bundle under attachments/), copied to attachments/<test>--<name>.
+for root, _dirs, files in os.walk(attachments):
+    if "manifest.json" not in files:
+        continue
     try:
-        with open(manifest_path) as f:
+        with open(os.path.join(root, "manifest.json")) as f:
             manifest = json.load(f)
         for test in manifest:
             test_name = safe(test.get("testIdentifier", "test").split("/")[-1])
             for item in test.get("attachments", []):
-                src = os.path.join(attachments, item.get("exportedFileName", ""))
+                src = os.path.join(root, item.get("exportedFileName", ""))
                 if not os.path.isfile(src):
                     continue
                 human = item.get("suggestedHumanReadableName") or os.path.basename(src)
@@ -48,7 +50,7 @@ if os.path.exists(manifest_path):
                     dest += os.path.splitext(src)[1]
                 shutil.copyfile(src, dest)
     except Exception as error:  # the summary still gets written
-        print(f"could not rename attachments: {error}")
+        print(f"could not rename attachments in {root}: {error}")
 
 # 2. Environment.
 lines.append("# iOS shell run\n")
@@ -58,26 +60,28 @@ lines.append("")
 
 # 3. Per-test results: xcresulttool first, the log as a fallback.
 results = []
-try:
-    raw = subprocess.run(["xcrun", "xcresulttool", "get", "test-results", "tests", "--path", xcresult],
-                         capture_output=True, text=True, timeout=120)
-    if raw.returncode == 0:
-        def walk(node):
-            if node.get("nodeType") == "Test Case":
-                notes = [c.get("name", "") for c in node.get("children", [])
-                         if c.get("nodeType") in ("Failure Message", "Skip Message", "Runtime Warning")]
-                results.append((node.get("name", "?"), node.get("result", "?"), notes))
-            for child in node.get("children", []):
-                walk(child)
-        for node in json.loads(raw.stdout).get("testNodes", []):
-            walk(node)
-except Exception as error:
-    print(f"xcresulttool failed: {error}")
+for bundle in [b for b in xcresult.split(":") if b]:
+    try:
+        raw = subprocess.run(["xcrun", "xcresulttool", "get", "test-results", "tests", "--path", bundle],
+                             capture_output=True, text=True, timeout=120)
+        if raw.returncode == 0:
+            def walk(node):
+                if node.get("nodeType") == "Test Case":
+                    notes = [c.get("name", "") for c in node.get("children", [])
+                             if c.get("nodeType") in ("Failure Message", "Skip Message", "Runtime Warning")]
+                    results.append((node.get("name", "?"), node.get("result", "?"), notes))
+                for child in node.get("children", []):
+                    walk(child)
+            for node in json.loads(raw.stdout).get("testNodes", []):
+                walk(node)
+    except Exception as error:
+        print(f"xcresulttool failed on {bundle}: {error}")
 
 log = ""
-if os.path.exists(log_path):
-    with open(log_path, errors="replace") as f:
-        log = f.read()
+for one_log in [p for p in log_path.split(":") if p]:
+    if os.path.exists(one_log):
+        with open(one_log, errors="replace") as f:
+            log += f.read() + "\n"
 if not results and log:
     for match in re.finditer(r"Test [Cc]ase '(?:-\[\S+ )?([^\]']+)\]?' (passed|failed|skipped)", log):
         results.append((match.group(1), match.group(2), []))
@@ -120,6 +124,8 @@ if os.path.exists(diag_path):
     notable = []
     probes = []
     production_trails = {}
+    parity = []
+    session_names = ("better-auth.session_token", "__Secure-better-auth.session_token")
     with open(diag_path, errors="replace") as f:
         for raw_line in f:
             try:
@@ -130,6 +136,22 @@ if os.path.exists(diag_path):
                 continue
             kinds[entry.get("kind", "?")] += 1
             test = str(entry.get("test", ""))
+            short = test.split("-")[0]
+            if entry.get("kind") == "cookie-store":
+                for cookie in entry.get("cookies", []):
+                    if cookie.get("name") in session_names:
+                        parity.append(f"{short}: cookie {cookie.get('name')} on {cookie.get('domain')} secure={cookie.get('isSecure')} "
+                                      f"httpOnly={cookie.get('isHTTPOnly')} sameSite={cookie.get('sameSite')} sessionOnly={cookie.get('isSessionOnly')}")
+            if entry.get("kind") == "snapshot" and isinstance(entry.get("page"), dict):
+                page = entry["page"]
+                href = str(page.get("href", ""))
+                if href.startswith("https://shell-test") or href.startswith("https://my.open.bot"):
+                    visible = [n for n in page.get("documentCookieNames", []) if "session_token" in n]
+                    parity.append(f"{short}: {href.split('/')[2]} isSecureContext={page.get('isSecureContext')} "
+                                  f"session cookie visible to document.cookie={bool(visible)}")
+                    parity.append(f"{short}: user agent {page.get('userAgent')}")
+            if entry.get("kind") == "page-websocket":
+                parity.append(f"{short}: websocket {entry.get('event')} {str(entry.get('url', '')).split('?')[0]}")
             if entry.get("kind") == "handoff-probe":
                 probes.append(f"{test}: status {entry.get('status')} supported {entry.get('supported')}")
             if test.startswith("testProduction") and entry.get("kind") == "navigation-action" and entry.get("mainFrame"):
@@ -147,6 +169,9 @@ if os.path.exists(diag_path):
         lines.append("```")
         lines.extend(notable[:40])
         lines.append("```")
+    if parity:
+        lines.append("- production parity (session cookies as stored, secure context, document.cookie, websockets):")
+        lines.extend(f"  - {item}" for item in list(dict.fromkeys(parity))[:60])
     if probes:
         lines.append("- hand-off probes:")
         lines.extend(f"  - {probe}" for probe in probes)

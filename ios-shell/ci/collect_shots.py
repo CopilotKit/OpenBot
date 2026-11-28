@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import sys
 
-PRIVATE_TESTS = ("testProductionSignedIn", "testProductionGoogleSignIn")
+PRIVATE_TESTS = ("testProductionSignedIn", "testProductionGoogleSignIn", "testProductionGoogleSignInInWebView")
 NAMED = re.compile(r"^(test[A-Za-z0-9_]+)--(.+)\.(png|jpe?g|heic|txt)$")
 
 artifacts = os.path.abspath(sys.argv[1])
@@ -67,19 +67,20 @@ if os.path.isdir(attachments):
         else:
             downscale(src, os.path.join(target, f"{test}--{moment}.jpg"))
         counts["private" if secret else "public"] += 1
-    # The exported originals (UUID names) of private tests go too: find them through the manifest.
-    manifest_path = os.path.join(attachments, "manifest.json")
-    if os.path.exists(manifest_path):
-        with open(manifest_path) as f:
+    # The exported originals (UUID names) of private tests go too: find them through the manifests.
+    originals = os.path.join(private, "attachments")
+    for root, _dirs, files in os.walk(attachments):
+        if "manifest.json" not in files:
+            continue
+        with open(os.path.join(root, "manifest.json")) as f:
             manifest = json.load(f)
-        originals = os.path.join(private, "attachments")
-        os.makedirs(originals, exist_ok=True)
         for test in manifest:
             test_name = test.get("testIdentifier", "").split("/")[-1].split("(")[0]
             if not is_private_test(test_name):
                 continue
+            os.makedirs(originals, exist_ok=True)
             for item in test.get("attachments", []):
-                exported = os.path.join(attachments, item.get("exportedFileName", ""))
+                exported = os.path.join(root, item.get("exportedFileName", ""))
                 if os.path.isfile(exported):
                     shutil.move(exported, os.path.join(originals, os.path.basename(exported)))
     for name in os.listdir(attachments):

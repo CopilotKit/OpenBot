@@ -39,13 +39,24 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        NSAppTransportSecurity:
-          NSAllowsLocalNetworking: true
         NSMicrophoneUsageDescription: OpenBot uses the microphone when you talk to a Bot.
         NSCameraUsageDescription: OpenBot uses the camera when you share a photo or video with a Bot.
+    postBuildScripts:
+      # Plain http to localhost (the probe and the mock stacks) only in Debug builds. A Release build
+      # keeps App Transport Security with no exception at all.
+      - name: Allow local networking in Debug
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$CONFIGURATION" = "Debug" ]; then
+            plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity:NSAllowsLocalNetworking" "$plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$plist"
+          fi
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openbot.shell
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
         PRODUCT_NAME: OpenBotShell
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: NO

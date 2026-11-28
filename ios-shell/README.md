@@ -87,7 +87,8 @@ ignores them.
 | `OPENBOT_SHELL_FORCE_OFFLINE_SECONDS=<n>` | The offline lock for n seconds, then the real network. |
 | `OPENBOT_SHELL_FORCE_DARK=1` | The whole app, web view included, in dark mode. |
 
-In every build: `OPENBOT_BASE_URL`, `OPENBOT_SHELL_DIAGNOSTICS=1`, `OPENBOT_SHELL_TEST_NAME`, and
+In every build, Release included (a launch environment cannot be set on a person's phone, so these
+change nothing there): `OPENBOT_BASE_URL`, `OPENBOT_SHELL_DIAGNOSTICS=1`, `OPENBOT_SHELL_TEST_NAME`, and
 `OPENBOT_SHELL_EPHEMERAL_SIGN_IN=1` (the sign-in sheet shares nothing with Safari, and iOS asks no
 consent). DEBUG builds also draw an invisible `debug-state` label with the model's state for UI tests.
 
@@ -107,6 +108,14 @@ python3 ios-shell/Probe/serve.py
 Then open http://127.0.0.1:8765/ in the shell (set `OPENBOT_BASE_URL`) or in any browser to
 compare. The comment at the top of `serve.py` lists every endpoint.
 
+## Release builds
+
+A Release build has none of the hooks above (CI greps the binary for their names and fails if one is
+there), no Web Inspector, and no App Transport Security exception: `NSAllowsLocalNetworking`, which
+the probe and the http mocks need, is added to the built Info.plist by a Debug-only build phase
+(`project.yml`). CI runs `ReleaseUITests` against a Release build, each test on a fresh install.
+`PRODUCTION-PARITY.md` lists what the tests here do and do not prove about a shipped app.
+
 ## The mock stacks
 
 The flow tests run against the real built web app over `app/workbench/mock-server.ts`:
@@ -118,6 +127,11 @@ APP_PORT=3010 SERVER_PORT=3001 bun app/serve.ts &                      # A: with
 MOCK_NO_HANDOFF=1 MOCK_SIGNED_OUT=1 SERVER_PORT=3002 bun app/workbench/mock-server.ts &
 APP_PORT=3011 SERVER_PORT=3002 bun app/serve.ts &                      # B: without it
 ```
+
+In CI, stack A is also reached at `https://shell-test.openbot.test` through `ci/tls-proxy.ts`, with
+a certificate from a throwaway CA the simulator is told to trust (`simctl keychain add-root-cert`)
+and the name mapped to 127.0.0.1 in `/etc/hosts`. Over https the mock sets production's cookie,
+`__Secure-better-auth.session_token` (Secure, HttpOnly, SameSite=Lax, host-only).
 
 ## CI
 

@@ -175,6 +175,15 @@ final class ShellFlowUITests: ShellTestCase {
             webText(app, "Can you draft the quarterly forecast?"),
         ], timeout: 25)
         XCTAssertNotNil(transcript, "the conversation did not open")
+        sleep(1)
+        if app.keyboards.firstMatch.exists {
+            // Finding for the web app: in the shell a conversation focuses its message box on open,
+            // which raises the keyboard (and so hides the tab bar).
+            screenshot("3a-conversation-opened-with-keyboard")
+            note("opening a conversation raised the keyboard (the message box took focus)")
+        }
+        dismissKeyboardIfUp(app, tapping: transcript)
+        XCTAssertTrue(tab(app, .conversations).waitForExistence(timeout: 5), "no tab bar in the conversation")
         XCTAssertTrue(tab(app, .conversations).isSelected, "opening a conversation moved the tab selection")
         sleep(1)
         screenshot("3-conversation")
@@ -387,6 +396,24 @@ final class ShellFlowUITests: ShellTestCase {
         XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 5), "the tab bar did not come back")
         sleep(1)
         screenshot("keyboard-dismissed")
+    }
+
+    // E. Back from the background: the page is alive and the tabs still route.
+    func testResumeFromBackground() throws {
+        let app = launchSignedIn()
+        XCTAssertTrue(webText(app, "Start a conversation").waitForExistence(timeout: 30))
+        XCUIDevice.shared.press(.home)
+        sleep(40)
+        app.activate()
+        XCTAssertTrue(tab(app, .home).waitForExistence(timeout: 10), "no tabs after coming back")
+        sleep(2)
+        screenshot("1-back-from-background")
+        XCTAssertTrue(webText(app, "Start a conversation").exists, "Home is not on screen after coming back")
+        tab(app, .conversations).tap()
+        XCTAssertTrue(webText(app, "Competitor pricing notes").waitForExistence(timeout: 15), "the tabs stopped routing after coming back")
+        sleep(1)
+        screenshot("2-conversations-after-background")
+        note("after background: \(debugState(app))")
     }
 
     // MARK: - Helpers

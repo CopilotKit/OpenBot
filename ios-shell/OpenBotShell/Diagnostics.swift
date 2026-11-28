@@ -176,6 +176,22 @@ final class Diagnostics: NSObject, WKScriptMessageHandler {
     };
   }
 
+  // WebSockets: the scheme and path they open, and when they open and close (never messages).
+  var NativeWebSocket = window.WebSocket;
+  if (NativeWebSocket) {
+    var Wrapped = function (url, protocols) {
+      var ws = protocols === undefined ? new NativeWebSocket(url) : new NativeWebSocket(url, protocols);
+      var u = safeURL(url);
+      ws.addEventListener('open', function () { send('websocket', { event: 'open', url: u }); });
+      ws.addEventListener('close', function (e) { send('websocket', { event: 'close', url: u, code: e.code }); });
+      ws.addEventListener('error', function () { send('websocket', { event: 'error', url: u }); });
+      return ws;
+    };
+    Wrapped.prototype = NativeWebSocket.prototype;
+    ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach(function (k) { Wrapped[k] = NativeWebSocket[k]; });
+    window.WebSocket = Wrapped;
+  }
+
   var xhrOpen = XMLHttpRequest.prototype.open;
   var xhrSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function (method, url) {

@@ -183,16 +183,7 @@ final class ProductionUITests: ShellTestCase {
     /// prompt or any other challenge: nothing here tries to get past one. Screenshots are taken
     /// before a value is filled in and after the page is left, never while a value shows.
     func testProductionGoogleSignIn() throws {
-        let inputs = ["OPENBOT_SHELL_GOOGLE_EMAIL", "OPENBOT_SHELL_GOOGLE_PASSWORD", "OPENBOT_SHELL_GOOGLE_TOTP_SECRET"]
-        note("secret-inputs: \(inputs.allSatisfy { secret($0) != nil } ? "present" : "absent")")
-        guard let email = secret("OPENBOT_SHELL_GOOGLE_EMAIL"),
-              let password = secret("OPENBOT_SHELL_GOOGLE_PASSWORD"),
-              let totpText = secret("OPENBOT_SHELL_GOOGLE_TOTP_SECRET") else {
-            throw XCTSkip("OPENBOT_SHELL_GOOGLE_EMAIL, OPENBOT_SHELL_GOOGLE_PASSWORD and OPENBOT_SHELL_GOOGLE_TOTP_SECRET are not all set")
-        }
-        guard let totpSecret = TOTP.base32Decode(totpText) else {
-            throw XCTSkip("OPENBOT_SHELL_GOOGLE_TOTP_SECRET is not base32")
-        }
+        let inputs = try googleInputs()
         try requireProduction()
         let app = launch(base: nil, moment: "google", extra: [
             "OPENBOT_SHELL_DEBUG_SHEET_URL": ShellTestCase.production + "/api/auth/hosted/sign-in?returnTo=%2F",
@@ -210,11 +201,70 @@ final class ProductionUITests: ShellTestCase {
         google.tap()
         sleep(10)
         screenshot("2-google")
+        try googleSteps(app: app, roots: [app, service], inputs: inputs)
+        note("finished the Google steps in the sheet; state \(debugState(app))")
+    }
 
+    /// Observation only: Google's sign-in inside the app's own web view (the web sign-in fallback).
+    /// Same rules as test k.
+    func testProductionGoogleSignInInWebView() throws {
+        let inputs = try googleInputs()
+        try requireProduction()
+        let app = launch(base: nil, moment: "google-webview")
+        let button = app.buttons["sign-in-button"]
+        XCTAssertTrue(button.waitForExistence(timeout: 15))
+        button.tap()
+        guard app.buttons["web-sign-in-cancel"].waitForExistence(timeout: 25) else {
+            note("no web sign-in fallback; stopped")
+            return
+        }
+        let predicate = NSPredicate(format: "label CONTAINS[c] 'Sign in or create an account'")
+        guard let start = firstExisting([app.webViews.buttons.matching(predicate).firstMatch,
+                                         app.webViews.links.matching(predicate).firstMatch], timeout: 30) else {
+            note("no 'Sign in or create an account'; stopped")
+            return
+        }
+        start.tap()
+        sleep(10)
+        screenshot("1-identity-provider")
+        guard let google = googleButton(in: [app.webViews.firstMatch]) else {
+            note("no Google button in the web view; stopped")
+            return
+        }
+        google.tap()
+        sleep(10)
+        screenshot("2-google")
+        try googleSteps(app: app, roots: [app], inputs: inputs)
+        // Where did the web view end up?
+        sleep(10)
+        screenshot("7-where-it-ended")
+        let signedIn = tab(app, .home).exists && !app.buttons["web-sign-in-cancel"].exists
+        note("web view variant ended: tabs shown \(signedIn); state \(debugState(app))")
+    }
+
+    private struct GoogleInputs {
+        let email: String
+        let password: String
+        let totpSecret: Data
+    }
+
+    private func googleInputs() throws -> GoogleInputs {
+        let names = ["OPENBOT_SHELL_GOOGLE_EMAIL", "OPENBOT_SHELL_GOOGLE_PASSWORD", "OPENBOT_SHELL_GOOGLE_TOTP_SECRET"]
+        note("secret-inputs: \(names.allSatisfy { secret($0) != nil } ? "present" : "absent")")
+        guard let email = secret(names[0]), let password = secret(names[1]), let totpText = secret(names[2]) else {
+            throw XCTSkip("OPENBOT_SHELL_GOOGLE_EMAIL, OPENBOT_SHELL_GOOGLE_PASSWORD and OPENBOT_SHELL_GOOGLE_TOTP_SECRET are not all set")
+        }
+        guard let totpSecret = TOTP.base32Decode(totpText) else {
+            throw XCTSkip("OPENBOT_SHELL_GOOGLE_TOTP_SECRET is not base32")
+        }
+        return GoogleInputs(email: email, password: password, totpSecret: totpSecret)
+    }
+
+    /// Google's email, password and authenticator pages, wherever they are shown (`roots`).
+    private func googleSteps(app: XCUIApplication, roots: [XCUIApplication], inputs: GoogleInputs) throws {
+        func live() -> [XCUIApplication] { roots.filter { $0.state != .notRunning } }
         func pageText() -> String {
-            var roots: [XCUIElement] = [app]
-            if service.state != .notRunning { roots.append(service) }
-            return roots.flatMap { labels($0, limit: 200) }.joined(separator: "\n").lowercased()
+            live().flatMap { labels($0, limit: 200) }.joined(separator: "\n").lowercased()
         }
         /// Stops the test at any challenge.
         func stopIfChallenged(_ step: String) throws {
@@ -222,12 +272,15 @@ final class ProductionUITests: ShellTestCase {
             let signs = ["captcha", "verify it\u{2019}s you", "verify it's you", "confirm it\u{2019}s you", "confirm it's you",
                          "unusual activity", "not a robot", "type the text you hear or see", "check your phone",
                          "this browser or app may not be secure", "couldn\u{2019}t sign you in", "couldn't sign you in",
-                         "try again later", "suspicious"]
+                         "try again later", "suspicious", "disallowed_useragent"]
             if let sign = signs.first(where: { text.contains($0) }) {
-                screenshot("challenge-at-\(step)")
+                screenshot("challenge-at-\(step.replacingOccurrences(of: " ", with: "-"))")
                 note("challenged by Google at \(step) (page says '\(sign)')")
                 throw XCTSkip("challenged by Google at \(step)")
             }
+        }
+        func first(_ make: (XCUIApplication) -> XCUIElement, timeout: TimeInterval) -> XCUIElement? {
+            firstExisting(live().map(make), timeout: timeout)
         }
         // Values go in through the pasteboard, never typeText: XCTest writes typed text to the log.
         func fill(_ field: XCUIElement, with value: String, step: String) -> Bool {
@@ -235,41 +288,38 @@ final class ProductionUITests: ShellTestCase {
             field.tap()
             sleep(1)
             field.press(forDuration: 1.2)
-            let paste = firstExisting([app.menuItems.matching(identifier: "Paste").firstMatch,
-                                       service.menuItems.matching(identifier: "Paste").firstMatch,
-                                       app.buttons.matching(identifier: "Paste").firstMatch,
-                                       service.buttons.matching(identifier: "Paste").firstMatch], timeout: 5)
+            let paste = first({ $0.menuItems.matching(identifier: "Paste").firstMatch }, timeout: 5)
+                ?? first({ $0.buttons.matching(identifier: "Paste").firstMatch }, timeout: 2)
             if paste == nil { note("\(step): no Paste menu") }
             paste?.tap()
+            // The paste reads the pasteboard after the tap returns: clear it a moment later.
+            sleep(2)
             UIPasteboard.general.string = ""
             return paste != nil
         }
-        func next() {
-            if let nextButton = firstExisting([app.webViews.buttons.matching(identifier: "Next").firstMatch,
-                                               service.webViews.buttons.matching(identifier: "Next").firstMatch,
-                                               app.buttons.matching(identifier: "Next").firstMatch], timeout: 5) {
-                nextButton.tap()
-            }
+        /// Submits the page with the keyboard's return key (the field holds the focus).
+        func next(_ field: XCUIElement, _ step: String) {
+            field.typeText("\n")
         }
 
         try stopIfChallenged("email page")
-        guard let emailField = firstExisting([app.textFields.firstMatch, service.textFields.firstMatch], timeout: 15) else {
+        guard let emailField = first({ $0.webViews.textFields.firstMatch }, timeout: 15) else {
             note("no email field reachable on Google's page")
             return
         }
-        guard fill(emailField, with: email, step: "email") else { return }
-        next()
+        guard fill(emailField, with: inputs.email, step: "email") else { return }
+        next(emailField, "email")
         sleep(8)
         screenshot("3-after-email")
         try stopIfChallenged("after email")
 
-        guard let passwordField = firstExisting([app.secureTextFields.firstMatch, service.secureTextFields.firstMatch], timeout: 15) else {
+        guard let passwordField = first({ $0.secureTextFields.firstMatch }, timeout: 15) else {
             screenshot("3-no-password-field")
             note("no password field after the email step")
             return
         }
-        guard fill(passwordField, with: password, step: "password") else { return }
-        next()
+        guard fill(passwordField, with: inputs.password, step: "password") else { return }
+        next(passwordField, "password")
         sleep(10)
         screenshot("4-after-password")
         try stopIfChallenged("after password")
@@ -277,12 +327,12 @@ final class ProductionUITests: ShellTestCase {
         // 2-Step Verification: only the authenticator code page is answered.
         let text = pageText()
         if text.contains("authenticator") || text.contains("enter code") || text.contains("2-step verification") {
-            guard let codeField = firstExisting([app.textFields.firstMatch, service.textFields.firstMatch], timeout: 10) else {
+            guard let codeField = first({ $0.webViews.textFields.firstMatch }, timeout: 10) else {
                 note("2-Step Verification page without a code field reachable; stopped")
                 return
             }
-            guard fill(codeField, with: TOTP.freshCode(secret: totpSecret), step: "code") else { return }
-            next()
+            guard fill(codeField, with: TOTP.freshCode(secret: inputs.totpSecret), step: "code") else { return }
+            next(codeField, "code")
             sleep(12)
             screenshot("5-after-code")
             try stopIfChallenged("after code")
@@ -291,7 +341,8 @@ final class ProductionUITests: ShellTestCase {
         }
         sleep(8)
         screenshot("6-final")
-        let host = service.state != .notRunning ? "SafariViewService running" : "SafariViewService not running"
-        note("finished the Google steps (\(host)); state \(debugState(app))")
+        // Hosts only: where Google sent the person.
+        let hosts = labels(app, limit: 400).filter { $0.hasPrefix("Button: Address") || $0.contains(".com") || $0.contains("open.bot") }
+        note("after the Google steps: \(hosts.prefix(5).joined(separator: " | "))")
     }
 }

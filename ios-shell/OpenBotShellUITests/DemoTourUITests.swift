@@ -68,17 +68,24 @@ final class DemoTourUITests: ShellTestCase {
         app.webViews.firstMatch.swipeDown()
         pause(1)
         webText(app, "Competitor pricing notes").tap()
-        _ = firstExisting([webText(app, "All three moved to per-seat pricing this year."),
-                           webText(app, "What do our three closest competitors charge?")], timeout: 20)
+        let transcript = firstExisting([webText(app, "All three moved to per-seat pricing this year."),
+                                        webText(app, "What do our three closest competitors charge?")], timeout: 20)
         pause(2)
+        // The conversation focuses its message box: put the keyboard away to see the tab bar again.
+        dismissKeyboardIfUp(app, tapping: transcript)
+        pause(1.2)
         edgeSwipeBack(app)
-        _ = webText(app, "Quarterly forecast").waitForExistence(timeout: 10)
+        if !webText(app, "Quarterly forecast").waitForExistence(timeout: 6) {
+            note("demo: the edge swipe did not go back; using the tab")
+            tab(app, .conversations).tap()
+        }
         pause(1.5)
 
         // Bots: open one.
         tapWhenThere(tab(app, .bots), "Bots tab")
         tapWhenThere(webText(app, "Research Bot"), "Research Bot")
         pause(2)
+        dismissKeyboardIfUp(app)
 
         // Home, the Account menu, Settings and back.
         tapWhenThere(tab(app, .home), "Home tab")
@@ -86,8 +93,9 @@ final class DemoTourUITests: ShellTestCase {
         tapWhenThere(webElement(app, label: "Account"), "Account button")
         pause(1.2)
         tapWhenThere(webElement(app, label: "Settings"), "Settings item")
-        pause(2)
-        edgeSwipeBack(app)
+        pause(2.5)
+        tapWhenThere(tab(app, .home), "Home tab")
+        _ = webText(app, "Start a conversation").waitForExistence(timeout: 10)
         pause(1.5)
 
         // Sign out from the Account menu: the native sign-in screen.
