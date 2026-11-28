@@ -62,4 +62,32 @@ describe("userContent image hardening", () => {
       },
     ]);
   });
+
+  test("strips whitespace and line breaks from the emitted base64 data URL", () => {
+    const wrapped = ` ${png.slice(0, 4)}\r\n\t${png.slice(4)} `;
+    expect(
+      userContent([
+        {
+          type: "image",
+          source: { type: "data", value: wrapped, mimeType: "image/png" },
+        },
+      ]),
+    ).toEqual([
+      { type: "image_url", image_url: { url: `data:image/png;base64,${png}` } },
+    ]);
+  });
+
+  test.each([["="], ["=="], [" == "]])(
+    "names a padding-only value (%j) instead of sending it",
+    (value) => {
+      expect(
+        userContent([
+          {
+            type: "image",
+            source: { type: "data", value, mimeType: "image/png" },
+          },
+        ]),
+      ).toEqual([{ type: "text", text: "[image]" }]);
+    },
+  );
 });
