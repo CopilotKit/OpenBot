@@ -676,7 +676,8 @@ final class ShellController: NSObject, WebControllerDelegate {
             }
             // `canGoBack` (the web app's per-tab stacks) decides the edge swipe; absent, the web
             // view's own back as before.
-            web.updateBack(canGoBack: message["canGoBack"] as? Bool)
+            web.updateBack(canGoBack: message["canGoBack"] as? Bool, depth: message["depth"] as? Int,
+                           tab: message["tab"] as? String)
             switch web.backMode {
             case .webHistory: model.backMode = "web"
             case .sendToPage: model.backMode = "page"

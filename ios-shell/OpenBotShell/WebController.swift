@@ -341,10 +341,17 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     /// What the left-edge swipe does now (from the page's last `route`: `ShellBack`).
     private(set) var backMode: ShellBack = .webHistory
     private var backSwipe: UIScreenEdgePanGestureRecognizer?
+    /// The slide over the previous page's snapshot (BackTransition.swift).
+    private(set) lazy var transition = BackTransition(webView: webView, diagnostics: diagnostics)
+    /// The swipe in progress plays the slide.
+    private var swipeSlides = false
 
     /// The page's last `route` said `canGoBack` (or nothing): WebKit's own back gesture for a page
     /// that keeps no stacks, the shell's own edge swipe sending `openbot:back` for one that does.
-    func updateBack(canGoBack: Bool?) {
+    func updateBack(canGoBack: Bool?, depth: Int? = nil, tab: String? = nil) {
+        if let tab = tab { transition.route(tab: tab, depth: depth) }
+        // The page has its new route: once it has drawn, a cover left by a back goes.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.transition.pageDrawn() }
         let mode = ShellBack.decide(canGoBack: canGoBack)
         guard mode != backMode else { return }
         backMode = mode
@@ -363,13 +370,46 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
     }
 
     @objc private func handleBackSwipe(_ edge: UIScreenEdgePanGestureRecognizer) {
-        guard edge.state == .ended else { return }
         let move = edge.translation(in: webView)
-        // A mostly horizontal drag of a fair way from the edge; nothing follows the finger.
-        guard move.x > 60, move.x > abs(move.y) * 1.5 else { return }
-        diagnostics.log("back-swipe", ["mode": "\(backMode)"])
-        guard backMode == .sendToPage else { return }
-        sendBack()
+        let width = max(webView.bounds.width, 1)
+        switch edge.state {
+        case .began:
+            swipeSlides = backMode == .sendToPage && transition.canSlide
+            if swipeSlides { transition.begin() }
+        case .changed:
+            if swipeSlides { transition.update(progress: move.x / width) }
+        case .ended:
+            let velocity = edge.velocity(in: webView).x
+            let through = move.x > width / 3 || (velocity > 500 && move.x > 30)
+            diagnostics.log("back-swipe", ["mode": "\(backMode)", "slide": swipeSlides, "through": through])
+            if swipeSlides {
+                transition.end(through: through && backMode == .sendToPage) { [weak self] in self?.sendBack() }
+            } else if backMode == .sendToPage, through, move.x > abs(move.y) * 1.5 {
+                // No picture to slide over: the page changes when the swipe ends.
+                sendBack()
+            }
+            swipeSlides = false
+        case .cancelled, .failed:
+            if swipeSlides { transition.end(through: false) {} }
+            swipeSlides = false
+        default:
+            break
+        }
+    }
+
+    /// The page asked to go somewhere in this tab (`will-navigate`): a picture first, or the slide
+    /// for a back, then `openbot:navigate-ok` lets it go ahead (it waits 120 ms at most).
+    private func willNavigate(_ body: [String: Any]) {
+        let direction = body["direction"] as? String ?? ""
+        let tab = body["tab"] as? String ?? transition.currentTab
+        let ok = { [weak self] in
+            self?.webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent(\"openbot:navigate-ok\"))", completionHandler: nil)
+        }
+        switch direction {
+        case "push": transition.willPush(tab: tab, completion: ok)
+        case "back": transition.playBack(back: ok)
+        default: ok()
+        }
     }
 
     /// Asks the page to pop the current tab's stack (main frame, own origin only).
@@ -476,6 +516,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScrip
         if let signedIn = body["signedIn"] as? Bool { entry["signedIn"] = signedIn }
         diagnostics.log("bridge", entry)
         if type == "ready" { pageReady = true }
+        if type == "will-navigate" { willNavigate(body) }
         delegate?.webController(self, didReceive: body)
     }
 

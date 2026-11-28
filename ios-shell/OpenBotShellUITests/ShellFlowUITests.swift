@@ -718,6 +718,13 @@ final class ShellFlowUITests: ShellTestCase {
         }
 
         XCTAssertTrue(openConversation(app, "Quarterly forecast"))
+        // A short swipe (a quarter of the width) springs back: the conversation stays.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.45))
+            .press(forDuration: 0.3, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: 0.46)))
+        sleep(2)
+        XCTAssertTrue(webElement(app, label: "Back").exists, "a short swipe left the conversation")
+        XCTAssertFalse(chatsList(app).exists, "a short swipe went back to the list")
+        screenshot("4a-after-short-swipe")
         edgeSwipeBack(app)
         XCTAssertTrue(chatsList(app).waitForExistence(timeout: 10), "the edge swipe did not return to the Chats list: \(debugState(app))")
         XCTAssertTrue(tab(app, .conversations).isSelected)
